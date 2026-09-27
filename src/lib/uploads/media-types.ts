@@ -1,4 +1,4 @@
-import * as path from "node:path";
+// Shared with the browser upload queue, so no Node imports here.
 
 export const AUDIO_UPLOAD_EXTENSIONS = new Set([
     ".mp3",
@@ -26,10 +26,20 @@ export const VIDEO_UPLOAD_EXTENSIONS = new Set([
     ".ogv",
 ]);
 
+/**
+ * Audio uploads are read into memory for duration probing, hashing and the
+ * waveform, so they keep a fixed cap. Videos stream to storage and are
+ * capped by `VIDEO_UPLOAD_MAX_BYTES` instead.
+ */
+export const AUDIO_UPLOAD_MAX_BYTES = 500 * 1024 * 1024;
+
 const AMBIGUOUS_CONTAINER_EXTENSIONS = new Set([".mp4", ".webm"]);
 
+/** Lowercase extension with its dot, `""` when there is none (like `path.extname`). */
 export function uploadExtension(filename: string): string {
-    return path.extname(filename).toLowerCase();
+    const basename = filename.split(/[\\/]/).pop() ?? "";
+    const dot = basename.lastIndexOf(".");
+    return dot > 0 ? basename.slice(dot).toLowerCase() : "";
 }
 
 export function isSupportedUpload(filename: string, mimeType: string): boolean {
@@ -58,4 +68,11 @@ export function acceptedUploadExtensions(): string {
     ]
         .sort()
         .join(", ");
+}
+
+/** Human-readable upload limit, e.g. `500 MB` or `4 GB`. */
+export function formatUploadLimit(bytes: number): string {
+    const gib = bytes / 1024 ** 3;
+    if (gib >= 1 && Number.isInteger(gib * 10)) return `${gib} GB`;
+    return `${Math.round(bytes / 1024 ** 2)} MB`;
 }

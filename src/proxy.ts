@@ -49,7 +49,11 @@ export const config = {
     // proxy paths) must still hit this middleware -- excluding .js would
     // skip both the admin-host isolation gate and the auth-header
     // stripping below for those routes.
+    //
+    // /api/recordings/upload is excluded because Next buffers the whole
+    // request body in memory for any route the proxy runs on, and video
+    // uploads run to gigabytes. The route applies the admin-host gate itself.
     matcher: [
-        "/((?!_next/static|_next/image|favicon\\.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|woff|woff2|ttf|otf|map)).*)",
+        "/((?!api/recordings/upload$|_next/static|_next/image|favicon\\.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|woff|woff2|ttf|otf|map)).*)",
     ],
 };

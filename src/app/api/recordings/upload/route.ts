@@ -5,11 +5,15 @@ import { listJobsForUser } from "@/db/queries/async-jobs";
 import { requireApiSession } from "@/lib/auth-server";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
+import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
+import { decideHostnameGate } from "@/lib/hosted/hostname-gate";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import type { StorageProvider } from "@/lib/storage/types";
 import {
+    AUDIO_UPLOAD_MAX_BYTES,
     acceptedUploadExtensions,
     isSupportedUpload,
     shouldExtractVideo,
@@ -17,12 +21,57 @@ import {
 } from "@/lib/uploads/media-types";
 import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
 import {
+    fileTooLarge,
+    readUploadBody,
+    readUploadMetadata,
+    streamUploadBody,
+} from "@/lib/uploads/upload-body";
+import {
     enqueueVideoExtractionJob,
     parseVideoExtractionJobPayload,
     VIDEO_EXTRACTION_JOB_KIND,
 } from "@/lib/uploads/video-extraction-job";
 
+/**
+ * `src/proxy.ts` skips this route so it cannot buffer the request body in
+ * memory, and with it the admin-host gate. Apply that gate here instead.
+ */
+function assertNotOnAdminHost(request: Request): void {
+    const decision = decideHostnameGate({
+        requestHostname: (request.headers.get("host") ?? "")
+            .split(":")[0]
+            .toLowerCase(),
+        pathname: new URL(request.url).pathname,
+        adminHostname: env.ADMIN_HOSTNAME,
+    });
+    if (decision.kind !== "next") {
+        throw new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
+    }
+}
+
+function anotherVideoConverting(): AppError {
+    return new AppError(
+        ErrorCode.RATE_LIMITED,
+        "Another video is already being converted. Try this upload again when it finishes.",
+        429,
+    );
+}
+
+async function deleteSource(
+    storage: StorageProvider,
+    sourceStorageKey: string,
+): Promise<void> {
+    try {
+        if (await storage.exists(sourceStorageKey)) {
+            await storage.deleteFile(sourceStorageKey);
+        }
+    } catch (cleanupError) {
+        console.error("Failed to clean up uploaded video:", cleanupError);
+    }
+}
+
 export const GET = apiHandler(async (request: Request) => {
+    assertNotOnAdminHost(request);
     const session = await requireApiSession(request);
     const jobs = await listJobsForUser(session.user.id, {
         kind: VIDEO_EXTRACTION_JOB_KIND,
@@ -47,10 +96,17 @@ export const GET = apiHandler(async (request: Request) => {
         }
     });
 
-    return NextResponse.json({ uploads });
+    return NextResponse.json({
+        uploads,
+        limits: {
+            audioMaxBytes: AUDIO_UPLOAD_MAX_BYTES,
+            videoMaxBytes: env.VIDEO_UPLOAD_MAX_BYTES,
+        },
+    });
 });
 
 export const POST = apiHandler(async (request: Request) => {
+    assertNotOnAdminHost(request);
     const session = await requireApiSession(request);
     await assertNotOrgAccount(session.user.id);
 
@@ -62,35 +118,30 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
-    const formData = await request.formData();
-    const fileEntry = formData.get("file");
+    const upload = readUploadMetadata(request);
+    const ext = uploadExtension(upload.filename);
 
-    if (!fileEntry || !(fileEntry instanceof File)) {
+    if (!isSupportedUpload(upload.filename, upload.mimeType)) {
         throw new AppError(
-            ErrorCode.MISSING_REQUIRED_FIELD,
-            "No file provided",
+            ErrorCode.INVALID_FILE_FORMAT,
+            `Unsupported format. Upload a browser-recognized video or use one of these extensions: ${acceptedUploadExtensions()}`,
             400,
-            { field: "file" },
         );
     }
 
-    const file = fileEntry;
-
-    // Reject files larger than 500 MB
-    const MAX_FILE_SIZE = 500 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-        throw new AppError(
-            ErrorCode.FILE_TOO_LARGE,
-            "File exceeds the 500 MB size limit",
-            413,
-        );
+    const isVideo = shouldExtractVideo(upload.filename, upload.mimeType);
+    const maxBytes = isVideo
+        ? env.VIDEO_UPLOAD_MAX_BYTES
+        : AUDIO_UPLOAD_MAX_BYTES;
+    if (upload.size > maxBytes) {
+        throw fileTooLarge(maxBytes);
     }
 
     // Storage cap: block the upload before reading the body when it would
     // push the user over their plan's storage limit. No-op on self-host.
     const cap = await enforceStorageCap({
         userId: session.user.id,
-        additionalBytes: file.size,
+        additionalBytes: upload.size,
     });
     if (!cap.allowed) {
         throw new AppError(
@@ -100,48 +151,46 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
-    const ext = uploadExtension(file.name);
-
-    if (!isSupportedUpload(file.name, file.type)) {
-        throw new AppError(
-            ErrorCode.INVALID_FILE_FORMAT,
-            `Unsupported format. Upload a browser-recognized video or use one of these extensions: ${acceptedUploadExtensions()}`,
-            400,
-        );
-    }
-
-    // Read file into buffer (inline to avoid keeping the intermediate
-    // ArrayBuffer in scope alongside the Buffer, which would briefly
-    // double memory usage for large files)
-    const buffer = Buffer.from(await file.arrayBuffer());
-
+    // readUploadMetadata rejected a request without a body.
+    const body = request.body as ReadableStream<Uint8Array>;
     const storage = await createUserStorageProvider(session.user.id);
-    const basename = path.basename(file.name, ext);
+    const basename = path.basename(upload.filename, ext);
 
-    if (shouldExtractVideo(file.name, file.type)) {
+    if (isVideo) {
+        // Checked again when the job is queued; this saves sending gigabytes
+        // only to be turned away at the end.
+        const active = await listJobsForUser(session.user.id, {
+            kind: VIDEO_EXTRACTION_JOB_KIND,
+            activeOnly: true,
+            limit: 1,
+        });
+        if (active.length > 0) throw anotherVideoConverting();
+
         const uploadId = nanoid();
         const sourceStorageKey = `${session.user.id}/video-uploads/${uploadId}`;
-        await storage.uploadFile(
-            sourceStorageKey,
-            buffer,
-            "application/octet-stream",
-        );
+        // Stream straight to storage: only the extracted audio is kept, and
+        // the source can be several gigabytes.
+        const source = streamUploadBody(body, upload.size);
+        try {
+            await storage.uploadStream(
+                sourceStorageKey,
+                source.stream,
+                "application/octet-stream",
+            );
+        } catch (uploadError) {
+            await deleteSource(storage, sourceStorageKey);
+            throw source.error ?? uploadError;
+        }
 
         try {
             const enqueued = await enqueueVideoExtractionJob({
                 uploadId,
                 sourceStorageKey,
-                encryptedFilename: encryptText(file.name),
-                sourceSize: buffer.length,
+                encryptedFilename: encryptText(upload.filename),
+                sourceSize: source.bytes,
                 userId: session.user.id,
             });
-            if (!enqueued.created) {
-                throw new AppError(
-                    ErrorCode.RATE_LIMITED,
-                    "Another video is already being converted. Try this upload again when it finishes.",
-                    429,
-                );
-            }
+            if (!enqueued.created) throw anotherVideoConverting();
             return NextResponse.json(
                 {
                     success: true,
@@ -152,17 +201,12 @@ export const POST = apiHandler(async (request: Request) => {
                 { status: 202 },
             );
         } catch (queueError) {
-            try {
-                await storage.deleteFile(sourceStorageKey);
-            } catch (cleanupError) {
-                console.error(
-                    "Failed to clean up video after queueing error:",
-                    cleanupError,
-                );
-            }
+            await deleteSource(storage, sourceStorageKey);
             throw queueError;
         }
     }
+
+    const buffer = await readUploadBody(body, upload.size);
 
     const fileId = `uploaded-${nanoid()}`;
     await saveUploadedAudio({
