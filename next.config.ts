@@ -4,12 +4,9 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const nextConfig: NextConfig = {
     output: "standalone",
-    experimental: {
-        // Keep Next's proxy boundary aligned with the upload route's existing
-        // 500 MB application-level limit. The default 10 MB truncates multipart
-        // video requests before the route can validate them.
-        proxyClientMaxBodySize: 501 * 1024 * 1024,
-    },
+    // No proxyClientMaxBodySize: the proxy buffers every body it sees, so
+    // the upload route is kept out of its matcher (see src/proxy.ts) and
+    // everything else fits in the 10 MB default.
     // Client source maps are only ever generated when the build is going
     // to inject+upload+delete them (see the guarded `posthog-cli` step in
     // the Dockerfile builder stage). Without `POSTHOG_CLI_API_KEY`, Next

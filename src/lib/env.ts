@@ -195,6 +195,18 @@ const baseEnvSchema = z.object({
                 .max(60 * 60_000),
         ),
 
+    /**
+     * Largest video upload accepted, in bytes. Videos stream to storage and
+     * only their extracted audio is kept, so memory use does not grow with
+     * this. Default 4 GiB.
+     */
+    VIDEO_UPLOAD_MAX_BYTES: z
+        .string()
+        .regex(/^\d+$/, "VIDEO_UPLOAD_MAX_BYTES must be a positive integer")
+        .optional()
+        .transform((val) => (val ? Number(val) : 4 * 1024 ** 3))
+        .pipe(z.number().int().positive().max(Number.MAX_SAFE_INTEGER)),
+
     /** Compress OpenAI-style transcription inputs above this byte threshold. */
     WHISPER_MAX_BYTES: z
         .string()
@@ -829,6 +841,7 @@ function validateEnv(): Env {
             BACKGROUND_SYNC_ENABLED: process.env.BACKGROUND_SYNC_ENABLED,
             BACKGROUND_SYNC_INTERVAL_MS:
                 process.env.BACKGROUND_SYNC_INTERVAL_MS,
+            VIDEO_UPLOAD_MAX_BYTES: process.env.VIDEO_UPLOAD_MAX_BYTES,
             WHISPER_MAX_BYTES: process.env.WHISPER_MAX_BYTES,
             WHISPER_COMPRESS_BITRATE_KBPS:
                 process.env.WHISPER_COMPRESS_BITRATE_KBPS,

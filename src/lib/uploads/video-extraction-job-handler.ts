@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings } from "@/db/schema";
@@ -264,9 +266,6 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
             let temporaryDirectory: string | null = null;
             try {
                 reportProgress({ phase: "preparing" });
-                const source = await storage.downloadFile(
-                    payload.sourceStorageKey,
-                );
                 temporaryDirectory = await mkdtemp(
                     path.join(tmpdir(), "riffado-video-"),
                 );
@@ -274,7 +273,12 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
                 const sourceExtension = path.extname(filename).toLowerCase();
                 const inputPath = path.join(temporaryDirectory, "input");
                 const outputPath = path.join(temporaryDirectory, "audio.m4a");
-                await writeFile(inputPath, source);
+                // Streamed: the source video can be several gigabytes.
+                await pipeline(
+                    await storage.downloadStream(payload.sourceStorageKey),
+                    createWriteStream(inputPath),
+                    { signal },
+                );
 
                 const durationSeconds = await probeDurationSeconds(
                     inputPath,

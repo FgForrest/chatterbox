@@ -7,6 +7,11 @@ import type {
     PendingUploadPhase,
 } from "@/components/dashboard/pending-upload-row";
 import { followJob, type JobProgressSnapshot } from "@/lib/jobs/client";
+import {
+    formatUploadLimit,
+    isSupportedUpload,
+    shouldExtractVideo,
+} from "@/lib/uploads/media-types";
 
 interface Options {
     /** Called after a successful upload so the parent can refresh data. */
@@ -27,6 +32,9 @@ export function useUploadQueue({ onUploadComplete }: Options) {
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const followers = useRef<Map<string, AbortController>>(new Map());
+    // Known once the active-uploads request answers; until then the server
+    // is the only judge of size.
+    const limits = useRef<UploadLimits | null>(null);
 
     const updatePending = useCallback(
         (id: string, update: Partial<PendingUpload>) => {
@@ -81,6 +89,12 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             .then(async (response) => {
                 if (!response.ok) return;
                 const body = (await response.json()) as ActiveUploadsResponse;
+                if (
+                    typeof body.limits?.audioMaxBytes === "number" &&
+                    typeof body.limits.videoMaxBytes === "number"
+                ) {
+                    limits.current = body.limits;
+                }
                 if (!Array.isArray(body.uploads)) return;
 
                 for (const upload of body.uploads) {
@@ -131,6 +145,24 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             // Reset so picking the same file twice still fires change.
             e.target.value = "";
 
+            const sizeError = uploadSizeError(file, limits.current);
+            if (sizeError) {
+                toast.error(sizeError);
+                return;
+            }
+            // The server refuses this too, but only once the request
+            // arrives, and a browser mid-way through sending gigabytes may
+            // report that as a bare network error.
+            if (
+                followers.current.size > 0 &&
+                shouldExtractVideo(file.name, file.type)
+            ) {
+                toast.error(
+                    "Another video is already being converted. Try this upload again when it finishes.",
+                );
+                return;
+            }
+
             // Optimistic placeholder in the list. Uses a `pending:`
             // prefixed id namespace so the row can't collide with a
             // server-issued recording id.
@@ -151,9 +183,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             setIsUploading(true);
             let conversionStarted = false;
             try {
-                const formData = new FormData();
-                formData.append("file", file);
-                const data = await sendUpload(formData, (progress) => {
+                const data = await sendUpload(file, (progress) => {
                     updatePending(placeholderId, { progress });
                 });
 
@@ -215,8 +245,27 @@ interface ActiveUpload {
     progress: JobProgressSnapshot | null;
 }
 
+interface UploadLimits {
+    audioMaxBytes: number;
+    videoMaxBytes: number;
+}
+
 interface ActiveUploadsResponse {
     uploads?: ActiveUpload[];
+    limits?: UploadLimits;
+}
+
+/** Refuse an oversized file before sending it rather than after. */
+function uploadSizeError(
+    file: File,
+    limits: UploadLimits | null,
+): string | null {
+    if (!limits || !isSupportedUpload(file.name, file.type)) return null;
+    const maxBytes = shouldExtractVideo(file.name, file.type)
+        ? limits.videoMaxBytes
+        : limits.audioMaxBytes;
+    if (file.size <= maxBytes) return null;
+    return `"${file.name}" exceeds the ${formatUploadLimit(maxBytes)} size limit`;
 }
 
 function pendingFromProgress(
@@ -239,13 +288,22 @@ function pendingFromProgress(
     return { phase, progress: percent };
 }
 
+/**
+ * The file goes as the raw request body so the server can stream it to
+ * storage; a multipart form would have to be held in memory whole.
+ */
 function sendUpload(
-    formData: FormData,
+    file: File,
     onProgress: (progress: number) => void,
 ): Promise<UploadResponse> {
     return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest();
         request.open("POST", "/api/recordings/upload");
+        request.setRequestHeader(
+            "X-Upload-Filename",
+            encodeURIComponent(file.name),
+        );
+        request.setRequestHeader("X-Upload-Size", String(file.size));
         request.upload.addEventListener("progress", (event) => {
             if (!event.lengthComputable || event.total <= 0) return;
             onProgress(
@@ -276,6 +334,7 @@ function sendUpload(
         request.addEventListener("error", () => {
             reject(new Error("Failed to upload recording"));
         });
-        request.send(formData);
+        // The browser sets Content-Type from file.type.
+        request.send(file);
     });
 }

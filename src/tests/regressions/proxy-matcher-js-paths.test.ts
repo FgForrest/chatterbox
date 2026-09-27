@@ -36,4 +36,13 @@ describe("proxy middleware matcher", () => {
         expect(pattern.test("/api/int/collect")).toBe(true);
         expect(pattern.test("/dashboard")).toBe(true);
     });
+
+    // Next buffers the whole body of any request the proxy runs on, so the
+    // upload route must stay outside it. The route gates admin hosts itself.
+    it("skips the upload route, and only that route", () => {
+        expect(pattern.test("/api/recordings/upload")).toBe(false);
+        expect(pattern.test("/api/recordings/uploads")).toBe(true);
+        expect(pattern.test("/api/recordings/upload/x")).toBe(true);
+        expect(pattern.test("/api/recordings")).toBe(true);
+    });
 });
