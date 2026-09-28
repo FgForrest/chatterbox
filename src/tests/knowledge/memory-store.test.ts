@@ -127,4 +127,86 @@ describe("KnowledgeMemoryStore", () => {
         await knowledge.get(["c", "b", "a"]);
         expect(knowledge.stats().scopes).toBe(3);
     });
+
+    describe("a load in flight when the generation moves", () => {
+        // Each load waits until released; what it reads is the name at the
+        // time it started, as a query would.
+        let name: string;
+        let releases: Array<() => void>;
+
+        function slowStore() {
+            return new KnowledgeMemoryStore({
+                load: async (scope) => {
+                    loads.push(scope);
+                    const seen = name;
+                    await new Promise<void>((resolve) =>
+                        releases.push(resolve),
+                    );
+                    const loaded = scopeOf(scope);
+                    return {
+                        ...loaded,
+                        items: loaded.items.map((item) => ({
+                            ...item,
+                            name: seen,
+                        })),
+                    };
+                },
+                readGenerations: async (scopes) =>
+                    new Map(scopes.map((s) => [s, generations.get(s) ?? 0])),
+                maxBytes: 1_000_000,
+                ttlMs: 60_000,
+                now: () => clock,
+            });
+        }
+
+        async function settle() {
+            for (let i = 0; i < 10; i++) await Promise.resolve();
+        }
+
+        beforeEach(() => {
+            name = "Jan Novotný";
+            releases = [];
+        });
+
+        it("is not handed to a read that saw the newer generation", async () => {
+            const knowledge = slowStore();
+            const first = knowledge.get(["alice"]);
+            await settle();
+            // The name is erased and the generation moves while it loads.
+            name = "erased";
+            generations.set("alice", 2);
+            const second = knowledge.get(["alice"]);
+            await settle();
+            for (const release of releases.splice(0)) release();
+            await settle();
+            for (const release of releases.splice(0)) release();
+
+            const [newer] = await second;
+            expect(newer?.generation).toBe(2);
+            expect(newer?.items[0]?.name).toBe("erased");
+            const [older] = await first;
+            expect(older?.generation).toBe(1);
+        });
+
+        it("never replaces the newer entry when it finishes last", async () => {
+            const knowledge = slowStore();
+            const first = knowledge.get(["alice"]);
+            await settle();
+            name = "erased";
+            generations.set("alice", 2);
+            const second = knowledge.get(["alice"]);
+            await settle();
+            // The newer load finishes first, the older one after it.
+            releases[1]?.();
+            await second;
+            releases[0]?.();
+            await first;
+
+            loads = [];
+            const [held] = await knowledge.get(["alice"]);
+            expect(loads).toEqual([]);
+            expect(held?.generation).toBe(2);
+            expect(held?.items[0]?.name).toBe("erased");
+        });
+    });
 });

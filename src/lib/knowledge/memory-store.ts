@@ -146,7 +146,13 @@ export function estimateBytes(loaded: LoadedScope): number {
 
 export class KnowledgeMemoryStore {
     private readonly cached = new Map<string, ScopeKnowledge>();
-    private readonly loading = new Map<string, Promise<ScopeKnowledge>>();
+    private readonly loading = new Map<
+        string,
+        { generation: number; sequence: number; load: Promise<ScopeKnowledge> }
+    >();
+    /** Per scope, the number of the last load kept, or of a drop. */
+    private readonly settled = new Map<string, number>();
+    private sequence = 0;
     private readonly stale = new Set<string>();
     private totalBytes = 0;
     private readonly counts = { hits: 0, loads: 0, evictions: 0, dropped: 0 };
@@ -217,7 +223,13 @@ export class KnowledgeMemoryStore {
         this.cached.set(scope, entry);
     }
 
+    /** Forget a scope, and every load of it already in flight. */
     private drop(scope: string): void {
+        this.settled.set(scope, ++this.sequence);
+        this.remove(scope);
+    }
+
+    private remove(scope: string): void {
         const held = this.cached.get(scope);
         if (!held) return;
         this.totalBytes -= held.bytes;
@@ -226,12 +238,17 @@ export class KnowledgeMemoryStore {
     }
 
     /**
-     * Load a scope once however many ask at the same time. The generation
-     * was read before the load, so what is stored is at least that new.
+     * Load a scope once however many ask at the same time, as long as the
+     * load in flight was started for at least the generation this caller
+     * read: one started for an older generation may miss what moved it, so
+     * a newer need starts its own. Loads are numbered, and one finishing
+     * after a later load stored (or after the scope was dropped) returns to
+     * its own callers but is not kept.
      */
     private reload(scope: string, generation: number): Promise<ScopeKnowledge> {
         const pending = this.loading.get(scope);
-        if (pending) return pending;
+        if (pending && pending.generation >= generation) return pending.load;
+        const sequence = ++this.sequence;
         const load = (async () => {
             try {
                 const loaded = await this.options.load(scope);
@@ -244,16 +261,20 @@ export class KnowledgeMemoryStore {
                     index,
                     bytes: estimateBytes(loaded) + index.bytes,
                 };
-                this.drop(scope);
+                this.counts.loads++;
+                if ((this.settled.get(scope) ?? 0) > sequence) return entry;
+                this.remove(scope);
                 this.cached.set(scope, entry);
                 this.totalBytes += entry.bytes;
-                this.counts.loads++;
+                this.settled.set(scope, sequence);
                 return entry;
             } finally {
-                this.loading.delete(scope);
+                if (this.loading.get(scope)?.sequence === sequence) {
+                    this.loading.delete(scope);
+                }
             }
         })();
-        this.loading.set(scope, load);
+        this.loading.set(scope, { generation, sequence, load });
         return load;
     }
 
@@ -274,7 +295,7 @@ export class KnowledgeMemoryStore {
         for (const scope of candidates) {
             if (this.totalBytes <= this.options.maxBytes) break;
             const bytes = this.cached.get(scope)?.bytes ?? 0;
-            this.drop(scope);
+            this.remove(scope);
             this.counts.evictions++;
             this.options.log?.(
                 `[knowledge] evicted a scope (${bytes} bytes); ${this.cached.size} held, ${this.totalBytes} bytes`,
