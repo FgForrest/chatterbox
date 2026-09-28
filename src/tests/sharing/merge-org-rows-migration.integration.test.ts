@@ -1,5 +1,5 @@
 /**
- * Migration 0067: the rows the organization account held of a shared
+ * Migration 0066: the rows the organization account held of a shared
  * recording, before a shared recording was one recording, become the
  * recording's own. Runs the file against rows as that release left them.
  *
@@ -33,7 +33,7 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const MIGRATION = join(
     process.cwd(),
-    "src/db/migrations/0067_merge_org_rows.sql",
+    "src/db/migrations/0066_merge_org_rows.sql",
 );
 
 const OWNER = "user-owner";

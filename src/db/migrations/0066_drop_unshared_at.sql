@@ -1,1 +1,0 @@
-ALTER TABLE "recordings" DROP COLUMN "unshared_at";

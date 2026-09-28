@@ -383,6 +383,12 @@ export const recordings = pgTable(
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.
         remoteRetentionClaimedAt: timestamp("remote_retention_claimed_at"),
+        // Deprecated and no longer read or written: the grace period it
+        // timed is gone (a shared recording's retention is the
+        // Organization's, and its owner's applies at once after a
+        // withdrawal). Kept so the release before still runs against this
+        // schema; drop it in a later release.
+        unsharedAt: timestamp("unshared_at"),
         // When a person last set the title. Null means the title is still a
         // machine's (a Plaud filename, an upload's name, a generated one)
         // and may be replaced by a generated title or Plaud's filename; set,
