@@ -24,6 +24,7 @@ import {
     knowledgeEntities,
     knowledgeFactEvidence,
     knowledgeFacts,
+    knowledgeRelationTypes,
     people,
     recordingFolders,
     recordings,
@@ -93,6 +94,7 @@ import {
     confirmManualFact,
 } from "@/lib/knowledge/facts";
 import {
+    createOrgType,
     createPrivateType,
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
@@ -340,6 +342,57 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
                 .select({ id: knowledgeFactEvidence.id })
                 .from(knowledgeFactEvidence)
                 .where(eq(knowledgeFactEvidence.factId, leads)),
+        ).toHaveLength(1);
+    });
+
+    it("keeps a fact private that the Organization's relation does not fit, and still shares", async () => {
+        const mentors = await createPrivateType(OWNER, {
+            kind: "relation",
+            label: "mentors",
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        // Adopted as an Organization relation between organizations only.
+        const partners = await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "partners with",
+            subjectTypes: ["organization"],
+            objectTypes: ["organization"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        await confirmFactFromRecording({
+            subject: { personId: jan },
+            relationKey: mentors,
+            object: { personId: pavel },
+            ownerUserId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            startMs: 0,
+            endMs: 12_000,
+        });
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: partners })
+            .where(eq(knowledgeRelationTypes.key, mentors));
+
+        await share();
+
+        expect(
+            await db()
+                .select()
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, orgUserId)),
+        ).toEqual([]);
+        expect(
+            await db()
+                .select({ id: knowledgeFacts.id })
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, OWNER)),
         ).toHaveLength(1);
     });
 

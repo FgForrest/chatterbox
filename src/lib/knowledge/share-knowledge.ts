@@ -316,15 +316,24 @@ async function publishFactInTx(
         }
     }
 
-    const orgFactId = await confirmFactInTx(tx, {
-        scopeUserId: orgUserId,
-        actorUserId: ownerUserId,
-        origin: "recording",
-        subject,
-        relationKey,
-        object,
-        expectedCurrentFactId,
-    });
+    // A fact the Organization's vocabulary cannot hold (its relation, as
+    // adopted, takes other types) stays private rather than failing the
+    // share. `confirmFactInTx` refuses before it writes anything.
+    let orgFactId: string;
+    try {
+        orgFactId = await confirmFactInTx(tx, {
+            scopeUserId: orgUserId,
+            actorUserId: ownerUserId,
+            origin: "recording",
+            subject,
+            relationKey,
+            object,
+            expectedCurrentFactId,
+        });
+    } catch (error) {
+        if (error instanceof AppError && error.statusCode < 500) return false;
+        throw error;
+    }
     const evidence = await tx
         .select()
         .from(knowledgeFactEvidence)
