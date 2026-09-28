@@ -726,7 +726,6 @@ async function transcribeRecordingInner(
                 recordingId,
                 sourceSource: opts.attributionSource,
                 targetSource: "riffado",
-                targetText: transcriptionText,
             });
         }
 

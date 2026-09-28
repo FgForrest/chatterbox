@@ -72,7 +72,7 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 // Moving the speaker rows is tested against a real database
 // (`attribution-remap.integration.test.ts`); here only that it happens.
 vi.mock("@/lib/knowledge/attribution", () => ({
-    copyMatchingSpeakerAttributions: vi.fn().mockResolvedValue(false),
+    copyMatchingSpeakerAttributions: vi.fn().mockResolvedValue(0),
     remapTranscriptAttributionsInTx: vi.fn(),
 }));
 vi.mock("@/lib/knowledge/speaker-labels", () => ({
