@@ -138,6 +138,7 @@ import {
     requireRecordingView,
     resolveRecordingAccess,
 } from "@/lib/sharing/access";
+import { repairSharedSpeakerNames } from "@/lib/sharing/share-names";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
@@ -1214,6 +1215,41 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 .map((row) => row.label);
             expect(suggested).toEqual(["speaker_9"]);
             expect(await ownerOf(guess)).toBe(ALICE);
+        });
+
+        it("repairs names an older release let the owner give after sharing, once", async () => {
+            const { transcript } = await answeredMeeting();
+            await share();
+            // As an older release could leave it: a private person named on
+            // the shared transcript, and a private suggestion beside it.
+            const petr = await person("Petr");
+            const guess = await person("Maybe Karel");
+            await db()
+                .update(transcriptSpeakers)
+                .set({ personId: petr, markedUnknown: false })
+                .where(
+                    and(
+                        eq(transcriptSpeakers.transcriptionId, transcript),
+                        eq(transcriptSpeakers.label, "speaker_1"),
+                    ),
+                );
+            await db().insert(transcriptSpeakers).values({
+                userId: ALICE,
+                transcriptionId: transcript,
+                label: "speaker_9",
+                personId: guess,
+                source: "heuristic",
+                status: "suggested",
+            });
+
+            expect(await repairSharedSpeakerNames()).toBe(1);
+            expect(await ownerOf(petr)).toBe(await orgUser());
+            expect(await ownerOf(guess)).toBe(ALICE);
+            expect(
+                (await sharedNames()).map((row) => row.label).sort(),
+            ).toEqual(["speaker_0", "speaker_1"]);
+            // Nothing left to do.
+            expect(await repairSharedSpeakerNames()).toBe(0);
         });
 
         describe("racing a share", () => {

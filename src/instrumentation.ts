@@ -38,6 +38,10 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
+type SharedNamesModule = {
+    startSharedSpeakerNamesRepair: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -130,6 +134,13 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
+
+    // Names an older release let owners give on shared recordings become
+    // the Organization's. After the organization account exists; in the
+    // background, and a no-op once done.
+    const { startSharedSpeakerNamesRepair } =
+        require("./lib/sharing/share-names") as SharedNamesModule;
+    startSharedSpeakerNamesRepair();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever
