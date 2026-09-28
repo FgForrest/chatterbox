@@ -42,6 +42,10 @@ type VocabularyModule = {
     startCoreVocabularySeed: () => Promise<void>;
 };
 
+type KnowledgeLoaderModule = {
+    startKnowledgeListener: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -140,6 +144,12 @@ export async function register() {
     const { startCoreVocabularySeed } =
         require("./lib/knowledge/vocabulary") as VocabularyModule;
     await startCoreVocabularySeed();
+
+    // Only hears of knowledge changes sooner; every read checks the scope
+    // generations itself.
+    const { startKnowledgeListener } =
+        require("./lib/knowledge/knowledge-loader") as KnowledgeLoaderModule;
+    startKnowledgeListener();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

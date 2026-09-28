@@ -91,6 +91,7 @@ Self-host only; ignored when `IS_HOSTED=true`. All optional.
 | `EMBEDDING_MODEL`    | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
 | `EMBEDDING_API_KEY`  | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
 | `LEARN_MCP_URL`      | —        | The one URL of Riffado's read-only knowledge tools the Learn bridge may call back.                       |
+| `KNOWLEDGE_MEMORY_MB`| `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.     |
 
 ## SMTP (email notifications)
 

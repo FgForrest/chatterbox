@@ -34,6 +34,7 @@ describe("Learn environment configuration", () => {
             expect(parsed.EMBEDDING_MODEL).toBe("bge-m3");
             expect(parsed.EMBEDDING_API_KEY).toBeUndefined();
             expect(parsed.LEARN_MCP_URL).toBeUndefined();
+            expect(parsed.KNOWLEDGE_MEMORY_MB).toBe(256);
         }
     });
 
@@ -43,7 +44,9 @@ describe("Learn environment configuration", () => {
             EMBEDDING_MODEL: "multilingual-e5-large",
             EMBEDDING_API_KEY: "secret",
             LEARN_MCP_URL: "http://riffado:3000/api/mcp/learn",
+            KNOWLEDGE_MEMORY_MB: "1024",
         });
+        expect(parsed.KNOWLEDGE_MEMORY_MB).toBe(1024);
         expect(parsed.EMBEDDING_BASE_URL).toBe("http://embeddings:8080/v1");
         expect(parsed.EMBEDDING_MODEL).toBe("multilingual-e5-large");
         expect(parsed.EMBEDDING_API_KEY).toBe("secret");
@@ -53,6 +56,8 @@ describe("Learn environment configuration", () => {
     it.each([
         ["EMBEDDING_BASE_URL", "not a url"],
         ["LEARN_MCP_URL", "embeddings:8080"],
+        ["KNOWLEDGE_MEMORY_MB", "8"],
+        ["KNOWLEDGE_MEMORY_MB", "a lot"],
     ])("rejects an invalid %s", (field, value) => {
         expect(() => envSchema.parse({ [field]: value })).toThrow();
     });

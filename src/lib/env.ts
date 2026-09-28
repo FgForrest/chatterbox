@@ -158,6 +158,18 @@ const baseEnvSchema = z.object({
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
     /**
+     * How much memory, in MB, one process may hold of decrypted knowledge
+     * before it evicts the least recently used scopes.
+     */
+    KNOWLEDGE_MEMORY_MB: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? Number(val.trim()) : 256))
+        .refine((val) => Number.isInteger(val) && val >= 16 && val <= 16_384, {
+            message:
+                "KNOWLEDGE_MEMORY_MB must be a whole number from 16 to 16384",
+        }),
+    /**
      * The one URL of this app's read-only knowledge tools (MCP) the Learn
      * bridge may call back; nothing else is reachable from it.
      */
@@ -920,6 +932,7 @@ function validateEnv(): Env {
             EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
             EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
             LEARN_MCP_URL: process.env.LEARN_MCP_URL,
+            KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,
             GOOGLE_CLOUD_PROJECT_NUMBER:

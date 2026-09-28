@@ -177,52 +177,162 @@ export interface NameCandidate {
 /** Below this trigram similarity, two names are not offered as one. */
 const TRIGRAM_FLOOR = 0.4;
 
-function score(
+interface IndexedName {
+    id: string;
+    name: string;
+    normalized: string;
+    words: number;
+    grams: number;
+}
+
+function scoreEntry(
     query: string,
-    name: string,
+    queryWords: number,
+    queryGrams: number,
+    entry: IndexedName,
+    sharedWords: number,
+    sharedGrams: number,
 ): { score: number; reason: MatchReason } | null {
-    if (!query || !name) return null;
-    if (query === name) return { score: 1, reason: "exact" };
-    const queryWords = query.split(" ");
-    const nameWords = new Set(name.split(" "));
-    if (queryWords.every((word) => nameWords.has(word))) {
-        return { score: 0.9, reason: "token" };
-    }
+    if (query === entry.normalized) return { score: 1, reason: "exact" };
+    if (sharedWords === queryWords) return { score: 0.9, reason: "token" };
     const allowed = Math.max(
         1,
-        Math.floor(Math.min(query.length, name.length) / 5),
+        Math.floor(Math.min(query.length, entry.normalized.length) / 5),
     );
-    const distance = boundedLevenshtein(query, name, allowed);
-    if (distance <= allowed) {
-        return { score: 0.85 - distance * 0.05, reason: "edit" };
+    // An edit changes at most three trigrams: fewer shared, and the names
+    // are further apart than that.
+    if (sharedGrams >= queryGrams - 3 * allowed) {
+        const distance = boundedLevenshtein(query, entry.normalized, allowed);
+        if (distance <= allowed) {
+            return { score: 0.85 - distance * 0.05, reason: "edit" };
+        }
     }
-    const similarity = trigramSimilarity(query, name);
+    const similarity =
+        sharedGrams / (queryGrams + entry.grams - sharedGrams || 1);
     if (similarity >= TRIGRAM_FLOOR) {
         return { score: similarity * 0.8, reason: "trigram" };
     }
     return null;
 }
 
+function compact(postings: Map<string, number[]>): Map<string, Int32Array> {
+    return new Map(
+        [...postings].map(([key, list]) => [key, Int32Array.from(list)]),
+    );
+}
+
+/**
+ * Names normalized once, with their words and trigrams posted, so a query
+ * scores only the names that share a word or a trigram with it. Built when
+ * a scope is loaded into memory; `bytes` is its own estimate of its size.
+ */
+export class NameIndex {
+    private readonly entries: IndexedName[] = [];
+    private readonly byWord: Map<string, Int32Array>;
+    private readonly byGram: Map<string, Int32Array>;
+    readonly bytes: number;
+
+    constructor(candidates: readonly NameCandidate[]) {
+        const words = new Map<string, number[]>();
+        const grams = new Map<string, number[]>();
+        let postings = 0;
+        let text = 0;
+        for (const candidate of candidates) {
+            for (const name of candidate.names) {
+                const normalized = normalizeName(name);
+                if (!normalized) continue;
+                const index = this.entries.length;
+                const wordSet = new Set(normalized.split(" "));
+                const gramSet = trigrams(normalized);
+                this.entries.push({
+                    id: candidate.id,
+                    name,
+                    normalized,
+                    words: wordSet.size,
+                    grams: gramSet.size,
+                });
+                for (const word of wordSet) post(words, word, index);
+                for (const gram of gramSet) post(grams, gram, index);
+                postings += wordSet.size + gramSet.size;
+                text += normalized.length;
+            }
+        }
+        this.byWord = compact(words);
+        this.byGram = compact(grams);
+        this.bytes =
+            this.entries.length * 160 +
+            text * 2 +
+            postings * 4 +
+            (words.size + grams.size) * 128;
+    }
+
+    /** How many names it holds. */
+    get size(): number {
+        return this.entries.length;
+    }
+
+    /** The candidates matching `query`, best first; see `matchNames`. */
+    match(query: string): NameMatch[] {
+        const normalized = normalizeName(query);
+        if (!normalized) return [];
+        const queryWords = new Set(normalized.split(" "));
+        const queryGrams = trigrams(normalized);
+        const sharedGrams = new Map<number, number>();
+        for (const gram of queryGrams) {
+            for (const index of this.byGram.get(gram) ?? []) {
+                sharedGrams.set(index, (sharedGrams.get(index) ?? 0) + 1);
+            }
+        }
+        const sharedWords = new Map<number, number>();
+        for (const word of queryWords) {
+            for (const index of this.byWord.get(word) ?? []) {
+                sharedWords.set(index, (sharedWords.get(index) ?? 0) + 1);
+            }
+        }
+        const best = new Map<string, NameMatch>();
+        const considered = new Set([
+            ...sharedGrams.keys(),
+            ...sharedWords.keys(),
+        ]);
+        for (const index of considered) {
+            const entry = this.entries[index];
+            if (!entry) continue;
+            const found = scoreEntry(
+                normalized,
+                queryWords.size,
+                queryGrams.size,
+                entry,
+                sharedWords.get(index) ?? 0,
+                sharedGrams.get(index) ?? 0,
+            );
+            const held = best.get(entry.id);
+            if (found && (!held || found.score > held.score)) {
+                best.set(entry.id, {
+                    id: entry.id,
+                    name: entry.name,
+                    ...found,
+                });
+            }
+        }
+        return [...best.values()].sort((a, b) => b.score - a.score);
+    }
+}
+
+function post(postings: Map<string, number[]>, key: string, index: number) {
+    const list = postings.get(key);
+    if (list) list.push(index);
+    else postings.set(key, [index]);
+}
+
 /**
  * The candidates whose names match `query`, best first, each once with its
  * best-matching name and why it matched: the same normalized name, all of
- * the query's words, a few edits apart, or close by trigrams.
+ * the query's words, a few edits apart, or close by trigrams. A name
+ * sharing neither a word nor a trigram with the query is not considered.
  */
 export function matchNames(
     query: string,
     candidates: readonly NameCandidate[],
 ): NameMatch[] {
-    const normalized = normalizeName(query);
-    const matches: NameMatch[] = [];
-    for (const candidate of candidates) {
-        let best: NameMatch | null = null;
-        for (const name of candidate.names) {
-            const found = score(normalized, normalizeName(name));
-            if (found && (!best || found.score > best.score)) {
-                best = { id: candidate.id, name, ...found };
-            }
-        }
-        if (best) matches.push(best);
-    }
-    return matches.sort((a, b) => b.score - a.score);
+    return new NameIndex(candidates).match(query);
 }

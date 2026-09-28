@@ -73,7 +73,8 @@ services:
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
-      LEARN_MCP_URL: ${LEARN_MCP_URL:-}
+            LEARN_MCP_URL: ${LEARN_MCP_URL:-}
+      KNOWLEDGE_MEMORY_MB: ${KNOWLEDGE_MEMORY_MB:-}
 
 
       # SMTP (optional: password reset + email notifications)
