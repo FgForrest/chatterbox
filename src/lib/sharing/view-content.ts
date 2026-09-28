@@ -1,14 +1,17 @@
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, transcriptions } from "@/db/schema";
+import { aiEnhancements, recordings, transcriptions } from "@/db/schema";
 
 /**
  * Reading the Organization view of shared recordings.
  *
- * Until someone produces an Organization transcript or summary, the view
- * falls back to the owner's, read-only. The owner chose to share the
- * recording, and an empty panel would only send everyone to re-run work that
- * already exists.
+ * Sharing takes the Organization's own snapshot of the transcripts and
+ * summaries. A recording shared before snapshots existed, until the backfill
+ * or its first change takes one, shows the owner's instead, read-only: the
+ * owner chose to share it, and an empty panel would only send everyone to
+ * re-run work that already exists. Once the snapshot is taken the owner's
+ * rows are never shown here: what the Organization's retention removed stays
+ * removed, and what the owner makes afterwards stays theirs.
  */
 
 type TranscriptionRow = typeof transcriptions.$inferSelect;
@@ -23,20 +26,40 @@ export interface ViewOwners {
 export interface SharedRecordingRef {
     id: string;
     ownerUserId: string;
+    /** `recordings.orgSnapshotAt`: once set, the owner's rows are not shown. */
+    orgSnapshotAt: Date | null;
 }
 
+/** The owner's rows of the recordings that may still fall back to them. */
 function ownerRowsCondition(
     table: typeof transcriptions | typeof aiEnhancements,
     refs: SharedRecordingRef[],
 ) {
     return or(
-        ...refs.map((ref) =>
-            and(
-                eq(table.recordingId, ref.id),
-                eq(table.userId, ref.ownerUserId),
+        ...refs
+            .filter((ref) => ref.orgSnapshotAt === null)
+            .map((ref) =>
+                and(
+                    eq(table.recordingId, ref.id),
+                    eq(table.userId, ref.ownerUserId),
+                ),
             ),
-        ),
     );
+}
+
+/**
+ * Whether the Organization view of a recording may still show the owner's
+ * rows: only until the Organization took its snapshot.
+ */
+export async function ownerRowsShownInOrgView(
+    recordingId: string,
+): Promise<boolean> {
+    const [row] = await db
+        .select({ orgSnapshotAt: recordings.orgSnapshotAt })
+        .from(recordings)
+        .where(eq(recordings.id, recordingId))
+        .limit(1);
+    return row !== undefined && row.orgSnapshotAt === null;
 }
 
 /**
@@ -63,7 +86,9 @@ export async function readOrgViewTranscriptRows(
             ),
         );
     const covered = new Set(own.map((row) => row.recordingId));
-    const missing = refs.filter((ref) => !covered.has(ref.id));
+    const missing = refs.filter(
+        (ref) => !covered.has(ref.id) && ref.orgSnapshotAt === null,
+    );
     const fallback =
         missing.length > 0
             ? await db
@@ -107,25 +132,28 @@ export async function readOrgViewSummaryRecordingIds(
 /**
  * The transcript an Organization summary is generated from.
  *
- * The organization's own transcript when there is one, else the owner's,
- * preferring their provider's output over an import.
+ * The organization's own transcript when there is one, else, before its
+ * snapshot, the owner's; either way preferring a provider's output over an
+ * edit, and both over an import.
  */
 export async function findOrgSummarySource(
     recordingId: string,
     owners: ViewOwners,
 ): Promise<TranscriptionRow | undefined> {
-    const [own] = await db
+    const ownRows = await db
         .select()
         .from(transcriptions)
         .where(
             and(
                 eq(transcriptions.recordingId, recordingId),
                 eq(transcriptions.userId, owners.contentUserId),
-                eq(transcriptions.source, "riffado"),
             ),
-        )
-        .limit(1);
-    if (own) return own;
+        );
+    for (const source of FALLBACK_SOURCE_ORDER) {
+        const row = ownRows.find((item) => item.source === source);
+        if (row) return row;
+    }
+    if (!(await ownerRowsShownInOrgView(recordingId))) return undefined;
     const ownerRows = await db
         .select()
         .from(transcriptions)
@@ -146,7 +174,7 @@ export async function findOrgSummarySource(
  * Whose rows a view's reads come from right now.
  *
  * The Organization view reads the organization's rows once it has any of
- * the requested kind, and the owner's until then.
+ * the requested kind or took its snapshot, and the owner's until then.
  */
 export async function effectiveViewReader(
     recordingId: string,
@@ -178,7 +206,7 @@ export async function effectiveViewReader(
                       ),
                   )
                   .limit(1);
-    return own.length > 0
+    return own.length > 0 || !(await ownerRowsShownInOrgView(recordingId))
         ? { userId: owners.contentUserId, fallback: false }
         : { userId: owners.ownerUserId, fallback: true };
 }

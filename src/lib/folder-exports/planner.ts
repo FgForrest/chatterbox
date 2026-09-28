@@ -176,6 +176,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
     const refs = recordingRows.map((row) => ({
         id: row.id,
         ownerUserId: row.userId,
+        orgSnapshotAt: row.orgSnapshotAt,
     }));
     const [
         transcriptRows,

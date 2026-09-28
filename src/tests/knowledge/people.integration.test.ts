@@ -24,6 +24,7 @@ import {
 } from "vitest";
 import {
     people,
+    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
@@ -683,6 +684,14 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
         });
 
         it("never shows the owner's private person in the Organization view", async () => {
+            // Shared before snapshots existed, the view shows the owner's
+            // transcript until the Organization takes its copy.
+            await unshareRecording(ALICE, REC);
+            await db().insert(recordingFolderAssignments).values({
+                userId: ALICE,
+                recordingId: REC,
+                folderId: orgRootId,
+            });
             // A name on the owner's transcript the Organization never took:
             // sharing promotes every name it copies, so only a row written
             // outside the share can be one.
@@ -696,11 +705,8 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                         eq(transcriptSpeakers.label, "speaker_1"),
                     ),
                 );
-            // Retention removed the Organization's copy, so the view falls
-            // back to the owner's transcript; the name stays private.
-            await db()
-                .delete(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
+            // The view falls back to the owner's transcript; the name stays
+            // private.
             const read = await call(
                 getSpeakersRoute,
                 BOB,

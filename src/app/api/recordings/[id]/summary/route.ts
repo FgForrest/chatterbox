@@ -17,6 +17,7 @@ import {
 } from "@/lib/sharing/access";
 import { getJobVisibleTo } from "@/lib/sharing/jobs";
 import { orgContentChanged } from "@/lib/sharing/notify";
+import { ownerRowsShownInOrgView } from "@/lib/sharing/view-content";
 import type { MultiPassPhase } from "@/lib/summary/multi-pass";
 import {
     encodeStreamEvent,
@@ -339,10 +340,15 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             : undefined;
 
     // The Organization view reads the organization's summaries once it has
-    // any, and the owner's until then (read-only, flagged as `fallback`).
+    // any, and before its snapshot the owner's (read-only, flagged as
+    // `fallback`).
     let summaries = await readStoredSummaries(access.contentUserId, id);
     let fallback = false;
-    if (summaries.length === 0 && access.contentUserId !== access.ownerUserId) {
+    if (
+        summaries.length === 0 &&
+        access.contentUserId !== access.ownerUserId &&
+        (await ownerRowsShownInOrgView(id))
+    ) {
         summaries = await readStoredSummaries(access.ownerUserId, id);
         fallback = summaries.length > 0;
     }

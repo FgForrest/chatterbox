@@ -84,6 +84,14 @@ import { unshareRecording } from "@/lib/folders/folders";
 import { lockOrgPeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { snapshotRecordingForOrgInTx } from "@/lib/sharing/org-transcript";
+import {
+    effectiveViewReader,
+    findOrgSummarySource,
+    ownerRowsShownInOrgView,
+    readOrgViewSummaryRecordingIds,
+    readOrgViewSummaryRows,
+    readOrgViewTranscriptRows,
+} from "@/lib/sharing/view-content";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -411,5 +419,91 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
         await share();
         expect((await snapshot()).size).toBe(1);
         expect(await orgTranscripts()).toHaveLength(1);
+    });
+
+    describe("the Organization view", () => {
+        const ref = async () => {
+            const [row] = await db()
+                .select({ orgSnapshotAt: recordings.orgSnapshotAt })
+                .from(recordings)
+                .where(eq(recordings.id, REC));
+            return {
+                id: REC,
+                ownerUserId: OWNER,
+                orgSnapshotAt: row?.orgSnapshotAt ?? null,
+            };
+        };
+
+        it("shows the owner's rows only until the snapshot", async () => {
+            const riffado = await transcript(OWNER, "riffado");
+            await summary(OWNER, "riffado", riffado);
+            await share();
+
+            // Shared before snapshots existed: the owner's rows, read-only.
+            const before = await readOrgViewTranscriptRows(
+                [await ref()],
+                orgUserId,
+            );
+            expect(before.rows.map((row) => row.userId)).toEqual([OWNER]);
+            expect(
+                await effectiveViewReader(REC, owners(), "transcript"),
+            ).toEqual({ userId: OWNER, fallback: true });
+
+            await snapshot();
+            // Organization retention removes its copies.
+            await db()
+                .delete(aiEnhancements)
+                .where(eq(aiEnhancements.userId, orgUserId));
+            await db()
+                .delete(transcriptions)
+                .where(eq(transcriptions.userId, orgUserId));
+
+            // What its retention removed stays removed.
+            const after = await readOrgViewTranscriptRows(
+                [await ref()],
+                orgUserId,
+            );
+            expect(after.rows).toEqual([]);
+            expect(
+                await readOrgViewSummaryRecordingIds([await ref()], orgUserId),
+            ).toEqual(new Set());
+            expect(
+                await readOrgViewSummaryRows([await ref()], orgUserId),
+            ).toEqual([]);
+            for (const kind of ["transcript", "summary"] as const) {
+                expect(await effectiveViewReader(REC, owners(), kind)).toEqual({
+                    userId: orgUserId,
+                    fallback: false,
+                });
+            }
+            expect(await findOrgSummarySource(REC, owners())).toBeUndefined();
+            expect(await ownerRowsShownInOrgView(REC)).toBe(false);
+        });
+
+        it("never shows a summary the owner made after the share", async () => {
+            await transcript(OWNER, "riffado");
+            await share();
+            await snapshot();
+
+            await summary(OWNER, "riffado", null);
+
+            expect(
+                await readOrgViewSummaryRecordingIds([await ref()], orgUserId),
+            ).toEqual(new Set());
+            expect(await effectiveViewReader(REC, owners(), "summary")).toEqual(
+                { userId: orgUserId, fallback: false },
+            );
+        });
+
+        it("summarizes the Organization's own copy of any source before the owner's", async () => {
+            await transcript(OWNER, "plaud");
+            await share();
+            const copies = await snapshot();
+            const plaudCopy = [...copies.values()][0];
+
+            expect((await findOrgSummarySource(REC, owners()))?.id).toBe(
+                plaudCopy?.id,
+            );
+        });
     });
 });

@@ -113,6 +113,7 @@ async function loadOrganizationLibrary(
             deviceSn: recordings.deviceSn,
             waveformPeaks: recordings.waveformPeaks,
             audioReapedAt: recordings.audioReapedAt,
+            orgSnapshotAt: recordings.orgSnapshotAt,
             ownerName: users.name,
             ownerEmail: users.email,
         })
@@ -125,7 +126,11 @@ async function loadOrganizationLibrary(
             ),
         )
         .orderBy(desc(recordings.startTime));
-    const refs = rows.map((row) => ({ id: row.id, ownerUserId: row.userId }));
+    const refs = rows.map((row) => ({
+        id: row.id,
+        ownerUserId: row.userId,
+        orgSnapshotAt: row.orgSnapshotAt,
+    }));
     const [{ rows: transcriptRows }, summaryIds] = await Promise.all([
         readOrgViewTranscriptRows(refs, orgUserId),
         readOrgViewSummaryRecordingIds(refs, orgUserId),
@@ -136,6 +141,7 @@ async function loadOrganizationLibrary(
         ({
             waveformPeaks,
             audioReapedAt,
+            orgSnapshotAt: _snapshot,
             userId,
             ownerName,
             ownerEmail,
