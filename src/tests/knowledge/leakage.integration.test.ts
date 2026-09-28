@@ -65,6 +65,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+            KNOWLEDGE_MEMORY_MB: 64,
         },
     };
 });
@@ -100,6 +101,12 @@ import {
     deleteFact,
     listFacts,
 } from "@/lib/knowledge/facts";
+import {
+    findByName,
+    knowledgeStore,
+    knowledgeView,
+} from "@/lib/knowledge/knowledge-loader";
+import { mergePeople } from "@/lib/knowledge/people";
 import {
     createPrivateType,
     deleteOwnType,
@@ -475,6 +482,95 @@ describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
                 await refusal(deleteFact(BOB, "no-such")),
             );
             expect(await listFacts(ALICE, { personId: jan })).toHaveLength(1);
+        });
+    });
+
+    describe("what a reader is given", () => {
+        /** Alice's private knowledge, some of it about the Organization's Jan. */
+        async function alicesPrivateLayer() {
+            knowledgeStore().invalidateAll();
+            const [orgJan, alicesPavel] = await db()
+                .insert(people)
+                .values([
+                    { userId: orgUserId, displayName: encryptText("Jan") },
+                    { userId: ALICE, displayName: encryptText("Pavel Tajný") },
+                ])
+                .returning({ id: people.id });
+            const orion = await createEntity(ALICE, {
+                typeKey: "project",
+                name: "Orion Secret",
+            });
+            await addAlias(ALICE, { personId: orgJan?.id ?? "" }, "Honzíček");
+            await confirmManualFact(ALICE, {
+                subject: { personId: orgJan?.id ?? "" },
+                relationKey: "leads",
+                object: { entityId: orion.id },
+            });
+            return {
+                orgJan: orgJan?.id ?? "",
+                alicesPavel: alicesPavel?.id ?? "",
+                orion: orion.id,
+            };
+        }
+
+        it("gives no one else, nor a shared run, anything of it: not by search, list or count", async () => {
+            const { orgJan } = await alicesPrivateLayer();
+            for (const context of [
+                { kind: "pages" as const, viewerUserId: BOB },
+                { kind: "pages" as const, viewerUserId: orgUserId },
+                {
+                    kind: "recording" as const,
+                    ownerUserId: ALICE,
+                    shared: true,
+                },
+            ]) {
+                const view = await knowledgeView(context);
+                const text = JSON.stringify({
+                    items: view.items,
+                    facts: view.facts,
+                });
+                for (const secret of [
+                    "Pavel Tajný",
+                    "Orion Secret",
+                    "Honzíček",
+                ]) {
+                    expect(text).not.toContain(secret);
+                    expect(findByName(view, secret)).toEqual([]);
+                }
+                expect(view.facts).toEqual([]);
+            }
+            for (const viewer of [BOB, orgUserId]) {
+                expect(await listFacts(viewer, { personId: orgJan })).toEqual(
+                    [],
+                );
+                expect(await listAliases(viewer, { personId: orgJan })).toEqual(
+                    [],
+                );
+            }
+        });
+
+        it("answers a merge into or of another account's person as missing", async () => {
+            const { alicesPavel } = await alicesPrivateLayer();
+            const [bobs] = await db()
+                .insert(people)
+                .values({ userId: BOB, displayName: encryptText("Petr") })
+                .returning({ id: people.id });
+            const bobsId = bobs?.id ?? "";
+            expectSameRefusal(
+                await refusal(mergePeople(BOB, alicesPavel, bobsId)),
+                await refusal(mergePeople(BOB, "no-such", bobsId)),
+            );
+            expectSameRefusal(
+                await refusal(mergePeople(BOB, bobsId, alicesPavel)),
+                await refusal(mergePeople(BOB, bobsId, "no-such")),
+            );
+        });
+
+        it("never refuses a name because another account gave it", async () => {
+            const { orgJan } = await alicesPrivateLayer();
+            await expect(
+                addAlias(BOB, { personId: orgJan }, "Honzíček"),
+            ).resolves.toEqual(expect.any(String));
         });
     });
 });

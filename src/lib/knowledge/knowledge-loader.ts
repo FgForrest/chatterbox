@@ -27,6 +27,7 @@ import {
     type LoadedScope,
 } from "@/lib/knowledge/memory-store";
 import type { NameIndex, NameMatch } from "@/lib/knowledge/name-match";
+import { type ReadContext, readableScopes } from "@/lib/knowledge/scope";
 import {
     KNOWLEDGE_CHANNEL,
     readScopeGenerations,
@@ -247,19 +248,15 @@ export interface KnowledgeView {
 }
 
 /**
- * The knowledge `viewerUserId` may use: the Organization's, and unless
- * `sharedOnly` (a run on a shared recording, which reads and writes the
- * shared layer alone) their own, fresh.
+ * The knowledge a reader may use, fresh: the scopes `readableScopes`
+ * gives for the context, merged.
  */
 export async function knowledgeView(
-    viewerUserId: string,
-    { sharedOnly = false }: { sharedOnly?: boolean } = {},
+    context: ReadContext,
 ): Promise<KnowledgeView> {
     orgScope = await getOrgUserId();
-    const scopes = [
-        ...(orgScope ? [orgScope] : []),
-        ...(sharedOnly || viewerUserId === orgScope ? [] : [viewerUserId]),
-    ];
+    const scopes = readableScopes(context, orgScope);
+    const viewerUserId = scopes.find((scope) => scope !== orgScope) ?? null;
     const loaded = await knowledgeStore().get(scopes);
     const scopeOf = (scope: string) =>
         scope === orgScope ? ("org" as const) : ("personal" as const);

@@ -94,6 +94,11 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const ALICE = "user-alice";
 const BOB = "user-bob";
 
+const pages = (viewerUserId: string) => ({
+    kind: "pages" as const,
+    viewerUserId,
+});
+
 describeWithDatabase("the knowledge view (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
     let orgUserId = "";
@@ -150,7 +155,7 @@ describeWithDatabase("the knowledge view (PostgreSQL)", () => {
     });
 
     it("gives a reader the Organization's and their own, and a shared run the Organization's", async () => {
-        const alice = await knowledgeView(ALICE);
+        const alice = await knowledgeView(pages(ALICE));
         expect(
             alice.items.map((item) => [item.name, item.scope]).sort(),
         ).toEqual([
@@ -168,37 +173,43 @@ describeWithDatabase("the knowledge view (PostgreSQL)", () => {
             reason: "trigram",
         });
 
-        const shared = await knowledgeView(ALICE, { sharedOnly: true });
+        const shared = await knowledgeView({
+            kind: "recording",
+            ownerUserId: ALICE,
+            shared: true,
+        });
         expect(shared.items.map((item) => item.name)).toEqual(["Jan Novotný"]);
         expect(shared.items[0]?.names).toEqual([]);
         expect(shared.facts).toEqual([]);
 
-        const bob = await knowledgeView(BOB);
+        const bob = await knowledgeView(pages(BOB));
         expect(bob.items.map((item) => item.name)).toEqual(["Jan Novotný"]);
         expect(bob.facts).toEqual([]);
     });
 
     it("shows a change on the next read, and forgets what was erased", async () => {
-        await knowledgeView(ALICE);
+        await knowledgeView(pages(ALICE));
         await renameEntity(ALICE, orion, "Orion CRM");
         expect(
-            (await knowledgeView(ALICE)).items.map((item) => item.name).sort(),
+            (await knowledgeView(pages(ALICE))).items
+                .map((item) => item.name)
+                .sort(),
         ).toEqual(["Jan Novotný", "Orion CRM"]);
 
         await deletePerson(orgUserId, orgJan);
-        const after = await knowledgeView(ALICE);
+        const after = await knowledgeView(pages(ALICE));
         expect(after.items.map((item) => item.name)).toEqual(["Orion CRM"]);
         expect(after.facts).toEqual([]);
         expect(JSON.stringify(after)).not.toContain("Honza");
 
         await deleteEntity(ALICE, orion);
-        expect((await knowledgeView(ALICE)).items).toEqual([]);
+        expect((await knowledgeView(pages(ALICE))).items).toEqual([]);
     });
 
     it("reads from memory while nothing changed", async () => {
-        await knowledgeView(ALICE);
+        await knowledgeView(pages(ALICE));
         const before = knowledgeStore().stats();
-        await knowledgeView(ALICE);
+        await knowledgeView(pages(ALICE));
         const after = knowledgeStore().stats();
         expect(after.loads).toBe(before.loads);
         expect(after.hits).toBe(before.hits + 2);
