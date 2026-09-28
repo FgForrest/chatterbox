@@ -31,6 +31,7 @@ import {
 } from "@/lib/ai/enhancement-provider";
 import { decrypt } from "@/lib/encryption";
 import { encryptJsonField } from "@/lib/encryption/fields";
+import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
@@ -46,6 +47,7 @@ import {
     type LearnJobPayload,
     parseLearnJobPayload,
 } from "@/lib/learn/learn-job";
+import { chooseLearnPath } from "@/lib/learn/provider";
 import {
     type LearnChat,
     type LearnRelationChoice,
@@ -363,6 +365,12 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
                 run.actorUserId ?? "",
                 signal,
             );
+            // Path 1 (the bridge, with tools) lands with Task 3.6; until
+            // then every run takes the fallback, and says so.
+            const path = chooseLearnPath(
+                { provider },
+                { mcpUrl: env.LEARN_MCP_URL },
+            );
             reportProgress({ phase: "reading" });
             const pass = await runFallbackPass({
                 chat,
@@ -426,7 +434,7 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
                         .update(learnRuns)
                         .set({
                             status,
-                            path: "fallback",
+                            path,
                             provider,
                             model,
                             stats,
