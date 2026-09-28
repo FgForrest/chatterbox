@@ -245,7 +245,7 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 userId: ownerId,
                 text: encryptText(DIALOG),
                 provider: "openai",
-                model: "whisper-1",
+                model: "gpt-4o-transcribe-diarize",
                 source: "riffado",
             })
             .returning({ id: transcriptions.id });
@@ -729,7 +729,7 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                     userId: orgUserId,
                     text: encryptText(DIALOG),
                     provider: "openai",
-                    model: "whisper-1",
+                    model: "gpt-4o-transcribe-diarize",
                     source: "riffado",
                 })
                 .returning({ id: transcriptions.id });
