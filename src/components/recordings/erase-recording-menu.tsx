@@ -45,6 +45,11 @@ type EraseOperation =
 
 interface EraseRecordingMenuProps {
     recording: Recording;
+    /**
+     * In the Organization: the recording is the organization account's to
+     * change, so erasing any of it takes it out of the Organization first.
+     */
+    shared?: boolean;
     onDeleteLocal: (recording: Recording) => Promise<void>;
     onChanged: () => void;
 }
@@ -52,11 +57,12 @@ interface EraseRecordingMenuProps {
 async function postOperation(
     recordingId: string,
     scope: "audio" | "transcript" | "summary" | "plaud" | "restore-audio",
+    withdraw = false,
 ): Promise<void> {
     const response = await fetch(`/api/recordings/${recordingId}/erase`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope }),
+        body: JSON.stringify(withdraw ? { scope, withdraw } : { scope }),
     });
     if (!response.ok) {
         const body = (await response.json().catch(() => null)) as {
@@ -68,6 +74,7 @@ async function postOperation(
 
 export function EraseRecordingMenu({
     recording,
+    shared = false,
     onDeleteLocal,
     onChanged,
 }: EraseRecordingMenuProps) {
@@ -162,7 +169,11 @@ export function EraseRecordingMenu({
                 await postOperation(recording.id, "plaud");
                 await onDeleteLocal(recording);
             } else {
-                await postOperation(recording.id, operation);
+                await postOperation(
+                    recording.id,
+                    operation,
+                    shared && operation !== "plaud",
+                );
                 toast.success(operationCopy[operation].success);
                 onChanged();
             }
@@ -183,6 +194,8 @@ export function EraseRecordingMenu({
             ? operationCopy[operation]
             : null;
     const requiresTitle = operation === "everywhere";
+    // Everything but the Plaud original is the recording itself.
+    const withdraws = shared && operation !== null && operation !== "plaud";
     const confirmed = !requiresTitle || confirmText === recording.filename;
 
     return (
@@ -211,7 +224,11 @@ export function EraseRecordingMenu({
                         {i18n("Local artifacts")}
                     </DropdownMenuLabel>
                     {recording.audioReaped && isPlaudRecording ? (
-                        <DropdownMenuItem onSelect={() => void restoreAudio()}>
+                        <DropdownMenuItem
+                            // Shared, only the organization account changes it.
+                            disabled={shared}
+                            onSelect={() => void restoreAudio()}
+                        >
                             <RotateCcw className="size-4" />{" "}
                             {i18n("Restore audio from Plaud")}
                         </DropdownMenuItem>
@@ -279,6 +296,13 @@ export function EraseRecordingMenu({
                                     {copy.description}
                                 </DialogDescription>
                             </DialogHeader>
+                            {withdraws && (
+                                <p className="text-sm font-medium">
+                                    {i18n(
+                                        "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
+                                    )}
+                                </p>
+                            )}
                             {requiresTitle && (
                                 <div className="space-y-2">
                                     <p className="text-sm text-muted-foreground">

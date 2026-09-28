@@ -13,6 +13,11 @@ type IdContext = { params: Promise<{ id: string }> };
 
 const requestSchema = z.object({
     scope: z.enum(["audio", "transcript", "summary", "plaud", "restore-audio"]),
+    /**
+     * The owner agreed that erasing a shared recording takes it out of the
+     * Organization first; without it that erase is refused (409).
+     */
+    withdraw: z.boolean().optional(),
 });
 
 export const POST = apiHandler<IdContext>(async (request, context) => {
@@ -30,7 +35,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     } else if (parsed.data.scope === "restore-audio") {
         await restoreAudioFromPlaud(session.user.id, id);
     } else {
-        await eraseLocalArtifact(session.user.id, id, parsed.data.scope);
+        await eraseLocalArtifact(session.user.id, id, parsed.data.scope, {
+            withdraw: parsed.data.withdraw === true,
+        });
     }
 
     await notifyIfShared(id);

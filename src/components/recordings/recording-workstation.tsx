@@ -196,6 +196,9 @@ export function RecordingWorkstation({
                         action={
                             <EraseRecordingMenu
                                 recording={displayRecording}
+                                shared={sharedRecordingIds(
+                                    folderOrganization,
+                                ).has(recording.id)}
                                 onDeleteLocal={handleDelete}
                                 onChanged={refresh}
                             />
@@ -238,7 +241,7 @@ export function RecordingWorkstation({
                             onTranscribe={handleTranscribe}
                             onTranscribeComplete={refresh}
                             onTranscriptStale={refresh}
-                            // Shared, the owner's copy is frozen.
+                            // Shared, it is the organization account's.
                             readOnly={sharedRecordingIds(
                                 folderOrganization,
                             ).has(recording.id)}

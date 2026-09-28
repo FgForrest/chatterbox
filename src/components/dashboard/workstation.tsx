@@ -1079,6 +1079,13 @@ export function Workstation({
                                     transcriptReadOnly={
                                         selectedTranscriptReadOnly
                                     }
+                                    recordingShared={
+                                        selectedRecording
+                                            ? sharedIds.has(
+                                                  selectedRecording.id,
+                                              )
+                                            : false
+                                    }
                                     onSelectRecording={setCurrentRecording}
                                     onRenamed={handleRenamed}
                                     onDelete={handleDelete}

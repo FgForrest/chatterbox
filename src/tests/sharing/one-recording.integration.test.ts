@@ -83,6 +83,12 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/storage/factory", () => ({
+    createUserStorageProvider: vi.fn().mockResolvedValue({
+        exists: vi.fn().mockResolvedValue(false),
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+    }),
+}));
 // The files already carry the name; renaming them is not what is tested.
 vi.mock("@/lib/recordings/reconcile-storage", () => ({
     reconcileRecordingStorage: vi.fn(
@@ -111,6 +117,7 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 
+import { POST as postEraseRoute } from "@/app/api/recordings/[id]/erase/route";
 import { PATCH as patchRecordingRoute } from "@/app/api/recordings/[id]/route";
 import {
     DELETE as deleteSummaryRoute,
@@ -121,6 +128,7 @@ import { POST as postTopicsRoute } from "@/app/api/recordings/[id]/topics/route"
 import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { resolveRecordingAccess } from "@/lib/sharing/access";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -354,5 +362,34 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             body: { filename: "Renamed" },
         });
         expect(renamed.status).toBe(200);
+    });
+
+    it("erases a shared recording only by taking it out of the Organization first", async () => {
+        await share();
+        const erase = (body: object) =>
+            call(postEraseRoute, OWNER, {
+                method: "POST",
+                path: "erase",
+                body,
+            });
+
+        const refused = await erase({ scope: "transcript" });
+        expect(refused.status).toBe(409);
+        await expect(refused.json()).resolves.toMatchObject({
+            code: "RECORDING_SHARED",
+        });
+        expect(await resolveRecordingAccess(BOB, REC)).not.toBeNull();
+
+        const erased = await erase({ scope: "transcript", withdraw: true });
+        expect(erased.status).toBe(200);
+        // Withdrawn and erased together: nobody but the owner sees it, and
+        // its transcript is gone.
+        expect(await resolveRecordingAccess(BOB, REC)).toBeNull();
+        expect(
+            await db()
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.recordingId, REC)),
+        ).toEqual([]);
     });
 });

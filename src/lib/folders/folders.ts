@@ -98,7 +98,7 @@ async function scheduleExportProjection(userId: string): Promise<void> {
 }
 
 /** Everyone's view of the tree, and the organization's exports of it, are stale. */
-async function orgTreeChanged(): Promise<void> {
+export async function orgTreeChanged(): Promise<void> {
     await notifyOrgChange({ type: "tree" });
     const orgUserId = await getOrgUserId();
     if (orgUserId) await scheduleExportProjection(orgUserId);
@@ -235,7 +235,7 @@ function assertWritable(target: AccessibleFolder): void {
  * unshare, or a folder delete could cascade away a recording moved into it a
  * moment earlier. One transaction-scoped lock rules both out.
  */
-async function lockOrgTree(tx: Tx): Promise<void> {
+export async function lockOrgTree(tx: Tx): Promise<void> {
     await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext('riffado:org-tree'))`,
     );
@@ -1012,28 +1012,39 @@ export async function unshareRecording(
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, recordingId);
-        const orgFolderIds = (
-            await tx
-                .select({ id: recordingFolders.id })
-                .from(recordingFolders)
-                .where(eq(recordingFolders.userId, orgUserId))
-        ).map((row) => row.id);
-        if (orgFolderIds.length > 0) {
-            await tx
-                .delete(recordingFolderAssignments)
-                .where(
-                    and(
-                        eq(recordingFolderAssignments.recordingId, recordingId),
-                        inArray(
-                            recordingFolderAssignments.folderId,
-                            orgFolderIds,
-                        ),
-                    ),
-                );
-        }
-        await endSharingIfUnfiled(tx, orgUserId, recordingId);
+        await withdrawRecordingInTx(tx, orgUserId, recordingId);
     });
     await orgTreeChanged();
+}
+
+/**
+ * Take a recording out of the whole Organization tree in the caller's
+ * transaction, which holds the Organization tree lock and then the
+ * recording's. The caller checked the owner, and calls `orgTreeChanged`
+ * after it commits.
+ */
+export async function withdrawRecordingInTx(
+    tx: Tx,
+    orgUserId: string,
+    recordingId: string,
+): Promise<void> {
+    const orgFolderIds = (
+        await tx
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId))
+    ).map((row) => row.id);
+    if (orgFolderIds.length > 0) {
+        await tx
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.recordingId, recordingId),
+                    inArray(recordingFolderAssignments.folderId, orgFolderIds),
+                ),
+            );
+    }
+    await endSharingIfUnfiled(tx, orgUserId, recordingId);
 }
 
 async function requireRecordingOwnerForSharing(

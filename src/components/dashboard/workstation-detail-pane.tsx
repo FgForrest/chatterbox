@@ -47,6 +47,8 @@ interface Props {
     onTranscriptStale?: () => void;
     /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
     transcriptReadOnly?: boolean;
+    /** Whether the recording is in the Organization: erasing it withdraws it. */
+    recordingShared?: boolean;
     onSelectRecording: (r: Recording) => void;
     onRenamed?: (filename: string) => void;
     onDelete: (recording: Recording) => Promise<void>;
@@ -98,6 +100,7 @@ export function WorkstationDetailPane({
     onTranscribeComplete,
     onTranscriptStale,
     transcriptReadOnly,
+    recordingShared = false,
     onSelectRecording,
     onRenamed,
     onDelete,
@@ -152,11 +155,13 @@ export function WorkstationDetailPane({
                         recording={currentRecording}
                         onRenamed={onRenamed}
                         action={
-                            // Erasing and deleting act on the owner's own
-                            // copy, never on what the Organization view shows.
+                            // Erasing and deleting are the owner's, on their
+                            // own view; a shared recording leaves the
+                            // Organization first.
                             currentRecording.view === "org" ? undefined : (
                                 <EraseRecordingMenu
                                     recording={currentRecording}
+                                    shared={recordingShared}
                                     onDeleteLocal={onDelete}
                                     onChanged={onArtifactsChanged}
                                 />

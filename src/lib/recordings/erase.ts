@@ -9,9 +9,21 @@ import {
 } from "@/db/schema";
 import { sniffAudio } from "@/lib/audio/sniff";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    lockOrgTree,
+    orgTreeChanged,
+    withdrawRecordingInTx,
+} from "@/lib/folders/folders";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { sidecarKey } from "@/lib/recordings/storage-files";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    contentWriterRefusalNow,
+    recordingShared,
+    sharingOrgUserId,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 
@@ -100,10 +112,20 @@ async function cancelArtifactJobs(
         );
 }
 
+/**
+ * Erase one kind of a recording's local data.
+ *
+ * A shared recording is the organization account's to change, so its
+ * owner's erase takes it out of the Organization first: refused (409)
+ * unless `withdraw` says the owner agreed to that, and then withdrawn and
+ * erased in one transaction, so the Organization never sees it half
+ * erased.
+ */
 export async function eraseLocalArtifact(
     userId: string,
     recordingId: string,
     scope: LocalEraseScope,
+    options: { withdraw?: boolean } = {},
 ): Promise<void> {
     const [recording] = await db
         .select({ storagePath: recordings.storagePath })
@@ -124,8 +146,14 @@ export async function eraseLocalArtifact(
         );
     }
 
+    // Before the transaction, which would otherwise hold a second pooled
+    // connection while it looks the account up.
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
     await db.transaction(async (tx) => {
         const now = new Date();
+        // Before the recording lock, as withdrawing takes them.
+        if (orgUserId && options.withdraw) await lockOrgTree(tx);
         const [locked] = await tx
             .select({ deletedAt: recordings.deletedAt })
             .from(recordings)
@@ -143,6 +171,14 @@ export async function eraseLocalArtifact(
                 "Recording not found",
                 404,
             );
+        }
+        if (
+            orgUserId &&
+            (await isRecordingShared(recordingId, orgUserId, tx))
+        ) {
+            if (!options.withdraw) throw recordingShared();
+            await withdrawRecordingInTx(tx, orgUserId, recordingId);
+            withdrew = true;
         }
 
         if (scope === "audio") {
@@ -236,6 +272,8 @@ export async function eraseLocalArtifact(
                 );
         }
     });
+
+    if (withdrew) await orgTreeChanged();
 
     try {
         const storage = await createUserStorageProvider(userId);
@@ -373,6 +411,13 @@ export async function restoreAudioFromPlaud(
         userId,
         recordingId,
     );
+    // Shared, the recording is the organization account's to change.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: userId,
+        actorUserId: userId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
     const client = await createPlaudClient(
         connection.bearerToken,
         connection.apiBase,
