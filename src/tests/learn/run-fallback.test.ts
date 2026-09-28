@@ -184,6 +184,7 @@ describe("runFallbackPass", () => {
                         object: { literal: "x" },
                         start: "00:00",
                         end: "00:10",
+                        sensitivity: "none",
                     },
                 ],
             });

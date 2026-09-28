@@ -61,6 +61,7 @@ const valid = {
             object: { entityId: "e-tavesi" },
             start: "13:00",
             end: "13:05",
+            sensitivity: "none",
         },
     ],
 };

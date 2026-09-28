@@ -192,6 +192,7 @@ async function frameFor(
     const answered = await db
         .select({
             label: transcriptSpeakers.label,
+            personId: transcriptSpeakers.personId,
             status: transcriptSpeakers.status,
             markedUnknown: transcriptSpeakers.markedUnknown,
         })
@@ -241,6 +242,7 @@ async function frameFor(
     return {
         revision: run.transcriptRevision,
         currentRevision: transcript.revision,
+        transcriptKey: `${run.transcriptionId}@${run.transcriptRevision}`,
         turns: transcript.turns,
         language: transcript.language,
         provider: transcript.provider,
@@ -252,12 +254,15 @@ async function frameFor(
                 .filter((relation) => !relation.adoptedAsKey)
                 .map((relation) => [relation.key, relation]),
         ),
-        answeredLabels: new Set(
+        answeredLabels: new Map(
             answered
                 .filter(
                     (row) => row.status === "confirmed" || row.markedUnknown,
                 )
-                .map((row) => row.label),
+                .map((row) => [
+                    row.label,
+                    row.markedUnknown ? null : row.personId,
+                ]),
         ),
         confirmedHeardAs,
         knownFacts,

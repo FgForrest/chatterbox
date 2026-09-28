@@ -531,7 +531,9 @@ function PhraseItem({
     const payload = item.payload as {
         phrase: string;
         subject: Side;
-        object: Side;
+        /** Absent where it related to text, which is not kept. */
+        object?: Side;
+        objectKind: "entity" | "literal";
         count: number;
     };
     const [label, setLabel] = useState(payload.phrase);
@@ -543,7 +545,7 @@ function PhraseItem({
         );
     };
     const subjectType = typeOf(payload.subject);
-    const objectType = typeOf(payload.object);
+    const objectType = payload.object ? typeOf(payload.object) : null;
     const chosen =
         item.decision === "accepted"
             ? (item.choice?.action as string | undefined)
@@ -554,7 +556,8 @@ function PhraseItem({
         <div className="space-y-1 text-sm">
             <div>
                 "{payload.phrase}" ({payload.count}×):{" "}
-                {describe(payload.subject)} → {describe(payload.object)}
+                {describe(payload.subject)} →{" "}
+                {payload.object ? describe(payload.object) : i18n("a text")}
             </div>
             <div className="flex flex-wrap items-center gap-2">
                 <Input

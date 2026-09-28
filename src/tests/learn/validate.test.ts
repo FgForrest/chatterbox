@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LearnOutput } from "@/lib/learn/output";
 import {
+    factKey,
+    heardAsKey,
     type LearnRunFrame,
     MAX_NEW_FACTS,
     validateLearnOutput,
@@ -76,7 +78,7 @@ function frame(overrides: Partial<LearnRunFrame> = {}): LearnRunFrame {
                 },
             ],
         ]),
-        answeredLabels: new Set(["speaker_0"]),
+        answeredLabels: new Map([["speaker_0", "p-alice"]]),
         confirmedHeardAs: new Set(),
         knownFacts: new Map(),
         dismissed: new Set(),
@@ -106,7 +108,7 @@ const janLeadsOrion = {
     relationKey: "leads",
     object: { entityId: "e-orion" },
     start: "00:18",
-    end: "00:40",
+    end: "00:18",
     speakerLabel: "speaker_1",
     sensitivity: "none" as const,
 };
@@ -233,7 +235,9 @@ describe("validateLearnOutput", () => {
         });
 
         it("pre-ticks a correction of a non-person a person confirmed before, heard alike by the same provider in the same language", () => {
-            const confirmed = new Set(["e-tavesi|tavesy|cs|openai"]);
+            const confirmed = new Set([
+                heardAsKey({ entityId: "e-tavesi" }, "Tavesy", "cs", "openai"),
+            ]);
             const ticked = validateLearnOutput(
                 output({ corrections: [correctTavesi()] }),
                 frame({ confirmedHeardAs: confirmed }),
@@ -257,7 +261,14 @@ describe("validateLearnOutput", () => {
                     ],
                 }),
                 frame({
-                    confirmedHeardAs: new Set(["p-jan|honzo|cs|openai"]),
+                    confirmedHeardAs: new Set([
+                        heardAsKey(
+                            { personId: "p-jan" },
+                            "Honzo",
+                            "cs",
+                            "openai",
+                        ),
+                    ]),
                 }),
             );
             expect(person.items[0]?.preTicked).toBe(false);
@@ -362,7 +373,9 @@ describe("validateLearnOutput", () => {
                     ],
                 }),
                 frame({
-                    knownFacts: new Map([["p:p-jan|leads|e:e-orion", "f-1"]]),
+                    knownFacts: new Map([
+                        [factKey("p:p-jan", "leads", "e:e-orion"), "f-1"],
+                    ]),
                 }),
             );
             expect(items).toEqual([
@@ -470,7 +483,8 @@ describe("validateLearnOutput", () => {
                 subject: { personId: "p-jan" },
                 object: { entityId: "e-tavesi" },
                 start: "00:18",
-                end: "00:40",
+                end: "00:18",
+                sensitivity: "none" as const,
             };
             const { items } = validateLearnOutput(
                 output({
@@ -539,5 +553,212 @@ describe("validateLearnOutput", () => {
             frame(),
         );
         expect(items).toEqual([]);
+    });
+
+    describe("found in review", () => {
+        const confirmed = new Set([
+            heardAsKey({ entityId: "e-tavesi" }, "Tavesy", "cs", "openai"),
+        ]);
+
+        it("pre-ticks a confirmed correction only when it writes the entity's name", () => {
+            const { items } = validateLearnOutput(
+                output({
+                    corrections: [
+                        {
+                            ...correctTavesi(),
+                            replacement: "Acme Holdings (call +420 111)",
+                        },
+                    ],
+                }),
+                frame({ confirmedHeardAs: confirmed }),
+            );
+            expect(items[0]?.preTicked).toBe(false);
+        });
+
+        it("spans the whole line a fact is said in, and drops a span that quotes nothing", () => {
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    facts: [
+                        janLeadsOrion,
+                        { ...janLeadsOrion, start: "00:40", end: "00:18" },
+                    ],
+                }),
+                frame(),
+            );
+            expect(items[0]?.payload).toMatchObject({
+                startMs: 18_000,
+                endMs: 40_000,
+            });
+            expect(items).toHaveLength(1);
+            expect(dropped.badTime).toBe(1);
+        });
+
+        it("names a speaker a person answered, drops facts that speaker's answer rules out, and pre-ticks a known fact only once its speaker is answered", () => {
+            const answered = frame({
+                answeredLabels: new Map<string, string | null>([
+                    ["speaker_0", "p-alice"],
+                    ["speaker_1", null],
+                ]),
+            });
+            const { dropped } = validateLearnOutput(
+                output({
+                    facts: [
+                        // About speaker_1, whom a person marked unknown.
+                        janLeadsOrion,
+                        // Depends on speaker_0 (Alice), but is about Jan.
+                        {
+                            ...janLeadsOrion,
+                            subject: { personId: "p-jan" },
+                            speakerLabel: "speaker_0",
+                        },
+                    ],
+                }),
+                answered,
+            );
+            expect(dropped.speakerDecided).toBe(2);
+
+            const knownFacts = new Map([
+                [factKey("p:p-alice", "leads", "e:e-orion"), "f-alice"],
+            ]);
+            const byLabel = validateLearnOutput(
+                output({
+                    facts: [
+                        {
+                            ...janLeadsOrion,
+                            subject: { speakerLabel: "speaker_0" },
+                            speakerLabel: "speaker_0",
+                            start: "00:00",
+                            end: "00:00",
+                        },
+                        {
+                            ...janLeadsOrion,
+                            subject: { speakerLabel: "speaker_0" },
+                            speakerLabel: "speaker_0",
+                            start: "00:00",
+                            end: "00:00",
+                        },
+                    ],
+                }),
+                frame({ knownFacts }),
+            );
+            // Resolved to Alice, matched as known, once, and ticked.
+            expect(byLabel.items).toEqual([
+                expect.objectContaining({
+                    kind: "known_fact",
+                    preTicked: true,
+                    payload: expect.objectContaining({
+                        subject: { personId: "p-alice" },
+                    }),
+                }),
+            ]);
+            const pending = validateLearnOutput(
+                output({
+                    facts: [
+                        {
+                            ...janLeadsOrion,
+                            subject: { personId: "p-alice" },
+                            speakerLabel: "speaker_1",
+                        },
+                    ],
+                }),
+                frame({
+                    knownFacts,
+                    answeredLabels: new Map([["speaker_0", "p-alice"]]),
+                }),
+            );
+            expect(pending.items[0]).toMatchObject({
+                kind: "known_fact",
+                preTicked: false,
+                dependsOnLabel: "speaker_1",
+            });
+        });
+
+        it("screens relation phrases and keeps no text they relate to", () => {
+            const phrase = {
+                phrase: "is being treated for",
+                subject: { personId: "p-jan" },
+                object: { literal: "severe depression" },
+                start: "00:18",
+                end: "00:18",
+                sensitivity: "health" as const,
+            };
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    relationPhrases: [
+                        phrase,
+                        { ...phrase, sensitivity: "none" as const },
+                        {
+                            ...phrase,
+                            phrase: "mentors",
+                            object: { literal: "the new hires" },
+                            sensitivity: "none" as const,
+                        },
+                    ],
+                    facts: [
+                        {
+                            ...janLeadsOrion,
+                            relationKey: "has_role",
+                            object: { literal: "diagnosis pending" },
+                        },
+                    ],
+                }),
+                frame(),
+            );
+            // The model's "none" is not the last word: the deny list is a floor.
+            expect(dropped.sensitive).toBe(3);
+            expect(items).toEqual([
+                expect.objectContaining({
+                    kind: "relation_phrase",
+                    payload: expect.not.objectContaining({
+                        object: expect.anything(),
+                    }),
+                }),
+            ]);
+            expect(items[0]?.payload).toMatchObject({
+                phrase: "mentors",
+                objectKind: "literal",
+            });
+        });
+
+        it("keeps a dismissed correction from claiming its words", () => {
+            const first = validateLearnOutput(
+                output({ corrections: [correctTavesi()] }),
+                frame(),
+            );
+            const other = {
+                ...correctTavesi(),
+                replacement: "Tavesi Ltd",
+            };
+            const { items } = validateLearnOutput(
+                output({ corrections: [correctTavesi(), other] }),
+                frame({
+                    dismissed: new Set([first.items[0]?.fingerprint ?? ""]),
+                }),
+            );
+            expect(items.map((item) => item.payload)).toEqual([
+                expect.objectContaining({ replacement: "Tavesi Ltd" }),
+            ]);
+        });
+
+        it("ties what depends on a label to its transcript", () => {
+            const speaker = {
+                label: "speaker_1",
+                personId: "p-jan",
+                evidence: ["00:18"],
+                reason: "",
+            };
+            const one = validateLearnOutput(
+                output({ speakers: [speaker] }),
+                frame({ transcriptKey: "t-1@3" }),
+            );
+            const other = validateLearnOutput(
+                output({ speakers: [speaker] }),
+                frame({
+                    transcriptKey: "t-2@0",
+                    dismissed: new Set([one.items[0]?.fingerprint ?? ""]),
+                }),
+            );
+            expect(other.items).toHaveLength(1);
+        });
     });
 });

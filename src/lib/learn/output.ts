@@ -84,6 +84,7 @@ const relationPhrase = z.strictObject({
     object,
     start: clock,
     end: clock,
+    sensitivity: z.enum(SENSITIVITY_CATEGORIES),
 });
 
 export const learnOutputSchema = z.strictObject({

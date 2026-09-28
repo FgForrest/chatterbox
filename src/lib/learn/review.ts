@@ -546,14 +546,21 @@ export async function finishReview(
                     choice.spec,
                 );
                 // The relation works at once: the words that named it are
-                // its first fact, where it takes them.
-                if (subject) {
-                    await confirm(sp, key, subject, payload.object, {
-                        ...payload,
-                        speakerLabel: null,
-                    }).catch((error: unknown) => {
-                        if (!(error instanceof AppError)) throw error;
-                    });
+                // its first fact, where it takes them (never text, which a
+                // review item does not keep). In a savepoint of its own, so
+                // the type stays when the fact does not fit it.
+                const object = payload.object;
+                if (subject && object) {
+                    await sp
+                        .transaction((inner) =>
+                            confirm(inner as Tx, key, subject, object, {
+                                ...payload,
+                                speakerLabel: null,
+                            }),
+                        )
+                        .catch((error: unknown) => {
+                            if (!(error instanceof AppError)) throw error;
+                        });
                 }
             });
         }

@@ -672,11 +672,12 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     facts: [],
                     relationPhrases: [
                         {
-                            phrase: "dodává pro",
-                            subject: { speakerLabel: "speaker_0" },
-                            object: { entityId: tavesi },
+                            phrase: "dodává",
+                            subject: { entityId: tavesi },
+                            object: { literal: "senzory" },
                             start: "00:00",
                             end: "00:05",
+                            sensitivity: "none",
                         },
                     ],
                 });

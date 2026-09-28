@@ -117,7 +117,7 @@ const ANSWER_SYSTEM = [
     "speakers: for an unnamed label only, a known person (personId) when the transcript clearly shows who speaks there (they introduce themselves, or are addressed by name and answer); evidence is 1-3 times copied from the transcript lines; personId null when nobody known fits.",
     "corrections: where the transcript misheard or misspelled a known name or term, kind `correct` with the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement spelling; where a nickname or slang means a known person or thing, kind `link` with replacement null.",
     'facts: work facts the transcript states about known people and things, using only the listed relation keys and shapes; start and end are times copied from the transcript lines where it is said; speakerLabel is the label whose speaker the fact is about or depends on, else null; a subject may be {"speakerLabel":label} when a speaker states something about themselves; sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
-    "relationPhrases: a relation between known people or things that none of the listed keys expresses, as a short phrase in the transcript's language.",
+    "relationPhrases: a relation between known people or things that none of the listed keys expresses, as a short phrase in the transcript's language, with the same sensitivity category as a fact.",
     'Answer with one raw JSON object and nothing else: {"speakers":[],"corrections":[],"facts":[],"relationPhrases":[]}.',
 ].join(" ");
 

@@ -8,27 +8,41 @@
  * on, and only where it holds against the transcript and the run's scopes:
  * - the transcript must still be the revision the run read, else nothing
  *   (the run is superseded);
- * - times snap to the transcript's marks; heard text must stand exactly
- *   at its anchor; ids must be in the run's scopes; relation keys must be
- *   visible, and fit (an unknown relation becomes a phrase to review);
- * - facts the model marks sensitive go, whatever the language;
+ * - times snap to the transcript's turns: a span runs from the start of
+ *   the turn its start names to the end of the turn its end names, and
+ *   must quote something;
+ * - heard text must stand exactly at its anchor; ids must be in the run's
+ *   scopes; relation keys must be visible, and fit as a person's
+ *   confirmation checks them (an unknown relation becomes a phrase to
+ *   review);
+ * - anything the model marks sensitive goes, whatever the language, and
+ *   so does anything whose words name a denied topic (`deniedTopicOf`, a
+ *   floor under the model's judgement);
  * - one speaker suggestion per label, and none for a label a person
- *   answered; at most `MAX_NEW_FACTS` new facts;
+ *   answered; a fact whose speaker a person already answered otherwise
+ *   goes; at most `MAX_NEW_FACTS` new facts, and bounded corrections and
+ *   phrases;
  * - what a person dismissed before goes, except on a manual run.
  *
  * Two defaults (the design's fixed rule, never the model's confidence):
- * pre-ticked are a `correct` of a non-person a person confirmed before,
- * heard alike by the same provider in the same language, and a known fact
- * mentioned again; everything else is unticked. A fact about a speaker
- * depends on that speaker's answer, so a speaker is never named by a fact
- * of the same run (no circular evidence).
+ * pre-ticked are a `correct` of a non-person a person confirmed before
+ * (heard alike, same provider and language) that writes exactly that
+ * entity's name, and a known fact mentioned again whose speaker, if it
+ * depends on one, is answered; everything else is unticked. A fact about
+ * an unanswered speaker depends on that speaker's answer, so a speaker is
+ * never named by a fact of the same run (no circular evidence).
  */
 
 import {
     anchorMatches,
     anchorsOverlap,
 } from "@/lib/knowledge/correction-anchors";
-import { nodeKey, relationFits } from "@/lib/knowledge/fact-rules";
+import {
+    nodeKey,
+    quoteFromTurns,
+    relationFits,
+} from "@/lib/knowledge/fact-rules";
+import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
 import type {
     LearnCorrection,
     LearnFact,
@@ -40,12 +54,16 @@ import { parseClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 export const MAX_NEW_FACTS = 10;
+export const MAX_CORRECTION_ITEMS = 50;
+export const MAX_PHRASE_ITEMS = 20;
 
 export interface VisibleRelation {
     subjectTypes: readonly string[];
     /** The types an entity object may have; a literal relation has none. */
     objectTypes: readonly string[];
     objectKind: "entity" | "literal";
+    /** Its name, screened against the denied topics. */
+    label?: string;
 }
 
 /** What a run may know, frozen when its answer is validated. */
@@ -54,6 +72,11 @@ export interface LearnRunFrame {
     revision: number;
     /** The transcript's revision now. */
     currentRevision: number;
+    /**
+     * The transcript's identity, in the fingerprints of what depends on its
+     * labels (a label names one voice in one diarization only).
+     */
+    transcriptKey?: string;
     turns: readonly TranscriptTurn[];
     language: string | null;
     provider: string | null;
@@ -63,8 +86,8 @@ export interface LearnRunFrame {
     entities: ReadonlyMap<string, { typeKey: string; name: string }>;
     /** The relations visible to the run's scope, active. */
     relations: ReadonlyMap<string, VisibleRelation>;
-    /** Labels a person already answered (named, or marked unknown). */
-    answeredLabels: ReadonlySet<string>;
+    /** Labels a person already answered: the person named, or null for unknown. */
+    answeredLabels: ReadonlyMap<string, string | null>;
     /** `heardAsKey` of every heard-as form a person confirmed. */
     confirmedHeardAs: ReadonlySet<string>;
     /** Current facts in the run's scopes: `factKey` -> fact id. */
@@ -86,6 +109,7 @@ export type DropReason =
     | "overlapping"
     | "sensitive"
     | "doesNotFit"
+    | "speakerDecided"
     | "badTime"
     | "dismissed"
     | "budget";
@@ -145,7 +169,9 @@ export type ReviewCandidate =
           payload: {
               phrase: string;
               subject: LearnSubject;
-              object: LearnObject;
+              /** The thing it relates to; absent where that was text. */
+              object?: Target;
+              objectKind: "entity" | "literal";
               startMs: number;
               endMs: number;
               count: number;
@@ -165,12 +191,12 @@ export function heardAsKey(
     language: string | null,
     provider: string | null,
 ): string {
-    return [
+    return JSON.stringify([
         "personId" in target ? target.personId : target.entityId,
-        heard.trim().normalize("NFC").toLowerCase(),
+        normalizeText(heard),
         language ?? "",
         provider ?? "",
-    ].join("|");
+    ]);
 }
 
 /** A fact's identity in a scope: subject, relation, object. */
@@ -179,7 +205,7 @@ export function factKey(
     relationKey: string,
     object: string,
 ): string {
-    return `${subject}|${relationKey}|${object}`;
+    return JSON.stringify([subject, relationKey, object]);
 }
 
 function normalizePhrase(text: string): string {
@@ -190,27 +216,27 @@ function normalizeText(text: string): string {
     return text.trim().normalize("NFC").toLowerCase();
 }
 
-function targetKey(target: Target): string {
-    return nodeKey(target);
-}
-
-/** Transcript times a clock may snap to: every turn's start, and the end. */
+/**
+ * The transcript's turns as the times a clock may name: a start snaps to
+ * the start of the turn whose start is nearest, an end to the end of the
+ * turn whose start is nearest (so a fact said within one line spans it).
+ */
 function timeline(turns: readonly TranscriptTurn[]) {
-    const starts = turns.map((turn) => turn.startMs);
     const endMs = Math.max(0, ...turns.map((turn) => turn.endMs));
-    const points = [...new Set([...starts, endMs])].sort((a, b) => a - b);
-    return {
-        endMs,
-        /** The nearest point to a clock, or null past the end or unparsable. */
-        snap(clock: string): number | null {
-            const ms = parseClock(clock);
-            if (ms === null || ms > endMs || points.length === 0) return null;
-            let best = points[0] as number;
-            for (const point of points) {
-                if (Math.abs(point - ms) < Math.abs(best - ms)) best = point;
+    const nearestTurn = (clock: string): TranscriptTurn | null => {
+        const ms = parseClock(clock);
+        if (ms === null || ms > endMs || turns.length === 0) return null;
+        let best = turns[0] as TranscriptTurn;
+        for (const turn of turns) {
+            if (Math.abs(turn.startMs - ms) < Math.abs(best.startMs - ms)) {
+                best = turn;
             }
-            return best;
-        },
+        }
+        return best;
+    };
+    return {
+        start: (clock: string) => nearestTurn(clock)?.startMs ?? null,
+        end: (clock: string) => nearestTurn(clock)?.endMs ?? null,
     };
 }
 
@@ -228,6 +254,7 @@ export function validateLearnOutput(
     const items: ReviewCandidate[] = [];
     const time = timeline(frame.turns);
     const labels = new Set(frame.turns.map((turn) => turn.speaker));
+    const transcriptKey = frame.transcriptKey ?? "";
     const literalKey =
         frame.literalKey ??
         ((literal: string) => `l:${normalizeText(literal)}`);
@@ -244,6 +271,8 @@ export function validateLearnOutput(
         "personId" in node
             ? frame.people.has(node.personId)
             : frame.entities.has(node.entityId);
+    const denied = (...texts: (string | undefined)[]) =>
+        texts.some((text) => text !== undefined && deniedTopicOf(text));
 
     // Speakers: one per label a person has not answered.
     const suggested = new Set<string>();
@@ -265,13 +294,18 @@ export function validateLearnOutput(
             continue;
         }
         const evidenceMs = speaker.evidence
-            .map((clock) => time.snap(clock))
+            .map((clock) => time.start(clock))
             .filter((ms): ms is number => ms !== null);
         if (evidenceMs.length === 0) {
             drop("badTime");
             continue;
         }
-        const fingerprint = `speaker|${speaker.label}|${speaker.personId ?? "-"}`;
+        const fingerprint = JSON.stringify([
+            "speaker",
+            transcriptKey,
+            speaker.label,
+            speaker.personId,
+        ]);
         if (dismissed(fingerprint)) continue;
         suggested.add(speaker.label);
         items.push({
@@ -294,29 +328,42 @@ export function validateLearnOutput(
         Extract<ReviewCandidate, { kind: "correction" }>
     >();
     for (const correction of output.corrections) {
-        const kept = validCorrection(correction);
-        if (!kept) continue;
         const replacement =
             correction.kind === "link" ? null : (correction.replacement ?? "");
-        const group = [
+        const group = JSON.stringify([
             "correction",
             correction.kind,
-            targetKey(correction.target),
+            nodeKey(correction.target),
             normalizeText(correction.heard),
-            replacement === null ? "-" : normalizeText(replacement),
-        ].join("|");
+            replacement === null ? null : normalizeText(replacement),
+        ]);
         const held = groups.get(group);
+        // Dismissed words stay free for another correction.
+        if (!held && dismissed(group)) continue;
+        const kept = validCorrection(correction);
+        if (!kept) continue;
         if (held) {
             held.payload.anchors.push(kept);
             continue;
         }
-        if (dismissed(group)) continue;
+        if (groups.size >= MAX_CORRECTION_ITEMS) {
+            drop("budget");
+            continue;
+        }
+        const entity =
+            "entityId" in correction.target
+                ? frame.entities.get(correction.target.entityId)
+                : undefined;
         const item: Extract<ReviewCandidate, { kind: "correction" }> = {
             kind: "correction",
             fingerprint: group,
+            // Confirmed before, and writing exactly the entity's name:
+            // nothing else a model says may be applied by default.
             preTicked:
                 correction.kind === "correct" &&
-                "entityId" in correction.target &&
+                entity !== undefined &&
+                replacement !== null &&
+                normalizeText(replacement) === normalizeText(entity.name) &&
                 frame.confirmedHeardAs.has(
                     heardAsKey(
                         correction.target,
@@ -362,6 +409,13 @@ export function validateLearnOutput(
             drop("unchanged");
             return null;
         }
+        if (
+            correction.kind === "correct" &&
+            denied(correction.replacement ?? "")
+        ) {
+            drop("sensitive");
+            return null;
+        }
         const position = {
             turnIndex: anchor.turnIndex,
             charStart: anchor.charStart,
@@ -375,51 +429,26 @@ export function validateLearnOutput(
         return position;
     }
 
-    // Facts, and relation phrases (proposed, or facts of an unknown relation).
-    const phrases = new Map<
-        string,
-        Extract<ReviewCandidate, { kind: "relation_phrase" }>
-    >();
-    const addPhrase = (
-        text: string,
-        subject: LearnSubject,
-        object: LearnObject,
-        startMs: number,
-        endMs: number,
-    ) => {
-        const phrase = normalizePhrase(text);
-        if (!phrase) return;
-        const held = phrases.get(phrase);
-        if (held) {
-            held.payload.count++;
-            return;
+    // What a speaker label stands for, where a person answered it.
+    const resolveSubject = (subject: LearnSubject): LearnSubject | null => {
+        if (!("speakerLabel" in subject)) return subject;
+        if (!labels.has(subject.speakerLabel)) {
+            drop("unknownLabel");
+            return null;
         }
-        const fingerprint = `phrase|${phrase}`;
-        if (dismissed(fingerprint)) return;
-        const dependsOnLabel =
-            "speakerLabel" in subject ? subject.speakerLabel : undefined;
-        const item: Extract<ReviewCandidate, { kind: "relation_phrase" }> = {
-            kind: "relation_phrase",
-            fingerprint,
-            preTicked: false,
-            ...(dependsOnLabel ? { dependsOnLabel } : {}),
-            payload: { phrase, subject, object, startMs, endMs, count: 1 },
-        };
-        phrases.set(phrase, item);
-        items.push(item);
+        if (!frame.answeredLabels.has(subject.speakerLabel)) return subject;
+        const personId = frame.answeredLabels.get(subject.speakerLabel);
+        if (!personId) {
+            // Answered as unknown: nobody the fact could be about.
+            drop("speakerDecided");
+            return null;
+        }
+        return { personId };
     };
-
-    /** The subject's type and key, or null when it may not be named. */
     const subjectOf = (
         subject: LearnSubject,
     ): { type: string; key: string | null } | null => {
-        if ("speakerLabel" in subject) {
-            if (!labels.has(subject.speakerLabel)) {
-                drop("unknownLabel");
-                return null;
-            }
-            return { type: "person", key: null };
-        }
+        if ("speakerLabel" in subject) return { type: "person", key: null };
         if (!inScope(subject)) {
             drop("outOfScope");
             return null;
@@ -451,76 +480,176 @@ export function validateLearnOutput(
         };
     };
     const span = (start: string, end: string) => {
-        const startMs = time.snap(start);
-        const endMs = time.snap(end);
-        if (startMs === null || endMs === null) {
+        const startMs = time.start(start);
+        const endMs = time.end(end);
+        if (
+            startMs === null ||
+            endMs === null ||
+            endMs <= startMs ||
+            !quoteFromTurns(frame.turns, startMs, endMs)
+        ) {
             drop("badTime");
             return null;
         }
-        return { startMs, endMs: Math.max(startMs, endMs) };
+        return { startMs, endMs };
+    };
+    const literalOf = (object: LearnObject) =>
+        "literal" in object ? object.literal : undefined;
+
+    // Relation phrases, proposed or from facts of an unknown relation: only
+    // the phrase and what it relates, never text it relates to.
+    const phrases = new Map<
+        string,
+        Extract<ReviewCandidate, { kind: "relation_phrase" }>
+    >();
+    const addPhrase = (
+        text: string,
+        subject: LearnSubject,
+        object: LearnObject,
+        startMs: number,
+        endMs: number,
+    ) => {
+        const phrase = normalizePhrase(text);
+        if (!phrase) return;
+        if (denied(phrase, literalOf(object))) {
+            drop("sensitive");
+            return;
+        }
+        const held = phrases.get(phrase);
+        if (held) {
+            held.payload.count++;
+            return;
+        }
+        const fingerprint = JSON.stringify(["phrase", phrase]);
+        if (dismissed(fingerprint)) return;
+        if (phrases.size >= MAX_PHRASE_ITEMS) {
+            drop("budget");
+            return;
+        }
+        const dependsOnLabel =
+            "speakerLabel" in subject ? subject.speakerLabel : undefined;
+        const item: Extract<ReviewCandidate, { kind: "relation_phrase" }> = {
+            kind: "relation_phrase",
+            fingerprint,
+            preTicked: false,
+            ...(dependsOnLabel ? { dependsOnLabel } : {}),
+            payload: {
+                phrase,
+                subject,
+                ...("literal" in object ? {} : { object }),
+                objectKind: "literal" in object ? "literal" : "entity",
+                startMs,
+                endMs,
+                count: 1,
+            },
+        };
+        phrases.set(phrase, item);
+        items.push(item);
     };
 
+    const known = new Set<string>();
     let newFacts = 0;
     for (const fact of output.facts) {
         if (fact.sensitivity !== "none") {
             drop("sensitive");
             continue;
         }
-        const subject = subjectOf(fact.subject);
+        const relation = frame.relations.get(fact.relationKey);
+        if (denied(literalOf(fact.object), relation?.label)) {
+            drop("sensitive");
+            continue;
+        }
+        const subject = resolveSubject(fact.subject);
         if (!subject) continue;
+        const subjectSide = subjectOf(subject);
+        if (!subjectSide) continue;
         const object = objectOf(fact.object);
         if (!object) continue;
-        if (fact.speakerLabel !== null && !labels.has(fact.speakerLabel)) {
-            drop("unknownLabel");
-            continue;
+        if (fact.speakerLabel !== null) {
+            if (!labels.has(fact.speakerLabel)) {
+                drop("unknownLabel");
+                continue;
+            }
+            // Answered already: the fact holds only if it is about them.
+            if (frame.answeredLabels.has(fact.speakerLabel)) {
+                const personId = frame.answeredLabels.get(fact.speakerLabel);
+                const about = [subject, fact.object].some(
+                    (side) =>
+                        personId &&
+                        "personId" in side &&
+                        side.personId === personId,
+                );
+                if (!about) {
+                    drop("speakerDecided");
+                    continue;
+                }
+            }
         }
         const times = span(fact.start, fact.end);
         if (!times) continue;
-        const relation = frame.relations.get(fact.relationKey);
         if (!relation) {
             addPhrase(
                 fact.relationKey,
-                fact.subject,
+                subject,
                 fact.object,
                 times.startMs,
                 times.endMs,
             );
             continue;
         }
-        if (!fits(relation, subject.type, object.type)) {
+        if (
+            !relationFits(
+                relation,
+                subjectSide.type,
+                object.type === null
+                    ? { literal: true }
+                    : { type: object.type },
+            )
+        ) {
             drop("doesNotFit");
             continue;
         }
-        const dependsOnLabel =
-            "speakerLabel" in fact.subject
-                ? fact.subject.speakerLabel
-                : (fact.speakerLabel ?? undefined);
+        // Waits for a speaker's answer only while nobody gave it.
+        const pendingLabel =
+            "speakerLabel" in subject
+                ? subject.speakerLabel
+                : fact.speakerLabel !== null &&
+                    !frame.answeredLabels.has(fact.speakerLabel)
+                  ? fact.speakerLabel
+                  : undefined;
         const payload = {
-            subject: fact.subject,
+            subject,
             relationKey: fact.relationKey,
             object: fact.object,
             ...times,
             speakerLabel: fact.speakerLabel,
         };
-        const known =
-            subject.key !== null
+        const knownId =
+            subjectSide.key !== null
                 ? frame.knownFacts.get(
-                      factKey(subject.key, fact.relationKey, object.key),
+                      factKey(subjectSide.key, fact.relationKey, object.key),
                   )
                 : undefined;
-        if (known) {
-            const fingerprint = `known|${known}`;
+        if (knownId) {
+            if (known.has(knownId)) continue;
+            known.add(knownId);
+            const fingerprint = JSON.stringify(["known", knownId]);
             if (dismissed(fingerprint)) continue;
             items.push({
                 kind: "known_fact",
                 fingerprint,
-                preTicked: true,
-                ...(dependsOnLabel ? { dependsOnLabel } : {}),
-                payload: { ...payload, factId: known },
+                preTicked: pendingLabel === undefined,
+                ...(pendingLabel ? { dependsOnLabel: pendingLabel } : {}),
+                payload: { ...payload, factId: knownId },
             });
             continue;
         }
-        const fingerprint = factFingerprint(fact, subject.key, object.key);
+        const fingerprint = factFingerprint(
+            fact,
+            subjectSide.key,
+            object.key,
+            transcriptKey,
+        );
         if (dismissed(fingerprint)) continue;
         if (newFacts >= MAX_NEW_FACTS) {
             drop("budget");
@@ -531,19 +660,25 @@ export function validateLearnOutput(
             kind: "fact",
             fingerprint,
             preTicked: false,
-            ...(dependsOnLabel ? { dependsOnLabel } : {}),
+            ...(pendingLabel ? { dependsOnLabel: pendingLabel } : {}),
             payload,
         });
     }
 
     for (const proposed of output.relationPhrases) {
-        if (!subjectOf(proposed.subject)) continue;
+        if (proposed.sensitivity !== "none") {
+            drop("sensitive");
+            continue;
+        }
+        const subject = resolveSubject(proposed.subject);
+        if (!subject) continue;
+        if (!subjectOf(subject)) continue;
         if (!objectOf(proposed.object)) continue;
         const times = span(proposed.start, proposed.end);
         if (!times) continue;
         addPhrase(
             proposed.phrase,
-            proposed.subject,
+            subject,
             proposed.object,
             times.startMs,
             times.endMs,
@@ -553,28 +688,17 @@ export function validateLearnOutput(
     return { superseded: false, items, dropped };
 }
 
-/** The same rule a person's confirmation applies (`relationFits`). */
-function fits(
-    relation: VisibleRelation,
-    subjectType: string,
-    objectType: string | null,
-): boolean {
-    return relationFits(
-        relation,
-        subjectType,
-        objectType === null ? { literal: true } : { type: objectType },
-    );
-}
-
 function factFingerprint(
     fact: LearnFact,
     subjectKey: string | null,
     objectKey: string,
+    transcriptKey: string,
 ): string {
+    // About a voice: that voice is one label of one transcript.
     const subject =
         subjectKey ??
         ("speakerLabel" in fact.subject
-            ? `s:${fact.subject.speakerLabel}`
+            ? `s:${transcriptKey}:${fact.subject.speakerLabel}`
             : "");
-    return `fact|${subject}|${fact.relationKey}|${objectKey}`;
+    return JSON.stringify(["fact", subject, fact.relationKey, objectKey]);
 }
