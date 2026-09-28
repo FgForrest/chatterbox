@@ -16,6 +16,16 @@ const optionalStrictBoolean = z
         return z.NEVER;
     });
 
+/** An absolute http(s) URL; `host:port` alone parses as a URL with a scheme. */
+function isHttpUrl(value: string): boolean {
+    try {
+        const { protocol } = new URL(value);
+        return protocol === "http:" || protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
 const baseEnvSchema = z.object({
     /** True for the Riffado-operated hosted instance; default false (self-host). */
     IS_HOSTED: z
@@ -127,6 +137,38 @@ const baseEnvSchema = z.object({
         .refine((val) => val === undefined || /^\d+$/.test(val), {
             message: "GOOGLE_CLOUD_PROJECT_NUMBER must be numeric",
         }),
+    /**
+     * Learn (self-host only). The embedding service, an OpenAI-compatible
+     * `embeddings` endpoint such as the compose `embeddings` service;
+     * unset, Learn matches names by their words only.
+     */
+    EMBEDDING_BASE_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "EMBEDDING_BASE_URL must be an http(s) URL",
+        }),
+    EMBEDDING_MODEL: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || "bge-m3"),
+    EMBEDDING_API_KEY: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /**
+     * The one URL of this app's read-only knowledge tools (MCP) the Learn
+     * bridge may call back; nothing else is reachable from it.
+     */
+    LEARN_MCP_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "LEARN_MCP_URL must be an http(s) URL",
+        }),
+
     /**
      * Comma-separated Google Workspace domains whose accounts may connect.
      * Unset, any account the consent screen admits may.
@@ -874,6 +916,10 @@ function validateEnv(): Env {
             S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
             FILESYSTEM_EXPORT_ROOT: process.env.FILESYSTEM_EXPORT_ROOT,
             GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+            EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
+            EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
+            EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
+            LEARN_MCP_URL: process.env.LEARN_MCP_URL,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,
             GOOGLE_CLOUD_PROJECT_NUMBER:

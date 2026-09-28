@@ -68,7 +68,13 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_PICKER_API_KEY: ${GOOGLE_PICKER_API_KEY:-}
       GOOGLE_CLOUD_PROJECT_NUMBER: ${GOOGLE_CLOUD_PROJECT_NUMBER:-}
-      GOOGLE_WORKSPACE_DOMAINS: ${GOOGLE_WORKSPACE_DOMAINS:-}
+            GOOGLE_WORKSPACE_DOMAINS: ${GOOGLE_WORKSPACE_DOMAINS:-}
+      # Learn (optional; see docs/self-hosting/environment-variables)
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      LEARN_MCP_URL: ${LEARN_MCP_URL:-}
+
 
       # SMTP (optional: password reset + email notifications)
       SMTP_HOST: ${SMTP_HOST:-}
