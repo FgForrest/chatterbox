@@ -1,23 +1,20 @@
 /**
  * Speaker names an older release copied from Plaud's transcript onto the
  * user's own were stored as confirmed. Decision D1 (a) turns them back
- * into suggestions once, recognized by the missing confirmer and the same
- * person named on the Plaud transcript.
+ * into suggestions once, in migration 0062, recognized by the missing
+ * confirmer and the same person named on the Plaud transcript.
+ *
+ * This runs that migration's SQL against rows as the older release left
+ * them.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
  */
 
-import { eq } from "drizzle-orm";
-import {
-    afterAll,
-    beforeAll,
-    beforeEach,
-    describe,
-    expect,
-    it,
-    vi,
-} from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { eq, sql } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
     people,
     recordings,
@@ -31,64 +28,13 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
-    const ref: { current: Record<PropertyKey, unknown> | null } = {
-        current: null,
-    };
-    const proxy = new Proxy(
-        {},
-        {
-            get: (_target, property: string | symbol) => {
-                const current = ref.current;
-                if (!current) {
-                    throw new Error("test database was not initialized");
-                }
-                const value = current[property];
-                return typeof value === "function"
-                    ? value.bind(current)
-                    : value;
-            },
-        },
-    );
-    return {
-        dbProxy: proxy,
-        dbRef: ref,
-        mockEnv: {
-            IS_HOSTED: false,
-            SELF_HOST_MODE: "shared",
-            ORG_ACCOUNT_EMAIL: "org@example.test",
-            ORG_ACCOUNT_PASSWORD: "organization-password",
-            ENCRYPTION_KEY:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
-            DATABASE_URL: "postgres://unused",
-        },
-    };
-});
-
-vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
-vi.mock("@/lib/env", () => ({ env: mockEnv }));
-vi.mock("@/lib/posthog-server", () => ({
-    captureServerEvent: vi.fn().mockResolvedValue(undefined),
-    captureServerException: vi.fn(),
-}));
-vi.mock("@/lib/folder-exports/jobs", () => ({
-    enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@/lib/export/document-sidecars", () => ({
-    exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
-    refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
-    removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@/lib/webhooks/emit", () => ({
-    emitEvent: vi.fn().mockResolvedValue(undefined),
-}));
-
-import { encryptText } from "@/lib/encryption/fields";
-import { demoteCopiedAttributions } from "@/lib/knowledge/legacy-attribution-demotion";
-
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
+
+const MIGRATION = join(
+    process.cwd(),
+    "src/db/migrations/0062_demote_copied_speaker_names.sql",
+);
 
 const ALICE = "user-alice";
 const REC = "rec-meeting";
@@ -105,16 +51,19 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
         return database.db;
     }
 
+    /** Apply the migration, as the release's startup does once. */
+    async function demote() {
+        await db().execute(sql.raw(readFileSync(MIGRATION, "utf-8")));
+    }
+
     beforeAll(async () => {
         database = await createMigratedTestDatabase(
             testDatabaseUrl ?? "",
             "attribution_demotion",
         );
-        dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
     }, 120_000);
 
     afterAll(async () => {
-        dbRef.current = null;
         await database?.dispose();
     }, 30_000);
 
@@ -128,7 +77,7 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
                 userId: ALICE,
                 deviceSn: "SN-1",
                 plaudFileId: "plaud-1",
-                filename: encryptText("Weekly"),
+                filename: "Weekly",
                 duration: 60_000,
                 startTime: new Date("2026-09-01T10:00:00Z"),
                 endTime: new Date("2026-09-01T10:01:00Z"),
@@ -141,8 +90,8 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
         const inserted = await db()
             .insert(people)
             .values([
-                { userId: ALICE, displayName: encryptText("Jana") },
-                { userId: ALICE, displayName: encryptText("Petr") },
+                { userId: ALICE, displayName: "Jana" },
+                { userId: ALICE, displayName: "Petr" },
             ])
             .returning({ id: people.id });
         jana = inserted[0]?.id ?? "";
@@ -153,7 +102,7 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
                 (["plaud", "riffado"] as const).map((source) => ({
                     recordingId: REC,
                     userId: ALICE,
-                    text: encryptText("speaker_0: Hi\nspeaker_1: Hello"),
+                    text: "speaker_0: Hi\nspeaker_1: Hello",
                     provider: source,
                     model: "plaud",
                     source,
@@ -197,7 +146,7 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
         await row(plaud, "Speaker 1", jana);
         await row(own, "speaker_0", jana);
 
-        expect(await demoteCopiedAttributions()).toBe(1);
+        await demote();
         expect(await statusOf(own)).toEqual([
             { label: "speaker_0", status: "suggested", source: "heuristic" },
         ]);
@@ -211,26 +160,17 @@ describeWithDatabase("demoting copied speaker names (PostgreSQL)", () => {
         await row(plaud, "Speaker 1", jana);
         await row(own, "speaker_1", petr);
 
-        expect(await demoteCopiedAttributions()).toBe(0);
+        await demote();
         expect(await statusOf(own)).toEqual([
             { label: "speaker_1", status: "confirmed", source: "user" },
         ]);
     });
 
-    it("leaves a name a person accepted again on later runs", async () => {
+    it("keeps a name a person confirmed since the confirmer existed", async () => {
         await row(plaud, "Speaker 1", jana);
-        await row(own, "speaker_0", jana);
-        await demoteCopiedAttributions();
-        await db()
-            .update(transcriptSpeakers)
-            .set({
-                status: "confirmed",
-                source: "user",
-                confirmedByUserId: ALICE,
-            })
-            .where(eq(transcriptSpeakers.transcriptionId, own));
+        await row(own, "speaker_0", jana, ALICE);
 
-        expect(await demoteCopiedAttributions()).toBe(0);
+        await demote();
         expect(await statusOf(own)).toEqual([
             { label: "speaker_0", status: "confirmed", source: "user" },
         ]);

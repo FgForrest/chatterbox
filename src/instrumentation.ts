@@ -38,10 +38,6 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
-type LegacyAttributionDemotionModule = {
-    startLegacyAttributionDemotion: () => Promise<void>;
-};
-
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -134,12 +130,6 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
-
-    // Before the first request too: until it runs, names an older release
-    // copied between transcripts would pass for a person's answer.
-    const { startLegacyAttributionDemotion } =
-        require("./lib/knowledge/legacy-attribution-demotion") as LegacyAttributionDemotionModule;
-    await startLegacyAttributionDemotion();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever
