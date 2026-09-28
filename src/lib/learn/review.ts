@@ -41,6 +41,7 @@ import {
     createOwnTypeInTx,
     type NewTypeSpec,
     proposePhraseInTx,
+    vocabularyVisibleTo,
 } from "@/lib/knowledge/vocabulary";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
@@ -78,6 +79,10 @@ export interface ReviewView {
     items: ReviewItemView[];
     /** Names of the people and entities the items refer to, by id. */
     names: Record<string, string>;
+    /** Their types (`person` for people), for "create as my relation". */
+    types: Record<string, string>;
+    /** Labels of the relations the items use, by key. */
+    relations: Record<string, string>;
 }
 
 function reviewNotFound(): AppError {
@@ -123,14 +128,18 @@ export async function loadReview(
     access: RecordingViewContext,
 ): Promise<ReviewView> {
     const run = await latestRun(access);
-    if (!run) return { run: null, items: [], names: {} };
+    if (!run) {
+        return { run: null, items: [], names: {}, types: {}, relations: {} };
+    }
     const summary = {
         id: run.id,
         status: run.status,
         transcriptionId: run.transcriptionId,
         createdAt: run.createdAt.toISOString(),
     };
-    if (run.status !== "ready") return { run: summary, items: [], names: {} };
+    if (run.status !== "ready") {
+        return { run: summary, items: [], names: {}, types: {}, relations: {} };
+    }
     const rows = await db
         .select()
         .from(learnReviewItems)
@@ -156,10 +165,20 @@ export async function loadReview(
         shared: run.view === "org",
     });
     const names: Record<string, string> = {};
+    const types: Record<string, string> = {};
     for (const item of view.items) {
-        if (referenced.has(item.id)) names[item.id] = item.name;
+        if (!referenced.has(item.id)) continue;
+        names[item.id] = item.name;
+        types[item.id] = item.kind === "person" ? "person" : item.typeKey;
     }
-    return { run: summary, items, names };
+    const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
+        sharedOnly: run.view === "org",
+    });
+    const relations: Record<string, string> = {};
+    for (const relation of vocabulary.relationTypes) {
+        relations[relation.key] = relation.label;
+    }
+    return { run: summary, items, names, types, relations };
 }
 
 function validChoice(kind: ItemKind, choice: unknown): ReviewChoice | null {

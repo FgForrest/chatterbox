@@ -16,6 +16,7 @@ import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { LearnReview } from "@/components/learn/learn-review";
 import { Markdown } from "@/components/markdown";
 import {
     confirmedAttributions,
@@ -263,6 +264,10 @@ export function TranscriptionPanel({
         (activeTranscript?.source === "plaud" ||
             activeTranscript?.source === "riffado") &&
         (activeTranscript.turns?.length ?? 0) > 0;
+    // Learn reads timed turns, on a transcript the viewer may change: the
+    // owner's on the private view, the organization account's on the
+    // Organization view (the server decides whether Learn is available).
+    const canLearn = canDetectTopics;
     const {
         topics,
         detecting: detectingTopics,
@@ -632,6 +637,23 @@ export function TranscriptionPanel({
                                     onSelect={handleSelectTopic}
                                     getPlaybackMs={getPlaybackMs}
                                 />
+                                {canLearn && activeTranscript && (
+                                    <LearnReview
+                                        // Another recording, view or source
+                                        // is another review.
+                                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}`}
+                                        recordingId={recording.id}
+                                        view={view}
+                                        source={
+                                            activeTranscript.source === "plaud"
+                                                ? "plaud"
+                                                : "riffado"
+                                        }
+                                        turns={activeTranscript.turns ?? []}
+                                        onSeek={onSeekToTurn}
+                                        onFinished={onTranscriptStale}
+                                    />
+                                )}
                             </div>
                             {transcriptExpanded && (
                                 <div className="space-y-4">
