@@ -38,7 +38,7 @@ class HttpStatusError extends Error {
 }
 
 export interface EmbeddingClientOptions {
-    /** The API base, e.g. `http://embeddings:8080/v1`. */
+    /** The API base, e.g. `http://embeddings:11434/v1` (the compose service). */
     baseUrl: string;
     model: string;
     apiKey?: string;

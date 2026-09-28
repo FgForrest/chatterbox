@@ -167,12 +167,15 @@ services:
       OLLAMA_KEEP_ALIVE: ${EMBEDDING_KEEP_ALIVE:-24h}
     # Serve, and pull the model once the server answers; a failed pull
     # (offline) leaves the service unhealthy and Learn matching words only.
+    # An init process forwards `docker stop` to Ollama; if the server dies
+    # before it answers, the container exits and is restarted.
+    init: true
     entrypoint:
       - /bin/sh
       - -c
       - >-
         ollama serve & server=$$!;
-        until ollama list >/dev/null 2>&1; do sleep 1; done;
+        until ollama list >/dev/null 2>&1; do kill -0 $$server 2>/dev/null || exit 1; sleep 1; done;
         ollama pull "$$EMBEDDING_MODEL" || echo "could not pull the embedding model";
         wait $$server
     volumes:
