@@ -421,6 +421,20 @@
       "when": 1790591870054,
       "tag": "0059_transcript_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790593442575,
+      "tag": "0060_protect_existing_titles",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790593443733,
+      "tag": "0061_title_edited_at_no_default",
+      "breakpoints": true
     }
   ]
 }

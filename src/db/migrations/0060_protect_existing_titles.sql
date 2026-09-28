@@ -1,0 +1,1 @@
+ALTER TABLE "recordings" ADD COLUMN "title_edited_at" timestamp DEFAULT now();

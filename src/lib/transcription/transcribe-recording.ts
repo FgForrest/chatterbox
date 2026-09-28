@@ -772,23 +772,30 @@ async function transcribeRecordingInner(
                     transcriptionText,
                 );
 
-                if (generatedTitle) {
-                    // Encrypt the generated title before storing it as the
-                    // recording's filename. The plaintext is still available
-                    // below for the optional sync-to-Plaud push.
-                    await db
-                        .update(recordings)
-                        .set({
-                            filename: encryptText(generatedTitle),
-                            updatedAt: new Date(),
-                        })
-                        .where(
-                            and(
-                                eq(recordings.id, recordingId),
-                                eq(recordings.userId, userId),
-                                isNull(recordings.deletedAt),
-                            ),
-                        );
+                // Written only while no person has set a title, checked in
+                // the update itself: a rename committing while the title
+                // was being generated wins, and then nothing below runs.
+                const [retitled] = generatedTitle
+                    ? await db
+                          .update(recordings)
+                          .set({
+                              // Encrypted at rest; the plaintext is still
+                              // at hand for the optional Plaud push below.
+                              filename: encryptText(generatedTitle),
+                              updatedAt: new Date(),
+                          })
+                          .where(
+                              and(
+                                  eq(recordings.id, recordingId),
+                                  eq(recordings.userId, userId),
+                                  isNull(recordings.deletedAt),
+                                  isNull(recordings.titleEditedAt),
+                              ),
+                          )
+                          .returning({ id: recordings.id })
+                    : [];
+
+                if (generatedTitle && retitled) {
                     // The export was planned under the old title above;
                     // plan again so its directory follows the rename now.
                     await refreshExistingRecordingSidecars(userId, recordingId);

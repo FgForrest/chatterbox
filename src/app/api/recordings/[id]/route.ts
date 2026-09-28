@@ -172,6 +172,8 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         .update(recordings)
         .set({
             filename: encryptText(filename),
+            // A person chose this title; nothing generated replaces it.
+            titleEditedAt: new Date(),
             updatedAt: new Date(),
         })
         .where(

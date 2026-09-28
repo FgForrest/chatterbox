@@ -469,7 +469,11 @@ async function processRecording(
             // tombstoned the row during the download/upload above.
             const updated = await db.transaction(async (tx) => {
                 const [locked] = await tx
-                    .select({ deletedAt: recordings.deletedAt })
+                    .select({
+                        deletedAt: recordings.deletedAt,
+                        titleEditedAt: recordings.titleEditedAt,
+                        filename: recordings.filename,
+                    })
                     .from(recordings)
                     .where(
                         and(
@@ -482,9 +486,18 @@ async function processRecording(
 
                 if (!locked || locked.deletedAt) return false;
 
+                // A title a person set is kept over Plaud's filename. Read
+                // under the lock, so a rename committed during the download
+                // above still wins.
                 await tx
                     .update(recordings)
-                    .set({ ...recordingData, updatedAt: new Date() })
+                    .set({
+                        ...recordingData,
+                        filename: locked.titleEditedAt
+                            ? locked.filename
+                            : recordingData.filename,
+                        updatedAt: new Date(),
+                    })
                     .where(
                         and(
                             eq(recordings.id, existingRecording.id),

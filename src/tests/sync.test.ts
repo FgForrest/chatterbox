@@ -342,7 +342,11 @@ describe("Sync", () => {
             );
         });
 
-        it("should update recordings with newer version", async () => {
+        /**
+         * Sync a recording Plaud reports a newer version of. `locked` is the
+         * row the update re-reads under its lock.
+         */
+        async function syncNewerVersion(locked: Record<string, unknown>) {
             const mockConnection = {
                 id: "conn-1",
                 userId: mockUserId,
@@ -445,9 +449,7 @@ describe("Sync", () => {
                                     for: vi.fn().mockReturnValue({
                                         limit: vi
                                             .fn()
-                                            .mockResolvedValue([
-                                                { deletedAt: null },
-                                            ]),
+                                            .mockResolvedValue([locked]),
                                     }),
                                 }),
                             }),
@@ -461,6 +463,11 @@ describe("Sync", () => {
             );
 
             const result = await syncRecordingsForUser(mockUserId);
+            return { result, set };
+        }
+
+        it("should update recordings with newer version", async () => {
+            const { result, set } = await syncNewerVersion({ deletedAt: null });
 
             expect(result.newRecordings).toBe(0);
             expect(result.updatedRecordings).toBe(1);
@@ -469,6 +476,26 @@ describe("Sync", () => {
             );
             expect(set).toHaveBeenCalledWith(
                 expect.objectContaining({ waveformPeaks: [0.25, 1] }),
+            );
+            // A machine's title follows Plaud's filename.
+            expect(set.mock.calls[0]?.[0].filename).not.toBe(
+                "stored:Renamed by a person",
+            );
+        });
+
+        it("keeps a title a person set over Plaud's filename", async () => {
+            const { result, set } = await syncNewerVersion({
+                deletedAt: null,
+                titleEditedAt: new Date("2026-09-01T10:00:00Z"),
+                filename: "stored:Renamed by a person",
+            });
+
+            expect(result.updatedRecordings).toBe(1);
+            expect(set).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    filename: "stored:Renamed by a person",
+                    waveformPeaks: [0.25, 1],
+                }),
             );
         });
 

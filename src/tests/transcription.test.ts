@@ -85,11 +85,13 @@ import { recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
+import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     storeBrowserTranscription,
     transcribeRecording,
 } from "@/lib/transcription/transcribe-recording";
 import { emitEvent } from "@/lib/webhooks/emit";
+import { exprReferencesColumn } from "./fixtures/drizzle-expr";
 
 describe("Transcription", () => {
     const mockUserId = "user-123";
@@ -309,7 +311,18 @@ describe("Transcription", () => {
             expect(result.error).toBe("API Error");
         });
 
-        it("bumps recording updatedAt and emits completion after generated title is stored", async () => {
+        /**
+         * A run that transcribes, then generates a title. `retitled` is
+         * whether the title update matched a row, i.e. no person had set
+         * the title.
+         */
+        function stubTitledRun({
+            syncTitleToPlaud,
+            retitled,
+        }: {
+            syncTitleToPlaud: boolean;
+            retitled: boolean;
+        }) {
             const mockCreate = vi.fn().mockResolvedValue({
                 text: "Fresh transcript",
                 language: "en",
@@ -369,7 +382,7 @@ describe("Transcription", () => {
                             limit: vi.fn().mockResolvedValue([
                                 {
                                     autoGenerateTitle: true,
-                                    syncTitleToPlaud: false,
+                                    syncTitleToPlaud,
                                 },
                             ]),
                         }),
@@ -421,13 +434,38 @@ describe("Transcription", () => {
                 ) => callback(tx),
             );
 
-            const titleUpdateWhere = vi.fn().mockResolvedValue(undefined);
+            // The title is written only while no person has set one; the
+            // update says whether it matched a row.
+            const titleUpdateReturning = vi
+                .fn()
+                .mockResolvedValue(retitled ? [{ id: mockRecordingId }] : []);
+            const titleUpdateWhere = vi
+                .fn()
+                .mockReturnValue({ returning: titleUpdateReturning });
             const titleUpdateSet = vi.fn().mockReturnValue({
                 where: titleUpdateWhere,
             });
             (db.update as Mock).mockReturnValue({
                 set: titleUpdateSet,
             });
+
+            return {
+                txInsert,
+                txUpdate,
+                recordingBumpSet,
+                titleUpdateSet,
+                titleUpdateWhere,
+            };
+        }
+
+        it("bumps recording updatedAt and emits completion after generated title is stored", async () => {
+            const {
+                txInsert,
+                txUpdate,
+                recordingBumpSet,
+                titleUpdateSet,
+                titleUpdateWhere,
+            } = stubTitledRun({ syncTitleToPlaud: false, retitled: true });
 
             const result = await transcribeRecording(
                 mockUserId,
@@ -463,6 +501,30 @@ describe("Transcription", () => {
                 (refreshExistingRecordingSidecars as Mock).mock
                     .invocationCallOrder[0],
             ).toBeGreaterThan(titleUpdateWhere.mock.invocationCallOrder[0]);
+        });
+
+        it("keeps a title a person set, and pushes nothing to Plaud", async () => {
+            const { titleUpdateWhere } = stubTitledRun({
+                syncTitleToPlaud: true,
+                retitled: false,
+            });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
+            );
+
+            expect(result.success).toBe(true);
+            // The rename check is in the update itself, so a rename that
+            // commits while the title is generated still wins.
+            expect(
+                exprReferencesColumn(
+                    titleUpdateWhere.mock.calls[0]?.[0],
+                    recordings.titleEditedAt,
+                ),
+            ).toBe(true);
+            expect(refreshExistingRecordingSidecars).not.toHaveBeenCalled();
+            expect(createPlaudClient).not.toHaveBeenCalled();
         });
     });
 

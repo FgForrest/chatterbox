@@ -187,6 +187,8 @@ describe("PATCH /api/recordings/[id]", () => {
         expect(set).toHaveBeenCalledWith(
             expect.objectContaining({
                 filename: "encrypted:Q4 planning",
+                // A person chose it, so no generated title replaces it.
+                titleEditedAt: expect.any(Date),
             }),
         );
         await expect(response.json()).resolves.toEqual({
