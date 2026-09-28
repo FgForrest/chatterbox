@@ -160,6 +160,28 @@ export function toTranscriptList(
     ];
 }
 
+/**
+ * A short hash of what a transcript's speaker labels come from, so the
+ * speaker tags can tell a re-transcription from a refetch of the same text.
+ */
+export function transcriptFingerprint(
+    transcript: TranscriptOption | undefined,
+): string {
+    if (!transcript) return "";
+    const turns = (transcript.turns ?? [])
+        .map((turn) => `${turn.speaker}|${turn.startMs}|${turn.endMs}`)
+        .join("\n");
+    // FNV-1a, 32 bits: collisions only cost a missed reload.
+    let hash = 0x811c9dc5;
+    for (const part of [transcript.text, turns]) {
+        for (let index = 0; index < part.length; index++) {
+            hash ^= part.charCodeAt(index);
+            hash = Math.imul(hash, 0x01000193);
+        }
+    }
+    return (hash >>> 0).toString(36);
+}
+
 /** Distinct speaker tags in first-appearance order for one transcript. */
 export function transcriptSpeakerTags(
     transcript: TranscriptOption | undefined,
@@ -202,6 +224,10 @@ export function TranscriptionPanel({
             transcriptList.some((candidate) => candidate.source === "plaud"));
     const speakerTags = useMemo(
         () => transcriptSpeakerTags(activeTranscript),
+        [activeTranscript],
+    );
+    const activeFingerprint = useMemo(
+        () => transcriptFingerprint(activeTranscript),
         [activeTranscript],
     );
     // Topics are anchored to timed turns and written onto the viewer's own
@@ -521,6 +547,11 @@ export function TranscriptionPanel({
                     </div>
                     {activeTranscript && speakerTags.length > 0 && (
                         <SpeakerTags
+                            // Another recording, view, source or text is
+                            // another transcript to name: mount afresh, so
+                            // nothing of the last one's state, or its late
+                            // answers, reaches this one.
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeFingerprint}`}
                             recordingId={recording.id}
                             source={activeTranscript.source}
                             speakers={speakerTags}

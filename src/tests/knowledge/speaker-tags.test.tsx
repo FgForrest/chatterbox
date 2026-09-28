@@ -9,6 +9,10 @@ import {
 } from "@testing-library/react";
 import { useCallback, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
+
 import { Markdown } from "@/components/markdown";
 import { SpeakerTags } from "@/components/people/speaker-tags";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
@@ -19,6 +23,8 @@ interface FetchScenario {
     people?: unknown[];
     /** Answer every change with 409, as after a re-transcription. */
     conflict?: boolean;
+    /** Fail the first read of the speakers. */
+    failFirstRead?: boolean;
 }
 
 function response(body: unknown, status = 200): Response {
@@ -29,6 +35,7 @@ function response(body: unknown, status = 200): Response {
 const VERSION = { transcriptionId: "tx-1", revision: 3 };
 
 function stubFetch(scenario: FetchScenario) {
+    let reads = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
         if (init?.method === "PUT") {
             if (scenario.conflict) {
@@ -41,6 +48,10 @@ function stubFetch(scenario: FetchScenario) {
         }
         if (url === "/api/people") {
             return response({ people: scenario.people ?? [] });
+        }
+        reads++;
+        if (scenario.failFirstRead && reads === 1) {
+            return response({ error: "Unavailable" }, 503);
         }
         return response({
             ...VERSION,
@@ -216,6 +227,34 @@ describe("SpeakerTags", () => {
         expect(
             screen.getByRole("button", { name: "Unknown speaker" }),
         ).toBeDefined();
+    });
+
+    it("says so, and loads again, when changed before the speakers loaded", async () => {
+        const fetchMock = stubFetch({ failFirstRead: true });
+        renderTags();
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Speaker 0" }),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Unknown speaker" }),
+        );
+
+        await waitFor(() => {
+            expect(toastError).toHaveBeenCalledWith(
+                "The speakers are still loading. Try again in a moment.",
+            );
+        });
+        const calls = fetchMock.mock.calls;
+        expect(calls.filter(([, init]) => init?.method === "PUT")).toEqual([]);
+        await waitFor(() => {
+            expect(
+                calls.filter(
+                    ([url, init]) =>
+                        String(url).includes("/speakers") && !init?.method,
+                ),
+            ).toHaveLength(2);
+        });
     });
 
     describe("a suggested name", () => {

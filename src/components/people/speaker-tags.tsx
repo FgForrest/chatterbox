@@ -3,7 +3,7 @@
 import { Check, Loader2, Play, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { toastApiError } from "@/lib/api-errors";
@@ -150,8 +150,19 @@ export function SpeakerTags({
         revision: number;
     } | null>(null);
 
+    // The panel mounts a new instance for another transcript; an answer
+    // arriving after that belongs to the one it replaced.
+    const mounted = useRef(true);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
+
     const applyResponse = useCallback(
         (body: SpeakersResponse) => {
+            if (!mounted.current) return;
             onAttributionsChange(confirmedAttributions(body.speakers));
             setUnknownLabels(unknownSpeakerLabels(body.speakers));
             setSuggestions(suggestedSpeakers(body.speakers));
@@ -197,8 +208,14 @@ export function SpeakerTags({
         label: string,
         choice: SpeakerChoice | null,
     ): Promise<boolean> {
-        // Not loaded yet: there is no version to name.
-        if (!version) return false;
+        // Not loaded, or the load failed: there is no version to name.
+        if (!version) {
+            toast.error(
+                i18n("The speakers are still loading. Try again in a moment."),
+            );
+            await load();
+            return false;
+        }
         setSavingLabel(label);
         const response = await fetch(speakersUrl, {
             method: "PUT",
