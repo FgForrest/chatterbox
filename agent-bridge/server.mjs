@@ -54,13 +54,13 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 
 /**
- * Extra CLI flags, space-separated. These are configurable rather than
- * baked in because the useful hardening flags (tool suppression, turn
- * limits) drift between CLI releases, and a flag the installed binary
- * doesn't recognise is a hard startup failure -- which would take the
- * bridge down on a CLI upgrade rather than degrade it. Adopt one after
- * confirming it against your installed version (`claude --help`), with
- * an env change instead of an image rebuild. See README.
+ * Extra CLI flags, space-separated, appended after the bridge's own. The
+ * flags that keep tools and session persistence off are baked into
+ * `buildArgs` (lib.mjs) because the bridge is unsafe without them; this
+ * is for anything else, adopted with an env change instead of an image
+ * rebuild. A flag the installed binary doesn't recognise fails every
+ * request, so confirm it against your version (`claude --help`) first.
+ * See README.
  */
 const CLAUDE_EXTRA_ARGS = splitArgs(process.env.CLAUDE_EXTRA_ARGS);
 const CODEX_EXTRA_ARGS = splitArgs(process.env.CODEX_EXTRA_ARGS);
