@@ -1,9 +1,10 @@
 /**
- * Sync and a shared recording: its private copy is frozen, so Plaud's
- * transcript would be refused and its summary is imported only beside that
- * transcript. Nothing is fetched from Plaud for them while it is shared,
- * and both are imported once it is not. (Review 1B, finding H; the harness
- * is the one of the #274 regression test.)
+ * Sync and a shared recording: it is the organization account's to change,
+ * so Plaud's transcript would be refused and its summary is imported only
+ * beside that transcript. Nothing is fetched from Plaud for them while it is
+ * shared, and both are imported once it is not; a new Plaud version of it
+ * waits the same way. (Review 1B, finding H; the harness is the one of the
+ * #274 regression test.)
  */
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
@@ -104,7 +105,11 @@ type Fixture = {
 
 function plaudRecording(
     index: number,
-    overrides: { is_trans?: boolean; is_summary?: boolean } = {},
+    overrides: {
+        is_trans?: boolean;
+        is_summary?: boolean;
+        version_ms?: number;
+    } = {},
 ) {
     return {
         id: `plaud-${index}`,
@@ -115,7 +120,7 @@ function plaudRecording(
         filesize: 1024000,
         file_md5: `md5-${index}`,
         serial_number: "SN123",
-        version_ms: 1000,
+        version_ms: overrides.version_ms ?? 1000,
         timezone: 0,
         zonemins: 0,
         scene: 0,
@@ -320,13 +325,14 @@ function mockPlaudPages(
     const fetchContentLink =
         extras.fetchContentLink ??
         vi.fn(async () => [{ speaker: 1, content: "hello from plaud" }]);
+    const downloadRecording = vi.fn();
     (createPlaudClient as Mock).mockResolvedValue({
         getRecordings,
         getFileDetail,
         fetchContentLink,
-        downloadRecording: vi.fn(),
+        downloadRecording,
     });
-    return { getRecordings, getFileDetail };
+    return { getRecordings, getFileDetail, downloadRecording };
 }
 
 describe("sync of a shared recording", () => {
@@ -380,5 +386,21 @@ describe("sync of a shared recording", () => {
 
         expect(getFileDetail).toHaveBeenCalled();
         expect(upsertTranscription).not.toHaveBeenCalled();
+    });
+
+    it("leaves a new Plaud version of it for after the withdrawal", async () => {
+        const updated = fixture(0);
+        updated.rec = plaudRecording(0, { version_ms: 2000 });
+        const sync = async () => {
+            const { downloadRecording } = mockPlaudPages([[updated.rec]]);
+            mockSelects({ importPlaudContent: false, fixtures: [updated] });
+            await syncRecordingsForUser(USER_ID);
+            return downloadRecording;
+        };
+
+        expect(await sync()).not.toHaveBeenCalled();
+
+        sharing.shared = false;
+        expect(await sync()).toHaveBeenCalledWith("plaud-0", false);
     });
 });

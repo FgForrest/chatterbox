@@ -13,6 +13,7 @@ import {
     requireRecordingView,
 } from "@/lib/sharing/access";
 import { getJobVisibleTo } from "@/lib/sharing/jobs";
+import { assertMayChange } from "@/lib/sharing/writer";
 import type { TopicSource } from "@/lib/topics/generate-topics";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { enqueueTopicsJob, TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
@@ -95,7 +96,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const userId = session.user.id;
     const { id } = await (context as IdContext).params;
     assertPrivateView(request);
-    await requireRecordingView(userId, id, "private");
+    const access = await requireRecordingView(userId, id, "private");
+    // Shared, the recording is the organization account's to change.
+    assertMayChange(access, userId);
     const source = requestedTopicSource(request);
 
     const { job } = await enqueueTopicsJob({

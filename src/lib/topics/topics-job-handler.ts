@@ -5,6 +5,7 @@
  * encrypted.
  */
 
+import { AppError, ErrorCode } from "@/lib/errors";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
@@ -25,15 +26,29 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     parsePayload: parseTopicsJobPayload,
 
     async run({ payload, userId, reportProgress }): Promise<JobResult> {
-        const result = await generateTopicsForTranscript(
-            userId,
-            payload.recordingId,
-            payload.source,
-            {
-                trigger: payload.trigger,
-                onProgress: reportProgress,
-            },
-        );
+        let result: Awaited<ReturnType<typeof generateTopicsForTranscript>>;
+        try {
+            result = await generateTopicsForTranscript(
+                userId,
+                payload.recordingId,
+                payload.source,
+                {
+                    trigger: payload.trigger,
+                    onProgress: reportProgress,
+                },
+            );
+        } catch (error) {
+            // Shared since it was queued: an automatic run has nothing to
+            // do, and nothing failed. A person who asked is told why.
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.RECORDING_SHARED &&
+                payload.trigger !== "manual"
+            ) {
+                return { skipped: "shared" };
+            }
+            throw error;
+        }
         return {
             source: payload.source,
             topicCount: result.topics.length,

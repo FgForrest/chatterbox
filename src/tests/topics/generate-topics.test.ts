@@ -60,20 +60,39 @@ function selectChain() {
     return c;
 }
 
-vi.mock("@/db", () => ({
-    db: {
-        select: () => selectChain(),
-        update: () => ({
-            set: (set: Record<string, unknown>) => ({
-                where: () => ({
-                    returning: async () => {
-                        writes.push({ set });
-                        return writeMatches ? [{ id: "tr-1" }] : [];
-                    },
-                }),
+vi.mock("@/db", () => {
+    const update = () => ({
+        set: (set: Record<string, unknown>) => ({
+            where: () => ({
+                returning: async () => {
+                    writes.push({ set });
+                    return writeMatches ? [{ id: "tr-1" }] : [];
+                },
             }),
         }),
-    },
+    });
+    // The recording lock the write takes.
+    const lockChain = {
+        from: () => lockChain,
+        where: () => lockChain,
+        for: () => Promise.resolve([{ id: "rec-1" }]),
+    };
+    const tx = { select: () => lockChain, update };
+    return {
+        db: {
+            select: () => selectChain(),
+            update,
+            transaction: <T>(run: (transaction: typeof tx) => Promise<T>) =>
+                run(tx),
+        },
+    };
+});
+// Sharing is tested against a real database (`src/tests/sharing/`).
+vi.mock("@/lib/sharing/writer", () => ({
+    contentWriterRefusal: async () => null,
+    contentWriterRefusalNow: async () => null,
+    sharingOrgUserId: async () => null,
+    writerRefusalError: () => new Error("refused"),
 }));
 
 import { generateTopicsForTranscript } from "@/lib/topics/generate-topics";

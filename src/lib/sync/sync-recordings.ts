@@ -433,6 +433,18 @@ async function processRecording(
             return { status: "skipped" };
         }
 
+        // Shared, the recording is the organization account's to change,
+        // and a new version from Plaud would replace the audio under the
+        // Organization's transcript. It waits: the version is not advanced,
+        // so the first sync after a withdrawal applies it.
+        if (
+            existingRecording &&
+            context.orgUserId &&
+            (await isRecordingShared(existingRecording.id, context.orgUserId))
+        ) {
+            return { status: "skipped" };
+        }
+
         // Storage cap: gate NEW recordings before spending Plaud egress.
         // Updates replace an existing blob (roughly size-neutral) and are
         // left untouched so a near-cap user can still receive edits.
@@ -517,6 +529,17 @@ async function processRecording(
                     .limit(1);
 
                 if (!locked || locked.deletedAt) return false;
+                // Shared during the download: the version waits, as above.
+                if (
+                    context.orgUserId &&
+                    (await isRecordingShared(
+                        existingRecording.id,
+                        context.orgUserId,
+                        tx,
+                    ))
+                ) {
+                    return "shared" as const;
+                }
 
                 // A title a person set is kept over Plaud's filename. Read
                 // under the lock, so a rename committed during the download
@@ -539,6 +562,23 @@ async function processRecording(
                 return true;
             });
 
+            if (updated === "shared") {
+                // Its row still names the audio it had; a blob uploaded
+                // beside it is an orphan. One uploaded over it (the same
+                // key) is the new version already, which the first sync
+                // after the withdrawal records.
+                if (storageKey !== existingRecording.storagePath) {
+                    try {
+                        await storage.deleteFile(storageKey);
+                    } catch (cleanupError) {
+                        console.error(
+                            `Failed to clean up storage object ${storageKey} of a shared recording:`,
+                            cleanupError,
+                        );
+                    }
+                }
+                return { status: "skipped" };
+            }
             if (!updated) {
                 // Best-effort cleanup of the orphaned blob.
                 try {

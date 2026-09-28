@@ -1,9 +1,9 @@
 /**
  * Detecting the topics of one transcript and storing them on it.
  *
- * Private view only: topics are written onto the transcript row itself, and
- * on the Organization view that row can be the owner's (read through until
- * someone edits it), which the organization must not write to.
+ * The owner's, on the private view: topics are written onto the transcript
+ * row itself, so a shared recording's are the organization account's to
+ * change, which runs no topic detection yet.
  */
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -29,6 +29,12 @@ import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { captureServerEvent } from "@/lib/posthog-server";
+import {
+    contentWriterRefusal,
+    contentWriterRefusalNow,
+    sharingOrgUserId,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import {
     anchorTopics,
@@ -101,6 +107,14 @@ export async function generateTopicsForTranscript(
             404,
         );
     }
+    // Shared, it is not the owner's to change; refused before the provider
+    // is paid, and again under the lock where the topics are written.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: userId,
+        actorUserId: userId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
 
     const [transcript] = await db
         .select()
@@ -248,16 +262,38 @@ export async function generateTopicsForTranscript(
     // from. Every write of a transcript re-encrypts its text, so an unchanged
     // ciphertext means an unchanged transcript; a re-transcription that
     // landed meanwhile has already cleared topics, and must keep them clear.
-    const written = await db
-        .update(transcriptions)
-        .set({ topics: encryptJsonField(stored) })
-        .where(
-            and(
-                eq(transcriptions.id, transcript.id),
-                eq(transcriptions.text, transcript.text),
-            ),
-        )
-        .returning({ id: transcriptions.id });
+    // Under the recording lock sharing takes, so a recording shared while
+    // the model ran keeps what it was shared with.
+    const orgUserId = await sharingOrgUserId();
+    const written = await db.transaction(async (tx) => {
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .for("update");
+        const shared = await contentWriterRefusal(tx, {
+            recordingId,
+            ownerUserId: userId,
+            actorUserId: userId,
+            orgUserId,
+        });
+        if (shared) throw writerRefusalError(shared);
+        return tx
+            .update(transcriptions)
+            .set({ topics: encryptJsonField(stored) })
+            .where(
+                and(
+                    eq(transcriptions.id, transcript.id),
+                    eq(transcriptions.text, transcript.text),
+                ),
+            )
+            .returning({ id: transcriptions.id });
+    });
     if (written.length === 0) {
         throw new AppError(
             ErrorCode.CONFLICT,

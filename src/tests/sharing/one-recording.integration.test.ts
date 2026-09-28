@@ -78,6 +78,20 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/export/document-sidecars", () => ({
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
+    refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/webhooks/emit", () => ({
+    emitEvent: vi.fn().mockResolvedValue(undefined),
+}));
+// The files already carry the name; renaming them is not what is tested.
+vi.mock("@/lib/recordings/reconcile-storage", () => ({
+    reconcileRecordingStorage: vi.fn(
+        async (state: { storagePath: string; storageFilename: string }) => ({
+            changed: false,
+            storagePath: state.storagePath,
+            storageFilename: state.storageFilename,
+        }),
+    ),
 }));
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
@@ -97,14 +111,17 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 
+import { PATCH as patchRecordingRoute } from "@/app/api/recordings/[id]/route";
 import {
     DELETE as deleteSummaryRoute,
     GET as getSummaryRoute,
     POST as postSummaryRoute,
 } from "@/app/api/recordings/[id]/summary/route";
+import { POST as postTopicsRoute } from "@/app/api/recordings/[id]/topics/route";
 import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -121,20 +138,23 @@ type Handler = (
 function call(
     handler: unknown,
     user: string,
-    { view, method = "GET" }: { view?: "org"; method?: string } = {},
+    {
+        view,
+        method = "GET",
+        path = "summary",
+        body,
+    }: { view?: "org"; method?: string; path?: string; body?: object } = {},
 ) {
+    const url = `http://localhost/api/recordings/${REC}${path ? `/${path}` : ""}${view ? "?view=org" : ""}`;
     return (handler as Handler)(
-        new Request(
-            `http://localhost/api/recordings/${REC}/summary${view ? "?view=org" : ""}`,
-            {
-                method,
-                headers: {
-                    "content-type": "application/json",
-                    "x-test-user": user,
-                },
-                ...(method === "POST" ? { body: "{}" } : {}),
+        new Request(url, {
+            method,
+            headers: {
+                "content-type": "application/json",
+                "x-test-user": user,
             },
-        ),
+            ...(method === "GET" ? {} : { body: JSON.stringify(body ?? {}) }),
+        }),
         { params: Promise.resolve({ id: REC }) },
     );
 }
@@ -185,6 +205,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 fileMd5: "0".repeat(32),
                 storageType: "local",
                 storagePath: `${OWNER}/rec.mp3`,
+                storageFilename: "rec.mp3",
                 plaudVersion: "1",
             });
         // No speakers, so nothing stands in the way of sharing it.
@@ -294,5 +315,44 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                     ),
                 ),
         ).toEqual([]);
+    });
+
+    it("keeps the title and topics the organization account's while shared", async () => {
+        await share();
+
+        const rename = await call(patchRecordingRoute, OWNER, {
+            method: "PATCH",
+            path: "",
+            body: { filename: "Renamed" },
+        });
+        expect(rename.status).toBe(409);
+        await expect(rename.json()).resolves.toMatchObject({
+            code: "RECORDING_SHARED",
+        });
+        const topics = await call(postTopicsRoute, OWNER, {
+            method: "POST",
+            path: "topics",
+        });
+        expect(topics.status).toBe(409);
+        // An automatic detection queued before the share has nothing to do.
+        expect(
+            await topicsJobHandler.run({
+                payload: {
+                    recordingId: REC,
+                    source: "riffado",
+                    trigger: "auto",
+                },
+                userId: OWNER,
+                reportProgress: () => {},
+            } as unknown as Parameters<typeof topicsJobHandler.run>[0]),
+        ).toEqual({ skipped: "shared" });
+
+        await unshareRecording(OWNER, REC);
+        const renamed = await call(patchRecordingRoute, OWNER, {
+            method: "PATCH",
+            path: "",
+            body: { filename: "Renamed" },
+        });
+        expect(renamed.status).toBe(200);
     });
 });

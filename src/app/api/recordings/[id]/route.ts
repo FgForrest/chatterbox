@@ -24,6 +24,11 @@ import {
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    contentWriterRefusal,
+    sharingOrgUserId,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { createRedactedWebhookPayload } from "@/lib/webhooks/payload";
@@ -146,6 +151,17 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             404,
         );
     }
+    // Shared, the title is the organization account's to change, like the
+    // rest of the recording: refused before any file is renamed, and again
+    // under the lock where the title is written.
+    const orgUserId = await sharingOrgUserId();
+    const refusal = await contentWriterRefusal(undefined, {
+        recordingId: id,
+        ownerUserId: userId,
+        actorUserId: userId,
+        orgUserId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
 
     let reconciled: Awaited<ReturnType<typeof reconcileRecordingStorage>>;
     try {
@@ -168,27 +184,45 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const [updated] = await db
-        .update(recordings)
-        .set({
-            filename: encryptText(filename),
-            // A person chose this title; nothing generated replaces it.
-            titleEditedAt: new Date(),
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordings.id, id),
-                eq(recordings.userId, userId),
-                eq(recordings.storagePath, reconciled.storagePath),
-                eq(recordings.storageFilename, reconciled.storageFilename),
-                isNull(recordings.deletedAt),
-            ),
-        )
-        .returning({
-            id: recordings.id,
-            filename: recordings.filename,
+    const updated = await db.transaction(async (tx) => {
+        // The lock sharing takes, so a share that committed meanwhile is
+        // seen below. The files keep the name they were given; the next
+        // rename, by whoever may, reconciles them.
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(and(eq(recordings.id, id), eq(recordings.userId, userId)))
+            .for("update");
+        const shared = await contentWriterRefusal(tx, {
+            recordingId: id,
+            ownerUserId: userId,
+            actorUserId: userId,
+            orgUserId,
         });
+        if (shared) throw writerRefusalError(shared);
+        const [row] = await tx
+            .update(recordings)
+            .set({
+                filename: encryptText(filename),
+                // A person chose this title; nothing generated replaces it.
+                titleEditedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordings.id, id),
+                    eq(recordings.userId, userId),
+                    eq(recordings.storagePath, reconciled.storagePath),
+                    eq(recordings.storageFilename, reconciled.storageFilename),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .returning({
+                id: recordings.id,
+                filename: recordings.filename,
+            });
+        return row;
+    });
 
     if (!updated) {
         throw new AppError(
