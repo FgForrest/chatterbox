@@ -86,6 +86,38 @@ describe("mapLabels", () => {
         expect(m.uncertain).toEqual(new Map([["B", "Y"]]));
     });
 
+    it("does not carry a name when another old speaker talked over it", () => {
+        // X may hold B's words too: the timeline cannot tell.
+        const m = mapLabels(
+            [t("A", 0, 10_000), t("B", 3_000, 9_000)],
+            [t("X", 0, 10_000)],
+        );
+        expect(m.carried.size).toBe(0);
+        expect(m.uncertain).toEqual(new Map([["A", "X"]]));
+    });
+
+    it("does not carry a name when the new run found a voice over it", () => {
+        const m = mapLabels(
+            [t("A", 0, 10_000)],
+            [t("X", 0, 10_000), t("Y", 2_000, 8_000)],
+        );
+        expect(m.carried.size).toBe(0);
+        expect(m.uncertain).toEqual(new Map([["A", "X"]]));
+    });
+
+    it("still carries names across turns that barely overlap", () => {
+        const m = mapLabels(
+            [t("A", 0, 4_100), t("B", 4_000, 8_000)],
+            [t("X", 0, 4_000), t("Y", 4_000, 8_000)],
+        );
+        expect(m.carried).toEqual(
+            new Map([
+                ["A", "X"],
+                ["B", "Y"],
+            ]),
+        );
+    });
+
     it("measures a label's speech as the union of its turns", () => {
         const m = mapLabels(
             [t("A", 0, 10_000), t("A", 5_000, 15_000)],
@@ -172,5 +204,30 @@ describe("mapLabels", () => {
                 nextLabels: ["a", "b"],
             }).uncertain.size,
         ).toBe(0);
+    });
+
+    it("maps one-to-one whatever the input", () => {
+        const labels = ["speaker_0", "speaker_1", "speaker_2", "", "A"];
+        let seed = 1;
+        const random = () => {
+            seed = (seed * 1_664_525 + 1_013_904_223) >>> 0;
+            return seed / 2 ** 32;
+        };
+        const turns = () =>
+            Array.from({ length: Math.floor(random() * 10) }, () => {
+                const start = Math.floor(random() * 100) * 1_000;
+                return t(
+                    labels[Math.floor(random() * labels.length)],
+                    start,
+                    start + Math.floor(random() * 30 - 3) * 1_000,
+                );
+            });
+        for (let round = 0; round < 2_000; round++) {
+            const m = mapLabels(turns(), turns());
+            const from = [...m.carried.keys(), ...m.uncertain.keys()];
+            const to = [...m.carried.values(), ...m.uncertain.values()];
+            expect(new Set(from).size).toBe(from.length);
+            expect(new Set(to).size).toBe(to.length);
+        }
     });
 });

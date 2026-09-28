@@ -44,10 +44,13 @@ interface Pair {
  * Every transcript of a recording shares the audio's timeline, so the new
  * label that speaks when an old label spoke is the same voice. A name is
  * carried only when the new label is almost entirely that old speaker, holds
- * most of their speech, and each is the other's unique best match. Anything
- * weaker becomes a suggestion, assigned one-to-one by shared time. Labels
- * without usable timings pair up by speaking order, as suggestions only, and
- * only when both sides have as many of them. Labels are compared as keys.
+ * most of their speech, and each is the other's unique best match. Only
+ * time where one label speaks on each side counts for that: when two people
+ * talk over each other, the timeline cannot tell whose voice a label holds.
+ * Anything weaker becomes a suggestion, assigned one-to-one by shared time.
+ * Labels without usable timings pair up by speaking order, as suggestions
+ * only, and only when both sides have as many of them. Labels are compared
+ * as keys.
  */
 export function mapLabels(
     previous: readonly TranscriptTurn[] | null,
@@ -181,6 +184,39 @@ function union(intervals: Interval[]): Interval[] {
     return merged;
 }
 
+/** `a` minus `b`; both sorted and disjoint, as `union` returns them. */
+function subtract(a: readonly Interval[], b: readonly Interval[]): Interval[] {
+    const rest: Interval[] = [];
+    let first = 0;
+    for (const [aStart, aEnd] of a) {
+        let start = aStart;
+        while (first < b.length && b[first][1] <= start) first++;
+        for (let k = first; k < b.length && b[k][0] < aEnd; k++) {
+            if (b[k][0] > start) rest.push([start, b[k][0]]);
+            start = Math.max(start, b[k][1]);
+            if (start >= aEnd) break;
+        }
+        if (start < aEnd) rest.push([start, aEnd]);
+    }
+    return rest;
+}
+
+/** Each label's speech while no other label of the same transcript speaks. */
+function speechAlone(
+    speech: ReadonlyMap<string, Interval[]>,
+): Map<string, Interval[]> {
+    const alone = new Map<string, Interval[]>();
+    for (const [label, intervals] of speech) {
+        const others = union(
+            [...speech].flatMap(([other, spoken]) =>
+                other === label ? [] : spoken,
+            ),
+        );
+        alone.set(label, subtract(intervals, others));
+    }
+    return alone;
+}
+
 function duration(intervals: readonly Interval[]): number {
     let total = 0;
     for (const [start, end] of intervals) total += end - start;
@@ -250,13 +286,19 @@ function mapByOverlap(
             remember(byNew, newLabel, oldLabel, shared);
         }
     }
-    for (const { oldLabel, newLabel, shared } of pairs) {
+    const previousAlone = speechAlone(previous);
+    const nextAlone = speechAlone(next);
+    for (const { oldLabel, newLabel } of pairs) {
         const mutual =
             uniqueBest(byOld.get(oldLabel)) === newLabel &&
             uniqueBest(byNew.get(newLabel)) === oldLabel;
         if (!mutual) continue;
-        const recall = shared / duration(previous.get(oldLabel) ?? []);
-        const precision = shared / duration(next.get(newLabel) ?? []);
+        const clear = overlap(
+            previousAlone.get(oldLabel) ?? [],
+            nextAlone.get(newLabel) ?? [],
+        );
+        const recall = clear / duration(previous.get(oldLabel) ?? []);
+        const precision = clear / duration(next.get(newLabel) ?? []);
         if (recall >= minRecall && precision >= minPrecision) {
             mapping.carried.set(oldLabel, newLabel);
         }
