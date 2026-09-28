@@ -19,30 +19,10 @@ function requestedSource(request: Request): LearnSource {
         : "riffado";
 }
 
-/**
- * Who may run Learn on a recording, and see its runs: whoever may change
- * it in the view asked for. The owner on the private view; while it is
- * shared, the organization account on the Organization view (unconfirmed
- * suggestions are shown to them alone).
- */
-async function authorize(request: Request, context: IdContext) {
-    const session = await requireApiSession(request);
-    const { id } = await context.params;
-    const access = await requireRecordingView(
-        session.user.id,
-        id,
-        requestedRecordingView(request),
-    );
-    assertMayChange(access, session.user.id);
-    return { access, actorUserId: session.user.id };
-}
-
 /** Start Learn on one transcript (`?source=`), or join the run already open. */
 export const POST = apiHandler<IdContext>(async (request, context) => {
-    const { access, actorUserId } = await authorize(
-        request,
-        context as IdContext,
-    );
+    const { id } = await (context as IdContext).params;
+    const { access, actorUserId } = await authorizeLearn(request, id);
     const started = await startLearnRun({
         access,
         actorUserId,
@@ -54,7 +34,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
 /** The runs on the recording in this view, newest first: status and counts. */
 export const GET = apiHandler<IdContext>(async (request, context) => {
-    const { access } = await authorize(request, context as IdContext);
+    const { id } = await (context as IdContext).params;
+    const { access } = await authorizeLearn(request, id);
     const runs = await db
         .select({
             id: learnRuns.id,
@@ -80,3 +61,19 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         .limit(20);
     return NextResponse.json({ runs });
 });
+
+/**
+ * Whoever may change the recording in the view asked for: the owner on
+ * the private view; while it is shared, the organization account on the
+ * Organization view (Learn's unconfirmed suggestions are theirs alone).
+ */
+async function authorizeLearn(request: Request, recordingId: string) {
+    const session = await requireApiSession(request);
+    const access = await requireRecordingView(
+        session.user.id,
+        recordingId,
+        requestedRecordingView(request),
+    );
+    assertMayChange(access, session.user.id);
+    return { access, actorUserId: session.user.id };
+}

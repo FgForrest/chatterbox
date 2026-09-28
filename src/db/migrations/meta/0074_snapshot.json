@@ -1,5 +1,5 @@
 {
-  "id": "9762a792-96bf-414d-88fc-77c4488cf08a",
+  "id": "433b91b5-0f9e-42f6-b64a-8afe089239e7",
   "prevId": "e8b2d5dd-9447-4d20-9236-2e3b118e0e29",
   "version": "7",
   "dialect": "postgresql",
@@ -5047,6 +5047,12 @@
         "decision": {
           "name": "decision",
           "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "choice": {
+          "name": "choice",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": false
         },

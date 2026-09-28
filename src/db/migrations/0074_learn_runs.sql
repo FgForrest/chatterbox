@@ -16,6 +16,7 @@ CREATE TABLE "learn_review_items" (
 	"payload" jsonb NOT NULL,
 	"pre_ticked" boolean DEFAULT false NOT NULL,
 	"decision" varchar(16),
+	"choice" jsonb,
 	"version" integer DEFAULT 0 NOT NULL,
 	"depends_on_label" varchar(64),
 	"created_at" timestamp DEFAULT now() NOT NULL,

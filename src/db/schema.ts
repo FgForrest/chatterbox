@@ -1802,6 +1802,10 @@ export const learnReviewItems = pgTable(
         decision: varchar("decision", { length: 16 }).$type<
             "accepted" | "rejected"
         >(),
+        // What they chose with it, encrypted: another person for a speaker,
+        // "create as my relation" (with its name and shape) or "suggest to
+        // the Organization" for a phrase.
+        choice: jsonb("choice"),
         version: integer("version").notNull().default(0),
         dependsOnLabel: varchar("depends_on_label", { length: 64 }),
         createdAt: timestamp("created_at").notNull().defaultNow(),

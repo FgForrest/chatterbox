@@ -22,11 +22,13 @@ import {
 import {
     apiCredentials,
     asyncJobs,
+    learnDismissals,
     learnReviewItems,
     learnRuns,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
     users,
@@ -118,6 +120,9 @@ import {
     GET as getLearnRoute,
     POST as postLearnRoute,
 } from "@/app/api/recordings/[id]/learn/route";
+import { POST as postFinishRoute } from "@/app/api/recordings/[id]/review/finish/route";
+import { PATCH as patchItemRoute } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
+import { GET as getReviewRoute } from "@/app/api/recordings/[id]/review/route";
 import { encrypt } from "@/lib/encryption";
 import {
     decryptJsonField,
@@ -599,6 +604,190 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 "cancelled",
             );
             expect(createCompletion).not.toHaveBeenCalled();
+        });
+
+        describe("reviewing", () => {
+            type Handler = (
+                request: Request,
+                context: { params: Promise<Record<string, string>> },
+            ) => Promise<Response>;
+            const route = (
+                handler: unknown,
+                user: string,
+                path: string,
+                {
+                    method = "GET",
+                    body,
+                    params = {},
+                }: {
+                    method?: string;
+                    body?: object;
+                    params?: Record<string, string>;
+                } = {},
+            ) =>
+                (handler as Handler)(
+                    new Request(
+                        `http://localhost/api/recordings/${REC}/${path}`,
+                        {
+                            method,
+                            headers: {
+                                "content-type": "application/json",
+                                "x-test-user": user,
+                            },
+                            ...(body ? { body: JSON.stringify(body) } : {}),
+                        },
+                    ),
+                    { params: Promise.resolve({ id: REC, ...params }) },
+                );
+
+            async function readyRun() {
+                const tavesi = (
+                    await createEntity(OWNER, {
+                        typeKey: "organization",
+                        name: "Tavesi",
+                    })
+                ).id;
+                const { runId } = (await (await learn(OWNER)).json()) as {
+                    runId: string;
+                };
+                reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+                reply({
+                    speakers: [],
+                    corrections: [
+                        {
+                            turnIndex: 0,
+                            charStart: 19,
+                            charEnd: 25,
+                            heard: "Tavesy",
+                            kind: "correct",
+                            target: { entityId: tavesi },
+                            replacement: "Tavesi",
+                        },
+                    ],
+                    facts: [],
+                    relationPhrases: [
+                        {
+                            phrase: "dodává pro",
+                            subject: { speakerLabel: "speaker_0" },
+                            object: { entityId: tavesi },
+                            start: "00:00",
+                            end: "00:05",
+                        },
+                    ],
+                });
+                await runJob(runId);
+                return { runId, tavesi };
+            }
+
+            it("shows its items to the owner with the names they refer to, and to nobody else", async () => {
+                const { tavesi } = await readyRun();
+                const review = await route(getReviewRoute, OWNER, "review");
+                const body = (await review.json()) as {
+                    run: { status: string };
+                    items: { kind: string; preTicked: boolean }[];
+                    names: Record<string, string>;
+                };
+                expect(body.run.status).toBe("ready");
+                expect(body.items.map((item) => item.kind).sort()).toEqual([
+                    "correction",
+                    "relation_phrase",
+                ]);
+                expect(body.names).toEqual({ [tavesi]: "Tavesi" });
+                expect(
+                    (await route(getReviewRoute, BOB, "review")).status,
+                ).toBe(404);
+            });
+
+            it("keeps drafts by version, and finishing applies what is ticked and remembers what is not", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as {
+                    items: { id: string; kind: string; version: number }[];
+                };
+                const correction = items.find(
+                    (item) => item.kind === "correction",
+                );
+                const phrase = items.find(
+                    (item) => item.kind === "relation_phrase",
+                );
+                const patch = (id: string, body: object) =>
+                    route(patchItemRoute, OWNER, `review/items/${id}`, {
+                        method: "PATCH",
+                        body,
+                        params: { itemId: id },
+                    });
+                expect(
+                    (
+                        await patch(correction?.id ?? "", {
+                            decision: "accepted",
+                            version: 5,
+                        })
+                    ).status,
+                ).toBe(409);
+                const decided = await patch(correction?.id ?? "", {
+                    decision: "accepted",
+                    version: 0,
+                });
+                await expect(decided.json()).resolves.toEqual({ version: 1 });
+
+                const finished = await route(
+                    postFinishRoute,
+                    OWNER,
+                    "review/finish",
+                    {
+                        method: "POST",
+                        body: {
+                            versions: {
+                                [correction?.id ?? ""]: 1,
+                                [phrase?.id ?? ""]: 0,
+                            },
+                        },
+                    },
+                );
+                await expect(finished.json()).resolves.toMatchObject({
+                    status: "finished",
+                    applied: 1,
+                    dismissed: 1,
+                    skipped: [],
+                });
+                const corrections = await db()
+                    .select({
+                        userId: transcriptCorrections.userId,
+                        charStart: transcriptCorrections.charStart,
+                    })
+                    .from(transcriptCorrections);
+                expect(corrections).toEqual([{ userId: OWNER, charStart: 19 }]);
+                expect(await db().select().from(learnDismissals)).toHaveLength(
+                    1,
+                );
+                expect(
+                    (await route(getReviewRoute, OWNER, "review")).status,
+                ).toBe(200);
+            });
+
+            it("supersedes instead of finishing when the transcript changed", async () => {
+                const { runId } = await readyRun();
+                await db()
+                    .update(transcriptions)
+                    .set({ revision: 9 })
+                    .where(eq(transcriptions.id, transcriptId));
+                const finished = await route(
+                    postFinishRoute,
+                    OWNER,
+                    "review/finish",
+                    { method: "POST", body: {} },
+                );
+                await expect(finished.json()).resolves.toMatchObject({
+                    status: "superseded",
+                });
+                expect((await statusAndStats(runId))?.status).toBe(
+                    "superseded",
+                );
+                expect(await db().select().from(transcriptCorrections)).toEqual(
+                    [],
+                );
+            });
         });
     });
 

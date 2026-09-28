@@ -65,6 +65,11 @@ export interface FactArgs {
      * `details.currentFactId`), so nobody replaces what they did not see.
      */
     expectedCurrentFactId?: string | null;
+    /**
+     * Replace whatever value is current instead: a finished review, whose
+     * item showed the person this value to accept over the current one.
+     */
+    replaceCurrent?: boolean;
 }
 
 export interface Fact {
@@ -264,7 +269,7 @@ export async function confirmFactInTx(
             .orderBy(desc(knowledgeFacts.updatedAt), knowledgeFacts.id)
             .limit(1);
         const isCurrent = existing && current?.id === existing.id;
-        if (!isCurrent) {
+        if (!isCurrent && !args.replaceCurrent) {
             const expected = args.expectedCurrentFactId ?? null;
             if ((current?.id ?? null) !== expected) {
                 throw new AppError(
