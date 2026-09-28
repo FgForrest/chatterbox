@@ -18,8 +18,10 @@ import {
 } from "vitest";
 import {
     knowledgeEntityTypes,
+    knowledgeFacts,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
+    people,
     users,
 } from "@/db/schema";
 import {
@@ -73,6 +75,8 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { encryptText } from "@/lib/encryption/fields";
+import { confirmManualFact } from "@/lib/knowledge/facts";
 import {
     adoptPhrase,
     createOrgType,
@@ -302,6 +306,82 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         ).toBe(key);
         const [adopted] = await listVocabularyProposals(orgUserId);
         expect(adopted?.status).toBe("adopted");
+    });
+
+    it("gives members their adopted type back, with their facts, when the Organization deletes it", async () => {
+        const alicesKey = await createPrivateType(ALICE, worksWith);
+        const person = async (userId: string, name: string) =>
+            (
+                await db()
+                    .insert(people)
+                    .values({ userId, displayName: encryptText(name) })
+                    .returning({ id: people.id })
+            )[0]?.id ?? "";
+        const [jan, pavel, eva] = [
+            await person(ALICE, "Jan"),
+            await person(ALICE, "Pavel"),
+            await person(ALICE, "Eva"),
+        ];
+        const [petr, olga] = [
+            await person(BOB, "Petr"),
+            await person(BOB, "Olga"),
+        ];
+        const mentors = (
+            userId: string,
+            relationKey: string,
+            a: string,
+            b: string,
+        ) =>
+            confirmManualFact(userId, {
+                subject: { personId: a },
+                relationKey,
+                object: { personId: b },
+            });
+        // Before the adoption, under her own key.
+        const before = await mentors(ALICE, alicesKey, jan ?? "", pavel ?? "");
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+        const key = await adoptPhrase(orgUserId, proposal?.id ?? "", {
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        // After it, the Organization's key: once the same, once new.
+        await mentors(ALICE, alicesKey, jan ?? "", pavel ?? "");
+        await mentors(ALICE, alicesKey, jan ?? "", eva ?? "");
+        // Bob uses the Organization's type directly.
+        await mentors(BOB, key, petr ?? "", olga ?? "");
+        const factsOf = (userId: string) =>
+            db()
+                .select({
+                    id: knowledgeFacts.id,
+                    relationKey: knowledgeFacts.relationKey,
+                    objectPersonId: knowledgeFacts.objectPersonId,
+                })
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, userId));
+        expect(
+            (await factsOf(ALICE)).map((fact) => fact.relationKey).sort(),
+        ).toEqual([alicesKey, key, key].sort());
+
+        await deleteOwnType(orgUserId, "relation", key, 0);
+
+        const alices = await factsOf(ALICE);
+        expect(alices).toHaveLength(2);
+        expect(alices.every((fact) => fact.relationKey === alicesKey)).toBe(
+            true,
+        );
+        expect(alices.map((fact) => fact.id)).toContain(before);
+        expect(alices.map((fact) => fact.objectPersonId).sort()).toEqual(
+            [pavel, eva].sort(),
+        );
+        expect(
+            (await vocabularyVisibleTo(ALICE)).relationTypes.find(
+                (r) => r.key === alicesKey,
+            )?.adoptedAsKey,
+        ).toBeNull();
+        expect(await factsOf(BOB)).toEqual([]);
     });
 
     it("stops counting a suggestion when its account goes, and drops it with the last", async () => {

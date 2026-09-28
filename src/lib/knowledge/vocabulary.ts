@@ -13,7 +13,7 @@
  * run can tell the vocabulary it was made with is no longer current.
  */
 
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -27,7 +27,11 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
+import {
+    deleteFactsInTx,
+    deleteFactsNamingInTx,
+} from "@/lib/knowledge/fact-chains";
+import { rekeyRelationInTx } from "@/lib/knowledge/fact-merge";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeople,
@@ -592,6 +596,17 @@ async function usesOfType(
  * is refused (409, `details.count`), so nothing is deleted that the person
  * did not see counted.
  *
+ * An Organization type reaches further than its count, which stays the
+ * Organization's own so the curator never learns how much members know
+ * privately (Johnny, 2026-09-28); the confirmation says so in words:
+ * - with its entities goes everything anyone knows about them (their
+ *   facts, aliases, notes and corrections, in every scope);
+ * - a relation type goes from every member's facts: a member whose own
+ *   type had been adopted as it gets that type back, with the facts they
+ *   stated since (combined where they say the same); other members'
+ *   facts with it go;
+ * - private types adopted as it are adopted no longer.
+ *
  * Like deleting a person or an entity, it takes the Organization-people
  * lock and then the recordings a transcript rewrite would lock, of every
  * transcript whose corrections or evidence go with it.
@@ -618,14 +633,58 @@ export async function deleteOwnType(
         // everyone's aliases, notes, facts and corrections naming them.
         const scopes = await scopesUsingTypeInTx(tx, kind, key);
         scopes.add(userId);
-        if (kind === "relation" && count > 0) {
+        const organization = await isOrgAccount(userId);
+        if (kind === "relation") {
             const facts = await tx
                 .select({ id: knowledgeFacts.id })
                 .from(knowledgeFacts)
-                .where(usesOfTypeCondition(kind, userId, key));
+                .where(
+                    organization
+                        ? eq(knowledgeFacts.relationKey, key)
+                        : usesOfTypeCondition(kind, userId, key),
+                );
             await lockRecordingsNaming(tx, {
                 factIds: facts.map((row) => row.id),
             });
+        }
+        if (organization) {
+            const table = tableOf(kind);
+            const adopters = await tx
+                .update(table)
+                .set({ adoptedAsKey: null, updatedAt: new Date() })
+                .where(
+                    and(
+                        eq(table.adoptedAsKey, key),
+                        sql`${table.userId} is not null`,
+                    ),
+                )
+                .returning({ userId: table.userId, key: table.key });
+            for (const adopter of adopters) {
+                if (!adopter.userId) continue;
+                scopes.add(adopter.userId);
+                if (kind === "relation") {
+                    await rekeyRelationInTx(tx, {
+                        userId: adopter.userId,
+                        from: key,
+                        to: adopter.key,
+                    });
+                }
+            }
+            if (kind === "relation") {
+                const left = await tx
+                    .select({ id: knowledgeFacts.id })
+                    .from(knowledgeFacts)
+                    .where(
+                        and(
+                            eq(knowledgeFacts.relationKey, key),
+                            ne(knowledgeFacts.userId, userId),
+                        ),
+                    );
+                await deleteFactsInTx(
+                    tx,
+                    left.map((row) => row.id),
+                );
+            }
         }
         if (kind === "entity" && count > 0) {
             const doomed = await tx

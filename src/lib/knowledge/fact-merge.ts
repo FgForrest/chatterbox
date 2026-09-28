@@ -105,49 +105,118 @@ export async function moveFactsInTx(
             continue;
         }
 
-        // The same fact twice: keep `same`, give it what `fact` had.
-        await tx
-            .update(knowledgeFactEvidence)
-            .set({ factId: same.id })
-            .where(
-                and(
-                    eq(knowledgeFactEvidence.factId, fact.id),
-                    sql`not exists (select 1 from ${knowledgeFactEvidence} as kept where kept.fact_id = ${same.id} and kept.transcription_id = ${knowledgeFactEvidence.transcriptionId} and kept.start_ms = ${knowledgeFactEvidence.startMs} and kept.end_ms = ${knowledgeFactEvidence.endMs})`,
-                ),
-            );
-        // `same` stands where the later of the two stood: where `fact` did
-        // when `same` led to it (it was the older value), else where it is.
-        // Read before anything below repoints the chain.
-        const sameCameFirst = await leadsToInTx(tx, same.id, fact.id);
-        let pointer =
-            sameCameFirst || fact.replacedByFactId === null
-                ? fact.replacedByFactId
-                : same.replacedByFactId;
-        if (pointer === same.id) pointer = same.replacedByFactId;
-        await tx
-            .update(knowledgeFacts)
-            .set({ replacedByFactId: same.id })
-            .where(
-                and(
-                    eq(knowledgeFacts.replacedByFactId, fact.id),
-                    ne(knowledgeFacts.id, same.id),
-                ),
-            );
-        if (fact.origin === "manual" || pointer !== same.replacedByFactId) {
-            await tx
-                .update(knowledgeFacts)
-                .set({
-                    ...(fact.origin === "manual"
-                        ? { origin: "manual" as const }
-                        : {}),
-                    replacedByFactId: pointer,
-                })
-                .where(eq(knowledgeFacts.id, same.id));
-        }
-        await tx.delete(knowledgeFacts).where(eq(knowledgeFacts.id, fact.id));
+        await combineFactsInTx(tx, fact, same);
         touched.add(factGroupOf({ ...fact, subjectKey }));
     }
 
+    await settleSingleValuedInTx(tx, touched);
+}
+
+/**
+ * `fact` now says what `same` says (same scope, subject, relation and
+ * object): keep `same`, give it what `fact` had (its evidence, manual
+ * origin and place in the chain of replacements), and delete `fact`. The
+ * caller settles the group.
+ */
+async function combineFactsInTx(
+    tx: Tx,
+    fact: { id: string; origin: string; replacedByFactId: string | null },
+    same: { id: string; replacedByFactId: string | null },
+): Promise<void> {
+    await tx
+        .update(knowledgeFactEvidence)
+        .set({ factId: same.id })
+        .where(
+            and(
+                eq(knowledgeFactEvidence.factId, fact.id),
+                sql`not exists (select 1 from ${knowledgeFactEvidence} as kept where kept.fact_id = ${same.id} and kept.transcription_id = ${knowledgeFactEvidence.transcriptionId} and kept.start_ms = ${knowledgeFactEvidence.startMs} and kept.end_ms = ${knowledgeFactEvidence.endMs})`,
+            ),
+        );
+    // `same` stands where the later of the two stood: where `fact` did
+    // when `same` led to it (it was the older value), else where it is.
+    // Read before anything below repoints the chain.
+    const sameCameFirst = await leadsToInTx(tx, same.id, fact.id);
+    let pointer =
+        sameCameFirst || fact.replacedByFactId === null
+            ? fact.replacedByFactId
+            : same.replacedByFactId;
+    if (pointer === same.id) pointer = same.replacedByFactId;
+    await tx
+        .update(knowledgeFacts)
+        .set({ replacedByFactId: same.id })
+        .where(
+            and(
+                eq(knowledgeFacts.replacedByFactId, fact.id),
+                ne(knowledgeFacts.id, same.id),
+            ),
+        );
+    if (fact.origin === "manual" || pointer !== same.replacedByFactId) {
+        await tx
+            .update(knowledgeFacts)
+            .set({
+                ...(fact.origin === "manual"
+                    ? { origin: "manual" as const }
+                    : {}),
+                replacedByFactId: pointer,
+            })
+            .where(eq(knowledgeFacts.id, same.id));
+    }
+    await tx.delete(knowledgeFacts).where(eq(knowledgeFacts.id, fact.id));
+}
+
+/**
+ * Move a scope's facts of relation `from` to relation `to`, combining
+ * those that then say the same: a member's private relation type taking
+ * back the facts stated with the Organization's type it had been adopted
+ * as.
+ */
+export async function rekeyRelationInTx(
+    tx: Tx,
+    { userId, from, to }: { userId: string; from: string; to: string },
+): Promise<void> {
+    const facts = await tx
+        .select({
+            id: knowledgeFacts.id,
+            userId: knowledgeFacts.userId,
+            subjectKey: knowledgeFacts.subjectKey,
+            objectKey: knowledgeFacts.objectKey,
+            origin: knowledgeFacts.origin,
+            replacedByFactId: knowledgeFacts.replacedByFactId,
+        })
+        .from(knowledgeFacts)
+        .where(
+            and(
+                eq(knowledgeFacts.userId, userId),
+                eq(knowledgeFacts.relationKey, from),
+            ),
+        );
+    const touched = new Set<string>();
+    for (const fact of facts) {
+        const [same] = await tx
+            .select({
+                id: knowledgeFacts.id,
+                replacedByFactId: knowledgeFacts.replacedByFactId,
+            })
+            .from(knowledgeFacts)
+            .where(
+                and(
+                    eq(knowledgeFacts.userId, userId),
+                    eq(knowledgeFacts.subjectKey, fact.subjectKey),
+                    eq(knowledgeFacts.relationKey, to),
+                    eq(knowledgeFacts.objectKey, fact.objectKey),
+                ),
+            )
+            .limit(1);
+        if (same) {
+            await combineFactsInTx(tx, fact, same);
+        } else {
+            await tx
+                .update(knowledgeFacts)
+                .set({ relationKey: to })
+                .where(eq(knowledgeFacts.id, fact.id));
+        }
+        touched.add(factGroupOf({ ...fact, relationKey: to }));
+    }
     await settleSingleValuedInTx(tx, touched);
 }
 
