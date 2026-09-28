@@ -18,6 +18,7 @@ import {
     vi,
 } from "vitest";
 import {
+    aiEnhancements,
     recordingFolders,
     recordings,
     transcriptions,
@@ -224,5 +225,42 @@ describeWithDatabase("transcript revision (PostgreSQL)", () => {
         expect(committed).toBe(true);
         expect(await revisions()).toEqual([1]);
         expect(await revisions(orgUserId)).toEqual([]);
+    });
+    it("drops the summary of the text a forced write replaces, in the same write", async () => {
+        await write("first");
+        const [transcript] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, REC));
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                recordingId: REC,
+                userId: ALICE,
+                transcriptionId: transcript?.id,
+                summary: encryptText("about the first text"),
+                provider: "openai",
+                model: "gpt",
+                source: "riffado",
+            });
+
+        const { committed } = await upsertTranscription({
+            userId: ALICE,
+            recordingId: REC,
+            text: "second",
+            detectedLanguage: "en",
+            source: "riffado",
+            provider: "openai",
+            model: "whisper-1",
+            dropSummaryOnReplace: "riffado",
+        });
+
+        expect(committed).toBe(true);
+        expect(
+            await db()
+                .select()
+                .from(aiEnhancements)
+                .where(eq(aiEnhancements.recordingId, REC)),
+        ).toEqual([]);
     });
 });

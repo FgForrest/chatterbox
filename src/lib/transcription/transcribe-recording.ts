@@ -246,6 +246,18 @@ export async function storeBrowserTranscription(
                 });
             }
 
+            // The summary described the text replaced here; it goes in the
+            // same transaction, under the same writer check.
+            await tx
+                .delete(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.recordingId, recordingId),
+                        eq(aiEnhancements.userId, userId),
+                        eq(aiEnhancements.source, "riffado"),
+                    ),
+                );
+
             await tx
                 .update(recordings)
                 .set({ transcriptReapedAt: null, updatedAt: new Date() })
@@ -271,15 +283,6 @@ export async function storeBrowserTranscription(
         throw txError;
     }
 
-    await db
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, userId),
-                eq(aiEnhancements.source, "riffado"),
-            ),
-        );
     await removeRecordingSidecar(userId, recordingId, "summary", "riffado");
 
     await exportRecordingSidecarsIfEnabled(
@@ -742,6 +745,8 @@ async function transcribeRecordingInner(
             turns,
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,
+            // The summary describes the text a forced re-run replaces.
+            dropSummaryOnReplace: opts.force ? "riffado" : undefined,
         });
 
         if (!committed && reason) return refusedResult(reason);
@@ -788,21 +793,13 @@ async function transcribeRecordingInner(
             "riffado",
         );
 
-        // The previous transcript is being overwritten, so any existing
-        // summary now references stale source text. Drop it so readers never
-        // see "fresh transcript + old summary". If auto-summarize is on, a
-        // fresh summary is generated below; otherwise the recording shows no
-        // summary until someone clicks "Generate summary" manually.
+        // The previous transcript was overwritten, so its summary, which
+        // described the old text, went with it in the write above: readers
+        // never see "fresh transcript + old summary". If auto-summarize is
+        // on, a fresh summary is generated below; otherwise the recording
+        // shows no summary until someone clicks "Generate summary". Its
+        // exported file goes here.
         if (existingTranscription?.text && opts.force) {
-            await db
-                .delete(aiEnhancements)
-                .where(
-                    and(
-                        eq(aiEnhancements.recordingId, recordingId),
-                        eq(aiEnhancements.userId, userId),
-                        eq(aiEnhancements.source, "riffado"),
-                    ),
-                );
             await removeRecordingSidecar(
                 userId,
                 recordingId,

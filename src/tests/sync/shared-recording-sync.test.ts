@@ -85,6 +85,7 @@ import {
     users,
 } from "@/db/schema";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
+import { createUserStorageProvider } from "@/lib/storage/factory";
 import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import {
@@ -274,6 +275,14 @@ function mockSelects(opts: {
                             unseen ? [{ id: `local-${unseen.rec.id}` }] : [],
                         );
                     }
+                    // "Is this audio key another recording's?" No.
+                    if (
+                        walkStrings(whereClause).some((value) =>
+                            value.endsWith(".mp3"),
+                        )
+                    ) {
+                        return Promise.resolve([]);
+                    }
                     const f = plaudFixtures[recordingLookup++];
                     if (!f) return Promise.resolve([]);
                     return Promise.resolve([
@@ -281,6 +290,7 @@ function mockSelects(opts: {
                             id: `local-${f.rec.id}`,
                             plaudFileId: f.rec.id,
                             plaudVersion: "1000",
+                            storagePath: `${USER_ID}/${f.rec.id}.mp3`,
                             deletedAt: f.deletedAt ?? null,
                         },
                     ]);
@@ -402,5 +412,38 @@ describe("sync of a shared recording", () => {
 
         sharing.shared = false;
         expect(await sync()).toHaveBeenCalledWith("plaud-0", false);
+    });
+
+    it("writes no new Plaud version over its audio when it is shared during the download", async () => {
+        sharing.shared = false;
+        const updated = fixture(0);
+        updated.rec = plaudRecording(0, { version_ms: 2000 });
+        const { downloadRecording } = mockPlaudPages([[updated.rec]]);
+        downloadRecording.mockImplementation(async () => {
+            sharing.shared = true;
+            return Buffer.from("new audio");
+        });
+        const storage = await createUserStorageProvider(USER_ID);
+        const lock = {
+            from: () => lock,
+            where: () => lock,
+            for: () => lock,
+            limit: async () => [
+                { deletedAt: null, titleEditedAt: null, filename: "x" },
+            ],
+        };
+        const txUpdate = vi.fn();
+        (db.transaction as Mock).mockImplementation(
+            async (run: (tx: unknown) => Promise<unknown>) =>
+                run({ select: () => lock, update: txUpdate }),
+        );
+        mockSelects({ importPlaudContent: false, fixtures: [updated] });
+
+        await syncRecordingsForUser(USER_ID);
+
+        expect(downloadRecording).toHaveBeenCalled();
+        // Its audio and its row stay as they were shared.
+        expect(storage.uploadFile).not.toHaveBeenCalled();
+        expect(txUpdate).not.toHaveBeenCalled();
     });
 });

@@ -72,6 +72,16 @@ vi.mock("@/lib/summary/summary-job", () => ({
     enqueueSummaryJob: vi.fn(),
 }));
 
+// The write itself runs; the test reads what it was asked to do.
+vi.mock("@/lib/transcription/persist", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/transcription/persist")>();
+    return {
+        ...actual,
+        upsertTranscription: vi.fn(actual.upsertTranscription),
+    };
+});
+
 vi.mock("@/lib/rate-limit", () => ({
     consumeRateLimitBucket: vi.fn().mockResolvedValue({
         allowed: true,
@@ -82,9 +92,9 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { db } from "@/db";
-import { aiEnhancements } from "@/db/schema";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -385,6 +395,11 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         });
 
         expect(result.success).toBe(true);
-        expect(db.delete).toHaveBeenCalledWith(aiEnhancements);
+        // The summary goes with the text it described, in the same write
+        // (tested against a real database in
+        // `transcript-revision.integration.test.ts`).
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ dropSummaryOnReplace: "riffado" }),
+        );
     });
 });

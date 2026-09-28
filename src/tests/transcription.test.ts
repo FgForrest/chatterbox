@@ -438,13 +438,32 @@ describe("Transcription", () => {
                 insert: txInsert,
                 update: txUpdate,
             };
-            (db.transaction as Mock).mockImplementation(
-                async (
-                    callback: (
-                        transaction: typeof tx,
-                    ) => Promise<unknown> | unknown,
-                ) => callback(tx),
-            );
+            // The generated title is stored in a transaction of its own,
+            // which locks the recording first.
+            const titleLock = {
+                from: () => titleLock,
+                where: () => titleLock,
+                for: () => Promise.resolve([{ id: mockRecordingId }]),
+            };
+            const titleTx = {
+                select: () => titleLock,
+                update: (...args: unknown[]) => (db.update as Mock)(...args),
+            };
+            (db.transaction as Mock)
+                .mockImplementationOnce(
+                    async (
+                        callback: (
+                            transaction: typeof tx,
+                        ) => Promise<unknown> | unknown,
+                    ) => callback(tx),
+                )
+                .mockImplementationOnce(
+                    async (
+                        callback: (
+                            transaction: typeof titleTx,
+                        ) => Promise<unknown> | unknown,
+                    ) => callback(titleTx),
+                );
 
             // The title is written only while no person has set one; the
             // update says whether it matched a row.
@@ -653,6 +672,10 @@ describe("Transcription", () => {
                     }),
                 insert: txInsert,
                 update: txUpdate,
+                // The summary of the replaced text goes in the same write.
+                delete: vi.fn().mockReturnValue({
+                    where: vi.fn().mockResolvedValue(undefined),
+                }),
             };
             (db.transaction as Mock).mockImplementation(
                 async (

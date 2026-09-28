@@ -19,6 +19,7 @@ import { sidecarKey } from "@/lib/recordings/storage-files";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import {
+    contentWriterRefusal,
     contentWriterRefusalNow,
     recordingShared,
     sharingOrgUserId,
@@ -426,21 +427,55 @@ export async function restoreAudioFromPlaud(
     const audio = await client.downloadRecording(recording.plaudFileId, false);
     const sniffed = sniffAudio(audio);
     const storage = await createUserStorageProvider(userId);
-    await storage.uploadFile(recording.storagePath, audio, sniffed.contentType);
-    await db
-        .update(recordings)
-        .set({
-            audioReapedAt: null,
-            downloadedAt: new Date(),
-            filesize: audio.length,
-            waveformPeaks: null,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordings.id, recordingId),
-                eq(recordings.userId, userId),
-                isNull(recordings.deletedAt),
-            ),
+    const orgUserId = await sharingOrgUserId();
+    // Written under the recording lock, once it is known to be still the
+    // owner's to change: a share landing during the download must not have
+    // its audio replaced, nor its retention marker cleared.
+    await db.transaction(async (tx) => {
+        const [locked] = await tx
+            .select({ deletedAt: recordings.deletedAt })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!locked || locked.deletedAt) {
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording not found",
+                404,
+            );
+        }
+        const shared = await contentWriterRefusal(tx, {
+            recordingId,
+            ownerUserId: userId,
+            actorUserId: userId,
+            orgUserId,
+        });
+        if (shared) throw writerRefusalError(shared);
+        await storage.uploadFile(
+            recording.storagePath,
+            audio,
+            sniffed.contentType,
         );
+        await tx
+            .update(recordings)
+            .set({
+                audioReapedAt: null,
+                downloadedAt: new Date(),
+                filesize: audio.length,
+                waveformPeaks: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            );
+    });
 }

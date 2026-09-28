@@ -476,9 +476,18 @@ async function processRecording(
             recordingId,
         );
         const contentType = sniffed.contentType;
+        // A new version written over the audio a recording already serves
+        // is written only under its lock, once the recording is known to be
+        // still its owner's to change: a share landing during the download
+        // must not have its audio replaced. A fresh key serves nobody yet.
+        const overwrites =
+            existingRecording !== undefined &&
+            storageKey === existingRecording.storagePath;
         const [waveformPeaks] = await Promise.all([
             generateIngestWaveform(audioBuffer),
-            storage.uploadFile(storageKey, audioBuffer, contentType),
+            overwrites
+                ? Promise.resolve()
+                : storage.uploadFile(storageKey, audioBuffer, contentType),
         ]);
 
         const recordingData = {
@@ -540,6 +549,13 @@ async function processRecording(
                 ) {
                     return "shared" as const;
                 }
+                if (overwrites) {
+                    await storage.uploadFile(
+                        storageKey,
+                        audioBuffer,
+                        contentType,
+                    );
+                }
 
                 // A title a person set is kept over Plaud's filename. Read
                 // under the lock, so a rename committed during the download
@@ -563,11 +579,9 @@ async function processRecording(
             });
 
             if (updated === "shared") {
-                // Its row still names the audio it had; a blob uploaded
-                // beside it is an orphan. One uploaded over it (the same
-                // key) is the new version already, which the first sync
-                // after the withdrawal records.
-                if (storageKey !== existingRecording.storagePath) {
+                // Its row still names the audio it had, which was not
+                // touched; a blob uploaded beside it is an orphan.
+                if (!overwrites) {
                     try {
                         await storage.deleteFile(storageKey);
                     } catch (cleanupError) {
@@ -580,9 +594,10 @@ async function processRecording(
                 return { status: "skipped" };
             }
             if (!updated) {
-                // Best-effort cleanup of the orphaned blob.
+                // Best-effort cleanup of the orphaned blob, when one was
+                // written beside the recording's audio.
                 try {
-                    await storage.deleteFile(storageKey);
+                    if (!overwrites) await storage.deleteFile(storageKey);
                 } catch (cleanupError) {
                     console.error(
                         `Failed to clean up orphaned storage object ${storageKey} after concurrent delete:`,

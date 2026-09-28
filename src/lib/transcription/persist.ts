@@ -46,6 +46,12 @@ export interface UpsertTranscriptionArgs {
     /** Permit an explicit user action to replace a deliberately erased transcript. */
     allowReaped?: boolean;
     /**
+     * The summary source made from the text this write replaces, deleted
+     * with it in the same transaction, so it never outlives its text nor
+     * goes after the writer lost the right to change the recording.
+     */
+    dropSummaryOnReplace?: EnhancementSource;
+    /**
      * Who makes the change; defaults to `userId`. The organization account
      * on a shared recording, the owner otherwise (see `writerRefusal`).
      */
@@ -229,6 +235,20 @@ export async function upsertTranscription(
                     previous: storedSpeakerVersion(current),
                     next: speakerVersionOf({ source, model, text, turns }),
                 });
+                if (args.dropSummaryOnReplace) {
+                    await tx
+                        .delete(aiEnhancements)
+                        .where(
+                            and(
+                                eq(aiEnhancements.recordingId, recordingId),
+                                eq(aiEnhancements.userId, userId),
+                                eq(
+                                    aiEnhancements.source,
+                                    args.dropSummaryOnReplace,
+                                ),
+                            ),
+                        );
+                }
             } else {
                 await tx.insert(transcriptions).values({
                     recordingId,

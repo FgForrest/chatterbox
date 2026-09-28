@@ -93,7 +93,7 @@ vi.mock("@/lib/transcription/persist", () => ({
 }));
 
 import { db } from "@/db";
-import { aiEnhancements, transcriptSpeakers } from "@/db/schema";
+import { transcriptSpeakers } from "@/db/schema";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
@@ -202,9 +202,10 @@ describe("forced re-transcribe and speaker attributions", () => {
         expect(deletes.some((call) => call.table === transcriptSpeakers)).toBe(
             false,
         );
-        // The summary was made from the old text, so it goes.
-        expect(deletes.some((call) => call.table === aiEnhancements)).toBe(
-            true,
+        // The summary was made from the old text, so it goes, in the same
+        // write as the text.
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ dropSummaryOnReplace: "riffado" }),
         );
     });
 

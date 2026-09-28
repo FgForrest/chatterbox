@@ -2,31 +2,60 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
+import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 
 /**
  * Store a generated title as the recording's name, unless a person has set
  * one (`titleEditedAt`). Checked in the update itself, so a rename that
  * commits while the title was being generated wins. Returns whether the
  * title was stored; nothing that follows from a new title may run if not.
+ *
+ * The owner's run generates it, and a recording shared while the title was
+ * being generated is the organization account's to change: checked under
+ * the recording lock sharing takes, so that share wins too.
  */
 export async function storeGeneratedTitle(
     userId: string,
     recordingId: string,
     title: string,
 ): Promise<boolean> {
-    const stored = await db
-        .update(recordings)
-        .set({ filename: encryptText(title), updatedAt: new Date() })
-        .where(
-            and(
-                eq(recordings.id, recordingId),
-                eq(recordings.userId, userId),
-                isNull(recordings.deletedAt),
-                isNull(recordings.titleEditedAt),
-            ),
-        )
-        .returning({ id: recordings.id });
-    return stored.length > 0;
+    // Before the transaction; see `sharingOrgUserId`.
+    const orgUserId = await sharingOrgUserId();
+    return db.transaction(async (tx) => {
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .for("update");
+        if (
+            await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId: userId,
+                orgUserId,
+            })
+        ) {
+            return false;
+        }
+        const stored = await tx
+            .update(recordings)
+            .set({ filename: encryptText(title), updatedAt: new Date() })
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                    isNull(recordings.deletedAt),
+                    isNull(recordings.titleEditedAt),
+                ),
+            )
+            .returning({ id: recordings.id });
+        return stored.length > 0;
+    });
 }
 
 /**
