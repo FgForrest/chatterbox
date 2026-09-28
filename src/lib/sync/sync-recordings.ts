@@ -229,10 +229,7 @@ async function loadPlaudContentGaps(
             )
             .limit(1);
         if (existing) hasPlaudTranscript = true;
-        else
-            needsTranscript = !(
-                orgUserId && (await isRecordingShared(recordingId, orgUserId))
-            );
+        else needsTranscript = true;
     }
 
     let needsSummary = false;
@@ -251,6 +248,23 @@ async function loadPlaudContentGaps(
         if (!existing) needsSummary = true;
     }
 
+    // Shared, the owner's copy is frozen: Plaud's transcript would be
+    // refused, and its summary is imported only beside that transcript.
+    // Neither is a gap, so nothing is fetched from Plaud for them; the
+    // first sync after an unshare finds both again.
+    if (
+        !hasPlaudTranscript &&
+        (needsTranscript || needsSummary) &&
+        orgUserId &&
+        (await isRecordingShared(recordingId, orgUserId))
+    ) {
+        return {
+            needsTranscript: false,
+            needsSummary: false,
+            hasPlaudTranscript,
+        };
+    }
+
     return { needsTranscript, needsSummary, hasPlaudTranscript };
 }
 
@@ -267,14 +281,12 @@ async function hasUnseenPlaudContentGaps(
             and(
                 isNull(transcriptions.id),
                 isNull(recordings.transcriptReapedAt),
-                // Frozen while shared: not a gap this sync can fill.
-                orgUserId
-                    ? not(sharedRecordingCondition(orgUserId))
-                    : undefined,
             ),
             and(isNull(aiEnhancements.id), isNull(recordings.summaryReapedAt)),
         ),
     ];
+    // Frozen while shared: no gap this sync would fill.
+    if (orgUserId) conditions.push(not(sharedRecordingCondition(orgUserId)));
     if (seenRecordingIds.size > 0) {
         conditions.push(notInArray(recordings.id, [...seenRecordingIds]));
     }
