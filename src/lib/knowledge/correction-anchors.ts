@@ -11,8 +11,10 @@
  *
  * A transcript without times (a Plaud import whose turns all stand at 0)
  * has no timeline to search over: there a correction stays only where the
- * same turn, said by the same speaker, still has its words at the same
- * place, as through an unchanged re-import.
+ * turns are still the same ones (as many, each said by the same speaker)
+ * and its turn still has its words at the same place, as through an
+ * unchanged re-import or one with words edited. Turns added or removed
+ * shift every index, so nothing stays.
  */
 
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -159,6 +161,14 @@ export function remapCorrectionAnchors(
 ): (AnchorPosition | null)[] {
     if (!previousTurns?.length || !nextTurns?.length) {
         return anchors.map(() => null);
+    }
+    if (isUntimed(previousTurns) || isUntimed(nextTurns)) {
+        const sameTurns =
+            previousTurns.length === nextTurns.length &&
+            previousTurns.every(
+                (turn, index) => turn.speaker === nextTurns[index]?.speaker,
+            );
+        if (!sameTurns) return anchors.map(() => null);
     }
     const remap =
         isUntimed(previousTurns) || isUntimed(nextTurns)

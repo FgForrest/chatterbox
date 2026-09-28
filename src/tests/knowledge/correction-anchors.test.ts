@@ -197,6 +197,24 @@ describe("remapCorrectionAnchors", () => {
             ]);
         });
 
+        it("drops an anchor when turns were added or removed, whatever stands at its place", () => {
+            const said = [
+                turn(0, 0, "Tady Novák.", "speaker_1"),
+                turn(0, 0, "Jan, can you send it?", "speaker_2"),
+            ];
+            const jan = anchorOf(said, 1, "Jan");
+            // A pair inserted before: turn 1 is another sentence now.
+            const shifted = [
+                turn(0, 0, "Tady Novák.", "speaker_1"),
+                turn(0, 0, "Jan, bring the car.", "speaker_2"),
+                turn(0, 0, "Ok.", "speaker_1"),
+                turn(0, 0, "Jan, can you send it?", "speaker_2"),
+            ];
+            expect(remapCorrectionAnchors([jan], said, shifted)).toEqual([
+                null,
+            ]);
+        });
+
         it("drops an anchor whose turn another speaker now says", () => {
             const relabelled = [
                 untimed[0] as TranscriptTurn,
