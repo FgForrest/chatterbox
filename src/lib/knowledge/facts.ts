@@ -36,7 +36,10 @@ import {
     relationFits,
 } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
@@ -330,6 +333,7 @@ export async function confirmFactFromRecording(
         throw invalid("The time range is not valid", "startMs");
     }
     return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
         const { recordingId, revision, turns } = await lockTranscriptForChange(
             tx,
             { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
@@ -429,6 +433,7 @@ export async function confirmManualFact(
     args: FactArgs,
 ): Promise<string> {
     return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
         const factId = await confirmFactInTx(tx, {
             ...args,
             scopeUserId: actorUserId,

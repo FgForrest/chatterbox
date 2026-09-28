@@ -17,7 +17,11 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeople,
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
     scopesNamingInTx,
@@ -762,6 +766,7 @@ export async function addPersonNotes(
     const trimmed = notes.trim();
     if (!trimmed) return;
     await db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
         await appendOverlayNotes(tx, personId, userId, encryptText(trimmed));
         await bumpScopeInTx(tx, [userId]);
     });
@@ -828,18 +833,4 @@ export async function promotePersonInTx(
         .returning({ id: people.id });
     // Deleted since it was read: there is nobody to promote.
     return promoted?.id ?? null;
-}
-
-/**
- * Serialize promotions, so two recordings shared at once cannot both create
- * an Organization person for the same email, and a delete or merge cannot
- * act on a private person a share is promoting.
- *
- * Taken before any recording lock: a promotion may merge people, and a
- * merge locks the recordings that name them.
- */
-export async function lockOrgPeople(tx: Tx): Promise<void> {
-    await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext('riffado:org-people'))`,
-    );
 }

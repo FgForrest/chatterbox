@@ -21,6 +21,8 @@ vi.mock("@/db", () => ({
         update: vi.fn(),
         delete: vi.fn(),
         transaction: vi.fn(),
+        // The Organization-people lock a speaker change takes first.
+        execute: vi.fn().mockResolvedValue([]),
     },
 }));
 
@@ -192,6 +194,8 @@ describe("speakers route and ownership", () => {
             [{ revision: 0 }],
             // What the label answered before: nothing yet.
             [],
+            // The person named, as they are now: not merged away.
+            [{ id: "person-1", mergedIntoId: null }],
             [],
         );
         const values = vi.fn().mockReturnValue({

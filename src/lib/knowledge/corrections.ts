@@ -36,7 +36,10 @@ import {
     type CorrectionAnchor,
 } from "@/lib/knowledge/correction-anchors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 
@@ -127,6 +130,7 @@ export async function acceptCorrection(
     const { anchor, kind, actorUserId } = args;
     const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
     return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
         const { revision, turns, language, provider } =
             await lockTranscriptForChange(tx, args, args);
         if (revision !== args.revision) throw transcriptChanged();

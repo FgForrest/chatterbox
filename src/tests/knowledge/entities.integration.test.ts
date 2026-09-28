@@ -104,7 +104,7 @@ import {
     promoteEntityInTx,
     renameEntity,
 } from "@/lib/knowledge/entities";
-import { lockOrgPeople } from "@/lib/knowledge/people";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import {
     createOrgType,
     createPrivateType,

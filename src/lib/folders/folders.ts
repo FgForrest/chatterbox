@@ -14,7 +14,7 @@ import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import { lockOrgPeople } from "@/lib/knowledge/people";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import {
     publishKnowledgeInTx,

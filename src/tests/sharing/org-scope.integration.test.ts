@@ -127,11 +127,8 @@ import {
     lockForSpeakerChange,
 } from "@/lib/knowledge/attribution";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import {
-    deletePerson,
-    lockOrgPeople,
-    mergePeople,
-} from "@/lib/knowledge/people";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { deletePerson, mergePeople } from "@/lib/knowledge/people";
 import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { ensureOrgAccount } from "@/lib/org/account";
 import {

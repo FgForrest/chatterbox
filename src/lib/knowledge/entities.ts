@@ -28,8 +28,7 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { lockOrgPeople } from "@/lib/knowledge/people";
+import { lockOrgPeople, orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
     scopesNamingInTx,

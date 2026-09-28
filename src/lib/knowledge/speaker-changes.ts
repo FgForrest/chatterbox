@@ -9,6 +9,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transcriptSpeakers } from "@/db/schema";
+import { resolveTargetInTx } from "@/lib/knowledge/aliases";
 import {
     deleteSpeakerInTx,
     lockForSpeakerChange,
@@ -17,6 +18,7 @@ import {
     writeSpeakerInTx,
 } from "@/lib/knowledge/attribution";
 import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence";
+import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
@@ -66,7 +68,10 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
 export async function changeTranscriptSpeaker(
     args: SpeakerChangeArgs,
 ): Promise<string | null> {
-    return db.transaction((tx) => changeTranscriptSpeakerInTx(tx, args));
+    return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
+        return changeTranscriptSpeakerInTx(tx, args);
+    });
 }
 
 /**
@@ -140,7 +145,11 @@ async function answerSpeakerInTx(
         case "name": {
             let personId: string;
             if ("personId" in answer) {
-                personId = answer.personId;
+                personId = await currentPersonInTx(
+                    tx,
+                    actorUserId,
+                    answer.personId,
+                );
             } else {
                 personId = (
                     await createPersonInTx(tx, {
@@ -177,7 +186,27 @@ async function answerSpeakerInTx(
             await speakerChanged(null);
             return null;
         case "reject":
-            await rejectInTx(tx, { ...where, personId: answer.personId });
+            await rejectInTx(tx, {
+                ...where,
+                personId: await currentPersonInTx(
+                    tx,
+                    actorUserId,
+                    answer.personId,
+                ),
+            });
             return null;
     }
+}
+
+/**
+ * The person an answer names, as they are now: one merged away since the
+ * caller looked them up is the one they were folded into.
+ */
+async function currentPersonInTx(
+    tx: Tx,
+    actorUserId: string,
+    personId: string,
+): Promise<string> {
+    const target = await resolveTargetInTx(tx, actorUserId, { personId });
+    return "personId" in target ? target.personId : personId;
 }

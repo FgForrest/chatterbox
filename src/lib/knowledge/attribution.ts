@@ -10,7 +10,10 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { mapLabels, remapAttributionRows } from "@/lib/knowledge/label-mapping";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import {
     type SpeakerVersion,
     speakerKey,
@@ -137,6 +140,9 @@ export async function copyMatchingSpeakerAttributions({
     writer,
 }: CopyMatchingSpeakerAttributionsArgs): Promise<number> {
     return db.transaction(async (tx) => {
+        // The people copied are named where a merge may be folding them
+        // away: after it, never meanwhile (`lockOrgPeopleShared`).
+        await lockOrgPeopleShared(tx);
         // Held against a concurrent rewrite of either transcript, which
         // locks the recording for update, and against a share or a
         // withdrawal.

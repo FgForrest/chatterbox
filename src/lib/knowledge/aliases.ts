@@ -23,7 +23,10 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { entitiesVisibleTo } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 
@@ -159,6 +162,7 @@ export async function addAlias(
 ): Promise<string> {
     const clean = cleanText(text);
     return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
         const resolved = await resolveTargetInTx(tx, actorUserId, target);
         const [row] = await tx
             .insert(knowledgeAliases)
