@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
     countReapCandidates,
-    loadOrgRetentionContext,
     type RetentionPolicy,
 } from "@/db/queries/retention";
 import { requireApiSession } from "@/lib/auth-server";
@@ -36,15 +35,14 @@ export const GET = apiHandler(async (request: Request) => {
         return days;
     };
 
-    // The organization account's policy only ever removes the Organization
-    // view's transcripts and summaries; everyone else's audio period is
-    // held back by the Organization while a recording is shared. The preview
-    // counts under the same rules the sweep deletes by.
+    // The organization account's policy governs shared recordings, and
+    // everyone else's the rest of their own; neither touches the other's.
+    // The preview counts under the same rules the sweep deletes by.
     const isOrg = await isOrgAccount(session.user.id);
     const policy: RetentionPolicy = {
         userId: session.user.id,
         remoteOriginalDays: isOrg ? null : readDays("remoteOriginalDays"),
-        audioDays: isOrg ? null : readDays("localAudioDays"),
+        audioDays: readDays("localAudioDays"),
         transcriptDays: readDays("localTranscriptDays"),
         summaryDays: readDays("localSummaryDays"),
         isOrg,
@@ -59,9 +57,11 @@ export const GET = apiHandler(async (request: Request) => {
         return NextResponse.json({ count: 0 });
     }
 
-    const orgUserId = isOrg ? null : await getOrgUserId();
-    const org = orgUserId ? await loadOrgRetentionContext(orgUserId) : null;
-    const count = await countReapCandidates(policy, Date.now(), org);
+    const orgUserId = await getOrgUserId();
+    if (isOrg && session.user.id !== orgUserId) {
+        return NextResponse.json({ count: 0 });
+    }
+    const count = await countReapCandidates(policy, Date.now(), orgUserId);
 
     return NextResponse.json({ count });
 });

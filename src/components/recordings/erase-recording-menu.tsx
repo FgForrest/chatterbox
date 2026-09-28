@@ -14,6 +14,7 @@ import {
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
+import { WithdrawRetentionWarning } from "@/components/recordings/withdraw-retention-warning";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -302,6 +303,11 @@ export function EraseRecordingMenu({
                                         "This recording is shared with the Organization. It will be taken out of the Organization first, and colleagues will no longer see it.",
                                     )}
                                 </p>
+                            )}
+                            {withdraws && (
+                                <WithdrawRetentionWarning
+                                    recordingId={recording.id}
+                                />
                             )}
                             {requiresTitle && (
                                 <div className="space-y-2">

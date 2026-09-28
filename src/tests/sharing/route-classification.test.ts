@@ -45,10 +45,13 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         DELETE: "view",
     },
     // Gated as `view`, and the private view is the only one it accepts:
-    // topics are written onto the viewer's own transcript row.
+    // topics are written onto the owner's transcript row, and not while
+    // the recording is shared.
     "recordings/[id]/topics/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcribe/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcription/from-browser/route.ts": { POST: "owner" },
+    // The private view, which is the owner's alone.
+    "recordings/[id]/withdraw-preview/route.ts": { GET: "view" },
     "jobs/[id]/route.ts": { GET: "job" },
     "folders/route.ts": { GET: "folders", POST: "folders" },
     "folders/[id]/route.ts": { PATCH: "folders", DELETE: "folders" },

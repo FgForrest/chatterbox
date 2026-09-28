@@ -19,6 +19,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 /** One kind of data a retention policy can remove. */
 export type RetentionKind =
@@ -34,31 +35,20 @@ export interface RetentionPolicy {
     transcriptDays: number | null;
     summaryDays: number | null;
     /**
-     * The organization account's policy. It governs the Organization view's
-     * transcripts and summaries -- rows it owns, on recordings it does not --
-     * and never an owner's audio or Plaud original.
+     * The organization account's policy. A shared recording is one
+     * recording, the organization account's to change, so while it is
+     * shared this policy governs its audio, transcripts and summaries --
+     * its owner's rows -- and its owner's policy none of them. It never
+     * touches a Plaud original, which is the owner's Plaud account. After a
+     * withdrawal the owner's policy applies at once.
      */
     isOrg?: boolean;
 }
 
-/**
- * What the Organization means for an owner's audio.
- *
- * While a recording is shared its audio serves everyone, so it is kept until
- * both the owner's and the organization's audio periods have passed -- the
- * longer wins, and a missing organization period means "keep". After an
- * unshare the owner's period applies again, but only after a grace period.
- */
-export interface OrgRetentionContext {
-    orgUserId: string;
-    audioDays: number | null;
-}
-
-/** Days an unshared recording's audio is still kept for, whatever the owner's policy. */
-export const UNSHARE_AUDIO_GRACE_DAYS = 7;
-
 export interface ReapCandidate {
     id: string;
+    /** The recording's owner, whose rows and markers are reaped. */
+    userId: string;
     storagePath: string;
     startTime: Date;
     deviceSn: string;
@@ -67,11 +57,6 @@ export interface ReapCandidate {
     audioReapedAt: Date | null;
     transcriptReapedAt: Date | null;
     summaryReapedAt: Date | null;
-    /**
-     * Whether the owner's audio period may act on this recording now, given
-     * the Organization. Absent means yes.
-     */
-    audioReleasable?: boolean;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -188,26 +173,39 @@ export async function listArmedRetentionPolicies(
         const policy = effectivePolicy(row);
         if (!policy) return [];
         if (row.role !== "org") return [policy];
-        // The organization owns no audio and no Plaud originals; its audio
-        // period only extends owners' audio (see `OrgRetentionContext`).
+        // Plaud originals are their owners' Plaud accounts.
         const orgPolicy: RetentionPolicy = {
             ...policy,
             remoteOriginalDays: null,
-            audioDays: null,
             isOrg: true,
         };
-        return orgPolicy.transcriptDays !== null ||
+        return orgPolicy.audioDays !== null ||
+            orgPolicy.transcriptDays !== null ||
             orgPolicy.summaryDays !== null
             ? [orgPolicy]
             : [];
     });
 }
 
-/** The organization's audio period, read from its own settings. */
-export async function loadOrgRetentionContext(
-    orgUserId: string,
-): Promise<OrgRetentionContext> {
-    const [row] = await db
+/** One kind a withdrawal would hand to its owner's policy already past due. */
+export interface DueOnWithdrawal {
+    kind: Exclude<RetentionKind, "remoteOriginal">;
+    days: number;
+}
+
+/**
+ * What the owner's retention policy would remove from a shared recording
+ * at its next sweep, were it withdrawn now: the kinds past the owner's
+ * periods that are still there. The withdraw confirmation warns with it,
+ * as nothing is kept past the owner's policy once the Organization lets
+ * go of the recording.
+ */
+export async function dueOnWithdrawal(
+    recordingId: string,
+    ownerUserId: string,
+    now = Date.now(),
+): Promise<DueOnWithdrawal[]> {
+    const [settings] = await db
         .select({
             userId: userSettings.userId,
             retentionRemoteOriginalDays:
@@ -223,10 +221,63 @@ export async function loadOrgRetentionContext(
             retentionDeleteSummary: userSettings.retentionDeleteSummary,
         })
         .from(userSettings)
-        .where(eq(userSettings.userId, orgUserId))
+        .where(eq(userSettings.userId, ownerUserId))
         .limit(1);
-    const policy = row ? effectivePolicy(row) : null;
-    return { orgUserId, audioDays: policy?.audioDays ?? null };
+    const policy = settings ? effectivePolicy(settings) : null;
+    if (!policy) return [];
+    const [recording] = await db
+        .select({
+            startTime: recordings.startTime,
+            audioReapedAt: recordings.audioReapedAt,
+            transcriptReapedAt: recordings.transcriptReapedAt,
+            summaryReapedAt: recordings.summaryReapedAt,
+        })
+        .from(recordings)
+        .where(
+            and(
+                eq(recordings.id, recordingId),
+                eq(recordings.userId, ownerUserId),
+                isNull(recordings.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!recording) return [];
+    const due = (days: number | null): days is number =>
+        days !== null &&
+        recording.startTime.getTime() < retentionCutoff(days, now).getTime();
+
+    const found: DueOnWithdrawal[] = [];
+    if (due(policy.audioDays) && recording.audioReapedAt === null) {
+        found.push({ kind: "audio", days: policy.audioDays });
+    }
+    if (due(policy.transcriptDays) && recording.transcriptReapedAt === null) {
+        const [row] = await db
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, recordingId),
+                    eq(transcriptions.userId, ownerUserId),
+                ),
+            )
+            .limit(1);
+        if (row)
+            found.push({ kind: "transcript", days: policy.transcriptDays });
+    }
+    if (due(policy.summaryDays) && recording.summaryReapedAt === null) {
+        const [row] = await db
+            .select({ id: aiEnhancements.id })
+            .from(aiEnhancements)
+            .where(
+                and(
+                    eq(aiEnhancements.recordingId, recordingId),
+                    eq(aiEnhancements.userId, ownerUserId),
+                ),
+            )
+            .limit(1);
+        if (row) found.push({ kind: "summary", days: policy.summaryDays });
+    }
+    return found;
 }
 
 function sharedWithOrgCondition(orgUserId: string) {
@@ -238,38 +289,6 @@ function sharedWithOrgCondition(orgUserId: string) {
         where ${recordingFolderAssignments.recordingId} = ${recordings.id}
             and ${recordingFolders.userId} = ${orgUserId}
     )`;
-}
-
-/**
- * SQL predicate: the owner's audio period may act on the recording now.
- *
- * Unshared and past the grace period; or shared and past the
- * organization's audio period too.
- */
-function audioReleasableCondition(
-    org: OrgRetentionContext | null | undefined,
-    now: number,
-) {
-    if (!org) return sql`true`;
-    const shared = sharedWithOrgCondition(org.orgUserId);
-    const graceCutoff = retentionCutoff(UNSHARE_AUDIO_GRACE_DAYS, now);
-    const released = and(
-        sql`not ${shared}`,
-        or(
-            isNull(recordings.unsharedAt),
-            lt(recordings.unsharedAt, graceCutoff),
-        ),
-    );
-    if (org.audioDays === null) return released ?? sql`true`;
-    return (
-        or(
-            released,
-            and(
-                shared,
-                lt(recordings.startTime, retentionCutoff(org.audioDays, now)),
-            ),
-        ) ?? sql`true`
-    );
 }
 
 /**
@@ -292,8 +311,15 @@ function audioReleasableCondition(
 function reapCandidateWhere(
     policy: RetentionPolicy,
     now: number,
-    org?: OrgRetentionContext | null,
+    orgUserId?: string | null,
 ) {
+    // A shared recording's audio, transcripts and summaries are the
+    // Organization's policy's, and only those: see `RetentionPolicy.isOrg`.
+    const governed = policy.isOrg
+        ? sharedWithOrgCondition(policy.userId)
+        : orgUserId
+          ? sql`not ${sharedWithOrgCondition(orgUserId)}`
+          : undefined;
     const stillHasSomething = [];
 
     if (policy.remoteOriginalDays !== null) {
@@ -317,7 +343,7 @@ function reapCandidateWhere(
                     retentionCutoff(policy.audioDays, now),
                 ),
                 isNull(recordings.audioReapedAt),
-                audioReleasableCondition(org, now),
+                governed,
             ),
         );
     }
@@ -328,11 +354,8 @@ function reapCandidateWhere(
                     recordings.startTime,
                     retentionCutoff(policy.transcriptDays, now),
                 ),
-                // The markers describe the owner's rows; the organization's
-                // rows are selected by existing alone.
-                policy.isOrg
-                    ? undefined
-                    : isNull(recordings.transcriptReapedAt),
+                isNull(recordings.transcriptReapedAt),
+                governed,
                 exists(
                     db
                         .select({ id: transcriptions.id })
@@ -340,7 +363,7 @@ function reapCandidateWhere(
                         .where(
                             and(
                                 eq(transcriptions.recordingId, recordings.id),
-                                eq(transcriptions.userId, policy.userId),
+                                eq(transcriptions.userId, recordings.userId),
                             ),
                         ),
                 ),
@@ -354,7 +377,8 @@ function reapCandidateWhere(
                     recordings.startTime,
                     retentionCutoff(policy.summaryDays, now),
                 ),
-                policy.isOrg ? undefined : isNull(recordings.summaryReapedAt),
+                isNull(recordings.summaryReapedAt),
+                governed,
                 exists(
                     db
                         .select({ id: aiEnhancements.id })
@@ -362,7 +386,7 @@ function reapCandidateWhere(
                         .where(
                             and(
                                 eq(aiEnhancements.recordingId, recordings.id),
-                                eq(aiEnhancements.userId, policy.userId),
+                                eq(aiEnhancements.userId, recordings.userId),
                             ),
                         ),
                 ),
@@ -375,9 +399,8 @@ function reapCandidateWhere(
     // would scan the table to return no rows.
     if (stillHasSomething.length === 0) return null;
 
-    // The organization's rows sit on other people's recordings; they are
-    // selected by the rows' owner, which the transcript and summary tests
-    // above already do.
+    // The Organization's recordings are other people's; they are selected
+    // by being shared, above.
     return and(
         policy.isOrg ? undefined : eq(recordings.userId, policy.userId),
         isNull(recordings.deletedAt),
@@ -385,18 +408,23 @@ function reapCandidateWhere(
     );
 }
 
+/**
+ * `orgUserId`: the organization account an owner's policy yields shared
+ * recordings to, or null when this instance shows no Organization.
+ */
 export async function listReapCandidates(
     policy: RetentionPolicy,
     now: Date,
     limit: number,
-    org?: OrgRetentionContext | null,
+    orgUserId?: string | null,
 ): Promise<ReapCandidate[]> {
-    const where = reapCandidateWhere(policy, now.getTime(), org);
+    const where = reapCandidateWhere(policy, now.getTime(), orgUserId);
     if (where === null) return [];
 
     return db
         .select({
             id: recordings.id,
+            userId: recordings.userId,
             storagePath: recordings.storagePath,
             startTime: recordings.startTime,
             deviceSn: recordings.deviceSn,
@@ -405,9 +433,6 @@ export async function listReapCandidates(
             audioReapedAt: recordings.audioReapedAt,
             transcriptReapedAt: recordings.transcriptReapedAt,
             summaryReapedAt: recordings.summaryReapedAt,
-            // Selected alongside so the reaper applies the exact condition
-            // that chose the row: it may have been chosen for its transcript.
-            audioReleasable: sql<boolean>`${audioReleasableCondition(org, now.getTime())}`,
         })
         .from(recordings)
         .where(where)
@@ -415,38 +440,99 @@ export async function listReapCandidates(
         .limit(limit);
 }
 
-/** Delete this user's transcripts for a recording. Returns how many went. */
-export async function deleteTranscriptsForRecording(
-    recordingId: string,
-    userId: string,
-): Promise<number> {
-    const rows = await db
-        .delete(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, userId),
-            ),
-        )
-        .returning({ id: transcriptions.id });
-    return rows.length;
+/**
+ * Which policy may reap a recording: the owner's while it is not shared,
+ * the organization account's while it is (`RetentionPolicy.isOrg`).
+ * `orgUserId` is that account, or null when this instance shows none.
+ */
+export interface RetentionGovernor {
+    isOrg: boolean;
+    orgUserId: string | null;
 }
 
-/** Delete this user's summary for a recording. Returns how many went. */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Lock the recording, as sharing and withdrawing do, and say whether the
+ * governor still governs it: a share or a withdrawal that landed after the
+ * sweep chose it wins, and the policy that chose it leaves it alone.
+ */
+async function lockGovernedInTx(
+    tx: Tx,
+    recordingId: string,
+    governor: RetentionGovernor,
+): Promise<boolean> {
+    await tx
+        .select({ id: recordings.id })
+        .from(recordings)
+        .where(eq(recordings.id, recordingId))
+        .for("update");
+    if (!governor.orgUserId) return !governor.isOrg;
+    const shared = await isRecordingShared(recordingId, governor.orgUserId, tx);
+    return shared === governor.isOrg;
+}
+
+/**
+ * Whether the governor governs the recording right now, outside a
+ * transaction: for the audio file, whose deletion is not one.
+ */
+export async function recordingGovernedBy(
+    recordingId: string,
+    governor: RetentionGovernor,
+): Promise<boolean> {
+    if (!governor.orgUserId) return !governor.isOrg;
+    return (
+        (await isRecordingShared(recordingId, governor.orgUserId)) ===
+        governor.isOrg
+    );
+}
+
+/**
+ * Delete a recording's transcripts, which its owner holds, if the governor
+ * still governs it. Returns how many went.
+ */
+export async function deleteTranscriptsForRecording(
+    recordingId: string,
+    ownerUserId: string,
+    governor: RetentionGovernor,
+): Promise<number> {
+    return db.transaction(async (tx) => {
+        if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        const rows = await tx
+            .delete(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, recordingId),
+                    eq(transcriptions.userId, ownerUserId),
+                ),
+            )
+            .returning({ id: transcriptions.id });
+        return rows.length;
+    });
+}
+
+/**
+ * Delete a recording's summaries, which its owner holds, if the governor
+ * still governs it. Returns how many went.
+ */
 export async function deleteSummaryForRecording(
     recordingId: string,
-    userId: string,
+    ownerUserId: string,
+    governor: RetentionGovernor,
 ): Promise<number> {
-    const rows = await db
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, userId),
-            ),
-        )
-        .returning({ id: aiEnhancements.id });
-    return rows.length;
+    return db.transaction(async (tx) => {
+        if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        const rows = await tx
+            .delete(aiEnhancements)
+            .where(
+                and(
+                    eq(aiEnhancements.recordingId, recordingId),
+                    eq(aiEnhancements.userId, ownerUserId),
+                ),
+            )
+            .returning({ id: aiEnhancements.id });
+        return rows.length;
+    });
 }
 
 /**
@@ -562,9 +648,9 @@ export async function releaseRemoteOriginalReapClaim(
 export async function countReapCandidates(
     policy: RetentionPolicy,
     now = Date.now(),
-    org?: OrgRetentionContext | null,
+    orgUserId?: string | null,
 ): Promise<number> {
-    const where = reapCandidateWhere(policy, now, org);
+    const where = reapCandidateWhere(policy, now, orgUserId);
     if (where === null) return 0;
 
     const [row] = await db

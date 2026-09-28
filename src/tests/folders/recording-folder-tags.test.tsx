@@ -114,8 +114,12 @@ describe("recording folder tags", () => {
         expect(screen.queryByRole("button", { name: "Meetings" })).toBeNull();
     });
 
-    it("lets the owner withdraw a shared recording", () => {
+    it("lets the owner withdraw a shared recording, once confirmed with what their retention will delete", async () => {
         const onRemove = vi.fn().mockResolvedValue(undefined);
+        const fetchMock = vi.fn(async () =>
+            Response.json({ due: [{ kind: "audio", days: 30 }] }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
         render(
             <RecordingFolderTags
                 recordingId="rec-1"
@@ -130,6 +134,21 @@ describe("recording folder tags", () => {
         fireEvent.click(
             screen.getByRole("button", { name: "Remove from Sales" }),
         );
+        // Its last Organization folder: leaving it withdraws the recording.
+        expect(onRemove).not.toHaveBeenCalled();
+        expect((await screen.findByRole("alert")).textContent).toContain(
+            "audio older than 30 days",
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/rec-1/withdraw-preview",
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Take out of the Organization",
+            }),
+        );
         expect(onRemove).toHaveBeenCalledWith("rec-1", "sales");
+        vi.unstubAllGlobals();
     });
 });

@@ -1105,10 +1105,6 @@ async function endSharingIfUnfiled(
 
     const now = new Date();
     await tx
-        .update(recordings)
-        .set({ unsharedAt: now })
-        .where(eq(recordings.id, recordingId));
-    await tx
         .update(asyncJobs)
         .set({
             status: "failed",

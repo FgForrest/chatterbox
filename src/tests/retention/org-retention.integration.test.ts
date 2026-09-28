@@ -80,9 +80,9 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 
 import {
+    dueOnWithdrawal,
     listArmedRetentionPolicies,
     listReapCandidates,
-    loadOrgRetentionContext,
     type RetentionPolicy,
 } from "@/db/queries/retention";
 import { encryptText } from "@/lib/encryption/fields";
@@ -166,18 +166,16 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
                 storagePath: `${OWNER}/old.mp3`,
                 plaudVersion: "1",
             });
-        for (const userId of [OWNER, orgUserId]) {
-            await db()
-                .insert(transcriptions)
-                .values({
-                    recordingId: REC,
-                    userId,
-                    text: encryptText("text"),
-                    provider: "openai",
-                    model: "whisper-1",
-                    source: "riffado",
-                });
-        }
+        await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                text: encryptText("text"),
+                provider: "openai",
+                model: "whisper-1",
+                source: "riffado",
+            });
         await addRecordingToFolder({
             userId: OWNER,
             recordingId: REC,
@@ -193,114 +191,170 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
         summaryDays: null,
     };
 
-    async function setOrgAudioDays(days: number | null) {
-        await db()
-            .update(userSettings)
-            .set({ retentionLocalAudioDays: days })
-            .where(eq(userSettings.userId, orgUserId));
-    }
+    const ownerAll30: RetentionPolicy = {
+        ...ownerAudio30,
+        transcriptDays: 30,
+        summaryDays: 30,
+    };
 
-    it("keeps shared audio when the organization has no audio period", async () => {
-        const org = await loadOrgRetentionContext(orgUserId);
-        expect(
-            await listReapCandidates(ownerAudio30, new Date(), 10, org),
-        ).toEqual([]);
-    });
-
-    it("lets the longer of the two audio periods win while shared", async () => {
-        await setOrgAudioDays(90);
-        let org = await loadOrgRetentionContext(orgUserId);
-        expect(
-            await listReapCandidates(ownerAudio30, new Date(), 10, org),
-        ).toEqual([]);
-
-        await setOrgAudioDays(45);
-        org = await loadOrgRetentionContext(orgUserId);
-        const [candidate] = await listReapCandidates(
-            ownerAudio30,
-            new Date(),
-            10,
-            org,
-        );
-        expect(candidate?.audioReleasable).toBe(true);
-        const storage = fakeStorage();
-        const outcome = await reapRecording(
-            storage,
-            ownerAudio30,
-            candidate as NonNullable<typeof candidate>,
-        );
-        expect(outcome.reaped).toEqual(["audio"]);
-    });
-
-    it("waits out the grace period after an unshare", async () => {
-        await unshareRecording(OWNER, REC);
-        const org = await loadOrgRetentionContext(orgUserId);
-        expect(
-            await listReapCandidates(ownerAudio30, new Date(), 10, org),
-        ).toEqual([]);
-        expect(
-            await listReapCandidates(
-                ownerAudio30,
-                new Date(Date.now() + 8 * DAY),
-                10,
-                org,
-            ),
-        ).toHaveLength(1);
-    });
-
-    it("does not reap shared audio when the recording is due for another kind", async () => {
-        const both: RetentionPolicy = { ...ownerAudio30, transcriptDays: 30 };
-        const org = await loadOrgRetentionContext(orgUserId);
-        const [candidate] = await listReapCandidates(both, new Date(), 10, org);
-        expect(candidate?.audioReleasable).toBe(false);
-        const storage = fakeStorage();
-        const outcome = await reapRecording(
-            storage,
-            both,
-            candidate as NonNullable<typeof candidate>,
-        );
-        expect(outcome.reaped).toEqual(["transcript"]);
-        expect(storage.deleted).toEqual([]);
-        const left = await db().select().from(transcriptions);
-        expect(left.map((row) => row.userId)).toEqual([orgUserId]);
-    });
-
-    it("lets the organization's policy remove only the Organization view's rows", async () => {
+    async function orgPolicy(days: {
+        audio?: number;
+        transcript?: number;
+    }): Promise<RetentionPolicy> {
         await db()
             .update(userSettings)
             .set({
-                retentionLocalTranscriptDays: 30,
-                retentionLocalAudioDays: 1,
+                retentionLocalAudioDays: days.audio ?? null,
+                retentionLocalTranscriptDays: days.transcript ?? null,
                 retentionRemoteOriginalDays: 1,
             })
             .where(eq(userSettings.userId, orgUserId));
-        const [orgPolicy] = (await listArmedRetentionPolicies(10)).filter(
-            (policy) => policy.isOrg,
+        const [policy] = (await listArmedRetentionPolicies(10)).filter(
+            (candidate) => candidate.isOrg,
         );
-        expect(orgPolicy).toMatchObject({
-            audioDays: null,
+        return policy as RetentionPolicy;
+    }
+
+    async function markers() {
+        const [recording] = await db()
+            .select({
+                audio: recordings.audioReapedAt,
+                transcript: recordings.transcriptReapedAt,
+            })
+            .from(recordings)
+            .where(eq(recordings.id, REC));
+        return {
+            audio: recording?.audio !== null,
+            transcript: recording?.transcript !== null,
+        };
+    }
+
+    it("leaves a shared recording to the Organization's policy, whatever the owner's says", async () => {
+        expect(
+            await listReapCandidates(ownerAll30, new Date(), 10, orgUserId),
+        ).toEqual([]);
+        // The owner's Plaud original is theirs, shared or not.
+        expect(
+            await listReapCandidates(
+                { ...ownerAll30, remoteOriginalDays: 30 },
+                new Date(),
+                10,
+                orgUserId,
+            ),
+        ).toEqual([]);
+    });
+
+    it("lets the Organization's policy reap a shared recording's audio and rows, and mark them", async () => {
+        const policy = await orgPolicy({ audio: 45, transcript: 30 });
+        // Plaud originals are their owners' Plaud accounts.
+        expect(policy).toMatchObject({
             remoteOriginalDays: null,
+            audioDays: 45,
             transcriptDays: 30,
         });
         const [candidate] = await listReapCandidates(
-            orgPolicy as RetentionPolicy,
+            policy,
             new Date(),
             10,
+            orgUserId,
         );
         const storage = fakeStorage();
         const outcome = await reapRecording(
             storage,
-            orgPolicy as RetentionPolicy,
+            policy,
             candidate as NonNullable<typeof candidate>,
+            new Date(),
+            orgUserId,
         );
-        expect(outcome.reaped).toEqual(["transcript"]);
+
+        expect(outcome.reaped.sort()).toEqual(["audio", "transcript"]);
+        expect(storage.deleted).toEqual([`${OWNER}/old.mp3`]);
+        expect(await db().select().from(transcriptions)).toEqual([]);
+        // The markers describe the one recording, so its owner's sync and
+        // auto-transcription leave it alone after a withdrawal too.
+        expect(await markers()).toEqual({ audio: true, transcript: true });
+    });
+
+    it("reaps nothing of a recording the Organization no longer has", async () => {
+        const policy = await orgPolicy({ transcript: 30 });
+        await unshareRecording(OWNER, REC);
+
+        expect(
+            await listReapCandidates(policy, new Date(), 10, orgUserId),
+        ).toEqual([]);
+    });
+
+    it("applies the owner's policy at once after a withdrawal", async () => {
+        await unshareRecording(OWNER, REC);
+
+        const [candidate] = await listReapCandidates(
+            ownerAll30,
+            new Date(),
+            10,
+            orgUserId,
+        );
+        const storage = fakeStorage();
+        const outcome = await reapRecording(
+            storage,
+            ownerAll30,
+            candidate as NonNullable<typeof candidate>,
+            new Date(),
+            orgUserId,
+        );
+        expect(outcome.reaped.sort()).toEqual(["audio", "transcript"]);
+    });
+
+    it("leaves a recording shared after the sweep chose it", async () => {
+        await unshareRecording(OWNER, REC);
+        const [candidate] = await listReapCandidates(
+            ownerAll30,
+            new Date(),
+            10,
+            orgUserId,
+        );
+        // Shared again between the sweep's choice and its deletes.
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: REC,
+            folderId: orgRootId,
+        });
+
+        const storage = fakeStorage();
+        const outcome = await reapRecording(
+            storage,
+            ownerAll30,
+            candidate as NonNullable<typeof candidate>,
+            new Date(),
+            orgUserId,
+        );
+
+        expect(outcome.reaped).toEqual([]);
         expect(storage.deleted).toEqual([]);
-        const left = await db().select().from(transcriptions);
-        expect(left.map((row) => row.userId)).toEqual([OWNER]);
-        const [recording] = await db()
-            .select()
-            .from(recordings)
-            .where(eq(recordings.id, REC));
-        expect(recording?.transcriptReapedAt).toBeNull();
+        expect(await db().select().from(transcriptions)).toHaveLength(1);
+        expect(await markers()).toEqual({ audio: false, transcript: false });
+    });
+    it("tells the owner what their policy will delete once the recording is withdrawn", async () => {
+        await db()
+            .insert(userSettings)
+            .values({
+                userId: OWNER,
+                retentionLocalAudioDays: 30,
+                retentionLocalTranscriptDays: 90,
+                retentionLocalSummaryDays: 30,
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: {
+                    retentionLocalAudioDays: 30,
+                    retentionLocalTranscriptDays: 90,
+                    retentionLocalSummaryDays: 30,
+                },
+            });
+
+        // 60 days old: past the audio period, not the transcript's; there
+        // is no summary to delete.
+        expect(await dueOnWithdrawal(REC, OWNER)).toEqual([
+            { kind: "audio", days: 30 },
+        ]);
     });
 });

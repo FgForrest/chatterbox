@@ -19,6 +19,9 @@ vi.mock("@/db/queries/retention", () => ({
         claimRemoteOriginalReap(...args),
     releaseRemoteOriginalReapClaim: (...args: unknown[]) =>
         releaseRemoteOriginalReapClaim(...args),
+    // Whether a policy governs a shared recording is tested against a real
+    // database (`org-retention.integration.test.ts`).
+    recordingGovernedBy: async () => true,
 }));
 vi.mock("@/lib/recordings/erase", () => ({
     movePlaudRecordingToTrash: (...args: unknown[]) =>
@@ -45,6 +48,7 @@ function policy(overrides: Partial<RetentionPolicy> = {}): RetentionPolicy {
 function candidate(overrides: Partial<ReapCandidate> = {}): ReapCandidate {
     return {
         id: "rec-1",
+        userId: "user-1",
         storagePath: "user-1/Board meeting.mp3",
         startTime: new Date("2026-07-01T00:00:00.000Z"),
         deviceSn: "plaud-device-1",
@@ -190,10 +194,12 @@ describe("reapRecording", () => {
         expect(deleteTranscriptsForRecording).toHaveBeenCalledWith(
             "rec-1",
             "user-1",
+            { isOrg: false, orgUserId: null },
         );
         expect(deleteSummaryForRecording).toHaveBeenCalledWith(
             "rec-1",
             "user-1",
+            { isOrg: false, orgUserId: null },
         );
     });
 

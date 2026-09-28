@@ -2,7 +2,17 @@
 
 import { Folder, FolderInput, FolderPlus, Users, X } from "lucide-react";
 import { useExtracted } from "next-intl";
+import { useState } from "react";
+import { WithdrawRetentionWarning } from "@/components/recordings/withdraw-retention-warning";
 import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -50,6 +60,11 @@ export function RecordingFolderTags({
     onMove,
 }: RecordingFolderTagsProps) {
     const i18n = useExtracted();
+    // The Organization folder whose removal would withdraw the recording,
+    // while its owner confirms.
+    const [withdrawing, setWithdrawing] = useState<RecordingFolder | null>(
+        null,
+    );
     const label = (folder: RecordingFolder) =>
         folder.parentId === null && folder.scope === "org"
             ? i18n("Organization")
@@ -104,6 +119,16 @@ export function RecordingFolderTags({
                         <button
                             type="button"
                             onClick={() => {
+                                // Its last Organization folder: leaving it
+                                // withdraws the recording, which is
+                                // confirmed first.
+                                if (
+                                    folder.scope === "org" &&
+                                    assignedOrg.length === 1
+                                ) {
+                                    setWithdrawing(folder);
+                                    return;
+                                }
                                 void onRemove(recordingId, folder.id).catch(
                                     () => {},
                                 );
@@ -220,6 +245,51 @@ export function RecordingFolderTags({
                     </DropdownMenuContent>
                 </DropdownMenu>
             )}
+            <Dialog
+                open={withdrawing !== null}
+                onOpenChange={(open) => {
+                    if (!open) setWithdrawing(null);
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {i18n(
+                                "Take this recording out of the Organization?",
+                            )}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {i18n(
+                                "Colleagues will no longer see it. You get it back as the Organization left it, and can change it again.",
+                            )}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {withdrawing && (
+                        <WithdrawRetentionWarning recordingId={recordingId} />
+                    )}
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setWithdrawing(null)}
+                        >
+                            {i18n("Cancel")}
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                const folder = withdrawing;
+                                setWithdrawing(null);
+                                if (folder) {
+                                    void onRemove(recordingId, folder.id).catch(
+                                        () => {},
+                                    );
+                                }
+                            }}
+                        >
+                            {i18n("Take out of the Organization")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </fieldset>
     );
 }
