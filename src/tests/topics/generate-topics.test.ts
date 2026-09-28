@@ -87,6 +87,17 @@ vi.mock("@/db", () => {
         },
     };
 });
+// Sharing is tested against a real database (`src/tests/sharing/`); here
+// every run is the owner's, on the private view.
+vi.mock("@/lib/sharing/run-context", () => ({
+    resolveRunContext: async (actorUserId: string) => ({
+        view: "private",
+        actorUserId,
+        ownerUserId: actorUserId,
+        contentUserId: actorUserId,
+        settingsUserId: actorUserId,
+    }),
+}));
 // Sharing is tested against a real database (`src/tests/sharing/`).
 vi.mock("@/lib/sharing/writer", () => ({
     contentWriterRefusal: async () => null,

@@ -256,9 +256,9 @@ export function TranscriptionPanel({
         [activeTranscript],
     );
     // Topics are anchored to timed turns and written onto the transcript
-    // row, by its owner on the private view.
+    // row, by whoever may change it: its owner on the private view, the
+    // organization account on the Organization view while shared.
     const canDetectTopics =
-        !orgView &&
         !readOnly &&
         (activeTranscript?.source === "plaud" ||
             activeTranscript?.source === "riffado") &&
@@ -272,6 +272,7 @@ export function TranscriptionPanel({
         activeTranscript?.source,
         activeTranscript?.topics,
         canDetectTopics,
+        view,
     );
     const transcriptSectionRef = useRef<HTMLElement>(null);
     // A fresh object per jump, so jumping to the same topic twice scrolls

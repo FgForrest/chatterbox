@@ -20,9 +20,11 @@ import {
 } from "vitest";
 import {
     aiEnhancements,
+    apiCredentials,
     recordingFolders,
     recordings,
     transcriptions,
+    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -62,6 +64,19 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+        },
+    };
+});
+
+const { createCompletion } = vi.hoisted(() => ({
+    createCompletion: vi.fn(),
+}));
+vi.mock("openai", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("openai")>();
+    return {
+        ...actual,
+        OpenAI: class {
+            chat = { completions: { create: createCompletion } };
         },
     };
 });
@@ -124,8 +139,18 @@ import {
     GET as getSummaryRoute,
     POST as postSummaryRoute,
 } from "@/app/api/recordings/[id]/summary/route";
-import { POST as postTopicsRoute } from "@/app/api/recordings/[id]/topics/route";
-import { decryptText, encryptText } from "@/lib/encryption/fields";
+import {
+    GET as getTopicsRoute,
+    POST as postTopicsRoute,
+} from "@/app/api/recordings/[id]/topics/route";
+import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
+import { encrypt } from "@/lib/encryption";
+import {
+    decryptJsonField,
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
@@ -401,6 +426,103 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         expect(row?.titleEditedAt).not.toBeNull();
         // Withdrawn, the curator's view of it is gone.
         expect((await rename(orgUserId, "Again", "org")).status).toBe(404);
+    });
+
+    it("lets the organization account detect topics on the Organization view, with the Organization's settings", async () => {
+        const turns = [
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 30_000,
+                text: "Rozpočet.",
+            },
+            {
+                speaker: "speaker_1",
+                startMs: 30_000,
+                endMs: 60_000,
+                text: "Termíny.",
+            },
+        ];
+        // Shared first: the share gate would ask for these voices' names.
+        await share();
+        await db()
+            .update(transcriptions)
+            .set({ turns: encryptJsonField(turns) })
+            .where(eq(transcriptions.recordingId, REC));
+        for (const [userId, aiOutputLanguage] of [
+            [OWNER, "de"],
+            [orgUserId, "cs"],
+        ] as const) {
+            await db()
+                .insert(userSettings)
+                .values({ userId, aiOutputLanguage })
+                .onConflictDoUpdate({
+                    target: userSettings.userId,
+                    set: { aiOutputLanguage },
+                });
+        }
+        // The organization account pays; the owner has no provider at all.
+        await db()
+            .insert(apiCredentials)
+            .values({
+                userId: orgUserId,
+                provider: "openai",
+                apiKey: encrypt("org-key"),
+                defaultModel: "gpt-4o-mini",
+                isDefaultEnhancement: true,
+            });
+        const detect = (user: string, view?: "org") =>
+            call(postTopicsRoute, user, {
+                method: "POST",
+                path: "topics",
+                view,
+            });
+
+        expect((await detect(BOB, "org")).status).toBe(403);
+        expect((await detect(OWNER, "org")).status).toBe(403);
+        // Anyone the recording is shared with reads them there.
+        expect(
+            (await call(getTopicsRoute, BOB, { path: "topics", view: "org" }))
+                .status,
+        ).toBe(200);
+
+        createCompletion.mockResolvedValueOnce({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            topics: [
+                                { start: "00:00", title: "Rozpočet" },
+                                { start: "00:30", title: "Termíny" },
+                            ],
+                        }),
+                    },
+                },
+            ],
+        });
+        const result = await topicsJobHandler.run({
+            payload: {
+                recordingId: REC,
+                source: "riffado",
+                trigger: "manual",
+                view: "org",
+            },
+            userId: orgUserId,
+            reportProgress: () => {},
+        } as unknown as Parameters<typeof topicsJobHandler.run>[0]);
+
+        expect(result).toMatchObject({ topicCount: 2 });
+        const [{ messages }] = createCompletion.mock.calls[0] ?? [{}];
+        expect(messages[0].content).toContain(
+            getAiOutputLanguageDirective("cs"),
+        );
+        const [row] = await db()
+            .select({ topics: transcriptions.topics })
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, REC));
+        expect(
+            decryptJsonField<{ topics: unknown[] }>(row?.topics)?.topics,
+        ).toHaveLength(2);
     });
 
     it("erases a shared recording only by taking it out of the Organization first", async () => {

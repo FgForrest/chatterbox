@@ -1,9 +1,12 @@
 /**
  * Detecting the topics of one transcript and storing them on it.
  *
- * The owner's, on the private view: topics are written onto the transcript
- * row itself, so a shared recording's are the organization account's to
- * change, which runs no topic detection yet.
+ * Topics are written onto the transcript row itself, so they follow the
+ * writer rule: the owner detects them on the private view, and while the
+ * recording is shared the organization account on the Organization view.
+ * The prompt and output language follow the view, and the provider is the
+ * actor's, who pays (`resolveRunContext`); the row is the owner's either
+ * way, as a shared recording is one recording.
  */
 
 import { and, eq, isNull } from "drizzle-orm";
@@ -29,6 +32,8 @@ import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { resolveRunContext } from "@/lib/sharing/run-context";
+import type { RecordingView } from "@/lib/sharing/view";
 import {
     contentWriterRefusal,
     contentWriterRefusalNow,
@@ -73,6 +78,7 @@ const CALL_RETRY_MAX_MS = 15_000;
 export interface GenerateTopicsOptions {
     trigger: "manual" | "auto";
     onProgress?: (progress: JobProgress) => void;
+    view?: RecordingView;
 }
 
 export interface GenerateTopicsResult {
@@ -84,11 +90,25 @@ export interface GenerateTopicsResult {
 }
 
 export async function generateTopicsForTranscript(
-    userId: string,
+    actorUserId: string,
     recordingId: string,
     source: TopicSource,
     opts: GenerateTopicsOptions,
 ): Promise<GenerateTopicsResult> {
+    const ctx = await resolveRunContext(
+        actorUserId,
+        recordingId,
+        opts.view ?? "private",
+    );
+    if (!ctx) {
+        throw new AppError(
+            ErrorCode.RECORDING_NOT_FOUND,
+            "Recording not found",
+            404,
+        );
+    }
+    // The owner's rows in either view.
+    const userId = ctx.ownerUserId;
     const [recording] = await db
         .select({ id: recordings.id })
         .from(recordings)
@@ -107,12 +127,12 @@ export async function generateTopicsForTranscript(
             404,
         );
     }
-    // Shared, it is not the owner's to change; refused before the provider
-    // is paid, and again under the lock where the topics are written.
+    // Refused before the provider is paid, and again under the lock where
+    // the topics are written.
     const refusal = await contentWriterRefusalNow({
         recordingId,
         ownerUserId: userId,
-        actorUserId: userId,
+        actorUserId: ctx.actorUserId,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -143,10 +163,11 @@ export async function generateTopicsForTranscript(
         );
     }
 
+    // The prompt and language follow the view.
     const [settings] = await db
         .select()
         .from(userSettings)
-        .where(eq(userSettings.userId, userId))
+        .where(eq(userSettings.userId, ctx.settingsUserId))
         .limit(1);
     const promptConfig = normalizeTopicPromptConfig(
         settings?.topicPrompt ? decryptJsonField(settings.topicPrompt) : null,
@@ -157,10 +178,11 @@ export async function generateTopicsForTranscript(
         TOPIC_TEMPLATE_KIND,
     );
 
+    // The provider is the actor's, who pays.
     const configured = await db
         .select()
         .from(apiCredentials)
-        .where(eq(apiCredentials.userId, userId));
+        .where(eq(apiCredentials.userId, ctx.actorUserId));
     const credentials = pickEnhancementCredential(configured);
     if (!credentials) {
         throw new AppError(
@@ -279,7 +301,7 @@ export async function generateTopicsForTranscript(
         const shared = await contentWriterRefusal(tx, {
             recordingId,
             ownerUserId: userId,
-            actorUserId: userId,
+            actorUserId: ctx.actorUserId,
             orgUserId,
         });
         if (shared) throw writerRefusalError(shared);
@@ -303,7 +325,7 @@ export async function generateTopicsForTranscript(
     }
 
     await captureServerEvent({
-        distinctId: userId,
+        distinctId: ctx.actorUserId,
         event: "topics_generated",
         properties: {
             trigger: opts.trigger,

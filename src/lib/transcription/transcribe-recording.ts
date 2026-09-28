@@ -913,7 +913,8 @@ async function transcribeRecordingInner(
         });
 
         // Topics need the timings only some providers report. Queued like the
-        // summary, and never on the Organization view (see generate-topics).
+        // summary, and like it not after a run on the Organization view,
+        // where the organization account detects them by hand.
         if (!orgView && turns?.length) {
             await queueAutoTopics(userId, recordingId, "riffado");
         }

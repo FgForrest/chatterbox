@@ -12,7 +12,7 @@ import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import { recordingJobSubject } from "@/lib/sharing/view";
+import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import type { TopicSource } from "./generate-topics";
 
 export const TOPICS_JOB_KIND = "topics";
@@ -30,6 +30,8 @@ export interface TopicsJobPayload {
     recordingId: string;
     source: TopicSource;
     trigger: "manual" | "auto";
+    /** Absent on the private view, which is every job queued before views. */
+    view?: RecordingView;
 }
 
 export function parseTopicsJobPayload(
@@ -48,10 +50,21 @@ export function parseTopicsJobPayload(
             'source must be "plaud" or "riffado"',
         );
     }
+    if (
+        raw.view !== undefined &&
+        raw.view !== "org" &&
+        raw.view !== "private"
+    ) {
+        throw new InvalidJobPayloadError(
+            TOPICS_JOB_KIND,
+            'view must be "private" or "org" when present',
+        );
+    }
     return {
         recordingId,
         source: raw.source,
         trigger: raw.trigger === "manual" ? "manual" : "auto",
+        ...(raw.view === "org" ? { view: "org" as const } : {}),
     };
 }
 
@@ -65,15 +78,20 @@ export function parseTopicsJobPayload(
  * reporting the other transcript's topics.
  */
 export async function enqueueTopicsJob(input: {
+    /** The actor. On the private view, the recording's owner. */
     userId: string;
     recordingId: string;
     source: TopicSource;
     trigger: "manual" | "auto";
+    view?: RecordingView;
 }): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
         userId: input.userId,
         kind: TOPICS_JOB_KIND,
-        subjectId: recordingJobSubject(input.recordingId, "private"),
+        subjectId: recordingJobSubject(
+            input.recordingId,
+            input.view ?? "private",
+        ),
         priority:
             input.trigger === "manual"
                 ? TOPICS_PRIORITY_MANUAL
@@ -83,6 +101,7 @@ export async function enqueueTopicsJob(input: {
             recordingId: input.recordingId,
             source: input.source,
             trigger: input.trigger,
+            ...(input.view === "org" ? { view: "org" } : {}),
         },
     });
     if (enqueued.created) nudge();

@@ -145,6 +145,7 @@ function renderPanel(
         onSeekToTurn?: (ms: number) => void;
         recording?: Recording;
         getPlaybackMs?: () => number;
+        readOnly?: boolean;
     } = {},
 ) {
     return render(
@@ -155,6 +156,7 @@ function renderPanel(
             onTranscribe={vi.fn()}
             onSeekToTurn={props.onSeekToTurn}
             getPlaybackMs={props.getPlaybackMs}
+            readOnly={props.readOnly}
         />,
     );
 }
@@ -308,11 +310,25 @@ describe("transcript topics", () => {
         ).toBeNull();
     });
 
-    it("does not offer detection on the Organization view", () => {
-        renderPanel(PLAUD, { recording: { ...RECORDING, view: "org" } });
+    it("does not offer detection on the Organization view to anyone but the organization account", () => {
+        renderPanel(PLAUD, {
+            recording: { ...RECORDING, view: "org" },
+            readOnly: true,
+        });
         expect(
             screen.queryByRole("button", { name: "Detect topics" }),
         ).toBeNull();
+    });
+
+    it("detects on the Organization view for the organization account", async () => {
+        renderPanel(PLAUD, { recording: { ...RECORDING, view: "org" } });
+        fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                expect.stringMatching(/\/topics\?source=plaud&view=org$/),
+                expect.objectContaining({ method: "POST" }),
+            ),
+        );
     });
 
     it("says why detection failed", async () => {

@@ -35,6 +35,7 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
                 {
                     trigger: payload.trigger,
                     onProgress: reportProgress,
+                    view: payload.view,
                 },
             );
         } catch (error) {

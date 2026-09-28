@@ -33,20 +33,6 @@ function requestedTopicSource(request: Request): TopicSource {
         : "riffado";
 }
 
-/**
- * Topics are written onto the transcript row, and on the Organization view
- * that row can be the owner's, read through until someone edits the view.
- */
-function assertPrivateView(request: Request): void {
-    if (requestedRecordingView(request) === "org") {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "Topics can be detected only on your own view of a recording",
-            400,
-        );
-    }
-}
-
 async function readTopics(
     userId: string,
     recordingId: string,
@@ -66,21 +52,24 @@ async function readTopics(
     return readTranscriptTopics(row);
 }
 
-/** The stored topics of one transcript, and the job detecting them, if any. */
+/**
+ * The stored topics of one transcript, and the job detecting them in this
+ * view, if any. Topics sit on the owner's transcript row, which both views
+ * read.
+ */
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
-    const userId = session.user.id;
     const { id } = await (context as IdContext).params;
-    assertPrivateView(request);
-    await requireRecordingView(userId, id, "private");
+    const view = requestedRecordingView(request);
+    const access = await requireRecordingView(session.user.id, id, view);
     const source = requestedTopicSource(request);
 
     const job = await getActiveJob(
         TOPICS_JOB_KIND,
-        recordingJobSubject(id, "private"),
+        recordingJobSubject(id, view),
     );
     return NextResponse.json({
-        topics: await readTopics(userId, id, source),
+        topics: await readTopics(access.contentUserId, id, source),
         jobId: job && job.payload.source === source ? job.id : null,
     });
 });
@@ -95,9 +84,10 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const userId = session.user.id;
     const { id } = await (context as IdContext).params;
-    assertPrivateView(request);
-    const access = await requireRecordingView(userId, id, "private");
-    // Shared, the recording is the organization account's to change.
+    const view = requestedRecordingView(request);
+    const access = await requireRecordingView(userId, id, view);
+    // The owner on the private view; while shared, the organization account
+    // on the Organization view, with the Organization's prompt and language.
     assertMayChange(access, userId);
     const source = requestedTopicSource(request);
 
@@ -106,6 +96,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         recordingId: id,
         source,
         trigger: "manual",
+        view,
     });
     // The queue keeps one topics job per recording; an already-running job
     // for the other transcript must not be reported as this one's.
@@ -131,6 +122,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         throw appErrorFromJobFailure(row.errorCode, row.lastError);
     }
     return NextResponse.json({
-        topics: (await readTopics(userId, id, source)) ?? [],
+        topics: (await readTopics(access.contentUserId, id, source)) ?? [],
     });
 });
