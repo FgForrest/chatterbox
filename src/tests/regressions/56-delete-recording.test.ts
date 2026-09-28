@@ -287,6 +287,7 @@ import { DELETE as deleteRecording } from "@/app/api/recordings/[id]/route";
 import {
     aiEnhancements,
     asyncJobs,
+    learnDismissals,
     recordings as recordingsTable,
     transcriptions as transcriptionsTable,
     webhookDeliveries,
@@ -332,7 +333,9 @@ describe("DELETE /api/recordings/[id]", () => {
                       ? "webhook_deliveries"
                       : t === asyncJobs
                         ? "async_jobs"
-                        : "unknown";
+                        : t === learnDismissals
+                          ? "learn_dismissals"
+                          : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -505,13 +508,14 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(5);
+        expect(txCalls).toHaveLength(6);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
-        // webhook redaction → recordings.
+        // Learn dismissals → webhook redaction → recordings.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",
         ]);
@@ -574,6 +578,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",
         ]);

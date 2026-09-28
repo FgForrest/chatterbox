@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
     aiEnhancements,
     asyncJobs,
+    learnDismissals,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -415,6 +416,11 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         await tx
             .delete(aiEnhancements)
             .where(eq(aiEnhancements.recordingId, id));
+        // Learn runs and their items went with the transcripts; what was
+        // dismissed has nothing left to answer for.
+        await tx
+            .delete(learnDismissals)
+            .where(eq(learnDismissals.recordingId, id));
 
         if (orgUserId) {
             const orgFolderIds = tx

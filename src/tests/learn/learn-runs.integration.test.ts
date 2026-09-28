@@ -119,6 +119,12 @@ vi.mock("@/lib/knowledge/vocabulary", async (importOriginal) => {
     };
 });
 
+vi.mock("@/lib/storage/factory", () => ({
+    createUserStorageProvider: vi.fn().mockResolvedValue({
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+    }),
+}));
+
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -145,6 +151,7 @@ import {
 import { POST as postFinishRoute } from "@/app/api/recordings/[id]/review/finish/route";
 import { PATCH as patchItemRoute } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
 import { GET as getReviewRoute } from "@/app/api/recordings/[id]/review/route";
+import { DELETE as deleteRecordingRoute } from "@/app/api/recordings/[id]/route";
 import { encrypt } from "@/lib/encryption";
 import {
     decryptJsonField,
@@ -322,6 +329,24 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
 
         await unshareRecording(OWNER, REC);
 
+        expect(await db().select().from(learnDismissals)).toEqual([]);
+    });
+
+    it("takes every dismissal with a deleted recording, whose tombstone stays", async () => {
+        await db()
+            .insert(learnDismissals)
+            .values([
+                { userId: OWNER, recordingId: REC, fingerprintHmac: "a" },
+                { userId: orgUserId, recordingId: REC, fingerprintHmac: "b" },
+            ]);
+        const deleted = await deleteRecordingRoute(
+            new Request(`http://localhost/api/recordings/${REC}`, {
+                method: "DELETE",
+                headers: { "x-test-user": OWNER },
+            }),
+            { params: Promise.resolve({ id: REC }) },
+        );
+        expect(deleted.status).toBe(200);
         expect(await db().select().from(learnDismissals)).toEqual([]);
     });
 
