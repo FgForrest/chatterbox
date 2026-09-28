@@ -32,6 +32,7 @@ import {
     deleteFactsNamingInTx,
 } from "@/lib/knowledge/fact-chains";
 import { rekeyRelationInTx } from "@/lib/knowledge/fact-merge";
+import { relationFits } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeople,
@@ -673,6 +674,17 @@ export async function deleteOwnType(
                 if (!adopter.userId) continue;
                 scopes.add(adopter.userId);
                 if (kind === "relation") {
+                    // What the member stated with the Organization's shape
+                    // and their own type does not take goes; the rest
+                    // returns to their type.
+                    await deleteFactsInTx(
+                        tx,
+                        await factsNotFittingInTx(tx, {
+                            userId: adopter.userId,
+                            relationKey: key,
+                            shapeKey: adopter.key,
+                        }),
+                    );
                     await rekeyRelationInTx(tx, {
                         userId: adopter.userId,
                         from: key,
@@ -724,6 +736,91 @@ export async function deleteOwnType(
         await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
     });
+}
+
+/**
+ * The ids of `userId`'s facts of `relationKey` that the relation type
+ * `shapeKey` (theirs) does not take (`relationFits`).
+ */
+async function factsNotFittingInTx(
+    tx: Tx,
+    {
+        userId,
+        relationKey,
+        shapeKey,
+    }: { userId: string; relationKey: string; shapeKey: string },
+): Promise<string[]> {
+    const [shape] = await tx
+        .select({
+            subjectTypes: knowledgeRelationTypes.subjectTypes,
+            objectTypes: knowledgeRelationTypes.objectTypes,
+            objectKind: knowledgeRelationTypes.objectKind,
+        })
+        .from(knowledgeRelationTypes)
+        .where(
+            and(
+                eq(knowledgeRelationTypes.userId, userId),
+                eq(knowledgeRelationTypes.key, shapeKey),
+            ),
+        )
+        .limit(1);
+    const facts = await tx
+        .select({
+            id: knowledgeFacts.id,
+            subjectPersonId: knowledgeFacts.subjectPersonId,
+            subjectEntityId: knowledgeFacts.subjectEntityId,
+            objectPersonId: knowledgeFacts.objectPersonId,
+            objectEntityId: knowledgeFacts.objectEntityId,
+        })
+        .from(knowledgeFacts)
+        .where(
+            and(
+                eq(knowledgeFacts.userId, userId),
+                eq(knowledgeFacts.relationKey, relationKey),
+            ),
+        );
+    if (!shape) return facts.map((fact) => fact.id);
+    const entityIds = facts.flatMap((fact) =>
+        [fact.subjectEntityId, fact.objectEntityId].filter(
+            (id): id is string => id !== null,
+        ),
+    );
+    const types = new Map(
+        entityIds.length > 0
+            ? (
+                  await tx
+                      .select({
+                          id: knowledgeEntities.id,
+                          typeKey: knowledgeEntities.typeKey,
+                      })
+                      .from(knowledgeEntities)
+                      .where(inArray(knowledgeEntities.id, entityIds))
+              ).map((row) => [row.id, row.typeKey])
+            : [],
+    );
+    const typeOf = (personId: string | null, entityId: string | null) =>
+        personId ? "person" : (types.get(entityId ?? "") ?? "");
+    return facts
+        .filter(
+            (fact) =>
+                !relationFits(
+                    {
+                        subjectTypes: shape.subjectTypes,
+                        objectTypes: shape.objectTypes,
+                        objectKind: shape.objectKind,
+                    },
+                    typeOf(fact.subjectPersonId, fact.subjectEntityId),
+                    fact.objectPersonId || fact.objectEntityId
+                        ? {
+                              type: typeOf(
+                                  fact.objectPersonId,
+                                  fact.objectEntityId,
+                              ),
+                          }
+                        : { literal: true },
+                ),
+        )
+        .map((fact) => fact.id);
 }
 
 /**

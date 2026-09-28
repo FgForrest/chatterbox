@@ -76,6 +76,7 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 
 import { encryptText } from "@/lib/encryption/fields";
+import { createEntity } from "@/lib/knowledge/entities";
 import { confirmManualFact } from "@/lib/knowledge/facts";
 import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
 import {
@@ -411,6 +412,51 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             )?.adoptedAsKey,
         ).toBeNull();
         expect(await factsOf(BOB)).toEqual([]);
+    });
+
+    it("gives a member back only the facts that fit their own type", async () => {
+        const alicesKey = await createPrivateType(ALICE, worksWith);
+        const [jan, pavel] = await db()
+            .insert(people)
+            .values([
+                { userId: ALICE, displayName: encryptText("Jan") },
+                { userId: ALICE, displayName: encryptText("Pavel") },
+            ])
+            .returning({ id: people.id });
+        const before = await confirmManualFact(ALICE, {
+            subject: { personId: jan?.id ?? "" },
+            relationKey: alicesKey,
+            object: { personId: pavel?.id ?? "" },
+        });
+        const orion = await createEntity(ALICE, {
+            typeKey: "project",
+            name: "Orion",
+        });
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+        // The Organization's "mentors" is another shape: project -> text.
+        const key = await adoptPhrase(orgUserId, proposal?.id ?? "", {
+            subjectTypes: ["project"],
+            objectTypes: [],
+            objectKind: "literal",
+            cardinality: "many",
+        });
+        await confirmManualFact(ALICE, {
+            subject: { entityId: orion.id },
+            relationKey: alicesKey,
+            object: { literal: "the migration" },
+        });
+
+        await deleteOwnType(orgUserId, "relation", key, 0);
+
+        const left = await db()
+            .select({
+                id: knowledgeFacts.id,
+                relationKey: knowledgeFacts.relationKey,
+            })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, ALICE));
+        expect(left).toEqual([{ id: before, relationKey: alicesKey }]);
     });
 
     it("stops counting a suggestion when its account goes, and drops it with the last", async () => {
