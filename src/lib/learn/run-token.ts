@@ -7,21 +7,33 @@
  * it only while the run is `running`.
  */
 
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, hkdfSync, timingSafeEqual } from "node:crypto";
 import { env } from "@/lib/env";
 
 export const LEARN_RUN_TOKEN_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const VERSION = "lr1";
 const DOMAIN = "riffado:learn-run-token";
 
-function secret(): string {
-    const value = env.API_TOKEN_HASH_SECRET ?? env.BETTER_AUTH_SECRET;
-    if (!value) throw new Error("The server secret is not configured");
-    return value;
+let derived: { secret: string; key: Buffer } | null = null;
+
+/**
+ * The tokens' own key, derived from the server secret (HKDF), so nothing
+ * else keyed by that secret can produce or check one.
+ */
+function key(): Buffer {
+    const secret = env.API_TOKEN_HASH_SECRET ?? env.BETTER_AUTH_SECRET;
+    if (!secret) throw new Error("The server secret is not configured");
+    if (derived?.secret !== secret) {
+        derived = {
+            secret,
+            key: Buffer.from(hkdfSync("sha256", secret, "", DOMAIN, 32)),
+        };
+    }
+    return derived.key;
 }
 
 function sign(runId: string, issuedAt: number): string {
-    return createHmac("sha256", secret())
+    return createHmac("sha256", key())
         .update(`${DOMAIN}\n${runId}\n${issuedAt}`)
         .digest("base64url");
 }

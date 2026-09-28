@@ -75,7 +75,7 @@ import { encryptText } from "@/lib/encryption/fields";
 import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
-import { MCP_TOOL_BUDGET } from "@/lib/learn/mcp";
+import { MCP_MAX_BODY_BYTES, MCP_TOOL_BUDGET } from "@/lib/learn/mcp";
 import { issueLearnRunToken } from "@/lib/learn/run-token";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -261,6 +261,53 @@ describeWithDatabase("the Learn MCP endpoint (PostgreSQL)", () => {
         expect(
             await payloadOf(await call(4, "find_facts", { id: bobsOrion })),
         ).toEqual([]);
+    });
+
+    it("refuses a body over its limit, and an id JSON-RPC does not allow", async () => {
+        const big = await mcp({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/list",
+            params: { padding: "x".repeat(MCP_MAX_BODY_BYTES) },
+        });
+        expect(big.status).toBe(413);
+        // Streamed, with no length said up front.
+        const chunk = new TextEncoder().encode("x".repeat(16 * 1024));
+        let sent = 0;
+        const streamed = await postMcp(
+            new Request("http://localhost/api/mcp/learn", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    authorization: `Bearer ${issueLearnRunToken(runId)}`,
+                },
+                body: new ReadableStream({
+                    pull(controller) {
+                        if (sent > MCP_MAX_BODY_BYTES * 2) {
+                            controller.close();
+                            return;
+                        }
+                        sent += chunk.length;
+                        controller.enqueue(chunk);
+                    },
+                }),
+                duplex: "half",
+            } as RequestInit),
+        );
+        expect(streamed.status).toBe(413);
+
+        for (const id of [{ nested: true }, [1], 1.5, "x".repeat(201)]) {
+            const answered = await mcp({
+                jsonrpc: "2.0",
+                id,
+                method: "tools/list",
+            });
+            await expect(answered.json()).resolves.toEqual({
+                jsonrpc: "2.0",
+                id: null,
+                error: { code: -32600, message: "Invalid request" },
+            });
+        }
     });
 
     it("stops a run that used its lookups", async () => {

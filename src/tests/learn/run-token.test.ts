@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/env", () => ({
@@ -46,5 +47,20 @@ describe("Learn run tokens", () => {
         ).toBeNull();
         expect(verifyLearnRunToken("garbage", now)).toBeNull();
         expect(verifyLearnRunToken("", now)).toBeNull();
+    });
+
+    it("is signed with a key of its own, not the server secret itself", () => {
+        const signature = createHmac(
+            "sha256",
+            "test-secret-test-secret-test-secret-00",
+        )
+            .update(`riffado:learn-run-token\nrun-1\n${now}`)
+            .digest("base64url");
+        expect(
+            verifyLearnRunToken(
+                ["lr1", "run-1", String(now), signature].join("."),
+                now,
+            ),
+        ).toBeNull();
     });
 });

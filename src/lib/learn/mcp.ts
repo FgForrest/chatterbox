@@ -20,6 +20,9 @@ import {
 
 /** Lookups one run may make over MCP. */
 export const MCP_TOOL_BUDGET = 60;
+/** The largest request body read; a tool call needs a few hundred bytes. */
+export const MCP_MAX_BODY_BYTES = 64 * 1024;
+const MAX_ID_LENGTH = 200;
 const PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpRun {
@@ -91,13 +94,58 @@ export const LEARN_MCP_TOOLS = [
     },
 ] as const;
 
+/** An id JSON-RPC allows, short enough to echo back. */
+function isId(value: unknown): boolean {
+    return (
+        value === undefined ||
+        value === null ||
+        (typeof value === "number" && Number.isSafeInteger(value)) ||
+        (typeof value === "string" && value.length <= MAX_ID_LENGTH)
+    );
+}
+
 function isRequest(value: unknown): value is JsonRpcRequest {
     return (
         typeof value === "object" &&
         value !== null &&
         (value as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-        typeof (value as { method?: unknown }).method === "string"
+        typeof (value as { method?: unknown }).method === "string" &&
+        isId((value as { id?: unknown }).id)
     );
+}
+
+/**
+ * The request's JSON body, read no further than `MCP_MAX_BODY_BYTES`
+ * whatever its length header says; `tooLarge` past that, and `undefined`
+ * for a body that is not JSON.
+ */
+export async function readMcpBody(
+    request: Request,
+): Promise<{ tooLarge: true } | { tooLarge: false; body: unknown }> {
+    const declared = Number(request.headers.get("content-length"));
+    if (declared > MCP_MAX_BODY_BYTES) return { tooLarge: true };
+    if (!request.body) return { tooLarge: false, body: undefined };
+    const reader = request.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > MCP_MAX_BODY_BYTES) {
+            await reader.cancel().catch(() => {});
+            return { tooLarge: true };
+        }
+        chunks.push(value);
+    }
+    try {
+        return {
+            tooLarge: false,
+            body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+        };
+    } catch {
+        return { tooLarge: false, body: undefined };
+    }
 }
 
 /** Spend one lookup of the run's, atomically; false when none is left. */
