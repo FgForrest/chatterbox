@@ -75,14 +75,20 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 /**
  * The speaker rows the Organization view shows.
  *
- * A suggestion is shown only to whoever may act on it: the organization
- * account, which changes a shared recording. Everyone else reads the
- * confirmed names, without who confirmed them.
+ * Only Organization people: sharing publishes every name, but a row naming
+ * someone the Organization does not know (given in local mode, or left by
+ * an older release) is shown as a speaker nobody named, without even the
+ * person's id. A suggestion is shown only to whoever may act on it: the
+ * organization account, which changes a shared recording. Everyone else
+ * reads the confirmed names, without who confirmed them.
  */
 function orgViewSpeakers(
-    speakers: TranscriptSpeaker[],
+    rows: TranscriptSpeaker[],
     viewer: { curator: boolean },
 ): TranscriptSpeaker[] {
+    const speakers = rows.filter(
+        (speaker) => !speaker.personId || speaker.personName !== null,
+    );
     if (viewer.curator) return speakers;
     return speakers.flatMap((speaker) =>
         speaker.status === "confirmed"
