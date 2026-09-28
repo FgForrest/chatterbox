@@ -52,6 +52,12 @@ interface RecordingFolderTagsProps {
      * Organization; anyone else may only move it within the Organization.
      */
     isOwn?: boolean;
+    /**
+     * Whether the viewer may take it out of Organization folders, down to
+     * withdrawing it: its owner, and the organization account on the
+     * Organization view, who confirms the owner's retention warning.
+     */
+    canWithdraw?: boolean;
     /** Show only Organization folders (the recording's Organization view). */
     organizationOnly?: boolean;
     onMove?: (
@@ -69,6 +75,7 @@ export function RecordingFolderTags({
     onAdd,
     onRemove,
     isOwn = true,
+    canWithdraw = isOwn,
     organizationOnly = false,
     onMove,
 }: RecordingFolderTagsProps) {
@@ -78,7 +85,12 @@ export function RecordingFolderTags({
     const [withdrawing, setWithdrawing] = useState<RecordingFolder | null>(
         null,
     );
-    const preview = useWithdrawPreview(withdrawing ? recordingId : null);
+    // The owner asks on their own view, the organization account on the
+    // Organization's.
+    const preview = useWithdrawPreview(
+        withdrawing ? recordingId : null,
+        isOwn ? "private" : "org",
+    );
     const label = (folder: RecordingFolder) =>
         folder.parentId === null && folder.scope === "org"
             ? i18n("Organization")
@@ -129,7 +141,7 @@ export function RecordingFolderTags({
                         )}
                         {label(folder)}
                     </button>
-                    {isOwn && (
+                    {(isOwn || (canWithdraw && folder.scope === "org")) && (
                         <button
                             type="button"
                             onClick={() => {
@@ -283,13 +295,20 @@ export function RecordingFolderTags({
                             )}
                         </DialogTitle>
                         <DialogDescription>
-                            {i18n(
-                                "Colleagues will no longer see it. You get it back as the Organization left it, and can change it again.",
-                            )}
+                            {isOwn
+                                ? i18n(
+                                      "Colleagues will no longer see it. You get it back as the Organization left it, and can change it again.",
+                                  )
+                                : i18n(
+                                      "Colleagues will no longer see it. Its owner gets it back as the Organization left it.",
+                                  )}
                         </DialogDescription>
                     </DialogHeader>
                     {withdrawing && (
-                        <WithdrawRetentionWarning preview={preview} />
+                        <WithdrawRetentionWarning
+                            preview={preview}
+                            ofOwner={!isOwn}
+                        />
                     )}
                     <DialogFooter>
                         <Button
@@ -300,7 +319,7 @@ export function RecordingFolderTags({
                         </Button>
                         <Button
                             // What the owner's retention will delete is
-                            // part of what they confirm.
+                            // part of what is confirmed.
                             disabled={preview.status === "loading"}
                             onClick={() => {
                                 const folder = withdrawing;

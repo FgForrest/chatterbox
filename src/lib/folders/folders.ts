@@ -967,7 +967,10 @@ export async function removeRecordingFromFolder(input: {
     userId: string;
     recordingId: string;
     folderId: string;
-    /** The owner confirmed that leaving the last Organization folder withdraws it. */
+    /**
+     * The owner, or the organization account, confirmed that leaving the
+     * last Organization folder withdraws it.
+     */
     withdraw?: boolean;
 }): Promise<void> {
     const orgUserId = await getOrgUserId();
@@ -996,7 +999,7 @@ export async function removeRecordingFromFolder(input: {
         return;
     }
 
-    await requireRecordingOwnerForSharing(input.userId, input.recordingId);
+    await requireMayWithdraw(input.userId, input.recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, input.recordingId);
@@ -1012,8 +1015,8 @@ export async function removeRecordingFromFolder(input: {
                 ),
             );
         // Its last Organization folder: leaving it withdraws the recording,
-        // which the owner confirms knowing what their retention will then
-        // delete. A client that thought another folder remained learns it
+        // which whoever removes it confirms knowing what the owner's
+        // retention will then delete. A client that thought another folder remained learns it
         // here, and nothing changed.
         if (
             !input.withdraw &&
@@ -1033,14 +1036,17 @@ export async function removeRecordingFromFolder(input: {
     await orgTreeChanged();
 }
 
-/** Remove a recording from the whole Organization tree. Owner only. */
+/**
+ * Remove a recording from the whole Organization tree: its owner, or the
+ * organization account (a withdrawal from the Organization's side).
+ */
 export async function unshareRecording(
     userId: string,
     recordingId: string,
 ): Promise<void> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
-    await requireRecordingOwnerForSharing(userId, recordingId);
+    await requireMayWithdraw(userId, recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, recordingId);
@@ -1080,6 +1086,39 @@ export async function withdrawRecordingInTx(
             );
     }
     return endSharingIfUnfiled(tx, orgUserId, recordingId);
+}
+
+/**
+ * Taking a recording out of Organization folders, down to withdrawing it:
+ * its owner, or the organization account, which decides what the
+ * Organization holds (Johnny, 2026-09-28). Sharing stays the owner's.
+ */
+async function requireMayWithdraw(
+    userId: string,
+    recordingId: string,
+    orgUserId: string | null,
+): Promise<void> {
+    if (orgUserId !== null && userId === orgUserId) {
+        const [recording] = await db
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .limit(1);
+        if (!recording) {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Recording or folder not found",
+                404,
+            );
+        }
+        return;
+    }
+    await requireRecordingOwnerForSharing(userId, recordingId);
 }
 
 async function requireRecordingOwnerForSharing(

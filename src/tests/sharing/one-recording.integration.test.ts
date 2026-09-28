@@ -133,6 +133,7 @@ vi.mock("@/lib/auth-server", async () => {
 });
 
 import { POST as postEraseRoute } from "@/app/api/recordings/[id]/erase/route";
+import { DELETE as deleteFolderRoute } from "@/app/api/recordings/[id]/folders/route";
 import { PATCH as patchRecordingRoute } from "@/app/api/recordings/[id]/route";
 import {
     DELETE as deleteSummaryRoute,
@@ -143,6 +144,7 @@ import {
     GET as getTopicsRoute,
     POST as postTopicsRoute,
 } from "@/app/api/recordings/[id]/topics/route";
+import { GET as getWithdrawPreviewRoute } from "@/app/api/recordings/[id]/withdraw-preview/route";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { encrypt } from "@/lib/encryption";
 import {
@@ -523,6 +525,59 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         expect(
             decryptJsonField<{ topics: unknown[] }>(row?.topics)?.topics,
         ).toHaveLength(2);
+    });
+
+    it("lets the organization account take it out of the Organization, after seeing the owner's retention warning", async () => {
+        await db()
+            .insert(userSettings)
+            .values({ userId: OWNER, retentionLocalAudioDays: 7 })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { retentionLocalAudioDays: 7 },
+            });
+        await share();
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        const preview = (user: string, view?: "org") =>
+            call(getWithdrawPreviewRoute, user, {
+                path: "withdraw-preview",
+                view,
+            });
+        const remove = (user: string, body: object) =>
+            call(deleteFolderRoute, user, {
+                method: "DELETE",
+                path: "folders",
+                body,
+            });
+
+        expect((await preview(BOB, "org")).status).toBe(403);
+        const seen = await preview(orgUserId, "org");
+        expect(seen.status).toBe(200);
+        await expect(seen.json()).resolves.toEqual({
+            due: [{ kind: "audio", days: 7 }],
+        });
+
+        expect((await remove(BOB, { organization: true })).status).toBe(403);
+        const unconfirmed = await remove(orgUserId, { folderId: root?.id });
+        expect(unconfirmed.status).toBe(409);
+        await expect(unconfirmed.json()).resolves.toMatchObject({
+            code: "WITHDRAW_UNCONFIRMED",
+        });
+        const withdrawn = await remove(orgUserId, {
+            folderId: root?.id,
+            withdraw: true,
+        });
+        expect(withdrawn.status).toBe(200);
+        expect(await resolveRecordingAccess(orgUserId, REC)).toBeNull();
+
+        // And the whole tree at once, shared again.
+        await share();
+        expect((await remove(orgUserId, { organization: true })).status).toBe(
+            200,
+        );
+        expect(await resolveRecordingAccess(orgUserId, REC)).toBeNull();
     });
 
     it("erases a shared recording only by taking it out of the Organization first", async () => {

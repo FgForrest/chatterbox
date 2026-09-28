@@ -182,6 +182,13 @@ export function WorkstationDetailPane({
                         onAdd={onAddToFolder}
                         onRemove={onRemoveFromFolder}
                         isOwn={currentRecording.isOwn !== false}
+                        // On the Organization view the organization account
+                        // may take it out, as its owner may.
+                        canWithdraw={
+                            currentRecording.isOwn !== false ||
+                            (currentRecording.view === "org" &&
+                                transcriptReadOnly === false)
+                        }
                         organizationOnly={currentRecording.view === "org"}
                         onMove={onMoveBetweenFolders}
                     />

@@ -58,9 +58,10 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Take a recording out of a folder, or with `{ "organization": true }` out of
- * the whole Organization tree. Leaving the Organization is owner only, and
- * taking it out of its last Organization folder needs `{ "withdraw": true }`
- * (409 WITHDRAW_UNCONFIRMED otherwise).
+ * the whole Organization tree. Out of Organization folders: its owner or the
+ * organization account; taking it out of its last Organization folder needs
+ * `{ "withdraw": true }` (409 WITHDRAW_UNCONFIRMED otherwise), sent once the
+ * owner's retention warning was seen (`withdraw-preview`).
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);

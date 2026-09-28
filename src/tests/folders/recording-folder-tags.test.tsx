@@ -152,6 +152,52 @@ describe("recording folder tags", () => {
         vi.unstubAllGlobals();
     });
 
+    it("lets the organization account withdraw a shared recording, once it confirmed what the owner's retention will delete", async () => {
+        const onRemove = vi.fn().mockResolvedValue(undefined);
+        const fetchMock = vi.fn(async () =>
+            Response.json({ due: [{ kind: "audio", days: 30 }] }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[orgRoot, sales]}
+                assignments={[{ recordingId: "rec-1", folderId: "sales" }]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={onRemove}
+                onMove={vi.fn()}
+                isOwn={false}
+                canWithdraw
+                organizationOnly
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Remove from Sales" }),
+        );
+        expect(onRemove).not.toHaveBeenCalled();
+        expect((await screen.findByRole("alert")).textContent).toContain(
+            "The owner's retention deletes audio older than 30 days",
+        );
+        expect(fetchMock).toHaveBeenCalledWith(
+            "/api/recordings/rec-1/withdraw-preview?view=org",
+        );
+        expect(screen.getByText(/Its owner gets it back/)).toBeTruthy();
+        // Sharing stays the owner's.
+        expect(
+            screen.queryByRole("button", { name: /Add to folder/ }),
+        ).toBeNull();
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Take out of the Organization",
+            }),
+        );
+        expect(onRemove).toHaveBeenCalledWith("rec-1", "sales", true);
+        vi.unstubAllGlobals();
+    });
+
     it("confirms nothing before the retention check has answered", () => {
         vi.stubGlobal(
             "fetch",
