@@ -1181,39 +1181,40 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             expect(await ownerOf(petr)).toBe(await orgUser());
         });
 
-        it("drops suggestions naming a private person, and keeps the Organization's", async () => {
+        it("publishes nobody through rows on labels the text no longer has", async () => {
             const { transcript } = await answeredMeeting();
+            const contact = await person("A private contact");
             const guess = await person("Maybe Karel");
-            const known = await db()
-                .insert(people)
-                .values({
-                    userId: await orgUser(),
-                    displayName: encryptText("Karel"),
-                })
-                .returning({ id: people.id });
-            // Left on labels the text no longer has, so the gate lets them by.
+            // Left from an earlier diarization: labels the text lacks, so
+            // the gate never judged them.
             await db()
                 .insert(transcriptSpeakers)
-                .values(
-                    [
-                        ["speaker_8", guess],
-                        ["speaker_9", known[0]?.id ?? ""],
-                    ].map(([label, personId]) => ({
+                .values([
+                    {
                         userId: ALICE,
                         transcriptionId: transcript,
-                        label: label ?? "",
-                        personId,
+                        label: "speaker_8",
+                        personId: contact,
+                        source: "user" as const,
+                        status: "confirmed" as const,
+                        confirmedByUserId: ALICE,
+                    },
+                    {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        label: "speaker_9",
+                        personId: guess,
                         source: "heuristic" as const,
                         status: "suggested" as const,
-                    })),
-                );
+                    },
+                ]);
 
             await share();
 
-            const suggested = (await sharedNames())
-                .filter((row) => ["speaker_8", "speaker_9"].includes(row.label))
-                .map((row) => row.label);
-            expect(suggested).toEqual(["speaker_9"]);
+            expect(
+                (await sharedNames()).map((row) => row.label).sort(),
+            ).toEqual(["speaker_0", "speaker_1"]);
+            expect(await ownerOf(contact)).toBe(ALICE);
             expect(await ownerOf(guess)).toBe(ALICE);
         });
 

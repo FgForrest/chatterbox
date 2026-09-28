@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, not } from "drizzle-orm";
+import { and, eq, inArray, isNull, not, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     people,
@@ -9,6 +9,7 @@ import {
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
+import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 import { getOrgUserId } from "@/lib/org/config";
 import {
     isRecordingShared,
@@ -25,7 +26,9 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Organization person (`promotePersonInTx`: the same record, moved, or
  * folded into the Organization's person with the same email). Suggestions
  * naming someone who is still private are machine guesses the organization
- * account, which reviews suggestions, must not see; they go.
+ * account, which reviews suggestions, must not see; they go. So do rows on
+ * labels the text no longer has: nobody sees them, the gate never judged
+ * them, and a private person on one must not be published by it.
  *
  * The caller holds the Organization-people lock and then the recording
  * lock, in that order: a promotion may merge people, which locks the
@@ -39,55 +42,69 @@ export async function publishSpeakerNamesInTx(
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<number> {
-    const transcriptIds = (
-        await tx
-            .select({ id: transcriptions.id })
-            .from(transcriptions)
-            .where(
-                and(
-                    eq(transcriptions.recordingId, recordingId),
-                    eq(transcriptions.userId, ownerUserId),
-                ),
-            )
-    ).map((row) => row.id);
-    if (transcriptIds.length === 0) return 0;
-
-    const privatelyNamed = await tx
-        .selectDistinct({ personId: transcriptSpeakers.personId })
-        .from(transcriptSpeakers)
-        .innerJoin(people, eq(people.id, transcriptSpeakers.personId))
+    const transcripts = await tx
+        .select({
+            id: transcriptions.id,
+            source: transcriptions.source,
+            model: transcriptions.model,
+            text: transcriptions.text,
+            turns: transcriptions.turns,
+        })
+        .from(transcriptions)
         .where(
             and(
-                inArray(transcriptSpeakers.transcriptionId, transcriptIds),
-                eq(transcriptSpeakers.status, "confirmed"),
-                isNotNull(transcriptSpeakers.personId),
-                not(orgOwnedCondition(people.userId)),
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, ownerUserId),
             ),
         );
-    let promoted = 0;
-    for (const { personId } of privatelyNamed) {
-        if (!personId) continue;
-        if (await promotePersonInTx(tx, personId, orgUserId)) promoted += 1;
-    }
+    if (transcripts.length === 0) return 0;
+    // The labels each text has now, as the gate reads them.
+    const current = new Map(
+        transcripts.map((transcript) => [
+            transcript.id,
+            new Set(transcriptSpeakerLabels(transcript)),
+        ]),
+    );
 
-    const privateSuggestions = await tx
-        .select({ id: transcriptSpeakers.id })
+    const rows = await tx
+        .select({
+            id: transcriptSpeakers.id,
+            transcriptionId: transcriptSpeakers.transcriptionId,
+            label: transcriptSpeakers.label,
+            personId: transcriptSpeakers.personId,
+            status: transcriptSpeakers.status,
+            orgPerson: sql<boolean>`coalesce(${orgOwnedCondition(people.userId)}, false)`,
+        })
         .from(transcriptSpeakers)
-        .innerJoin(people, eq(people.id, transcriptSpeakers.personId))
+        .leftJoin(people, eq(people.id, transcriptSpeakers.personId))
         .where(
-            and(
-                inArray(transcriptSpeakers.transcriptionId, transcriptIds),
-                eq(transcriptSpeakers.status, "suggested"),
-                not(orgOwnedCondition(people.userId)),
-            ),
-        );
-    if (privateSuggestions.length > 0) {
-        await tx.delete(transcriptSpeakers).where(
             inArray(
-                transcriptSpeakers.id,
-                privateSuggestions.map((row) => row.id),
+                transcriptSpeakers.transcriptionId,
+                transcripts.map((transcript) => transcript.id),
             ),
         );
+
+    const dropped: string[] = [];
+    const toPromote = new Set<string>();
+    for (const row of rows) {
+        if (!current.get(row.transcriptionId)?.has(row.label)) {
+            dropped.push(row.id);
+        } else if (!row.personId || row.orgPerson) {
+            // Nobody named, or somebody the Organization knows already.
+        } else if (row.status === "confirmed") {
+            toPromote.add(row.personId);
+        } else {
+            dropped.push(row.id);
+        }
+    }
+    if (dropped.length > 0) {
+        await tx
+            .delete(transcriptSpeakers)
+            .where(inArray(transcriptSpeakers.id, dropped));
+    }
+    let promoted = 0;
+    for (const personId of toPromote) {
+        if (await promotePersonInTx(tx, personId, orgUserId)) promoted += 1;
     }
     return promoted;
 }
