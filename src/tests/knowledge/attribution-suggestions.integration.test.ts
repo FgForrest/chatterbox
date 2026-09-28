@@ -583,6 +583,78 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         expect(await suggest([suggestion("speaker_0", jana)])).toBe(0);
     });
 
+    it("shows suggestions only to whoever may act on them", async () => {
+        const orgUserId = (await ensureOrgAccount()) ?? "";
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        const jana = await person(ALICE, "Jana");
+        await suggest([suggestion("speaker_0", jana)]);
+        await addRecordingToFolder({
+            userId: ALICE,
+            recordingId: REC,
+            folderId: root?.id ?? "",
+        });
+        const labelsSeenBy = async (user: string, query: string) => {
+            const response = await (getSpeakersRoute as unknown as Handler)(
+                request(user, query),
+                { params: Promise.resolve({ id: REC }) },
+            );
+            const body = (await response.json()) as {
+                speakers: { label: string; status: string }[];
+            };
+            return body.speakers.map((row) => `${row.label}:${row.status}`);
+        };
+
+        // The owner reviews suggestions on their own transcript.
+        expect(await labelsSeenBy(ALICE, "")).toEqual(["speaker_0:suggested"]);
+        // Shown in the Organization view, the owner's transcript is the
+        // owner's to review: nobody sees its suggestions there.
+        expect(await labelsSeenBy(orgUserId, "?view=org")).toEqual([]);
+        expect(await labelsSeenBy(BOB, "?view=org")).toEqual([]);
+
+        // The Organization's own copy: the organization account curates it.
+        await put(
+            orgUserId,
+            { label: "speaker_1", unknown: true },
+            "?view=org",
+        );
+        const [copy] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.userId, orgUserId));
+        const orgJana = await person(orgUserId, "Jana N.");
+        await appDb.transaction((tx) =>
+            insertSuggestionsInTx(tx, {
+                userId: orgUserId,
+                transcriptionId: copy?.id ?? "",
+                rows: [suggestion("speaker_0", orgJana)],
+            }),
+        );
+        expect((await labelsSeenBy(orgUserId, "?view=org")).sort()).toEqual([
+            "speaker_0:suggested",
+            "speaker_1:confirmed",
+        ]);
+        expect(await labelsSeenBy(BOB, "?view=org")).toEqual([
+            "speaker_1:confirmed",
+        ]);
+        expect(await labelsSeenBy(ALICE, "?view=org")).toEqual([
+            "speaker_1:confirmed",
+        ]);
+
+        // A member's change answers with confirmed rows only, too.
+        const response = await put(
+            BOB,
+            { label: "speaker_1", displayName: "Petr" },
+            "?view=org",
+        );
+        const body = (await response.json()) as {
+            speakers: { status: string }[];
+        };
+        expect(body.speakers.map((row) => row.status)).toEqual(["confirmed"]);
+    });
+
     it("copies unknown and the confirmer into the Organization view", async () => {
         const orgUserId = (await ensureOrgAccount()) ?? "";
         const [root] = await db()

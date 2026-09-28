@@ -527,6 +527,7 @@ export function TranscriptionPanel({
                             attributions={speakerAttributions}
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
+                            onSeek={onSeekToTurn}
                         />
                     )}
                 </CardHeader>

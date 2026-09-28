@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, X } from "lucide-react";
+import { Check, Loader2, Play, X } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
@@ -38,6 +38,8 @@ interface SpeakerTagsProps {
      * knowledge base, for everyone who can see the recording.
      */
     view?: RecordingView;
+    /** Play the recording from a moment, to hear a suggestion's evidence. */
+    onSeek?: (ms: number) => void;
 }
 
 export interface SpeakerResponseRow {
@@ -46,6 +48,31 @@ export interface SpeakerResponseRow {
     personName: string | null;
     status: string;
     markedUnknown?: boolean;
+    evidenceStartMs?: number | null;
+}
+
+/** A name a machine proposed for a label, waiting for a person's answer. */
+export interface SpeakerSuggestion {
+    personId: string;
+    name: string;
+    evidenceStartMs: number | null;
+}
+
+/** Suggestions by label. The route sends them only to who may act on them. */
+export function suggestedSpeakers(
+    speakers: SpeakerResponseRow[] | undefined,
+): Readonly<Record<string, SpeakerSuggestion>> {
+    const suggestions: Record<string, SpeakerSuggestion> = {};
+    for (const speaker of speakers ?? []) {
+        if (speaker.status !== "suggested") continue;
+        if (!speaker.personId || !speaker.personName) continue;
+        suggestions[speaker.label] = {
+            personId: speaker.personId,
+            name: speaker.personName,
+            evidenceStartMs: speaker.evidenceStartMs ?? null,
+        };
+    }
+    return suggestions;
 }
 
 /** Labels a person answered "nobody known" for. */
@@ -70,11 +97,15 @@ interface SpeakersResponse {
     speakers?: SpeakerResponseRow[];
 }
 
-/** What naming a speaker sends: a person, a new name, or "unknown". */
+/**
+ * What an answer sends: a person, a new name, "unknown", or "not this
+ * suggested person".
+ */
 type SpeakerChoice =
     | { personId: string }
     | { displayName: string }
-    | { unknown: true };
+    | { unknown: true }
+    | { personId: string; reject: true };
 
 export function confirmedAttributions(
     speakers: SpeakerResponseRow[] | undefined,
@@ -99,6 +130,7 @@ export function SpeakerTags({
     attributions,
     onAttributionsChange,
     view,
+    onSeek,
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
     const speakersUrl = withRecordingView(
@@ -110,6 +142,9 @@ export function SpeakerTags({
     const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
+    const [suggestions, setSuggestions] = useState<
+        Readonly<Record<string, SpeakerSuggestion>>
+    >({});
     const [version, setVersion] = useState<{
         transcriptionId: string;
         revision: number;
@@ -119,6 +154,7 @@ export function SpeakerTags({
         (body: SpeakersResponse) => {
             onAttributionsChange(confirmedAttributions(body.speakers));
             setUnknownLabels(unknownSpeakerLabels(body.speakers));
+            setSuggestions(suggestedSpeakers(body.speakers));
             if (
                 typeof body.transcriptionId === "string" &&
                 typeof body.revision === "number"
@@ -248,6 +284,92 @@ export function SpeakerTags({
                                 ) : (
                                     <X className="size-3" />
                                 )}
+                            </button>
+                        </span>
+                    );
+                }
+
+                const suggestion = attribution
+                    ? undefined
+                    : suggestions[speaker.speaker];
+                if (suggestion) {
+                    const evidenceMs = suggestion.evidenceStartMs;
+                    return (
+                        <span
+                            key={speaker.speaker}
+                            id={speakerAnchorId(speaker.speaker)}
+                            className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed border-primary/40 text-xs font-medium"
+                        >
+                            {onSeek && evidenceMs !== null && (
+                                <button
+                                    type="button"
+                                    onClick={() => onSeek(evidenceMs)}
+                                    aria-label={i18n(
+                                        "Play where {speaker} speaks",
+                                        { speaker: speaker.label },
+                                    )}
+                                    title={i18n("Listen")}
+                                    className="flex h-full items-center border-r border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground"
+                                >
+                                    <Play className="size-3" />
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setOpenLabel(speaker.speaker)}
+                                disabled={saving}
+                                title={i18n(
+                                    "Suggested for {speaker}. Pick someone else",
+                                    { speaker: speaker.label },
+                                )}
+                                className="inline-flex h-full items-center gap-2 pl-3 pr-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground disabled:opacity-60"
+                            >
+                                <span
+                                    className={`size-1.5 rounded-full ${accent}`}
+                                />
+                                {i18n("{name}?", { name: suggestion.name })}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    void attribute(speaker.speaker, {
+                                        personId: suggestion.personId,
+                                    })
+                                }
+                                disabled={saving}
+                                aria-label={i18n(
+                                    "Confirm {name} as {speaker}",
+                                    {
+                                        name: suggestion.name,
+                                        speaker: speaker.label,
+                                    },
+                                )}
+                                title={i18n("Confirm")}
+                                className="flex h-full items-center border-l border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary disabled:opacity-60"
+                            >
+                                {saving ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                    <Check className="size-3" />
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    void attribute(speaker.speaker, {
+                                        personId: suggestion.personId,
+                                        reject: true,
+                                    })
+                                }
+                                disabled={saving}
+                                aria-label={i18n("{speaker} is not {name}", {
+                                    name: suggestion.name,
+                                    speaker: speaker.label,
+                                })}
+                                title={i18n("Not this person")}
+                                className="flex h-full items-center border-l border-dashed border-primary/30 px-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
+                            >
+                                <X className="size-3" />
                             </button>
                         </span>
                     );

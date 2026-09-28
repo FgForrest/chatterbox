@@ -53,8 +53,10 @@ function stubFetch(scenario: FetchScenario) {
 
 function SpeakerTagsHarness({
     onAttributionsChange,
+    onSeek,
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
+    onSeek?: (ms: number) => void;
 }) {
     const [attributions, setAttributions] = useState<SpeakerAttributions>({});
     const handleAttributionsChange = useCallback(
@@ -72,13 +74,20 @@ function SpeakerTagsHarness({
             speakers={[{ speaker: "speaker_0", label: "Speaker 0" }]}
             attributions={attributions}
             onAttributionsChange={handleAttributionsChange}
+            onSeek={onSeek}
         />
     );
 }
 
-function renderTags(onAttributionsChange = vi.fn()) {
+function renderTags(
+    onAttributionsChange = vi.fn(),
+    onSeek?: (ms: number) => void,
+) {
     return render(
-        <SpeakerTagsHarness onAttributionsChange={onAttributionsChange} />,
+        <SpeakerTagsHarness
+            onAttributionsChange={onAttributionsChange}
+            onSeek={onSeek}
+        />,
     );
 }
 
@@ -207,6 +216,86 @@ describe("SpeakerTags", () => {
         expect(
             screen.getByRole("button", { name: "Unknown speaker" }),
         ).toBeDefined();
+    });
+
+    describe("a suggested name", () => {
+        const suggested = {
+            label: "speaker_0",
+            personId: "person-9",
+            personName: "Jan Novotný",
+            status: "suggested",
+            evidenceStartMs: 42_000,
+        };
+
+        it("shows as a question and never as the speaker's name", async () => {
+            const onAttributionsChange = vi.fn();
+            stubFetch({ initialSpeakers: [suggested] });
+            renderTags(onAttributionsChange);
+
+            await screen.findByText("Jan Novotný?");
+            // The transcript, summary and exports read confirmed names only.
+            expect(onAttributionsChange).toHaveBeenLastCalledWith({});
+        });
+
+        it("confirms the person, naming the version it saw", async () => {
+            const fetchMock = stubFetch({
+                initialSpeakers: [suggested],
+                savedSpeakers: [{ ...suggested, status: "confirmed" }],
+            });
+            renderTags();
+
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Confirm Jan Novotný as Speaker 0",
+                }),
+            );
+
+            await screen.findByRole("link", { name: "Jan Novotný" });
+            const put = fetchMock.mock.calls.find(
+                ([, init]) => init?.method === "PUT",
+            );
+            expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+                ...VERSION,
+                label: "speaker_0",
+                personId: "person-9",
+            });
+        });
+
+        it("rejects the person", async () => {
+            const fetchMock = stubFetch({ initialSpeakers: [suggested] });
+            renderTags();
+
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Speaker 0 is not Jan Novotný",
+                }),
+            );
+
+            await screen.findByRole("button", { name: "Speaker 0" });
+            const put = fetchMock.mock.calls.find(
+                ([, init]) => init?.method === "PUT",
+            );
+            expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+                ...VERSION,
+                label: "speaker_0",
+                personId: "person-9",
+                reject: true,
+            });
+        });
+
+        it("plays the moment it was recognized", async () => {
+            const onSeek = vi.fn();
+            stubFetch({ initialSpeakers: [suggested] });
+            renderTags(vi.fn(), onSeek);
+
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Play where Speaker 0 speaks",
+                }),
+            );
+
+            expect(onSeek).toHaveBeenCalledWith(42_000);
+        });
     });
 
     it("selects an existing person through the modal", async () => {

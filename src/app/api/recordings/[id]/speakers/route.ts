@@ -48,17 +48,14 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             transcript.id,
             { orgPeopleOnly: true },
         );
-        // On the owner's transcript only confirmed names are shown: a
-        // machine's guess there is the owner's to review, not everyone's to
-        // read. The Organization's own transcript is everyone's to curate,
-        // suggestions included.
         return NextResponse.json({
             transcriptionId: transcript.id,
             revision: transcript.revision,
             fallback: reader.fallback,
-            speakers: reader.fallback
-                ? speakers.filter((speaker) => speaker.status === "confirmed")
-                : speakers,
+            speakers: orgViewSpeakers(speakers, {
+                curator: session.user.id === access.orgUserId,
+                ownersTranscript: reader.fallback,
+            }),
         });
     }
 
@@ -71,6 +68,23 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         speakers: await getTranscriptSpeakers(session.user.id, transcript.id),
     });
 });
+
+/**
+ * The speaker rows the Organization view shows.
+ *
+ * A suggestion is shown only to whoever may act on it: on the
+ * Organization's own transcript that is the organization account, which
+ * curates it. Everyone else reads the confirmed names. On the owner's
+ * transcript, shown until the Organization has its own, a suggestion is
+ * the owner's to review, so nobody sees it here.
+ */
+function orgViewSpeakers(
+    speakers: TranscriptSpeaker[],
+    viewer: { curator: boolean; ownersTranscript: boolean },
+): TranscriptSpeaker[] {
+    if (viewer.curator && !viewer.ownersTranscript) return speakers;
+    return speakers.filter((speaker) => speaker.status === "confirmed");
+}
 
 /**
  * What a person said about one speaker label:
@@ -301,9 +315,15 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         return NextResponse.json({
             transcriptionId: transcript.id,
             revision: transcript.revision,
-            speakers: await getTranscriptSpeakers(orgUserId, transcript.id, {
-                orgPeopleOnly: true,
-            }),
+            speakers: orgViewSpeakers(
+                await getTranscriptSpeakers(orgUserId, transcript.id, {
+                    orgPeopleOnly: true,
+                }),
+                {
+                    curator: session.user.id === orgUserId,
+                    ownersTranscript: false,
+                },
+            ),
         });
     }
 
