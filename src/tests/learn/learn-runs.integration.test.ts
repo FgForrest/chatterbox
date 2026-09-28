@@ -98,6 +98,27 @@ vi.mock("openai", async (importOriginal) => {
     };
 });
 
+// Runs once, just before the next read of the vocabulary: in the handler,
+// the one that builds the final frame, after the knowledge view was read.
+const { beforeVocabulary } = vi.hoisted(() => ({
+    beforeVocabulary: { current: null as null | (() => Promise<void>) },
+}));
+vi.mock("@/lib/knowledge/vocabulary", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/knowledge/vocabulary")>();
+    return {
+        ...actual,
+        vocabularyVisibleTo: async (
+            ...args: Parameters<typeof actual.vocabularyVisibleTo>
+        ) => {
+            const hook = beforeVocabulary.current;
+            beforeVocabulary.current = null;
+            if (hook) await hook();
+            return actual.vocabularyVisibleTo(...args);
+        },
+    };
+});
+
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -132,7 +153,7 @@ import {
 } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
-import { createEntity } from "@/lib/knowledge/entities";
+import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
@@ -644,6 +665,129 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 decryptJsonField<{ anchors: unknown[] }>(item?.payload)
                     ?.anchors,
             ).toEqual([{ turnIndex: 0, charStart: 19, charEnd: 25 }]);
+        });
+
+        it("validates again when knowledge changed after it validated, and keeps what the tools counted", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            createCompletion.mockImplementationOnce(async () => {
+                // What the MCP route counts on the run meanwhile.
+                await db()
+                    .update(learnRuns)
+                    .set({ stats: { tool_calls: 3 } })
+                    .where(eq(learnRuns.id, runId));
+                // Deleted after the final frame read the knowledge, before
+                // the items are written.
+                beforeVocabulary.current = () => deleteEntity(OWNER, tavesi);
+                return {
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    speakers: [],
+                                    corrections: [
+                                        {
+                                            turnIndex: 0,
+                                            charStart: 19,
+                                            charEnd: 25,
+                                            heard: "Tavesy",
+                                            kind: "correct",
+                                            target: { entityId: tavesi },
+                                            replacement: "Tavesi",
+                                        },
+                                    ],
+                                    facts: [],
+                                    relationPhrases: [],
+                                }),
+                            },
+                        },
+                    ],
+                };
+            });
+
+            await expect(runJob(runId)).resolves.toMatchObject({
+                status: "finished",
+                items: 0,
+            });
+            expect(await db().select().from(learnReviewItems)).toEqual([]);
+            expect((await statusAndStats(runId))?.stats).toMatchObject({
+                tool_calls: 3,
+                fence_retries: 1,
+                dropped_outOfScope: 1,
+            });
+        });
+
+        it("writes, pre-ticking nothing, when knowledge keeps moving", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            let made = 0;
+            const again = async () => {
+                made++;
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: `Busy ${made}`,
+                });
+                beforeVocabulary.current = again;
+            };
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            createCompletion.mockImplementationOnce(async () => {
+                beforeVocabulary.current = again;
+                return {
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    speakers: [],
+                                    corrections: [
+                                        {
+                                            turnIndex: 0,
+                                            charStart: 19,
+                                            charEnd: 25,
+                                            heard: "Tavesy",
+                                            kind: "correct",
+                                            target: { entityId: tavesi },
+                                            replacement: "Tavesi",
+                                        },
+                                    ],
+                                    facts: [],
+                                    relationPhrases: [],
+                                }),
+                            },
+                        },
+                    ],
+                };
+            });
+            try {
+                await expect(runJob(runId)).resolves.toMatchObject({
+                    status: "ready",
+                    items: 1,
+                });
+            } finally {
+                beforeVocabulary.current = null;
+            }
+            expect(
+                (await db().select().from(learnReviewItems)).map(
+                    (item) => item.preTicked,
+                ),
+            ).toEqual([false]);
+            expect((await statusAndStats(runId))?.stats).toMatchObject({
+                fence_retries: 2,
+            });
         });
 
         it("keeps the status a rewrite set while a provider call was out, when that call then fails", async () => {

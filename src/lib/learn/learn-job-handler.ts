@@ -12,7 +12,7 @@
  * the bridge path lands (Task 3.6).
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
@@ -40,7 +40,12 @@ import { nodeKey } from "@/lib/knowledge/fact-rules";
 import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { readableScopes } from "@/lib/knowledge/scope";
+import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
+import {
+    vocabularyVersion,
+    vocabularyVisibleTo,
+} from "@/lib/knowledge/vocabulary";
 import { isFinalLearnError } from "@/lib/learn/errors";
 import {
     LEARN_JOB_KIND,
@@ -69,6 +74,12 @@ const FINGERPRINT_DOMAIN = "learn-fingerprint";
 /** Knowledge lookups one run may make. */
 const TOOL_BUDGET = 60;
 const CALL_RETRY_ATTEMPTS = 3;
+/**
+ * How often a run validates again when what it validated against changed
+ * before the items were written; the last time, it writes without
+ * pre-ticking anything.
+ */
+const FENCE_ATTEMPTS = 3;
 
 /** How a review item's fingerprint is stored: a keyed HMAC. */
 export function learnFingerprintHmac(fingerprint: string): string {
@@ -174,6 +185,58 @@ async function mayStillRun(
     return run.view === "private"
         ? run.actorUserId === run.userId
         : orgUserId !== null && run.actorUserId === orgUserId;
+}
+
+type Executor = Pick<typeof db, "select">;
+
+/**
+ * What a validation depended on, as one comparable value: the generations
+ * of the scopes the run reads, the vocabulary's version, the answers given
+ * on the transcript's speakers and the recording's dismissals. Read before
+ * the frame, and again under the locks the items are written under: when
+ * the two differ, the frame may be stale (an entity deleted, an alias taken
+ * back, a speaker answered) and the run validates again.
+ */
+async function fenceOf(
+    executor: Executor,
+    run: RunRow,
+    orgUserId: string | null,
+): Promise<string> {
+    const scopes = readableScopes(
+        {
+            kind: "recording",
+            ownerUserId: run.userId,
+            shared: run.view === "org",
+        },
+        orgUserId,
+    );
+    const generations = await readScopeGenerations(executor, scopes);
+    const answered = await executor
+        .select({
+            label: transcriptSpeakers.label,
+            personId: transcriptSpeakers.personId,
+            status: transcriptSpeakers.status,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+        })
+        .from(transcriptSpeakers)
+        .where(eq(transcriptSpeakers.transcriptionId, run.transcriptionId))
+        .orderBy(asc(transcriptSpeakers.label));
+    const dismissed = await executor
+        .select({ hmac: learnDismissals.fingerprintHmac })
+        .from(learnDismissals)
+        .where(
+            and(
+                eq(learnDismissals.recordingId, run.recordingId),
+                eq(learnDismissals.userId, run.scopeUserId),
+            ),
+        )
+        .orderBy(asc(learnDismissals.fingerprintHmac));
+    return JSON.stringify([
+        [...generations.entries()].sort(),
+        await vocabularyVersion(executor),
+        answered,
+        dismissed.map((row) => row.hmac),
+    ]);
 }
 
 /** Everything the validation needs to know of the run's scopes, frozen now. */
@@ -399,98 +462,136 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
             reportProgress({ phase: "checking" });
 
             // Validated against the knowledge as it is now; written under the
-            // recording lock, with the revision, the writer rule and the
-            // run's own status checked once more.
-            const frame = await frameFor(run, {
-                revision: transcript.revision,
-                turns,
-                language: transcript.detectedLanguage,
-                provider: transcript.provider,
-            });
-            const validated = validateLearnOutput(pass.output, frame);
-            const stats = counts(validated.items, {
+            // recording and transcript locks, with the revision, the writer
+            // rule and the run's own status checked once more, and validated
+            // again when what the validation read moved meanwhile.
+            const baseStats = {
                 calls: pass.calls,
                 lookups: pass.lookups,
                 windows: pass.windows,
                 repairs: pass.repairs,
-                ...Object.fromEntries(
-                    Object.entries(validated.dropped).map(([reason, n]) => [
-                        `dropped_${reason}`,
-                        n ?? 0,
-                    ]),
-                ),
-            });
-            const outcome = await db.transaction(async (tx) => {
-                await tx
-                    .select({ id: recordings.id })
-                    .from(recordings)
-                    .where(eq(recordings.id, run.recordingId))
-                    .for("share");
-                const [current] = await tx
-                    .select({ revision: transcriptions.revision })
-                    .from(transcriptions)
-                    .where(eq(transcriptions.id, run.transcriptionId));
-                const [still] = await tx
-                    .select({ status: learnRuns.status })
-                    .from(learnRuns)
-                    .where(eq(learnRuns.id, run.id))
-                    .for("update");
-                if (!current || still?.status !== "running") {
-                    return { status: "cancelled" as const, items: 0 };
-                }
-                const finish = (
-                    status: "ready" | "finished" | "superseded" | "cancelled",
-                ) =>
-                    tx
-                        .update(learnRuns)
-                        .set({
-                            status,
-                            path,
-                            provider,
-                            model,
-                            stats,
-                            finishedAt: status === "ready" ? null : new Date(),
-                            updatedAt: new Date(),
-                        })
-                        .where(eq(learnRuns.id, run.id));
-                if (
-                    validated.superseded ||
-                    current.revision !== run.transcriptRevision
-                ) {
-                    await finish("superseded");
-                    return { status: "superseded" as const, items: 0 };
-                }
-                if (!(await mayStillRun(run, orgUserId, tx))) {
-                    await finish("cancelled");
-                    return { status: "cancelled" as const, items: 0 };
-                }
-                if (validated.items.length > 0) {
-                    await tx.insert(learnReviewItems).values(
-                        validated.items.map((item) => ({
-                            runId: run.id,
-                            userId: run.scopeUserId,
-                            kind: item.kind,
-                            fingerprintHmac: learnFingerprintHmac(
-                                item.fingerprint,
-                            ),
-                            payload: encryptJsonField(item.payload),
-                            preTicked: item.preTicked,
-                            dependsOnLabel:
-                                "dependsOnLabel" in item
-                                    ? (item.dependsOnLabel ?? null)
-                                    : null,
-                        })),
-                    );
-                }
-                // An empty run says "nothing new found" and counts as finished.
-                const status =
-                    validated.items.length > 0
-                        ? ("ready" as const)
-                        : ("finished" as const);
-                await finish(status);
-                return { status, items: validated.items.length };
-            });
-            return { status: outcome.status, items: outcome.items };
+            };
+            for (let fenceAttempt = 1; ; fenceAttempt++) {
+                const lastAttempt = fenceAttempt >= FENCE_ATTEMPTS;
+                const fence = await fenceOf(db, run, orgUserId);
+                const frame = await frameFor(run, {
+                    revision: transcript.revision,
+                    turns,
+                    language: transcript.detectedLanguage,
+                    provider: transcript.provider,
+                });
+                const validated = validateLearnOutput(pass.output, frame);
+                const items: ReviewCandidate[] = lastAttempt
+                    ? validated.items.map(
+                          (item) =>
+                              ({
+                                  ...item,
+                                  preTicked: false,
+                              }) as ReviewCandidate,
+                      )
+                    : validated.items;
+                const stats = counts(items, {
+                    ...baseStats,
+                    ...(fenceAttempt > 1
+                        ? { fence_retries: fenceAttempt - 1 }
+                        : {}),
+                    ...Object.fromEntries(
+                        Object.entries(validated.dropped).map(([reason, n]) => [
+                            `dropped_${reason}`,
+                            n ?? 0,
+                        ]),
+                    ),
+                });
+                const outcome = await db.transaction(async (tx) => {
+                    await tx
+                        .select({ id: recordings.id })
+                        .from(recordings)
+                        .where(eq(recordings.id, run.recordingId))
+                        .for("share");
+                    // Speaker answers are written under the transcript held
+                    // for update: holding it for share keeps them still.
+                    const [current] = await tx
+                        .select({ revision: transcriptions.revision })
+                        .from(transcriptions)
+                        .where(eq(transcriptions.id, run.transcriptionId))
+                        .for("share");
+                    const [still] = await tx
+                        .select({ status: learnRuns.status })
+                        .from(learnRuns)
+                        .where(eq(learnRuns.id, run.id))
+                        .for("update");
+                    if (!current || still?.status !== "running") {
+                        return { status: "cancelled" as const, items: 0 };
+                    }
+                    const finish = (
+                        status:
+                            | "ready"
+                            | "finished"
+                            | "superseded"
+                            | "cancelled",
+                    ) =>
+                        tx
+                            .update(learnRuns)
+                            .set({
+                                status,
+                                path,
+                                provider,
+                                model,
+                                // Merged: the MCP route counts its tool
+                                // calls on the same row.
+                                stats: sql`coalesce(${learnRuns.stats}, '{}'::jsonb) || ${JSON.stringify(stats)}::jsonb`,
+                                finishedAt:
+                                    status === "ready" ? null : new Date(),
+                                updatedAt: new Date(),
+                            })
+                            .where(eq(learnRuns.id, run.id));
+                    if (
+                        validated.superseded ||
+                        current.revision !== run.transcriptRevision
+                    ) {
+                        await finish("superseded");
+                        return { status: "superseded" as const, items: 0 };
+                    }
+                    if (!(await mayStillRun(run, orgUserId, tx))) {
+                        await finish("cancelled");
+                        return { status: "cancelled" as const, items: 0 };
+                    }
+                    if (
+                        !lastAttempt &&
+                        (await fenceOf(tx, run, orgUserId)) !== fence
+                    ) {
+                        return { status: "stale" as const, items: 0 };
+                    }
+                    if (items.length > 0) {
+                        await tx.insert(learnReviewItems).values(
+                            items.map((item) => ({
+                                runId: run.id,
+                                userId: run.scopeUserId,
+                                kind: item.kind,
+                                fingerprintHmac: learnFingerprintHmac(
+                                    item.fingerprint,
+                                ),
+                                payload: encryptJsonField(item.payload),
+                                preTicked: item.preTicked,
+                                dependsOnLabel:
+                                    "dependsOnLabel" in item
+                                        ? (item.dependsOnLabel ?? null)
+                                        : null,
+                            })),
+                        );
+                    }
+                    // An empty run says "nothing new found" and counts as
+                    // finished.
+                    const status =
+                        items.length > 0
+                            ? ("ready" as const)
+                            : ("finished" as const);
+                    await finish(status);
+                    return { status, items: items.length };
+                });
+                if (outcome.status === "stale") continue;
+                return { status: outcome.status, items: outcome.items };
+            }
         } catch (caught) {
             // Final for Learn (lookups spent, no usable answer): no retry.
             const error = isFinalLearnError(caught)
