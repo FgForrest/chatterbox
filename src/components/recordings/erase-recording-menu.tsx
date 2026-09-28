@@ -14,7 +14,10 @@ import {
 import { useExtracted } from "next-intl";
 import { useState } from "react";
 import { toast } from "sonner";
-import { WithdrawRetentionWarning } from "@/components/recordings/withdraw-retention-warning";
+import {
+    useWithdrawPreview,
+    WithdrawRetentionWarning,
+} from "@/components/recordings/withdraw-retention-warning";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -197,6 +200,7 @@ export function EraseRecordingMenu({
     const requiresTitle = operation === "everywhere";
     // Everything but the Plaud original is the recording itself.
     const withdraws = shared && operation !== null && operation !== "plaud";
+    const preview = useWithdrawPreview(withdraws ? recording.id : null);
     const confirmed = !requiresTitle || confirmText === recording.filename;
 
     return (
@@ -305,9 +309,7 @@ export function EraseRecordingMenu({
                                 </p>
                             )}
                             {withdraws && (
-                                <WithdrawRetentionWarning
-                                    recordingId={recording.id}
-                                />
+                                <WithdrawRetentionWarning preview={preview} />
                             )}
                             {requiresTitle && (
                                 <div className="space-y-2">
@@ -339,7 +341,12 @@ export function EraseRecordingMenu({
                                 <Button
                                     variant="destructive"
                                     onClick={() => void execute()}
-                                    disabled={working || !confirmed}
+                                    disabled={
+                                        working ||
+                                        !confirmed ||
+                                        (withdraws &&
+                                            preview.status === "loading")
+                                    }
                                 >
                                     {working && (
                                         <Loader2 className="size-4 animate-spin" />

@@ -1140,6 +1140,8 @@
   "hDfkrK": "Velikost souboru",
   "6pLkvd": "MB",
   "c3VJQo": "Zařízení",
+  "HZ4FUh": "Zjišťuji, co vaše politika uchovávání smaže…",
+  "PLNpT9": "Nepodařilo se zjistit, co vaše politika uchovávání smaže. Jakmile bude nahrávka zase vaše, vaše nastavení uchovávání platí okamžitě.",
   "hkLtmi": "Vaše politika uchovávání maže zvuk starší než {days, plural, one {# den} few {# dny} other {# dní}}, takže zvuk této nahrávky bude do hodiny smazán.",
   "Gu-_Bp": "Vaše politika uchovávání maže přepisy starší než {days, plural, one {# den} few {# dny} other {# dní}}, takže přepisy této nahrávky budou do hodiny smazány.",
   "iNfGUj": "Vaše politika uchovávání maže shrnutí starší než {days, plural, one {# den} few {# dny} other {# dní}}, takže shrnutí této nahrávky budou do hodiny smazána.",

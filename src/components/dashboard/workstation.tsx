@@ -772,7 +772,12 @@ export function Workstation({
     );
 
     const handleFolderAssignment = useCallback(
-        async (recordingId: string, folderId: string, assigned: boolean) => {
+        async (
+            recordingId: string,
+            folderId: string,
+            assigned: boolean,
+            withdraw = false,
+        ) => {
             const assignment = { recordingId, folderId };
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
@@ -796,7 +801,9 @@ export function Workstation({
                 {
                     method: assigned ? "POST" : "DELETE",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ folderId }),
+                    body: JSON.stringify(
+                        withdraw ? { folderId, withdraw } : { folderId },
+                    ),
                 },
             );
             if (!response.ok) {
@@ -805,6 +812,13 @@ export function Workstation({
                     assignments: previous,
                 }));
                 const error = await parseApiError(response);
+                // The last Organization folder after all: the caller asks
+                // the owner to confirm the withdrawal.
+                if (error.code === "WITHDRAW_UNCONFIRMED") {
+                    throw Object.assign(new Error(error.error), {
+                        code: error.code,
+                    });
+                }
                 const refusal = shareRefusal(error);
                 if (refusal) {
                     const recording = recordings.find(
@@ -1122,11 +1136,13 @@ export function Workstation({
                                     onRemoveFromFolder={(
                                         recordingId,
                                         folderId,
+                                        withdraw,
                                     ) =>
                                         handleFolderAssignment(
                                             recordingId,
                                             folderId,
                                             false,
+                                            withdraw,
                                         )
                                     }
                                     onMoveBetweenFolders={

@@ -67,6 +67,7 @@ interface Props {
     onRemoveFromFolder: (
         recordingId: string,
         folderId: string,
+        withdraw?: boolean,
     ) => Promise<void>;
     onMoveBetweenFolders?: (
         recordingId: string,

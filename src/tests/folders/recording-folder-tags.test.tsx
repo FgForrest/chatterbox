@@ -148,7 +148,77 @@ describe("recording folder tags", () => {
                 name: "Take out of the Organization",
             }),
         );
+        expect(onRemove).toHaveBeenCalledWith("rec-1", "sales", true);
+        vi.unstubAllGlobals();
+    });
+
+    it("confirms nothing before the retention check has answered", () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => new Promise<Response>(() => {})),
+        );
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[folder, orgRoot, sales]}
+                assignments={[{ recordingId: "rec-1", folderId: "sales" }]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={vi.fn()}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Remove from Sales" }),
+        );
+        expect(
+            (
+                screen.getByRole("button", {
+                    name: "Take out of the Organization",
+                }) as HTMLButtonElement
+            ).disabled,
+        ).toBe(true);
+        vi.unstubAllGlobals();
+    });
+
+    it("asks for the confirmation when the server finds it was the last Organization folder", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ due: [] })),
+        );
+        const onRemove = vi
+            .fn()
+            .mockRejectedValueOnce(
+                Object.assign(new Error("last one"), {
+                    code: "WITHDRAW_UNCONFIRMED",
+                }),
+            )
+            .mockResolvedValue(undefined);
+        // Another tab removed the root; this one still shows both.
+        render(
+            <RecordingFolderTags
+                recordingId="rec-1"
+                folders={[folder, orgRoot, sales]}
+                assignments={[
+                    { recordingId: "rec-1", folderId: "sales" },
+                    { recordingId: "rec-1", folderId: "org-root" },
+                ]}
+                onSelectFolder={vi.fn()}
+                onAdd={vi.fn()}
+                onRemove={onRemove}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Remove from Sales" }),
+        );
         expect(onRemove).toHaveBeenCalledWith("rec-1", "sales");
+        const confirm = (await screen.findByRole("button", {
+            name: "Take out of the Organization",
+        })) as HTMLButtonElement;
+        await vi.waitFor(() => expect(confirm.disabled).toBe(false));
+        fireEvent.click(confirm);
+        expect(onRemove).toHaveBeenLastCalledWith("rec-1", "sales", true);
         vi.unstubAllGlobals();
     });
 });

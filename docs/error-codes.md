@@ -130,7 +130,8 @@ rephrased between releases without notice; `code` will not.
 | Code                       | Status | `details`      | When                                                                                                                                                                                                  |
 | -------------------------- | -----: | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SHARE_REQUIREMENTS_UNMET` |   409  | `{ problems }` | Filing a recording into the Organization was refused. `problems` lists `{ kind: "no_transcript" }`, `{ kind: "unresolved_speakers", source, labels }` (speakers nobody named or marked unknown) and `{ kind: "learn_unfinished", runs }`. |
-| `RECORDING_SHARED`         |   409  | —              | The recording is shared with the Organization: its owner's transcripts and speakers are frozen (re-transcription, browser transcripts, speaker changes and Plaud imports are refused) until it is withdrawn. On the Organization view only the organization account changes them; anyone else gets `403 FORBIDDEN`. |
+| `RECORDING_SHARED`         |   409  | —              | The recording is shared with the Organization, and while it is, only the organization account changes it (transcripts, speakers, summaries, topics, title, erase without `withdraw`), on the Organization view; its owner withdraws it first. Anyone else on the Organization view gets `403 FORBIDDEN`. |
+| `WITHDRAW_UNCONFIRMED`     |   409  | —              | Removing a recording from its last Organization folder takes it out of the Organization; the request must say `withdraw: true`, once the owner confirmed it (and saw what their retention will then delete). |
 
 ## Notifications
 

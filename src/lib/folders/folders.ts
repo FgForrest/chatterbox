@@ -954,6 +954,8 @@ export async function removeRecordingFromFolder(input: {
     userId: string;
     recordingId: string;
     folderId: string;
+    /** The owner confirmed that leaving the last Organization folder withdraws it. */
+    withdraw?: boolean;
 }): Promise<void> {
     const orgUserId = await getOrgUserId();
     const target = await resolveFolder(
@@ -996,6 +998,20 @@ export async function removeRecordingFromFolder(input: {
                     eq(recordingFolderAssignments.folderId, input.folderId),
                 ),
             );
+        // Its last Organization folder: leaving it withdraws the recording,
+        // which the owner confirms knowing what their retention will then
+        // delete. A client that thought another folder remained learns it
+        // here, and nothing changed.
+        if (
+            !input.withdraw &&
+            !(await isRecordingShared(input.recordingId, target.ownerId, tx))
+        ) {
+            throw new AppError(
+                ErrorCode.WITHDRAW_UNCONFIRMED,
+                "This is the recording's last Organization folder; removing it takes the recording out of the Organization",
+                409,
+            );
+        }
         await endSharingIfUnfiled(tx, target.ownerId, input.recordingId);
     });
     await orgTreeChanged();

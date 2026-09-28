@@ -3,7 +3,10 @@
 import { Folder, FolderInput, FolderPlus, Users, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useState } from "react";
-import { WithdrawRetentionWarning } from "@/components/recordings/withdraw-retention-warning";
+import {
+    useWithdrawPreview,
+    WithdrawRetentionWarning,
+} from "@/components/recordings/withdraw-retention-warning";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -32,7 +35,17 @@ interface RecordingFolderTagsProps {
     assignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
     onAdd: (recordingId: string, folderId: string) => Promise<void>;
-    onRemove: (recordingId: string, folderId: string) => Promise<void>;
+    /**
+     * `withdraw`: the owner confirmed that leaving the last Organization
+     * folder takes the recording out of the Organization. A removal the
+     * server finds to be that one without it rejects with an error whose
+     * `code` is `WITHDRAW_UNCONFIRMED`, and the confirmation opens.
+     */
+    onRemove: (
+        recordingId: string,
+        folderId: string,
+        withdraw?: boolean,
+    ) => Promise<void>;
     /**
      * Whether the viewer owns the recording. Only the owner files it in
      * Private folders or shares it with (and withdraws it from) the
@@ -65,6 +78,7 @@ export function RecordingFolderTags({
     const [withdrawing, setWithdrawing] = useState<RecordingFolder | null>(
         null,
     );
+    const preview = useWithdrawPreview(withdrawing ? recordingId : null);
     const label = (folder: RecordingFolder) =>
         folder.parentId === null && folder.scope === "org"
             ? i18n("Organization")
@@ -130,7 +144,17 @@ export function RecordingFolderTags({
                                     return;
                                 }
                                 void onRemove(recordingId, folder.id).catch(
-                                    () => {},
+                                    (error: unknown) => {
+                                        // It was the last one after all
+                                        // (another tab removed the other).
+                                        if (
+                                            (error as { code?: unknown })
+                                                ?.code ===
+                                            "WITHDRAW_UNCONFIRMED"
+                                        ) {
+                                            setWithdrawing(folder);
+                                        }
+                                    },
                                 );
                             }}
                             className="inline-flex h-full items-center border-l border-primary/15 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -265,7 +289,7 @@ export function RecordingFolderTags({
                         </DialogDescription>
                     </DialogHeader>
                     {withdrawing && (
-                        <WithdrawRetentionWarning recordingId={recordingId} />
+                        <WithdrawRetentionWarning preview={preview} />
                     )}
                     <DialogFooter>
                         <Button
@@ -275,13 +299,18 @@ export function RecordingFolderTags({
                             {i18n("Cancel")}
                         </Button>
                         <Button
+                            // What the owner's retention will delete is
+                            // part of what they confirm.
+                            disabled={preview.status === "loading"}
                             onClick={() => {
                                 const folder = withdrawing;
                                 setWithdrawing(null);
                                 if (folder) {
-                                    void onRemove(recordingId, folder.id).catch(
-                                        () => {},
-                                    );
+                                    void onRemove(
+                                        recordingId,
+                                        folder.id,
+                                        true,
+                                    ).catch(() => {});
                                 }
                             }}
                         >

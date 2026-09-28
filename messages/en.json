@@ -1140,6 +1140,8 @@
   "hDfkrK": "File Size",
   "6pLkvd": "MB",
   "c3VJQo": "Device",
+  "HZ4FUh": "Checking what your retention will delete…",
+  "PLNpT9": "Could not check what your retention will delete. Once it is yours again, your retention settings apply at once.",
   "hkLtmi": "Your retention deletes audio older than {days, plural, one {# day} other {# days}}, so this recording's audio will be deleted within the hour.",
   "Gu-_Bp": "Your retention deletes transcripts older than {days, plural, one {# day} other {# days}}, so this recording's transcripts will be deleted within the hour.",
   "iNfGUj": "Your retention deletes summaries older than {days, plural, one {# day} other {# days}}, so this recording's summaries will be deleted within the hour.",

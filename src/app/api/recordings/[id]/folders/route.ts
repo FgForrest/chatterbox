@@ -58,7 +58,9 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Take a recording out of a folder, or with `{ "organization": true }` out of
- * the whole Organization tree. Leaving the Organization is owner only.
+ * the whole Organization tree. Leaving the Organization is owner only, and
+ * taking it out of its last Organization folder needs `{ "withdraw": true }`
+ * (409 WITHDRAW_UNCONFIRMED otherwise).
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -76,6 +78,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         userId: session.user.id,
         recordingId: id,
         folderId: readString(body, "folderId"),
+        withdraw: (body as { withdraw?: unknown }).withdraw === true,
     });
     return NextResponse.json({ assigned: false });
 });

@@ -135,7 +135,7 @@ export function RecordingWorkstation({
     }, [recording.id, refresh, push, i18n]);
 
     const handleFolderAssignment = useCallback(
-        async (folderId: string, assigned: boolean) => {
+        async (folderId: string, assigned: boolean, withdraw = false) => {
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
                 ...current,
@@ -155,7 +155,9 @@ export function RecordingWorkstation({
                 {
                     method: assigned ? "POST" : "DELETE",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ folderId }),
+                    body: JSON.stringify(
+                        withdraw ? { folderId, withdraw } : { folderId },
+                    ),
                 },
             );
             if (!response.ok) {
@@ -164,6 +166,13 @@ export function RecordingWorkstation({
                     assignments: previous,
                 }));
                 const error = await parseApiError(response);
+                // The last Organization folder after all: the folder tags
+                // ask the owner to confirm the withdrawal.
+                if (error.code === "WITHDRAW_UNCONFIRMED") {
+                    throw Object.assign(new Error(error.error), {
+                        code: error.code,
+                    });
+                }
                 toast.error(
                     shareRefusal(error) ??
                         (error.error ||
@@ -219,8 +228,8 @@ export function RecordingWorkstation({
                         onAdd={(_recordingId, folderId) =>
                             handleFolderAssignment(folderId, true)
                         }
-                        onRemove={(_recordingId, folderId) =>
-                            handleFolderAssignment(folderId, false)
+                        onRemove={(_recordingId, folderId, withdraw) =>
+                            handleFolderAssignment(folderId, false, withdraw)
                         }
                     />
                     {!displayRecording.audioReaped && (
