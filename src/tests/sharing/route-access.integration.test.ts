@@ -486,6 +486,31 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             ).toHaveLength(1);
         });
 
+        it("shows nothing of the owner's once the Organization's copy is gone", async () => {
+            const orgPath = `/api/recordings/${REC}/speakers?view=org`;
+            const seen = await seenVersion(orgUserId, orgPath);
+            // Organization retention removes its copy.
+            await db()
+                .delete(transcriptions)
+                .where(eq(transcriptions.userId, orgUserId));
+
+            // The owner's transcript is not shown in its place...
+            expect((await call(getSpeakers, MEMBER, orgPath)).status).toBe(404);
+            // ...and a change made on the copy that was shown finds nothing
+            // to name: the snapshot is never taken again.
+            const change = await call(putSpeaker, orgUserId, orgPath, {
+                method: "PUT",
+                ...json({ ...seen, label: "speaker_0", displayName: "Eva" }),
+            });
+            expect(change.status).toBe(404);
+            expect(
+                await db()
+                    .select()
+                    .from(transcriptions)
+                    .where(eq(transcriptions.userId, orgUserId)),
+            ).toEqual([]);
+        });
+
         it("queues Organization work for its account only and lets every viewer follow it", async () => {
             // Members read a shared recording; its account re-transcribes it.
             expect(

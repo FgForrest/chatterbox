@@ -96,15 +96,59 @@ vi.mock("@/lib/sharing/org-transcript", async () => {
     };
 });
 
+import { db as appDb } from "@/db";
 import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
+import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { takeOrgSnapshot } from "@/lib/sharing/org-transcript";
 import { backfillOrgSnapshots } from "@/lib/sharing/snapshot-backfill";
+
+type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+
+/** A transaction held open, with its locks, until `commit`. */
+async function holdTransaction(work: (tx: Tx) => Promise<void>) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let ready = () => {};
+    const worked = new Promise<void>((resolve) => {
+        ready = resolve;
+    });
+    const done = appDb.transaction(async (tx) => {
+        await work(tx);
+        ready();
+        await released;
+    });
+    await Promise.race([worked, done]);
+    return {
+        commit: async () => {
+            release();
+            await done;
+        },
+    };
+}
+
+/** Whether `promise` is still pending after a moment: waiting on a lock. */
+async function stillWaiting(promise: Promise<unknown>): Promise<boolean> {
+    const pending = Symbol("pending");
+    const first = await Promise.race([
+        promise.then(
+            () => null,
+            () => null,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(pending), 300)),
+    ]);
+    return first === pending;
+}
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const OWNER = "user-owner";
+const OTHER = "user-other";
 const DIALOG = "speaker_0: Hello.\nspeaker_1: Hi there.";
 const DIARIZED = "gpt-4o-transcribe-diarize";
 
@@ -147,12 +191,12 @@ describeWithDatabase("the Organization snapshot backfill (PostgreSQL)", () => {
         orgRootId = root?.id ?? "";
     });
 
-    async function recording(id: string) {
+    async function recording(id: string, ownerId = OWNER) {
         await db()
             .insert(recordings)
             .values({
                 id,
-                userId: OWNER,
+                userId: ownerId,
                 deviceSn: "SN-1",
                 plaudFileId: `plaud-${id}`,
                 filename: encryptText(`Recording ${id}`),
@@ -162,7 +206,7 @@ describeWithDatabase("the Organization snapshot backfill (PostgreSQL)", () => {
                 filesize: 11,
                 fileMd5: "0".repeat(32),
                 storageType: "local",
-                storagePath: `${OWNER}/${id}.mp3`,
+                storagePath: `${ownerId}/${id}.mp3`,
                 plaudVersion: "1",
             });
     }
@@ -190,9 +234,9 @@ describeWithDatabase("the Organization snapshot backfill (PostgreSQL)", () => {
     }
 
     /** Shared the way it was before snapshots: an assignment, nothing copied. */
-    async function sharedBeforeSnapshots(recordingId: string) {
+    async function sharedBeforeSnapshots(recordingId: string, ownerId = OWNER) {
         await db().insert(recordingFolderAssignments).values({
-            userId: OWNER,
+            userId: ownerId,
             recordingId,
             folderId: orgRootId,
         });
@@ -346,6 +390,85 @@ describeWithDatabase("the Organization snapshot backfill (PostgreSQL)", () => {
             ).toEqual(["plaud", "riffado"]);
             expect(await marker(id)).not.toBeNull();
         }
+    });
+
+    it("folds a second owner's record with the same email into the Organization person a concurrent promotion makes", async () => {
+        await db()
+            .insert(users)
+            .values([{ id: OTHER, email: "other@example.test" }]);
+        const named: string[] = [];
+        for (const [id, ownerId] of [
+            ["rec-a", OWNER],
+            ["rec-b", OTHER],
+        ] as const) {
+            await recording(id, ownerId);
+            const own = await transcript(id, ownerId, "riffado");
+            const [person] = await db()
+                .insert(people)
+                .values({
+                    userId: ownerId,
+                    displayName: encryptText("Jana"),
+                    primaryEmail: encryptText("jana@example.test"),
+                    primaryEmailHash: lookupHash("jana@example.test"),
+                })
+                .returning({ id: people.id });
+            named.push(person?.id ?? "");
+            for (const label of ["speaker_0", "speaker_1"]) {
+                await db()
+                    .insert(transcriptSpeakers)
+                    .values({
+                        userId: ownerId,
+                        transcriptionId: own,
+                        label,
+                        personId: label === "speaker_0" ? person?.id : null,
+                        markedUnknown: label !== "speaker_0",
+                        source: "user",
+                        status: "confirmed",
+                        confirmedByUserId: ownerId,
+                    });
+            }
+            await sharedBeforeSnapshots(id, ownerId);
+        }
+
+        // Another share, promoting the first owner's Jana, holds its
+        // transaction open: the second snapshot's promotion must wait for
+        // it and fold its Jana into that one, or it makes a second
+        // Organization Jana with the same email and fails.
+        const first = await holdTransaction(async (tx) => {
+            await lockOrgPeople(tx);
+            await promotePersonInTx(tx, named[0] ?? "", orgUserId);
+        });
+        const second = takeOrgSnapshot("rec-b", {
+            ownerUserId: OTHER,
+            contentUserId: orgUserId,
+        });
+        expect(await stillWaiting(second)).toBe(true);
+        await first.commit();
+        expect(await second).toBe(true);
+        await takeOrgSnapshot("rec-a", {
+            ownerUserId: OWNER,
+            contentUserId: orgUserId,
+        });
+
+        const orgPeople = await db()
+            .select({ id: people.id })
+            .from(people)
+            .where(eq(people.userId, orgUserId));
+        expect(orgPeople).toHaveLength(1);
+        const names = await db()
+            .select({ personId: transcriptSpeakers.personId })
+            .from(transcriptSpeakers)
+            .where(
+                and(
+                    eq(transcriptSpeakers.userId, orgUserId),
+                    eq(transcriptSpeakers.label, "speaker_0"),
+                ),
+            );
+        expect(names.map((row) => row.personId)).toEqual([
+            orgPeople[0]?.id,
+            orgPeople[0]?.id,
+        ]);
+        expect(named).toContain(orgPeople[0]?.id);
     });
 
     it("does nothing while the Organization scope is read-only", async () => {

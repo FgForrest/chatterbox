@@ -19,6 +19,7 @@ import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useOrgEvents } from "@/hooks/use-org-events";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { parseApiError } from "@/lib/api-errors";
@@ -79,6 +80,17 @@ export function RecordingWorkstation({
     useEffect(() => {
         setFolderOrganization(initialFolderOrganization);
     }, [initialFolderOrganization]);
+
+    // Shared or withdrawn in another tab: the page reloads its folders,
+    // and with them whether this transcript may be changed here.
+    useOrgEvents(
+        folderOrganization.folders.some((folder) => folder.scope === "org"),
+        (event) => {
+            if (event.type === "tree" || event.recordingId === recording.id) {
+                refresh();
+            }
+        },
+    );
 
     useEffect(() => {
         void observeTranscriptionById(recording.id);

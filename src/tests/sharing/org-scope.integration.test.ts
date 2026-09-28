@@ -122,18 +122,23 @@ import {
     unshareRecording,
 } from "@/lib/folders/folders";
 import {
-    clearTranscriptSpeaker,
     deleteSpeakerInTx,
     lockForSpeakerChange,
 } from "@/lib/knowledge/attribution";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import { deletePerson, lockOrgPeople } from "@/lib/knowledge/people";
+import {
+    deletePerson,
+    lockOrgPeople,
+    mergePeople,
+} from "@/lib/knowledge/people";
+import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { ensureOrgAccount } from "@/lib/org/account";
 import {
     requireRecordingView,
     resolveRecordingAccess,
 } from "@/lib/sharing/access";
 import { upsertTranscription } from "@/lib/transcription/persist";
+import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -1196,6 +1201,14 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
         });
 
         describe("racing a share", () => {
+            // The organization account and its root exist before a race
+            // starts: creating them hashes a password, which would make a
+            // waiting share look like one waiting on a lock.
+            let root = "";
+            beforeEach(async () => {
+                root = await orgRootId();
+            });
+
             it("refuses when a speaker's answer is taken back first", async () => {
                 const { transcript } = await answeredMeeting();
                 const clearing = await holdTransaction(async (tx) => {
@@ -1211,7 +1224,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     });
                 });
 
-                const sharing = share();
+                const sharing = share(root);
                 expect(await stillWaiting(sharing)).toBe(true);
                 await clearing.commit();
 
@@ -1220,25 +1233,65 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 expect(await orgTranscripts()).toEqual([]);
             });
 
-            it("shares the answer when it is taken back after the snapshot", async () => {
+            it("shares the answer, and refuses taking it back, when that comes after the snapshot", async () => {
                 const { transcript } = await answeredMeeting();
                 let clearing: Promise<unknown> = Promise.resolve();
                 hooks.afterSnapshot = async () => {
-                    clearing = clearTranscriptSpeaker({
+                    clearing = changeTranscriptSpeaker({
                         userId: ALICE,
                         transcriptionId: transcript,
                         revision: 0,
                         label: "speaker_1",
+                        answer: { kind: "clear" },
+                        actorUserId: ALICE,
+                        frozenWhileSharedWith: await orgUser(),
                     });
                     expect(await stillWaiting(clearing)).toBe(true);
                 };
 
-                await share();
-                await Promise.allSettled([clearing]);
+                await share(root);
 
+                const error = await refusal(clearing);
+                expect(error.code).toBe("RECORDING_SHARED");
+                const [own] = await db()
+                    .select()
+                    .from(transcriptSpeakers)
+                    .where(
+                        and(
+                            eq(transcriptSpeakers.transcriptionId, transcript),
+                            eq(transcriptSpeakers.label, "speaker_1"),
+                        ),
+                    );
+                expect(own?.markedUnknown).toBe(true);
                 expect(
                     (await orgNames()).find((row) => row.label === "speaker_1"),
                 ).toMatchObject({ personId: null, markedUnknown: true });
+            });
+
+            it("refuses a transcript from the browser that waited for the share", async () => {
+                const { transcript } = await answeredMeeting();
+                let storing: Promise<{ errorCode?: string }> = Promise.resolve(
+                    {},
+                );
+                hooks.afterSnapshot = async () => {
+                    storing = storeBrowserTranscription({
+                        userId: ALICE,
+                        recordingId: "rec-a",
+                        text: "Made in the browser.",
+                        detectedLanguage: null,
+                        model: "whisper-base",
+                    });
+                    expect(await stillWaiting(storing)).toBe(true);
+                };
+
+                await share(root);
+
+                expect((await storing).errorCode).toBe("RECORDING_SHARED");
+                const [own] = await db()
+                    .select({ text: transcriptions.text })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.id, transcript));
+                expect(decryptText(own?.text ?? "")).toBe(DIALOG);
             });
 
             it("refuses when a named person is deleted first", async () => {
@@ -1249,7 +1302,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     await tx.delete(people).where(eq(people.id, jana));
                 });
 
-                const sharing = share();
+                const sharing = share(root);
                 expect(await stillWaiting(sharing)).toBe(true);
                 await deleting.commit();
 
@@ -1266,7 +1319,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     expect(await stillWaiting(deleting)).toBe(true);
                 };
 
-                await share();
+                await share(root);
 
                 // By then an Organization person, not the owner's to delete.
                 expect((await refusal(deleting)).statusCode).toBe(403);
@@ -1275,6 +1328,27 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     (await orgNames()).find((row) => row.label === "speaker_0")
                         ?.personId,
                 ).toBe(jana);
+            });
+
+            it("never publishes a private person a merge moved the named one into", async () => {
+                const { jana } = await answeredMeeting();
+                const privateJana = await person("Jana (mine)");
+                let merging: Promise<unknown> = Promise.resolve();
+                hooks.afterSnapshot = async () => {
+                    merging = mergePeople(ALICE, privateJana, jana);
+                    expect(await stillWaiting(merging)).toBe(true);
+                };
+
+                await share(root);
+
+                // By then Jana is the Organization's, not the owner's to
+                // fold into a private record.
+                expect((await refusal(merging)).statusCode).toBe(403);
+                const named = (await orgNames()).find(
+                    (row) => row.label === "speaker_0",
+                );
+                expect(named?.personId).toBe(jana);
+                expect(await ownerOf(jana)).toBe(await orgUser());
             });
         });
     });
