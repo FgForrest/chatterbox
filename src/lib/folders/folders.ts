@@ -916,6 +916,16 @@ export async function addRecordingToFolder(input: {
             );
             if (target.scope !== "org" || wasShared) return;
 
+            // Not shared, so nothing of the Organization's is left of it. A
+            // marker or rows a path around the unshare left behind (the
+            // organization account deleted and made again, its folders
+            // gone with it) would make the snapshot a no-op, and the gate
+            // refuse this recording for good.
+            await deleteOrgRows(tx, target.ownerId, input.recordingId);
+            await tx
+                .update(recordings)
+                .set({ orgSnapshotAt: null })
+                .where(eq(recordings.id, input.recordingId));
             await snapshotRecordingForOrgInTx(
                 tx,
                 input.recordingId,
@@ -1101,22 +1111,7 @@ async function deleteOrgViewIfUnshared(
         .update(recordings)
         .set({ unsharedAt: now, orgSnapshotAt: null })
         .where(eq(recordings.id, recordingId));
-    await tx
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, orgUserId),
-            ),
-        );
-    await tx
-        .delete(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, orgUserId),
-            ),
-        );
+    await deleteOrgRows(tx, orgUserId, recordingId);
     await tx
         .update(asyncJobs)
         .set({
@@ -1135,6 +1130,33 @@ async function deleteOrgViewIfUnshared(
                     recordingJobSubject(recordingId, "org"),
                 ),
                 inArray(asyncJobs.status, ["pending", "processing"]),
+            ),
+        );
+}
+
+/**
+ * Delete the Organization's transcripts and summaries of a recording; its
+ * speaker rows go with the transcripts.
+ */
+async function deleteOrgRows(
+    tx: Tx,
+    orgUserId: string,
+    recordingId: string,
+): Promise<void> {
+    await tx
+        .delete(aiEnhancements)
+        .where(
+            and(
+                eq(aiEnhancements.recordingId, recordingId),
+                eq(aiEnhancements.userId, orgUserId),
+            ),
+        );
+    await tx
+        .delete(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, orgUserId),
             ),
         );
 }

@@ -1167,6 +1167,34 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             expect(await marker()).not.toBeNull();
         });
 
+        it("shares again a recording whose snapshot outlived its assignments", async () => {
+            const { transcript } = await answeredMeeting();
+            await share();
+            // A path around the unshare: the assignments go, the marker and
+            // the Organization's copy stay.
+            await db()
+                .delete(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.recordingId, "rec-a"));
+            await db()
+                .update(transcriptSpeakers)
+                .set({ personId: null, markedUnknown: true })
+                .where(
+                    and(
+                        eq(transcriptSpeakers.transcriptionId, transcript),
+                        eq(transcriptSpeakers.label, "speaker_0"),
+                    ),
+                );
+
+            await share();
+
+            // A fresh snapshot, of the owner's transcript as it is now.
+            expect(await orgTranscripts()).toHaveLength(1);
+            expect(
+                (await orgNames()).find((row) => row.label === "speaker_0"),
+            ).toMatchObject({ personId: null, markedUnknown: true });
+            expect(await marker()).not.toBeNull();
+        });
+
         describe("racing a share", () => {
             it("refuses when a speaker's answer is taken back first", async () => {
                 const { transcript } = await answeredMeeting();
