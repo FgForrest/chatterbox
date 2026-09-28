@@ -24,6 +24,7 @@ import {
 } from "vitest";
 import {
     apiCredentials,
+    asyncJobs,
     people,
     recordingFolderAssignments,
     recordingFolders,
@@ -496,6 +497,46 @@ describeWithDatabase(
                 statusCode: 404,
                 code: "RECORDING_NOT_FOUND",
             });
+            expect(provider.calls).toBe(1);
+            expect(await textOf(OWNER)).toBe(SHARED_TEXT);
+        });
+
+        it("writes nothing for an organization account's run cancelled by a withdrawal, even once shared again", async () => {
+            await share();
+            const [job] = await db()
+                .insert(asyncJobs)
+                .values({
+                    userId: orgUserId,
+                    kind: "transcription",
+                    subjectId: `org:${REC}`,
+                    status: "processing",
+                    payload: { recordingId: REC, view: "org" },
+                })
+                .returning({ id: asyncJobs.id });
+            const { unshareRecording } = await import("@/lib/folders/folders");
+            // Withdrawn and shared again while the provider ran.
+            provider.during = async () => {
+                await unshareRecording(OWNER, REC);
+                await share();
+            };
+
+            const error = await transcriptionJobHandler
+                .run({
+                    payload: {
+                        recordingId: REC,
+                        trigger: "manual",
+                        force: true,
+                        view: "org",
+                    },
+                    userId: orgUserId,
+                    jobId: job?.id,
+                } as Parameters<typeof transcriptionJobHandler.run>[0])
+                .then(
+                    () => null,
+                    (caught: unknown) => caught,
+                );
+
+            expect(error).toMatchObject({ statusCode: 404 });
             expect(provider.calls).toBe(1);
             expect(await textOf(OWNER)).toBe(SHARED_TEXT);
         });

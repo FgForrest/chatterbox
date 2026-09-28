@@ -165,12 +165,12 @@ describe("automatic upload transcription", () => {
         expect(mocks.transcribeRecording).toHaveBeenCalledWith(
             "user-1",
             "recording-1",
-            {
+            expect.objectContaining({
                 trigger: "upload",
                 providerId: undefined,
                 model: undefined,
                 force: false,
-            },
+            }),
         );
     });
 

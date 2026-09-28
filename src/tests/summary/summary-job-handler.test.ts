@@ -53,6 +53,7 @@ function context(overrides: Record<string, unknown> = {}) {
 }
 
 const generated = {
+    ownerUserId: "user-1",
     // Distinctive enough that finding it anywhere in the job's result means
     // it genuinely leaked, rather than colliding with a JSON key.
     summary: "CONFIDENTIAL_SUMMARY_PROSE",

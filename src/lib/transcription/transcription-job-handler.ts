@@ -78,7 +78,7 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             ? false
             : isRetryableError(error),
 
-    async run({ payload, userId }): Promise<JobResult> {
+    async run({ payload, userId, jobId }): Promise<JobResult> {
         const allowed =
             payload.view === "org" ||
             (await allowManualArtifactGeneration(
@@ -101,6 +101,7 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             attributionSource: payload.attributionSource,
             force: payload.force,
             view: payload.view,
+            jobId,
         });
         // Shared since it was queued, queued on the Organization view by
         // someone other than its account, or the Organization is read-only:

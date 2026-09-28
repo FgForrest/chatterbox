@@ -211,6 +211,7 @@ export async function storeBrowserTranscription(
                         source: "riffado",
                         turns: null,
                         topics: null,
+                        producedByUserId: userId,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
@@ -243,6 +244,7 @@ export async function storeBrowserTranscription(
                     source: "riffado",
                     turns: null,
                     topics: null,
+                    producedByUserId: userId,
                 });
             }
 
@@ -324,6 +326,8 @@ export interface TranscribeOptions {
      * caller is the actor whose provider runs, not the owner.
      */
     view?: RecordingView;
+    /** The job this run finishes; cancelled meanwhile, it writes nothing. */
+    jobId?: string;
 }
 
 export interface TranscribeResult {
@@ -747,6 +751,7 @@ async function transcribeRecordingInner(
             actorUserId: ctx.actorUserId,
             // The summary describes the text a forced re-run replaces.
             dropSummaryOnReplace: opts.force ? "riffado" : undefined,
+            jobId: opts.jobId,
         });
 
         if (!committed && reason) return refusedResult(reason);
@@ -1024,14 +1029,16 @@ function recordingSharedResult(
     return { success: false, error, errorCode: "RECORDING_SHARED" };
 }
 
-function refusedResult(refusal: WriterRefusal): TranscribeResult {
-    return refusal === "shared"
-        ? recordingSharedResult()
-        : {
-              success: false,
-              error: "Recording not found",
-              errorCode: "RECORDING_NOT_FOUND",
-          };
+function refusedResult(refusal: WriterRefusal | "cancelled"): TranscribeResult {
+    if (refusal === "shared") return recordingSharedResult();
+    return {
+        success: false,
+        error:
+            refusal === "cancelled"
+                ? "The run was cancelled before it finished"
+                : "Recording not found",
+        errorCode: "RECORDING_NOT_FOUND",
+    };
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {

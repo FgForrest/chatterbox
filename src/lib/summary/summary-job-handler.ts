@@ -49,6 +49,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
     async run({
         payload,
         userId,
+        jobId,
         attempt,
         maxAttempts,
         reportProgress,
@@ -80,20 +81,21 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     trigger: payload.trigger,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
+                    jobId,
                 },
             );
 
             // Emitted here rather than in the transcription pipeline, so the
             // event still means "the summary is written and readable" now
             // that the write happens on a worker instead of inline. Webhooks
-            // are the owner's integration, so the Organization view is silent.
-            if (!orgView) {
-                await emitEvent(
-                    "summary.completed",
-                    userId,
-                    payload.recordingId,
-                ).catch(() => {});
-            }
+            // are the owner's integration, and a shared recording is one
+            // recording: a summary made on the Organization view is the
+            // owner's too, as its transcription is.
+            await emitEvent(
+                "summary.completed",
+                result.ownerUserId,
+                payload.recordingId,
+            ).catch(() => {});
 
             return {
                 provider: result.provider,

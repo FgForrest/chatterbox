@@ -73,9 +73,13 @@ export interface GenerateSummaryOptions {
      * prompts and language.
      */
     view?: RecordingView;
+    /** The job this run finishes; cancelled meanwhile, it writes nothing. */
+    jobId?: string;
 }
 
 export interface GenerateSummaryResult {
+    /** The recording's owner, whose summary this is in either view. */
+    ownerUserId: string;
     summary: string;
     keyPoints: string[];
     actionItems: string[];
@@ -107,13 +111,6 @@ export interface GenerateSummaryResult {
     };
 }
 
-/**
- * Attempts for a single provider call, and the wait between them.
- *
- * Three attempts over a few seconds -- short, because someone may be watching
- * this happen, and the job-level retry (minutes apart, in the worker) is the
- * right instrument for an outage that lasts longer than a moment.
- */
 /** Which transcript an Organization summary is made from, most preferred first. */
 const ORG_SUMMARY_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
 
@@ -141,6 +138,13 @@ async function findOrgSummarySource(
     return undefined;
 }
 
+/**
+ * Attempts for a single provider call, and the wait between them.
+ *
+ * Three attempts over a few seconds -- short, because someone may be watching
+ * this happen, and the job-level retry (minutes apart, in the worker) is the
+ * right instrument for an outage that lasts longer than a moment.
+ */
 const PASS_RETRY_ATTEMPTS = 3;
 const PASS_RETRY_BASE_MS = 1_500;
 const PASS_RETRY_MAX_MS = 15_000;
@@ -528,10 +532,18 @@ Correct the serialization without dropping or inventing information. Return exac
         multiPass,
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
+        jobId: opts.jobId,
     });
 
-    if (!committed && reason) throw writerRefusalError(reason);
     if (!committed) {
+        if (reason === "cancelled") {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "The run was cancelled before it finished",
+                410,
+            );
+        }
+        if (reason) throw writerRefusalError(reason);
         throw new AppError(ErrorCode.NOT_FOUND, "Recording was deleted", 410);
     }
 
@@ -561,6 +573,7 @@ Correct the serialization without dropping or inventing information. Return exac
     });
 
     return {
+        ownerUserId: ctx.ownerUserId,
         summary,
         keyPoints,
         actionItems,

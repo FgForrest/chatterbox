@@ -1,6 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, recordings, transcriptions } from "@/db/schema";
+import {
+    aiEnhancements,
+    asyncJobs,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
@@ -58,6 +63,12 @@ export interface UpsertTranscriptionArgs {
     actorUserId?: string;
     /** Account whose provider produced the text; defaults to the actor. */
     producedByUserId?: string;
+    /**
+     * The job this write finishes. Cancelled meanwhile (the recording was
+     * withdrawn, erased or deleted), it writes nothing, even if the
+     * recording is shared again by then.
+     */
+    jobId?: string;
 }
 
 export interface UpsertEnhancementArgs {
@@ -92,6 +103,8 @@ export interface UpsertEnhancementArgs {
     actorUserId?: string;
     /** Account whose provider produced the summary; defaults to the actor. */
     producedByUserId?: string;
+    /** See `UpsertTranscriptionArgs.jobId`. */
+    jobId?: string;
 }
 
 /**
@@ -101,18 +114,35 @@ export interface UpsertEnhancementArgs {
  *   only the organization account changes it (RECORDING_SHARED);
  * - `reason: "withdrawn"`: an Organization change, and the recording is no
  *   longer shared;
+ * - `reason: "cancelled"`: the job it finishes was cancelled meanwhile;
  * - otherwise it was soft-deleted mid-flight or its content erased (e.g.
  *   RECORDING_DELETED).
  */
 export interface UpsertResult {
     committed: boolean;
-    reason?: WriterRefusal;
+    reason?: WriterRefusal | "cancelled";
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
 
 class WriterRefused {
-    constructor(readonly refusal: WriterRefusal) {}
+    constructor(readonly refusal: WriterRefusal | "cancelled") {}
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Whether the job a write finishes is still running. A cancellation marks
+ * it failed under the same recording lock, so this is the job's state as of
+ * that lock.
+ */
+async function jobStillRunning(tx: Tx, jobId: string): Promise<boolean> {
+    const [job] = await tx
+        .select({ status: asyncJobs.status })
+        .from(asyncJobs)
+        .where(eq(asyncJobs.id, jobId))
+        .limit(1);
+    return job?.status === "processing";
 }
 
 // Both upserts run inside a transaction that takes a row-level write lock
@@ -182,6 +212,9 @@ export async function upsertTranscription(
                 orgUserId,
             });
             if (refusal) throw new WriterRefused(refusal);
+            if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
+                throw new WriterRefused("cancelled");
+            }
 
             const [current] = await tx
                 .select({
@@ -347,6 +380,9 @@ export async function upsertEnhancement(
                 orgUserId,
             });
             if (refusal) throw new WriterRefused(refusal);
+            if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
+                throw new WriterRefused("cancelled");
+            }
 
             const [existing] = await tx
                 .select({ id: aiEnhancements.id })
