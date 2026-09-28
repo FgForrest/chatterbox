@@ -22,6 +22,7 @@ import {
     asyncJobs,
     learnReviewItems,
     learnRuns,
+    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
@@ -80,6 +81,19 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 
+const { createCompletion } = vi.hoisted(() => ({
+    createCompletion: vi.fn(),
+}));
+vi.mock("openai", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("openai")>();
+    return {
+        ...actual,
+        OpenAI: class {
+            chat = { completions: { create: createCompletion } };
+        },
+    };
+});
+
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -103,8 +117,16 @@ import {
     POST as postLearnRoute,
 } from "@/app/api/recordings/[id]/learn/route";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptJsonField,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
+import { createEntity } from "@/lib/knowledge/entities";
+import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
+import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -404,5 +426,175 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             })
             .from(learnRuns);
         expect(row).toEqual({ scopeUserId: orgUserId, view: "org" });
+    });
+
+    describe("running", () => {
+        const reply = (content: object | string) =>
+            createCompletion.mockResolvedValueOnce({
+                choices: [
+                    {
+                        message: {
+                            content:
+                                typeof content === "string"
+                                    ? content
+                                    : JSON.stringify(content),
+                        },
+                    },
+                ],
+            });
+        const runJob = (runId: string) =>
+            learnJobHandler.run({
+                payload: { runId },
+                userId: OWNER,
+                jobId: "job",
+                attempt: 1,
+                maxAttempts: 2,
+                signal: new AbortController().signal,
+                reportProgress: () => {},
+            });
+        const statusAndStats = async (runId: string) =>
+            (
+                await db()
+                    .select({
+                        status: learnRuns.status,
+                        stats: learnRuns.stats,
+                    })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, runId))
+            )[0];
+
+        beforeEach(async () => {
+            createCompletion.mockReset();
+            knowledgeStore().invalidateAll();
+            await seedCoreVocabulary();
+            await provider(OWNER);
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Dobrý den, máme tu Tavesy.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+        });
+
+        it("stores what holds as review items, encrypted, and is ready for review", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const started = await learn(OWNER);
+            const { runId } = (await started.json()) as { runId: string };
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            reply({
+                speakers: [],
+                corrections: [
+                    {
+                        turnIndex: 0,
+                        charStart: 0,
+                        charEnd: 1,
+                        heard: "Tavesy",
+                        kind: "correct",
+                        target: { entityId: tavesi },
+                        replacement: "Tavesi",
+                    },
+                    {
+                        turnIndex: 0,
+                        charStart: 0,
+                        charEnd: 5,
+                        heard: "Dobrý",
+                        kind: "correct",
+                        target: { entityId: "someone-elses" },
+                        replacement: "x",
+                    },
+                ],
+                facts: [],
+                relationPhrases: [],
+            });
+
+            await expect(runJob(runId)).resolves.toMatchObject({
+                status: "ready",
+                items: 1,
+            });
+            expect(await statusAndStats(runId)).toMatchObject({
+                status: "ready",
+                stats: expect.objectContaining({
+                    items_correction: 1,
+                    dropped_outOfScope: 1,
+                }),
+            });
+            const [item] = await db().select().from(learnReviewItems);
+            expect(item).toMatchObject({
+                runId,
+                userId: OWNER,
+                kind: "correction",
+                preTicked: false,
+            });
+            expect(JSON.stringify(item?.payload)).not.toContain("Tavesi");
+            expect(
+                decryptJsonField<{ anchors: unknown[] }>(item?.payload)
+                    ?.anchors,
+            ).toEqual([{ turnIndex: 0, charStart: 19, charEnd: 25 }]);
+        });
+
+        it("finishes a run that found nothing new", async () => {
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [] });
+            reply({
+                speakers: [],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            });
+            await runJob(runId);
+            expect((await statusAndStats(runId))?.status).toBe("finished");
+        });
+
+        it("is superseded when its transcript changed, and cancelled when its recording was shared since", async () => {
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            await db()
+                .update(transcriptions)
+                .set({ revision: 5 })
+                .where(eq(transcriptions.id, transcriptId));
+            await runJob(runId);
+            expect((await statusAndStats(runId))?.status).toBe("superseded");
+            expect(createCompletion).not.toHaveBeenCalled();
+
+            await db().delete(learnRuns);
+            await db().delete(asyncJobs);
+            const second = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            // Shared meanwhile (the gate would wait for the run; a share
+            // from before the gate existed, or local mode switched off, would
+            // not).
+            const [root] = await db()
+                .select({ id: recordingFolders.id })
+                .from(recordingFolders)
+                .where(eq(recordingFolders.userId, orgUserId));
+            await db()
+                .insert(recordingFolderAssignments)
+                .values({
+                    userId: orgUserId,
+                    recordingId: REC,
+                    folderId: root?.id ?? "",
+                });
+            await runJob(second.runId);
+            expect((await statusAndStats(second.runId))?.status).toBe(
+                "cancelled",
+            );
+            expect(createCompletion).not.toHaveBeenCalled();
+        });
     });
 });

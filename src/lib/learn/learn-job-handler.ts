@@ -1,0 +1,494 @@
+/**
+ * Running a Learn run (job kind `learn.run`): read the transcript the run
+ * was started on, find what it says through the run's scopes, validate
+ * the answer against the run, and store what holds as review items for a
+ * person to decide on. Nothing here changes knowledge: the review does.
+ *
+ * The run goes nowhere when it no longer should: a changed transcript
+ * supersedes it; a recording that was shared, withdrawn or deleted since,
+ * so that the actor may no longer change it in the run's view, cancels it.
+ * Both are checked again under the recording lock where the items are
+ * written. The provider is the actor's, who pays; path 2 (no tools) until
+ * the bridge path lands (Task 3.6).
+ */
+
+import { and, eq, inArray } from "drizzle-orm";
+import { OpenAI } from "openai";
+import { db } from "@/db";
+import {
+    apiCredentials,
+    learnDismissals,
+    learnReviewItems,
+    learnRuns,
+    recordings,
+    transcriptions,
+    transcriptSpeakers,
+} from "@/db/schema";
+import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
+import {
+    enhancementChatModel,
+    pickEnhancementCredential,
+} from "@/lib/ai/enhancement-provider";
+import { decrypt } from "@/lib/encryption";
+import { encryptJsonField } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
+import { retryWithBackoff } from "@/lib/jobs/backoff";
+import { isRetryableError } from "@/lib/jobs/retryable";
+import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { nodeKey } from "@/lib/knowledge/fact-rules";
+import { objectKeyOf } from "@/lib/knowledge/facts";
+import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
+import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import {
+    LEARN_JOB_KIND,
+    LEARN_MAX_ATTEMPTS,
+    type LearnJobPayload,
+    parseLearnJobPayload,
+} from "@/lib/learn/learn-job";
+import {
+    type LearnChat,
+    type LearnRelationChoice,
+    runFallbackPass,
+} from "@/lib/learn/run-fallback";
+import { findEntities, type LearnToolContext } from "@/lib/learn/tools";
+import {
+    factKey,
+    heardAsKey,
+    type LearnRunFrame,
+    type ReviewCandidate,
+    validateLearnOutput,
+} from "@/lib/learn/validate";
+import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
+
+const FINGERPRINT_DOMAIN = "learn-fingerprint";
+/** Knowledge lookups one run may make. */
+const TOOL_BUDGET = 60;
+const CALL_RETRY_ATTEMPTS = 3;
+
+/** How a review item's fingerprint is stored: a keyed HMAC. */
+export function learnFingerprintHmac(fingerprint: string): string {
+    return domainLookupHash(FINGERPRINT_DOMAIN, fingerprint);
+}
+
+type RunRow = typeof learnRuns.$inferSelect;
+type Outcome =
+    | "ready"
+    | "finished"
+    | "superseded"
+    | "cancelled"
+    | "failed"
+    | "queued";
+
+async function setStatus(
+    runId: string,
+    status: Outcome,
+    extra: Partial<typeof learnRuns.$inferInsert> = {},
+): Promise<void> {
+    await db
+        .update(learnRuns)
+        .set({ status, updatedAt: new Date(), ...extra })
+        .where(eq(learnRuns.id, runId));
+}
+
+/** The actor's chat provider, as the Learn pass talks to it. */
+async function chatFor(
+    actorUserId: string,
+    signal: AbortSignal,
+): Promise<{ chat: LearnChat; provider: string; model: string }> {
+    const configured = await db
+        .select()
+        .from(apiCredentials)
+        .where(eq(apiCredentials.userId, actorUserId));
+    const credentials = pickEnhancementCredential(configured);
+    if (!credentials) {
+        throw new AppError(
+            ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+            "No AI provider configured",
+            400,
+        );
+    }
+    const openai = new OpenAI({
+        apiKey: decrypt(credentials.apiKey),
+        baseURL: credentials.baseUrl || undefined,
+    });
+    const model = enhancementChatModel(credentials);
+    return {
+        provider: credentials.provider,
+        model,
+        chat: {
+            complete: (messages, maxTokens) =>
+                retryWithBackoff({
+                    attempts: CALL_RETRY_ATTEMPTS,
+                    baseMs: 1_500,
+                    maxMs: 15_000,
+                    jitter: 0.5,
+                    isRetryable: isRetryableError,
+                    run: async () => {
+                        signal.throwIfAborted();
+                        const response = await openai.chat.completions.create(
+                            buildChatCompletionParams({
+                                model,
+                                messages,
+                                temperature: 0.1,
+                                maxTokens,
+                            }),
+                            { signal },
+                        );
+                        return (
+                            response.choices[0]?.message?.content?.trim() || ""
+                        );
+                    },
+                }),
+        },
+    };
+}
+
+/**
+ * Whether the actor may still change the recording in the run's view: the
+ * writer rule, and the view the run was started in. `orgUserId` is
+ * resolved by the caller, outside any transaction (`sharingOrgUserId`).
+ */
+async function mayStillRun(
+    run: RunRow,
+    orgUserId: string | null,
+    executor?: Parameters<typeof contentWriterRefusal>[0],
+): Promise<boolean> {
+    if (!run.actorUserId) return false;
+    const refusal = await contentWriterRefusal(executor, {
+        recordingId: run.recordingId,
+        ownerUserId: run.userId,
+        actorUserId: run.actorUserId,
+        orgUserId,
+    });
+    if (refusal) return false;
+    return run.view === "private"
+        ? run.actorUserId === run.userId
+        : orgUserId !== null && run.actorUserId === orgUserId;
+}
+
+/** Everything the validation needs to know of the run's scopes, frozen now. */
+async function frameFor(
+    run: RunRow,
+    transcript: {
+        revision: number;
+        turns: NonNullable<ReturnType<typeof readTranscriptTurns>>;
+        language: string | null;
+        provider: string | null;
+    },
+): Promise<LearnRunFrame> {
+    const shared = run.view === "org";
+    const view = await knowledgeView({
+        kind: "recording",
+        ownerUserId: run.userId,
+        shared,
+    });
+    const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
+        sharedOnly: shared,
+    });
+    const answered = await db
+        .select({
+            label: transcriptSpeakers.label,
+            status: transcriptSpeakers.status,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+        })
+        .from(transcriptSpeakers)
+        .where(eq(transcriptSpeakers.transcriptionId, run.transcriptionId));
+    const dismissed = await db
+        .select({ hmac: learnDismissals.fingerprintHmac })
+        .from(learnDismissals)
+        .where(
+            and(
+                eq(learnDismissals.recordingId, run.recordingId),
+                eq(learnDismissals.userId, run.scopeUserId),
+            ),
+        );
+    const people = new Map<string, { name: string }>();
+    const entities = new Map<string, { typeKey: string; name: string }>();
+    const confirmedHeardAs = new Set<string>();
+    for (const item of view.items) {
+        if (item.kind === "person") people.set(item.id, { name: item.name });
+        else entities.set(item.id, { typeKey: item.typeKey, name: item.name });
+        for (const name of item.names) {
+            if (name.kind !== "heard_as") continue;
+            confirmedHeardAs.add(
+                heardAsKey(
+                    name.target,
+                    name.text,
+                    name.language,
+                    name.provider,
+                ),
+            );
+        }
+    }
+    const literalKey = (literal: string) => objectKeyOf({ literal });
+    const knownFacts = new Map<string, string>();
+    for (const fact of view.facts) {
+        knownFacts.set(
+            factKey(
+                nodeKey(fact.subject),
+                fact.relationKey,
+                "literal" in fact.object
+                    ? literalKey(fact.object.literal)
+                    : nodeKey(fact.object),
+            ),
+            fact.id,
+        );
+    }
+    return {
+        revision: run.transcriptRevision,
+        currentRevision: transcript.revision,
+        turns: transcript.turns,
+        language: transcript.language,
+        provider: transcript.provider,
+        manual: run.trigger === "manual",
+        people,
+        entities,
+        relations: new Map(
+            vocabulary.relationTypes
+                .filter((relation) => !relation.adoptedAsKey)
+                .map((relation) => [relation.key, relation]),
+        ),
+        answeredLabels: new Set(
+            answered
+                .filter(
+                    (row) => row.status === "confirmed" || row.markedUnknown,
+                )
+                .map((row) => row.label),
+        ),
+        confirmedHeardAs,
+        knownFacts,
+        dismissed: new Set(dismissed.map((row) => row.hmac)),
+        fingerprintKey: learnFingerprintHmac,
+        literalKey,
+    };
+}
+
+function counts(
+    items: readonly ReviewCandidate[],
+    extra: Record<string, number>,
+): Record<string, number> {
+    const stats: Record<string, number> = { ...extra, items: items.length };
+    for (const item of items) {
+        stats[`items_${item.kind}`] = (stats[`items_${item.kind}`] ?? 0) + 1;
+    }
+    return stats;
+}
+
+export const learnJobHandler: JobHandler<LearnJobPayload> = {
+    kind: LEARN_JOB_KIND,
+    // One at a time: runs go to the same providers as summaries.
+    concurrency: 1,
+    maxAttempts: LEARN_MAX_ATTEMPTS,
+    timeoutMs: 20 * 60 * 1000,
+    backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
+    parsePayload: parseLearnJobPayload,
+
+    async run({
+        payload,
+        attempt,
+        maxAttempts,
+        signal,
+        reportProgress,
+    }): Promise<JobResult> {
+        const [run] = await db
+            .select()
+            .from(learnRuns)
+            .where(eq(learnRuns.id, payload.runId));
+        if (!run) return { skipped: "gone" };
+        if (run.status !== "queued" && run.status !== "running") {
+            return { skipped: run.status };
+        }
+        const claimed = await db
+            .update(learnRuns)
+            .set({
+                status: "running",
+                startedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(learnRuns.id, run.id),
+                    inArray(learnRuns.status, ["queued", "running"]),
+                ),
+            )
+            .returning({ id: learnRuns.id });
+        if (claimed.length === 0) return { skipped: "claimed" };
+
+        try {
+            const [transcript] = await db
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.id, run.transcriptionId));
+            if (!transcript) {
+                await setStatus(run.id, "cancelled");
+                return { skipped: "gone" };
+            }
+            if (transcript.revision !== run.transcriptRevision) {
+                await setStatus(run.id, "superseded");
+                return { skipped: "superseded" };
+            }
+            const orgUserId = await sharingOrgUserId();
+            if (!(await mayStillRun(run, orgUserId))) {
+                await setStatus(run.id, "cancelled");
+                return { skipped: "not allowed" };
+            }
+            const turns = readTranscriptTurns(transcript);
+            if (!turns?.length) {
+                await setStatus(run.id, "cancelled");
+                return { skipped: "untimed" };
+            }
+
+            const shared = run.view === "org";
+            const tools: LearnToolContext = {
+                read: { kind: "recording", ownerUserId: run.userId, shared },
+                budget: { remaining: TOOL_BUDGET },
+            };
+            const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
+                sharedOnly: shared,
+            });
+            const relations: LearnRelationChoice[] =
+                vocabulary.relationTypes.filter(
+                    (relation) => !relation.adoptedAsKey,
+                );
+            const frameBefore = await frameFor(run, {
+                revision: transcript.revision,
+                turns,
+                language: transcript.detectedLanguage,
+                provider: transcript.provider,
+            });
+            const labels = [...new Set(turns.map((turn) => turn.speaker))];
+            const { chat, provider, model } = await chatFor(
+                run.actorUserId ?? "",
+                signal,
+            );
+            reportProgress({ phase: "reading" });
+            const pass = await runFallbackPass({
+                chat,
+                lookup: {
+                    findEntities: (query) => findEntities(tools, query),
+                },
+                turns,
+                language: transcript.detectedLanguage,
+                relations,
+                unnamedLabels: labels.filter(
+                    (label) => !frameBefore.answeredLabels.has(label),
+                ),
+                signal,
+            });
+            reportProgress({ phase: "checking" });
+
+            // Validated against the knowledge as it is now; written under the
+            // recording lock, with the revision, the writer rule and the
+            // run's own status checked once more.
+            const frame = await frameFor(run, {
+                revision: transcript.revision,
+                turns,
+                language: transcript.detectedLanguage,
+                provider: transcript.provider,
+            });
+            const validated = validateLearnOutput(pass.output, frame);
+            const stats = counts(validated.items, {
+                calls: pass.calls,
+                lookups: pass.lookups,
+                windows: pass.windows,
+                repairs: pass.repairs,
+                ...Object.fromEntries(
+                    Object.entries(validated.dropped).map(([reason, n]) => [
+                        `dropped_${reason}`,
+                        n ?? 0,
+                    ]),
+                ),
+            });
+            const outcome = await db.transaction(async (tx) => {
+                await tx
+                    .select({ id: recordings.id })
+                    .from(recordings)
+                    .where(eq(recordings.id, run.recordingId))
+                    .for("share");
+                const [current] = await tx
+                    .select({ revision: transcriptions.revision })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.id, run.transcriptionId));
+                const [still] = await tx
+                    .select({ status: learnRuns.status })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, run.id))
+                    .for("update");
+                if (!current || still?.status !== "running") {
+                    return { status: "cancelled" as const, items: 0 };
+                }
+                const finish = (
+                    status: "ready" | "finished" | "superseded" | "cancelled",
+                ) =>
+                    tx
+                        .update(learnRuns)
+                        .set({
+                            status,
+                            path: "fallback",
+                            provider,
+                            model,
+                            stats,
+                            finishedAt: status === "ready" ? null : new Date(),
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(learnRuns.id, run.id));
+                if (
+                    validated.superseded ||
+                    current.revision !== run.transcriptRevision
+                ) {
+                    await finish("superseded");
+                    return { status: "superseded" as const, items: 0 };
+                }
+                if (!(await mayStillRun(run, orgUserId, tx))) {
+                    await finish("cancelled");
+                    return { status: "cancelled" as const, items: 0 };
+                }
+                if (validated.items.length > 0) {
+                    await tx.insert(learnReviewItems).values(
+                        validated.items.map((item) => ({
+                            runId: run.id,
+                            userId: run.scopeUserId,
+                            kind: item.kind,
+                            fingerprintHmac: learnFingerprintHmac(
+                                item.fingerprint,
+                            ),
+                            payload: encryptJsonField(item.payload),
+                            preTicked: item.preTicked,
+                            dependsOnLabel:
+                                "dependsOnLabel" in item
+                                    ? (item.dependsOnLabel ?? null)
+                                    : null,
+                        })),
+                    );
+                }
+                // An empty run says "nothing new found" and counts as finished.
+                const status =
+                    validated.items.length > 0
+                        ? ("ready" as const)
+                        : ("finished" as const);
+                await finish(status);
+                return { status, items: validated.items.length };
+            });
+            return { status: outcome.status, items: outcome.items };
+        } catch (error) {
+            // Retried by the queue when worth it: the run waits for it.
+            const retrying = attempt < maxAttempts && isRetryableError(error);
+            await setStatus(
+                run.id,
+                retrying ? "queued" : "failed",
+                retrying
+                    ? {}
+                    : {
+                          errorCode:
+                              error instanceof AppError
+                                  ? error.code
+                                  : ErrorCode.INTERNAL_ERROR,
+                          finishedAt: new Date(),
+                      },
+            );
+            throw error;
+        }
+    },
+};

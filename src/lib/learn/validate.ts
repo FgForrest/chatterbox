@@ -69,8 +69,10 @@ export interface LearnRunFrame {
     confirmedHeardAs: ReadonlySet<string>;
     /** Current facts in the run's scopes: `factKey` -> fact id. */
     knownFacts: ReadonlyMap<string, string>;
-    /** Fingerprints of items a person dismissed on this recording. */
+    /** Items a person dismissed on this recording, as `fingerprintKey` gives them. */
     dismissed: ReadonlySet<string>;
+    /** How a fingerprint is stored (a keyed HMAC); as is by default. */
+    fingerprintKey?: (fingerprint: string) => string;
     /** How a literal object is keyed (`objectKeyOf`); plain by default. */
     literalKey?: (literal: string) => string;
 }
@@ -229,8 +231,12 @@ export function validateLearnOutput(
     const literalKey =
         frame.literalKey ??
         ((literal: string) => `l:${normalizeText(literal)}`);
+    const stored =
+        frame.fingerprintKey ?? ((fingerprint: string) => fingerprint);
     const dismissed = (fingerprint: string) => {
-        if (frame.manual || !frame.dismissed.has(fingerprint)) return false;
+        if (frame.manual || !frame.dismissed.has(stored(fingerprint))) {
+            return false;
+        }
         drop("dismissed");
         return true;
     };
