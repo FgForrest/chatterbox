@@ -200,9 +200,16 @@ export class KnowledgeMemoryStore {
         if (this.cached.has(scope)) this.stale.add(scope);
     }
 
-    /** Forget everything: the listener that would have said what changed was lost. */
+    /**
+     * Forget everything: the listener that would have said what changed was
+     * lost. Loads in flight are fenced too, so none of them is kept.
+     */
     invalidateAll(): void {
-        for (const scope of [...this.cached.keys()]) this.drop(scope);
+        for (const scope of [
+            ...new Set([...this.cached.keys(), ...this.loading.keys()]),
+        ]) {
+            this.drop(scope);
+        }
         this.stale.clear();
     }
 
@@ -247,7 +254,16 @@ export class KnowledgeMemoryStore {
      */
     private reload(scope: string, generation: number): Promise<ScopeKnowledge> {
         const pending = this.loading.get(scope);
-        if (pending && pending.generation >= generation) return pending.load;
+        // Joinable: started for at least this generation, and not fenced
+        // by a drop since (a load from before the account went, or before
+        // everything was forgotten, may hold what is gone).
+        if (
+            pending &&
+            pending.generation >= generation &&
+            pending.sequence > (this.settled.get(scope) ?? 0)
+        ) {
+            return pending.load;
+        }
         const sequence = ++this.sequence;
         const load = (async () => {
             try {

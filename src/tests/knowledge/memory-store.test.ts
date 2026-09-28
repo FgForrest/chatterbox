@@ -208,5 +208,47 @@ describe("KnowledgeMemoryStore", () => {
             expect(held?.generation).toBe(2);
             expect(held?.items[0]?.name).toBe("erased");
         });
+
+        it("is not handed to a read after the scope's account went", async () => {
+            const knowledge = slowStore();
+            const first = knowledge.get(["alice"]);
+            await settle();
+            releases.shift()?.();
+            await first;
+            // Stale: a reload starts, reading what the account knew.
+            knowledge.markStale("alice");
+            const stale = knowledge.get(["alice"]);
+            await settle();
+            generations.delete("alice");
+            name = "gone";
+            const after = knowledge.get(["alice"]);
+            await settle();
+            for (const release of releases.splice(0)) release();
+            await settle();
+            for (const release of releases.splice(0)) release();
+
+            const [held] = await after;
+            expect(held?.generation).toBe(0);
+            expect(held?.items[0]?.name).toBe("gone");
+            await stale;
+        });
+
+        it("is not kept when everything was forgotten while it loaded", async () => {
+            const knowledge = slowStore();
+            const first = knowledge.get(["alice"]);
+            await settle();
+            knowledge.invalidateAll();
+            name = "new";
+            releases.shift()?.();
+            await first;
+
+            loads = [];
+            const next = knowledge.get(["alice"]);
+            await settle();
+            releases.shift()?.();
+            const [held] = await next;
+            expect(loads).toEqual(["alice"]);
+            expect(held?.items[0]?.name).toBe("new");
+        });
     });
 });
