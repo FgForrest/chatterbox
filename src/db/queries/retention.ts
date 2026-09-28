@@ -167,6 +167,10 @@ export async function listArmedRetentionPolicies(
                 ),
             ),
         )
+        // The organization account's policy first, as it alone governs
+        // every shared recording; the rest in a different order each tick,
+        // so no account waits behind the same `limit` others for good.
+        .orderBy(sql`${users.role} = 'org' desc`, sql`random()`)
         .limit(limit);
 
     return rows.flatMap((row) => {
