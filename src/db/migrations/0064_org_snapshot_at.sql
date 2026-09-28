@@ -1,0 +1,1 @@
+ALTER TABLE "recordings" ADD COLUMN "org_snapshot_at" timestamp;

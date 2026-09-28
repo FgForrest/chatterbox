@@ -1,6 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { recordings, transcriptions, transcriptSpeakers } from "@/db/schema";
+import {
+    aiEnhancements,
+    recordings,
+    transcriptions,
+    transcriptSpeakers,
+} from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { transcriptChanged } from "@/lib/knowledge/attribution";
 import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
@@ -34,10 +39,11 @@ export interface OrgSpeakerChangeArgs {
 /**
  * Change a speaker of the Organization view, in one transaction.
  *
- * Until someone edits it, the Organization view reads the owner's
- * transcripts. Naming a speaker there must not touch the owner's private
- * attributions, so the first change copies the owner's transcripts into
- * the organization's rows, and the change lands on the copy.
+ * The change lands on the Organization's own transcript, never on the
+ * owner's private attributions. Sharing takes the Organization's copy; a
+ * recording shared before that existed still shows the owner's
+ * transcripts, and its first change takes the copy (the snapshot) and
+ * lands on it.
  *
  * The change is refused (409) unless it was made on the transcript it
  * lands on: the Organization's own, or the owner's that is copied here. A
@@ -84,14 +90,14 @@ export async function changeOrgTranscriptSpeaker({
 
 /**
  * The Organization's own transcript for `source`, which the change must
- * have been made on, or, before the Organization has one, a copy of the
- * owner's made now.
+ * have been made on, or, before the Organization has any, its copy of the
+ * owner's, taken now by the snapshot.
  *
- * The copy covers every source, so switching sources in the view keeps
- * working, with the names already confirmed on them. It is made under the
- * recording lock the content upserts take, and only where the organization
- * has no row yet, so a concurrent Organization re-transcription is never
- * overwritten by the owner's older text.
+ * A recording shared before snapshots existed, and not yet reached by the
+ * backfill, still shows the owner's transcripts here. The snapshot runs
+ * under the recording lock the content upserts take, and copies only where
+ * the organization has no row yet, so a concurrent Organization
+ * re-transcription is never overwritten by the owner's older text.
  */
 async function orgTranscriptForChangeInTx(
     tx: Tx,
@@ -132,11 +138,53 @@ async function orgTranscriptForChangeInTx(
         return existing;
     }
 
-    // Copying promotes people, and a promotion may merge them, which locks
-    // the recordings naming them: the promotion lock comes first.
+    // The snapshot promotes people, and a promotion may merge them, which
+    // locks the recordings naming them: the promotion lock comes first.
     await lockOrgPeople(tx);
+    if (!(await lockSharedRecording(tx, recordingId, owners))) {
+        throw new AppError(
+            ErrorCode.RECORDING_NOT_FOUND,
+            "Recording not found",
+            404,
+        );
+    }
+    // Made while this request waited for the lock: not what was seen.
+    if (await findOwn()) throw transcriptChanged();
+
+    const copies = await snapshotRecordingForOrgInTx(
+        tx,
+        recordingId,
+        owners,
+        actorUserId,
+    );
+    const target = copies.get(seenId);
+    if (target) {
+        if (target.source !== source || target.revision !== seenRevision) {
+            throw transcriptChanged();
+        }
+        return target;
+    }
+    // Copies were taken, but not of the text the change was made on.
+    if (copies.size > 0) throw transcriptChanged();
+    // The snapshot was taken before, and this transcript is not in it:
+    // the Organization's copy was removed, and it is never taken again.
+    throw new AppError(ErrorCode.NOT_FOUND, "No transcript to attribute", 404);
+}
+
+/**
+ * Lock the recording row, as the content upserts do, and say whether it is
+ * still a live shared recording of `owners.ownerUserId`.
+ */
+async function lockSharedRecording(
+    tx: Tx,
+    recordingId: string,
+    owners: OrgTranscriptOwners,
+): Promise<{ orgSnapshotAt: Date | null } | null> {
     const [recording] = await tx
-        .select({ deletedAt: recordings.deletedAt })
+        .select({
+            deletedAt: recordings.deletedAt,
+            orgSnapshotAt: recordings.orgSnapshotAt,
+        })
         .from(recordings)
         .where(
             and(
@@ -151,14 +199,36 @@ async function orgTranscriptForChangeInTx(
         recording.deletedAt ||
         !(await isRecordingShared(recordingId, owners.contentUserId, tx))
     ) {
-        throw new AppError(
-            ErrorCode.RECORDING_NOT_FOUND,
-            "Recording not found",
-            404,
-        );
+        return null;
     }
-    // Made while this request waited for the lock: not what was seen.
-    if (await findOwn()) throw transcriptChanged();
+    return { orgSnapshotAt: recording.orgSnapshotAt };
+}
+
+/**
+ * Take the Organization's own copy of a shared recording, once.
+ *
+ * Copies every owner transcript the organization has no row of yet, with
+ * its confirmed speaker names (people promoted as needed), and each owner
+ * summary made from a transcript copied here; a summary tied to no
+ * transcript is copied as it is. Then marks the recording, so nothing is
+ * copied again until it is unshared: a transcript arriving later never
+ * reaches the Organization ungated, and rows Organization retention removed
+ * are never copied back. Existing Organization rows are left alone.
+ *
+ * The caller holds the Organization-people lock and then the recording
+ * lock. Does nothing unless the recording is, under that lock, shared, not
+ * deleted, and not yet snapshotted. Returns the copies made, by the id of
+ * the owner's transcript each one copies.
+ */
+export async function snapshotRecordingForOrgInTx(
+    tx: Tx,
+    recordingId: string,
+    owners: OrgTranscriptOwners,
+    actorUserId: string,
+): Promise<Map<string, TranscriptionRow>> {
+    const copies = new Map<string, TranscriptionRow>();
+    const recording = await lockSharedRecording(tx, recordingId, owners);
+    if (!recording || recording.orgSnapshotAt) return copies;
 
     const originals = await tx
         .select()
@@ -169,19 +239,6 @@ async function orgTranscriptForChangeInTx(
                 eq(transcriptions.userId, owners.ownerUserId),
             ),
         );
-    const shown = originals.find((original) => original.source === source);
-    if (!shown) {
-        throw new AppError(
-            ErrorCode.NOT_FOUND,
-            "No transcript to attribute",
-            404,
-        );
-    }
-    if (shown.id !== seenId || shown.revision !== seenRevision) {
-        throw transcriptChanged();
-    }
-
-    let target: TranscriptionRow | undefined;
     for (const original of originals) {
         const [copy] = await tx
             .insert(transcriptions)
@@ -210,10 +267,52 @@ async function orgTranscriptForChangeInTx(
             copy.id,
             owners.contentUserId,
         );
-        if (original.id === shown.id) target = copy;
+        copies.set(original.id, copy);
     }
-    if (!target) throw transcriptChanged();
-    return target;
+
+    const summaries = await tx
+        .select()
+        .from(aiEnhancements)
+        .where(
+            and(
+                eq(aiEnhancements.recordingId, recordingId),
+                eq(aiEnhancements.userId, owners.ownerUserId),
+            ),
+        );
+    for (const summary of summaries) {
+        // A summary travels with the transcript it was made from; one made
+        // from a transcript the Organization already had its own of would
+        // describe other text.
+        const transcriptionId =
+            summary.transcriptionId === null
+                ? null
+                : copies.get(summary.transcriptionId)?.id;
+        if (transcriptionId === undefined) continue;
+        await tx
+            .insert(aiEnhancements)
+            .values({
+                recordingId,
+                userId: owners.contentUserId,
+                transcriptionId,
+                summary: summary.summary,
+                actionItems: summary.actionItems,
+                keyPoints: summary.keyPoints,
+                provider: summary.provider,
+                model: summary.model,
+                source: summary.source,
+                multiPassRounds: summary.multiPassRounds,
+                multiPassUsed: summary.multiPassUsed,
+                multiPassMerged: summary.multiPassMerged,
+                producedByUserId: actorUserId,
+            })
+            .onConflictDoNothing();
+    }
+
+    await tx
+        .update(recordings)
+        .set({ orgSnapshotAt: new Date() })
+        .where(eq(recordings.id, recordingId));
+    return copies;
 }
 
 /**

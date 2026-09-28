@@ -1072,9 +1072,10 @@ async function deleteOrgViewIfUnshared(
     if (remaining.length > 0) return;
 
     const now = new Date();
+    // Sharing it again takes a fresh snapshot.
     await tx
         .update(recordings)
-        .set({ unsharedAt: now })
+        .set({ unsharedAt: now, orgSnapshotAt: null })
         .where(eq(recordings.id, recordingId));
     await tx
         .delete(aiEnhancements)
