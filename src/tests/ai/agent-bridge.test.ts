@@ -238,6 +238,110 @@ describe("agent-bridge", () => {
             expect(args.at(-2)).toBe("bar");
             expect(args.at(-1)).toBe("-");
         });
+
+        // The prompt is a user's transcript, and anything in it can act as
+        // an instruction. A tool would let that instruction read the
+        // credentials volume and put what it found into the summary.
+        describe("runs each CLI without tools or session persistence", () => {
+            /** Values that follow each occurrence of `flag`. */
+            const valuesOf = (args: string[], flag: string) =>
+                args.flatMap((arg, i) => (arg === flag ? [args[i + 1]] : []));
+
+            it("empties Claude's tool set with --tools, not --allowedTools", () => {
+                // `--allowedTools` only pre-approves tools; `--tools ""` is
+                // what removes them.
+                for (const model of ["claude-sonnet-5", "claude"]) {
+                    const args = buildArgs("claude", model);
+                    expect(valuesOf(args, "--tools")).toEqual([""]);
+                    // Variadic option: whatever follows "" must be a flag,
+                    // or the CLI reads it as a tool name.
+                    expect(args[args.indexOf("--tools") + 2]).toMatch(/^--/);
+                    expect(args).not.toContain("--allowedTools");
+                }
+            });
+
+            it("loads no MCP server for Claude", () => {
+                // `--tools ""` leaves MCP tools in place; an MCP server in
+                // the volume's user config was still offered to the model.
+                const args = buildArgs("claude", "claude-sonnet-5");
+                expect(args).toContain("--strict-mcp-config");
+                expect(args).not.toContain("--mcp-config");
+            });
+
+            it("keeps Claude sessions and auto-memory off disk", () => {
+                const args = buildArgs("claude", "claude-sonnet-5");
+                expect(args).toContain("--no-session-persistence");
+                // Every request shares the /work directory, so an
+                // auto-memory file would be shared across users too.
+                const settings = valuesOf(args, "--settings");
+                expect(settings).toHaveLength(1);
+                expect(JSON.parse(settings[0])).toEqual({
+                    autoMemoryEnabled: false,
+                    disableClaudeAiConnectors: true,
+                });
+            });
+
+            it("runs Codex ephemeral and without the volume's config.toml", () => {
+                const args = buildArgs("codex", "gpt-5.6-luna", [], "/tmp/o");
+                expect(args).toContain("--ephemeral");
+                // Otherwise config.toml could add an MCP server or turn a
+                // feature back on.
+                expect(args).toContain("--ignore-user-config");
+            });
+
+            it("disables every Codex feature that reaches past the prompt", () => {
+                const args = buildArgs("codex", "gpt-5.6-luna", [], "/tmp/o");
+                expect(valuesOf(args, "--disable")).toEqual(
+                    expect.arrayContaining([
+                        "shell_tool",
+                        "view_image",
+                        "apps",
+                        "plugins",
+                        "multi_agent",
+                        "browser_use",
+                        "computer_use",
+                        "image_generation",
+                        "memories",
+                        "goals",
+                    ]),
+                );
+                expect(valuesOf(args, "-c")).toEqual(
+                    expect.arrayContaining([
+                        'web_search="disabled"',
+                        'history.persistence="none"',
+                    ]),
+                );
+            });
+
+            it("keeps the Codex read-only sandbox", () => {
+                // `apply_patch` has no off switch in these versions; the
+                // sandbox is what refuses its writes.
+                const args = buildArgs("codex", "gpt-5.6-luna", [], "/tmp/o");
+                expect(valuesOf(args, "--sandbox")).toEqual(["read-only"]);
+            });
+
+            it("places operator extra args after the lockdown flags", () => {
+                const claude = buildArgs("claude", "claude-sonnet-5", [
+                    "--max-turns",
+                    "1",
+                ]);
+                expect(claude.slice(-2)).toEqual(["--max-turns", "1"]);
+                expect(claude.indexOf("--no-session-persistence")).toBeLessThan(
+                    claude.indexOf("--max-turns"),
+                );
+
+                const codex = buildArgs(
+                    "codex",
+                    "gpt-5.6-luna",
+                    ["--foo"],
+                    "/tmp/o",
+                );
+                expect(codex.indexOf("--ephemeral")).toBeLessThan(
+                    codex.indexOf("--foo"),
+                );
+                expect(codex.at(-1)).toBe("-");
+            });
+        });
     });
 
     describe("sanitizeForLog", () => {

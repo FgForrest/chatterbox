@@ -133,8 +133,36 @@ probe() {
     ' && ok "$label answered" || bad "$label failed"
 }
 
+# Reference point for the persistence check below: anything in the
+# session directories newer than this came from the round trips.
+SINCE="/tmp/agent-bridge-smoke.$$"
+if ! docker compose exec -T "$SERVICE" touch "$SINCE" 2>/dev/null; then
+    SINCE=""
+fi
+
 [ "$ONLY" = "codex" ]  || probe "Claude Code" "${CLAUDE_PROBE_MODEL:-claude-sonnet-5}"
 [ "$ONLY" = "claude" ] || probe "Codex" "${CODEX_PROBE_MODEL:-gpt-5.6-luna}"
+
+# The bridge runs both CLIs without session persistence. A transcript
+# landing here means the image predates that, or a flag stopped working.
+step "no session data persisted"
+if [ -z "$SINCE" ]; then
+    bad "could not create a reference file in the container"
+else
+    leftovers=$(docker compose exec -T "$SERVICE" sh -c '
+        find "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" \
+             "${CODEX_HOME:-$HOME/.codex}/sessions" \
+             "${CODEX_HOME:-$HOME/.codex}/memories" \
+             -type f -newer "$1" 2>/dev/null
+        rm -f "$1"
+    ' sh "$SINCE" | denoise)
+    if [ -n "$leftovers" ]; then
+        bad "the round trips wrote session files:"
+        printf '%s\n' "$leftovers" | sed 's/^/      /'
+    else
+        ok "no new files under projects/, sessions/ or memories/"
+    fi
+fi
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

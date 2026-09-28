@@ -40,7 +40,7 @@ docker compose --profile agent-bridge up -d --build agent-bridge
 ./agent-bridge/smoke.sh
 ```
 
-This checks both CLIs run, both are authenticated *against a subscription*, `/health` answers, and each backend completes a real round trip returning the JSON shape Riffado parses. It fails with the CLI's own error rather than a 502 three layers up.
+This checks both CLIs run, both are authenticated *against a subscription*, `/health` answers, each backend completes a real round trip returning the JSON shape Riffado parses, and those round trips left no session files behind (see [Hardening](#hardening-no-tools-no-persistence)). It fails with the CLI's own error rather than a 502 three layers up.
 
 **6. Add the provider in Riffado** — Settings → AI Providers → Add, pick **Claude Code** or **Codex**. Base URL and model prefill; paste `BRIDGE_TOKEN` into the API Key field and tick *Use for AI enhancements*.
 
@@ -63,6 +63,8 @@ docker build -t riffado-agent-bridge:local \
 ```
 
 The `ARG` defaults are `latest`, which is the wrong posture for a container holding credentials for two paid subscriptions — the same "first adopter" position the Dependabot `cooldown` block and pnpm's `minimumReleaseAge` exist to avoid. Rebuild when you upgrade the CLIs, and run `smoke.sh` afterwards: a flag that moved between releases is a hard failure, not a warning.
+
+The bridge's [hardening flags](#hardening-no-tools-no-persistence) were verified against Claude Code **2.1.270** and **2.1.281** and Codex **0.153.3** and **0.155.1**. Pin one of those; on anything newer, `smoke.sh` tells you whether the CLI still accepts them and still keeps sessions off disk.
 
 ### Running alongside an existing deployment
 
@@ -170,6 +172,107 @@ docker volume ls --filter name=agent_creds
 docker volume rm <the name it printed>
 ```
 
+## Hardening: no tools, no persistence
+
+Every prompt the bridge receives carries a user's transcript, and a transcript is untrusted input: a sentence spoken in a meeting or pasted into an upload can be written as an instruction to the agent. Both CLIs are coding agents, and by default they run with their full tool sets. A prompt injection could have the agent read the credentials in this container's volume and write them into the summary, which the requesting user then reads. Codex's `--sandbox read-only` blocks writes, not reads.
+
+By default both CLIs also save every session to disk, in the credentials volume: the full prompt, so the decrypted transcript, outside Riffado's retention settings and never pruned. Both also have a cross-session memory (Claude Code's auto-memory is on by default; Codex's memories feature is off by default in the versions below). One bridge serves every user of a Riffado instance, from the same working directory, so a memory written during one user's summary would be loaded into the next user's.
+
+The bridge only turns a prompt into text, so it runs both CLIs with no tools and nothing saved. These flags are built into `lib.mjs` (`buildArgs`), not left to `*_EXTRA_ARGS`.
+
+**Claude Code**
+
+| Flag | Effect |
+|---|---|
+| `--tools ""` | Empties the built-in tool set. `--allowedTools` would only pre-approve tools; this removes them. |
+| `--strict-mcp-config` | Loads no MCP server (none is passed with `--mcp-config`). Needed on top of `--tools ""`, which leaves MCP tools in place. |
+| `--no-session-persistence` | No session transcript under `~/.claude/projects/`. |
+| `--settings '{"autoMemoryEnabled":false,"disableClaudeAiConnectors":true}'` | No auto-memory (a `MEMORY.md` per working directory, loaded into every session), and no claude.ai connectors, the subscription account's own MCP servers. |
+
+**Codex**
+
+| Flag | Effect |
+|---|---|
+| `--ephemeral` | No rollout under `~/.codex/sessions/`, no thread history. |
+| `--ignore-user-config` | Skips `~/.codex/config.toml`, so nothing in the volume can add an MCP server or re-enable a feature below. Auth still comes from `CODEX_HOME`. |
+| `--disable shell_tool` | No shell commands. |
+| `--disable view_image` | No reading local files into the conversation. |
+| `--disable apps`, `--disable plugins` | No ChatGPT connectors, no plugin-provided tools or MCP servers. |
+| `--disable multi_agent`, `browser_use`, `computer_use`, `image_generation` | No sub-agents, browser or desktop control, image generation. |
+| `--disable memories`, `--disable goals` | No cross-session memories or goals. |
+| `-c web_search="disabled"` | No web search, which would otherwise be a way out for anything the model read. |
+| `-c history.persistence="none"` | No `~/.codex/history.jsonl`. `exec` did not write it in testing either. |
+
+`--sandbox read-only` stays. Codex still offers `apply_patch`, which no flag in these versions removes, and the sandbox is what refuses its writes (`patch rejected: writing is blocked by read-only sandbox`). What Codex still sends the model is `apply_patch` inside its code-mode `exec` wrapper (a JavaScript isolate with no file system or network access), plus `wait` and `request_user_input`. Codex still creates `state_*.sqlite`, `logs_*.sqlite`, `goals_*.sqlite`, `memories_*.sqlite` and `queue_*.sqlite` on every run; none of them held prompt text in testing.
+
+**What this does not cover.** An injected instruction can still shape the reply itself: a transcript can talk the model into a misleading summary. What it can no longer do is reach anything outside the prompt.
+
+**How it was verified.** On all four versions named under [Building the image](#building-the-image), each flag is in the CLI's `--help`, each Codex feature name in `codex features list`, and each settings or config key in the CLI's own settings schema or config validation. Each CLI was then run with the exact argv `buildArgs` produces against a local stand-in for the vendor API (no model, no subscription), in a throwaway home with an MCP server configured, and the requests it sent and the files it left were inspected:
+
+- Before: Claude Code offered 20 to 21 built-in tools (`Bash`, `Read`, `WebFetch`, `Write`, ...) plus the configured MCP server's, put an auto-memory section in its system prompt, and left the prompt in `projects/<cwd>/<session>.jsonl`. Codex offered `exec_command`, `write_stdin`, `view_image`, `apply_patch`, goal tools and MCP resource tools, and left the prompt in `sessions/`, `thread_history_*.sqlite` and `state_*.sqlite`.
+- After: Claude Code offered no tools and no auto-memory, and no file held the prompt. Codex offered only what is listed above, and no file held the prompt.
+
+The stand-in logs in with an API key, so what only loads for a subscription login (claude.ai connectors, ChatGPT apps, hosted tools) could not be observed; those are switched off by the flags above but were not seen being switched off.
+
+**Upgrading the CLIs.** A flag the installed version does not know fails every request, and Codex's `--disable` refuses a feature name it does not recognise (`Unknown feature flag: ...`). That is deliberate: a renamed feature fails loudly instead of quietly handing the shell back. Run `smoke.sh` after every CLI upgrade.
+
+### Purging session data from before this fix (optional)
+
+**Nothing needs to be deleted.** The hardening stops new session data from being written; what earlier bridges left in the credentials volume simply stays there. Leaving it alone is a perfectly valid choice, and the bridge never deletes anything itself.
+
+If you do want it gone, read this first:
+
+- **Only purge a dedicated volume.** The commands below delete directories under `/home/node/.claude` and `/home/node/.codex`. That is safe only when `/home/node` is the bridge's own Docker volume (`agent_creds` in the stock `docker-compose.yml`). If your setup bind-mounts a personal home directory, or your own `~/.claude` / `~/.codex`, into the container, **do not run them**: they would delete your own coding sessions, history and memories along with the bridge's. Step 2 checks this.
+- **Back up first.** Step 3 writes the whole volume to a tarball you can restore.
+
+The commands remove session transcripts, thread history and memories, and keep the login credentials (`.claude/.credentials.json`, `.codex/auth.json`) and configuration (`.claude.json`, `settings.json`, `config.toml`, `models_cache.json`). Run them from the directory whose compose project owns the bridge.
+
+```sh
+# 1. Stop the bridge, so no CLI has these files open.
+docker compose stop agent-bridge
+
+# 2. Check what /home/node is. Continue only if it prints
+#    "volume <project>_agent_creds -> /home/node" and no "bind" line.
+docker inspect "$(docker compose ps -a -q agent-bridge)" \
+  --format '{{range .Mounts}}{{.Type}} {{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}} -> {{.Destination}}{{"\n"}}{{end}}'
+
+# 3. Back the volume up (mounted read-only). Use the volume name step 2
+#    printed; with the stock compose file it is <project>_agent_creds.
+docker run --rm -v riffado_agent_creds:/v:ro -v "$PWD":/backup alpine \
+  tar czf /backup/agent-creds-$(date +%F).tgz -C /v .
+
+# 4. Look.
+docker compose run --rm --no-deps agent-bridge \
+  sh -c 'ls -la /home/node/.claude /home/node/.codex'
+
+# 5. Delete.
+docker compose run --rm --no-deps agent-bridge sh -c '
+  cd /home/node/.claude &&
+    rm -rf projects file-history tasks plans agent-memory session-env \
+           shell-snapshots paste-cache debug history.jsonl
+  cd /home/node/.codex &&
+    rm -rf sessions session_index.jsonl history.jsonl memories \
+           shell_snapshots generated_images \
+           thread_history_*.sqlite* state_*.sqlite* memories_*.sqlite* \
+           goals_*.sqlite* queue_*.sqlite* logs_*.sqlite*
+'
+
+# 6. Start it again and confirm both logins survived.
+docker compose up -d agent-bridge
+docker compose exec agent-bridge claude auth status
+docker compose exec agent-bridge codex login status
+```
+
+To undo, stop the bridge and restore the tarball into the volume:
+`docker run --rm -v riffado_agent_creds:/v -v "$PWD":/backup alpine tar xzf /backup/agent-creds-<date>.tgz -C /v`.
+
+What those are:
+
+- **`.claude/projects/`** holds one JSONL transcript per session, under `projects/-work/` for this bridge, and the auto-memory under `projects/-work/memory/`. It is where the transcripts were found in testing. `file-history`, `tasks`, `plans`, `agent-memory`, `session-env`, `shell-snapshots`, `paste-cache`, `debug` and `history.jsonl` hold state from the tools the bridge used to allow; none of them is needed to log in.
+- **`.codex/sessions/`**, **`thread_history_*.sqlite*`** and **`state_*.sqlite*`** held the prompt in testing (the thread history, and the `title`, `first_user_message` and `preview` columns of the state database's `threads` table). `memories/` and `memories_*.sqlite*` hold memories, `goals_*` and `queue_*` goal and queued-message state, `logs_*` per-session logs. Codex recreates the SQLite files it needs on its next run.
+
+Files an agent may have written into `/work` are in the container's own filesystem, not the volume; recreating the container (which a rebuild does) discards them.
+
 ## Configuration
 
 | Variable | Default | Notes |
@@ -179,22 +282,22 @@ docker volume rm <the name it printed>
 | `BRIDGE_MAX_CONCURRENCY` | `1` | Each request spawns a model session drawing on the same rolling window as your interactive coding. |
 | `BRIDGE_TIMEOUT_MS` | `300000` | Per request. The child is SIGKILLed on expiry. |
 | `BRIDGE_MAX_BODY_BYTES` | `20000000` | Transcripts are large; this is the ceiling. |
-| `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` | — | Extra flags, space-separated, applied verbatim. |
+| `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` | — | Extra flags, space-separated, applied verbatim after the bridge's own. |
 | `CLAUDE_BIN` / `CODEX_BIN` | `claude` / `codex` | Override to test a different build. |
 
-### Why the extra-args escape hatch
+### The extra-args escape hatch
 
-The useful hardening flags — tool suppression, turn limits — drift between CLI releases, and a flag the installed binary doesn't recognise is a **hard startup failure**, not a warning. Baking one in would mean a CLI upgrade could take the bridge down rather than degrade it.
-
-So the baked-in argv is only what's needed to get text in and out, and you add hardening once you've confirmed it against your installed version:
+The flags the bridge is unsafe without are built in (see [Hardening](#hardening-no-tools-no-persistence)). `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` are for anything else, adopted with an env change instead of an image rebuild. A flag the installed binary doesn't recognise is a **hard failure** on every request, not a warning, so confirm it against your installed version first:
 
 ```sh
 docker compose exec agent-bridge claude --help
 # then, in .env:
-CLAUDE_EXTRA_ARGS=--max-turns 1
+CLAUDE_EXTRA_ARGS=--effort low
 ```
 
-The isolation that *doesn't* depend on flags is structural: the CLIs run as a non-root user with `/work` — an empty directory — as their working directory, so an agent that decides to read or grep finds nothing.
+They are appended after the built-in flags, so they can override them. Do not use them to hand tools or session persistence back. Codex settings belong here too, as `-c key=value`: the bridge runs Codex with `--ignore-user-config`, so a `config.toml` in the volume is not read.
+
+Underneath the flags, the CLIs run as a non-root user with `/work`, an empty directory, as their working directory.
 
 ## Model routing
 
@@ -273,7 +376,9 @@ Errors surface in Riffado as a failed summary. `docker compose logs -f agent-bri
 | `connect ECONNREFUSED agent-bridge:8787` | Container isn't up. The profile means `docker compose up -d` alone skips it — pass `--profile agent-bridge`. |
 | `401 missing or invalid bearer token` | `BRIDGE_TOKEN` in `.env` and the API Key on the provider have drifted. The bridge compares them exactly. |
 | `400 unknown model "gpt-4o-mini"` | The provider's Default Model is blank, so Riffado substituted its own fallback. Set it. |
-| `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`. |
+| `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS`, or one of the built-in [hardening flags](#hardening-no-tools-no-persistence), isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`; pin a version the hardening was verified against. |
+| `502 … Unknown feature flag: <name>` | The installed Codex no longer knows a feature the bridge disables. Pin a verified version, then check `codex features list` for what the feature became before changing `lib.mjs`. |
+| `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild the image. Files written before that stay where they are; removing them is optional (see [Purging](#purging-session-data-from-before-this-fix-optional)). |
 | `502 … exited with code 1` mentioning login, credits, or a plan | Authentication or rate limit. Re-run the status commands under [Authentication](#authentication). |
 | `502 … produced output that is not the expected JSON envelope` | The Claude CLI's `--output-format json` envelope changed shape. Pin the version and check `parseClaudeEnvelope` in `lib.mjs`. |
 | `504 … exceeded BRIDGE_TIMEOUT_MS` | A long transcript against a slow model. Raise `BRIDGE_TIMEOUT_MS`. |
@@ -282,6 +387,6 @@ Errors surface in Riffado as a failed summary. `docker compose logs -f agent-bri
 
 ## Not verified in this repo's CI
 
-CI has no Claude or Codex subscription, so nothing here exercises a real CLI. `src/tests/ai/agent-bridge.test.ts` covers the pure request/response logic — auth, model routing, message flattening, JSON extraction — by importing the module's helpers. The CLI invocation itself is what `smoke.sh` is for; run it after any CLI upgrade.
+CI has no Claude or Codex subscription, so nothing here exercises a real CLI. `src/tests/ai/agent-bridge.test.ts` covers the pure request/response logic — auth, model routing, message flattening, JSON extraction, and the hardening flags in the argv — by importing the module's helpers. Whether the installed CLI accepts that argv and keeps sessions off disk is what `smoke.sh` is for; run it after any CLI upgrade.
 
 **Nor does CI build this Dockerfile.** That gap has already cost something: the `COPY` line named only `server.mjs` while the program also needs `lib.mjs`, so the published instructions produced an image that died at startup with `ERR_MODULE_NOT_FOUND` — and every test still passed, because they import `lib.mjs` straight from the source tree. A job that builds the image and starts the server far enough to bind a port would catch that class of defect without needing a subscription.
