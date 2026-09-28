@@ -96,6 +96,7 @@ import {
 import {
     createOrgType,
     createPrivateType,
+    deleteOwnType,
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
 import { ensureOrgAccount } from "@/lib/org/account";
@@ -256,6 +257,17 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
             .id;
     });
 
+    const owners = async (
+        table: typeof people | typeof knowledgeEntities,
+        id: string,
+    ) =>
+        (
+            await db()
+                .select({ userId: table.userId })
+                .from(table)
+                .where(eq(table.id, id))
+        )[0]?.userId;
+
     it("publishes what can be shared, promoting who and what it names, and keeps the rest private", async () => {
         const toJan = await correct(
             "Novák",
@@ -300,16 +312,6 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
 
         await share();
 
-        const owners = async (
-            table: typeof people | typeof knowledgeEntities,
-            id: string,
-        ) =>
-            (
-                await db()
-                    .select({ userId: table.userId })
-                    .from(table)
-                    .where(eq(table.id, id))
-            )[0]?.userId;
         expect(await owners(people, jan)).toBe(orgUserId);
         expect(await owners(knowledgeEntities, orion)).toBe(orgUserId);
         expect(await owners(knowledgeEntities, acme)).toBe(OWNER);
@@ -394,6 +396,9 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
                 .from(knowledgeFacts)
                 .where(eq(knowledgeFacts.userId, OWNER)),
         ).toHaveLength(1);
+        // Nothing of a fact that stays private is published: not whom it
+        // names either (Jan is the Organization's as a named speaker).
+        expect(await owners(people, pavel)).toBe(OWNER);
     });
 
     it("does not overwrite what the Organization knows of a single-valued relation", async () => {
@@ -444,6 +449,108 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
                 ),
             );
         expect(orgWorksFor.map((fact) => fact.id)).toEqual([orgSaid]);
+        // The company the private fact names stays the owner's.
+        expect(await owners(knowledgeEntities, ownersOrg.id)).toBe(OWNER);
+    });
+
+    it("adds its evidence to a single value the Organization already holds, and keeps a different one private", async () => {
+        const sla = await createEntity(orgUserId, {
+            typeKey: "term",
+            name: "SLA",
+        });
+        const kpi = await createEntity(orgUserId, {
+            typeKey: "term",
+            name: "KPI",
+        });
+        const slaMeans = await confirmManualFact(orgUserId, {
+            subject: { entityId: sla.id },
+            relationKey: "means",
+            object: { literal: "Service Level Agreement" },
+        });
+        const kpiMeans = await confirmManualFact(orgUserId, {
+            subject: { entityId: kpi.id },
+            relationKey: "means",
+            object: { literal: "Key Performance Indicator" },
+        });
+        for (const [subject, literal] of [
+            [sla.id, "Service  Level Agreement "],
+            [kpi.id, "Klíčový ukazatel"],
+        ] as const) {
+            await confirmFactFromRecording({
+                subject: { entityId: subject },
+                relationKey: "means",
+                object: { literal },
+                ownerUserId: OWNER,
+                transcriptionId: transcriptId,
+                revision: 0,
+                actorUserId: OWNER,
+                orgUserId,
+                startMs: 0,
+                endMs: 12_000,
+            });
+        }
+
+        await share();
+
+        const orgFacts = await db()
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, orgUserId));
+        expect(orgFacts.map((fact) => fact.id).sort()).toEqual(
+            [slaMeans, kpiMeans].sort(),
+        );
+        const orgEvidence = await db()
+            .select({ factId: knowledgeFactEvidence.factId })
+            .from(knowledgeFactEvidence)
+            .where(eq(knowledgeFactEvidence.userId, orgUserId));
+        expect(orgEvidence).toEqual([{ factId: slaMeans }]);
+    });
+
+    it("keeps a fact private whose relation was adopted as a type the Organization deleted, promoting nothing", async () => {
+        const mentors = await createPrivateType(OWNER, {
+            kind: "relation",
+            label: "mentors",
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        const coaches = await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "coaches",
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        // Said before the adoption, so stored with the private key.
+        await confirmFactFromRecording({
+            subject: { personId: jan },
+            relationKey: mentors,
+            object: { personId: pavel },
+            ownerUserId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            startMs: 0,
+            endMs: 12_000,
+        });
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: coaches })
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        await deleteOwnType(orgUserId, "relation", coaches, 0);
+
+        await share();
+
+        expect(
+            await db()
+                .select()
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, orgUserId)),
+        ).toEqual([]);
+        expect(await owners(people, pavel)).toBe(OWNER);
     });
 
     it("takes the Organization's evidence back on withdrawal, gives the owner the corrections, and publishes again on a new share", async () => {

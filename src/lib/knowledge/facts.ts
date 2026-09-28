@@ -96,9 +96,13 @@ function cleanLiteral(literal: string): string {
  * The relation a scope may state facts with: active, and core, the
  * Organization's, or the scope's own. A private type the Organization
  * adopted gives way to the Organization's, so the owner's later facts use
- * the shared one.
+ * the shared one. Null when there is none.
  */
-async function usableRelation(tx: Tx, scopeUserId: string, key: string) {
+export async function findUsableRelationInTx(
+    tx: Tx,
+    scopeUserId: string,
+    key: string,
+) {
     const find = async (relationKey: string) => {
         const [row] = await tx
             .select({
@@ -126,12 +130,24 @@ async function usableRelation(tx: Tx, scopeUserId: string, key: string) {
         return row ?? null;
     };
     const relation = await find(key);
-    if (!relation) throw invalid("Unknown relation", "relationKey");
-    if (relation.userId === scopeUserId && relation.adoptedAsKey) {
+    if (relation?.userId === scopeUserId && relation.adoptedAsKey) {
         const adopted = await find(relation.adoptedAsKey);
         if (adopted) return adopted;
     }
     return relation;
+}
+
+async function usableRelation(tx: Tx, scopeUserId: string, key: string) {
+    const relation = await findUsableRelationInTx(tx, scopeUserId, key);
+    if (!relation) throw invalid("Unknown relation", "relationKey");
+    return relation;
+}
+
+/** The key a fact's object is stored under: its node, or its words' hash. */
+export function objectKeyOf(object: FactObject): string {
+    return "literal" in object
+        ? `l:${domainLookupHash(LITERAL_DOMAIN, cleanLiteral(object.literal))}`
+        : nodeKey(object);
 }
 
 async function typeOf(tx: Tx, node: KnowledgeTarget): Promise<string> {
@@ -215,10 +231,7 @@ export async function confirmFactInTx(
     if (!fits) throw invalid("The relation does not fit", "relationKey");
 
     const subjectKey = nodeKey(subject);
-    const objectKey =
-        "literal" in object
-            ? `l:${domainLookupHash(LITERAL_DOMAIN, object.literal)}`
-            : nodeKey(object);
+    const objectKey = objectKeyOf(object);
     await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext(${`riffado:fact:${scopeUserId}|${subjectKey}|${relation.key}`}))`,
     );

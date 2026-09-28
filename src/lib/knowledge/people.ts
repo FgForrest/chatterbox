@@ -773,30 +773,33 @@ export async function addPersonNotes(
 }
 
 /**
- * Make a private person an Organization person.
- *
- * Promotion reassigns the row rather than copying it, so every attribution
- * -- the owner's private ones included -- keeps pointing at the same id and
- * the owner's knowledge base cannot drift from the Organization's. When the
- * Organization already knows someone with the same email, the private
- * record is folded into theirs instead. The owner's notes are never
- * promoted: they move to that owner's private overlay.
- *
- * Returns the id of the Organization person. Permanent: unsharing the
- * recording that caused it does not demote anyone.
+ * What sharing would make of a person, decided without writing anything
+ * (`promotePersonInTx` acts on it): the Organization person they are or
+ * would become, and for a private one the record promoted and the
+ * Organization person with the same email it would fold into. Null when
+ * they are gone. A merged-away id stands for the one it was folded into.
  */
-export async function promotePersonInTx(
+export interface PersonPromotion {
+    /** The Organization person's id, now or once promoted. */
+    orgPersonId: string;
+    /** The private record to promote; null when already the Organization's. */
+    row: PersonRow | null;
+    foldInto: string | null;
+}
+
+export async function planPersonPromotionInTx(
     tx: Tx,
     personId: string,
     orgUserId: string,
-): Promise<string | null> {
+): Promise<PersonPromotion | null> {
     const row = await readPersonRow(tx, personId);
     if (!row) return null;
     if (row.mergedIntoId) {
-        return promotePersonInTx(tx, row.mergedIntoId, orgUserId);
+        return planPersonPromotionInTx(tx, row.mergedIntoId, orgUserId);
     }
-    if (row.userId === orgUserId || row.ownerRole === "org") return row.id;
-
+    if (row.userId === orgUserId || row.ownerRole === "org") {
+        return { orgPersonId: row.id, row: null, foldInto: null };
+    }
     const [emailRow] = await tx
         .select({ hash: people.primaryEmailHash })
         .from(people)
@@ -814,11 +817,37 @@ export async function promotePersonInTx(
                 ),
             )
             .limit(1);
-        if (known) {
-            await mergeInTx(tx, known.id, row.id);
-            await moveNotesToOverlay(tx, row, known.id);
-            return known.id;
-        }
+        if (known) return { orgPersonId: known.id, row, foldInto: known.id };
+    }
+    return { orgPersonId: row.id, row, foldInto: null };
+}
+
+/**
+ * Make a private person an Organization person.
+ *
+ * Promotion reassigns the row rather than copying it, so every attribution
+ * -- the owner's private ones included -- keeps pointing at the same id and
+ * the owner's knowledge base cannot drift from the Organization's. When the
+ * Organization already knows someone with the same email, the private
+ * record is folded into theirs instead. The owner's notes are never
+ * promoted: they move to that owner's private overlay.
+ *
+ * Returns the id of the Organization person. Permanent: unsharing the
+ * recording that caused it does not demote anyone.
+ */
+export async function promotePersonInTx(
+    tx: Tx,
+    personId: string,
+    orgUserId: string,
+): Promise<string | null> {
+    const plan = await planPersonPromotionInTx(tx, personId, orgUserId);
+    if (!plan) return null;
+    const { row, foldInto } = plan;
+    if (!row) return plan.orgPersonId;
+    if (foldInto) {
+        await mergeInTx(tx, foldInto, row.id);
+        await moveNotesToOverlay(tx, row, foldInto);
+        return foldInto;
     }
 
     await moveNotesToOverlay(tx, row, row.id);

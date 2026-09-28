@@ -10,9 +10,11 @@
  *   owner's facts said there in the Organization's scope too, with
  *   Organization evidence beside the owner's. What names a private person
  *   or entity promotes them first. What cannot be shared stays private and
- *   is counted: a private relation or entity type the Organization has not
- *   adopted, or a single-valued fact the Organization already knows
- *   otherwise (the Organization's knowledge is not overwritten by a share).
+ *   is counted, and publishes nothing, not even whom it names: a private
+ *   relation or entity type the Organization has not adopted, a relation
+ *   the people or entities do not fit once promoted, or a single-valued
+ *   fact the Organization already knows otherwise (the Organization's
+ *   knowledge is not overwritten by a share).
  * - **Withdrawal** takes back everything the Organization derived from the
  *   recording: its evidence there goes, and a fact of its left without any
  *   is pruned. The corrections on the transcripts, and the heard-as forms
@@ -25,7 +27,7 @@
  * they touched for the caller to bump at its end.
  */
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { db } from "@/db";
 import {
     knowledgeAliases,
@@ -36,14 +38,25 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
-import { AppError } from "@/lib/errors";
+import { AppError, ErrorCode } from "@/lib/errors";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
-import { promoteEntityInTx } from "@/lib/knowledge/entities";
+import {
+    planEntityPromotionInTx,
+    promoteEntityInTx,
+} from "@/lib/knowledge/entities";
 import { pruneUnsupportedFactsInTx } from "@/lib/knowledge/fact-evidence";
-import { nodeKey } from "@/lib/knowledge/fact-rules";
-import { confirmFactInTx, type FactObject } from "@/lib/knowledge/facts";
+import { nodeKey, relationFits } from "@/lib/knowledge/fact-rules";
+import {
+    confirmFactInTx,
+    type FactObject,
+    findUsableRelationInTx,
+    objectKeyOf,
+} from "@/lib/knowledge/facts";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { promotePersonInTx } from "@/lib/knowledge/people";
+import {
+    planPersonPromotionInTx,
+    promotePersonInTx,
+} from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -240,7 +253,42 @@ export async function publishKnowledgeInTx(
     return result;
 }
 
-/** One of the owner's facts, stated in the Organization's scope; see above. */
+/**
+ * What a person or an entity would be in the Organization's scope, and its
+ * type, decided without writing (`planPersonPromotionInTx`,
+ * `planEntityPromotionInTx`): null when it cannot be shared.
+ */
+async function shareableTargetInTx(
+    tx: Tx,
+    target: KnowledgeTarget,
+    orgUserId: string,
+): Promise<{ target: KnowledgeTarget; type: string } | null> {
+    if ("personId" in target) {
+        const plan = await planPersonPromotionInTx(
+            tx,
+            target.personId,
+            orgUserId,
+        );
+        return plan
+            ? { target: { personId: plan.orgPersonId }, type: "person" }
+            : null;
+    }
+    const plan = await planEntityPromotionInTx(tx, target.entityId, orgUserId);
+    if (!plan || plan.kind === "private") return null;
+    return { target: { entityId: plan.orgEntityId }, type: plan.typeKey };
+}
+
+/**
+ * One of the owner's facts, stated in the Organization's scope; see above.
+ *
+ * Decided before anything is written, so a fact that stays private
+ * publishes nothing, not even whom it names: the relation the Organization
+ * would use, the people and entities it would name once promoted, that
+ * they fit the relation, and the Organization's current value of a
+ * single-valued relation. The share holds the Organization-people lock,
+ * which every other writer of the Organization's knowledge takes too, so
+ * what was decided still holds when it is written.
+ */
 async function publishFactInTx(
     tx: Tx,
     fact: {
@@ -263,36 +311,36 @@ async function publishFactInTx(
         fact.relationKey,
         ownerUserId,
     );
-    if (!relationKey) return false;
-    const subject = await sharedTargetInTx(
-        tx,
-        node(fact.subjectPersonId, fact.subjectEntityId),
-        orgUserId,
-    );
+    const relation = relationKey
+        ? await findUsableRelationInTx(tx, orgUserId, relationKey)
+        : null;
+    if (!relation) return false;
+    const subjectNode = node(fact.subjectPersonId, fact.subjectEntityId);
+    const objectNode = node(fact.objectPersonId, fact.objectEntityId);
+    const subject = await shareableTargetInTx(tx, subjectNode, orgUserId);
     if (!subject) return false;
-    let object: FactObject;
-    if (fact.objectLiteral) {
-        object = { literal: decryptText(fact.objectLiteral) };
-    } else {
-        const target = await sharedTargetInTx(
-            tx,
-            node(fact.objectPersonId, fact.objectEntityId),
-            orgUserId,
-        );
-        if (!target) return false;
-        object = target;
-    }
+    const literal = fact.objectLiteral ? decryptText(fact.objectLiteral) : null;
+    const object =
+        literal === null
+            ? await shareableTargetInTx(tx, objectNode, orgUserId)
+            : null;
+    if (literal === null && !object) return false;
+    const fits = relationFits(
+        {
+            subjectTypes: relation.subjectTypes,
+            objectTypes: relation.objectTypes,
+            objectKind: relation.objectKind as "entity" | "literal",
+        },
+        subject.type,
+        object ? { type: object.type } : { literal: true },
+    );
+    if (!fits) return false;
 
     // The Organization's knowledge is not overwritten by a share: where it
     // holds another current value of a single-valued relation, the fact
-    // stays private.
-    const [relation] = await tx
-        .select({ cardinality: knowledgeRelationTypes.cardinality })
-        .from(knowledgeRelationTypes)
-        .where(eq(knowledgeRelationTypes.key, relationKey))
-        .limit(1);
+    // stays private. The same value gains this recording's evidence.
     let expectedCurrentFactId: string | null = null;
-    if (relation?.cardinality === "one") {
+    if (relation.cardinality === "one") {
         const [current] = await tx
             .select({
                 id: knowledgeFacts.id,
@@ -302,38 +350,44 @@ async function publishFactInTx(
             .where(
                 and(
                     eq(knowledgeFacts.userId, orgUserId),
-                    eq(knowledgeFacts.subjectKey, nodeKey(subject)),
-                    eq(knowledgeFacts.relationKey, relationKey),
+                    eq(knowledgeFacts.subjectKey, nodeKey(subject.target)),
+                    eq(knowledgeFacts.relationKey, relation.key),
                     isNull(knowledgeFacts.replacedByFactId),
                 ),
             )
+            .orderBy(desc(knowledgeFacts.updatedAt), asc(knowledgeFacts.id))
             .limit(1);
         if (current) {
-            if ("literal" in object || current.objectKey !== nodeKey(object)) {
-                return false;
-            }
+            const objectKey = objectKeyOf(
+                object ? object.target : { literal: literal ?? "" },
+            );
+            if (current.objectKey !== objectKey) return false;
             expectedCurrentFactId = current.id;
         }
     }
 
-    // A fact the Organization's vocabulary cannot hold (its relation, as
-    // adopted, takes other types) stays private rather than failing the
-    // share. `confirmFactInTx` refuses before it writes anything.
-    let orgFactId: string;
-    try {
-        orgFactId = await confirmFactInTx(tx, {
-            scopeUserId: orgUserId,
-            actorUserId: ownerUserId,
-            origin: "recording",
-            subject,
-            relationKey,
-            object,
-            expectedCurrentFactId,
-        });
-    } catch (error) {
-        if (error instanceof AppError && error.statusCode < 500) return false;
-        throw error;
+    // Decided: now promote whom it names, and state it there.
+    const sharedSubject = await sharedTargetInTx(tx, subjectNode, orgUserId);
+    const sharedObject: FactObject | null =
+        literal === null
+            ? await sharedTargetInTx(tx, objectNode, orgUserId)
+            : { literal };
+    if (!sharedSubject || !sharedObject) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "What the share named changed meanwhile; try again",
+            409,
+        );
     }
+    const orgFactId = await confirmFactInTx(tx, {
+        scopeUserId: orgUserId,
+        actorUserId: ownerUserId,
+        origin: "recording",
+        subject: sharedSubject,
+        relationKey: relation.key,
+        object: sharedObject,
+        expectedCurrentFactId,
+    });
     const evidence = await tx
         .select()
         .from(knowledgeFactEvidence)

@@ -695,31 +695,41 @@ export async function deleteEntity(
 }
 
 /**
- * Make a private entity the Organization's, as sharing a recording that
- * names it does (`promotePersonInTx` for people). The caller holds the
- * Organization-people lock, and bumps the scopes naming the entity
- * (`scopesNamingInTx`, read first) and the Organization's at its end.
+ * What sharing would make of an entity, decided without writing anything
+ * (`promoteEntityInTx` acts on it). Null when it is gone; a merged-away id
+ * stands for the one it was folded into.
  *
- * A private type goes to the Organization type it was adopted as; one not
- * adopted refuses (409, `details.reason: "entityTypePrivate"`), as the
- * Organization cannot see it. An Organization entity of the same name and
- * type takes it in; otherwise it is reassigned in place. Its description
- * becomes its former owner's private notes, as a person's notes do.
- *
- * Returns the Organization entity's id, or null when it is gone.
- * Permanent: withdrawing the recording does not demote it.
+ * - `org`: it is the Organization's already.
+ * - `private`: its type is private and not adopted (or adopted as a type
+ *   the Organization no longer has), so the Organization cannot see it.
+ * - `promote`: the Organization entity it would be, with the type it would
+ *   take, and the Organization entity of that name and type it would fold
+ *   into, if any.
  */
-export async function promoteEntityInTx(
+export type EntityPromotion =
+    | { kind: "org"; orgEntityId: string; typeKey: string }
+    | { kind: "private"; entityId: string }
+    | {
+          kind: "promote";
+          orgEntityId: string;
+          typeKey: string;
+          row: EntityRow;
+          foldInto: string | null;
+      };
+
+export async function planEntityPromotionInTx(
     tx: Tx,
     entityId: string,
     orgUserId: string,
-): Promise<string | null> {
+): Promise<EntityPromotion | null> {
     const row = await readEntityRow(tx, entityId);
     if (!row) return null;
     if (row.mergedIntoId) {
-        return promoteEntityInTx(tx, row.mergedIntoId, orgUserId);
+        return planEntityPromotionInTx(tx, row.mergedIntoId, orgUserId);
     }
-    if (row.userId === orgUserId || row.ownerRole === "org") return row.id;
+    if (row.userId === orgUserId || row.ownerRole === "org") {
+        return { kind: "org", orgEntityId: row.id, typeKey: row.typeKey };
+    }
 
     let typeKey = row.typeKey;
     const [type] = await tx
@@ -740,24 +750,81 @@ export async function promoteEntityInTx(
         )
         .limit(1);
     if (type?.userId === row.userId) {
-        if (!type.adoptedAsKey) {
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "The entity's type is private",
-                409,
-                { reason: "entityTypePrivate", entityId: row.id },
-            );
+        if (
+            !type.adoptedAsKey ||
+            !(await isSharedEntityType(tx, type.adoptedAsKey))
+        ) {
+            return { kind: "private", entityId: row.id };
         }
         typeKey = type.adoptedAsKey;
     }
-
     const known = await sameNamed(tx, orgUserId, typeKey, row.nameHmac);
-    if (known) {
-        await mergeEntitiesInTx(tx, known, row.id);
+    return {
+        kind: "promote",
+        orgEntityId: known ?? row.id,
+        typeKey,
+        row,
+        foldInto: known,
+    };
+}
+
+/** A core or Organization entity type exists under `key`. */
+async function isSharedEntityType(tx: Tx, key: string): Promise<boolean> {
+    const [type] = await tx
+        .select({ id: knowledgeEntityTypes.id })
+        .from(knowledgeEntityTypes)
+        .where(
+            and(
+                eq(knowledgeEntityTypes.key, key),
+                or(
+                    isNull(knowledgeEntityTypes.userId),
+                    orgOwnedCondition(knowledgeEntityTypes.userId),
+                ),
+            ),
+        )
+        .limit(1);
+    return Boolean(type);
+}
+
+/**
+ * Make a private entity the Organization's, as sharing a recording that
+ * names it does (`promotePersonInTx` for people). The caller holds the
+ * Organization-people lock, and bumps the scopes naming the entity
+ * (`scopesNamingInTx`, read first) and the Organization's at its end.
+ *
+ * A private type goes to the Organization type it was adopted as; one not
+ * adopted refuses (409, `details.reason: "entityTypePrivate"`), as the
+ * Organization cannot see it. An Organization entity of the same name and
+ * type takes it in; otherwise it is reassigned in place. Its description
+ * becomes its former owner's private notes, as a person's notes do.
+ *
+ * Returns the Organization entity's id, or null when it is gone.
+ * Permanent: withdrawing the recording does not demote it.
+ */
+export async function promoteEntityInTx(
+    tx: Tx,
+    entityId: string,
+    orgUserId: string,
+): Promise<string | null> {
+    const plan = await planEntityPromotionInTx(tx, entityId, orgUserId);
+    if (!plan) return null;
+    if (plan.kind === "org") return plan.orgEntityId;
+    if (plan.kind === "private") {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "The entity's type is private",
+            409,
+            { reason: "entityTypePrivate", entityId: plan.entityId },
+        );
+    }
+
+    const { row, typeKey, foldInto } = plan;
+    if (foldInto) {
+        await mergeEntitiesInTx(tx, foldInto, row.id);
         if (row.description) {
-            await appendEntityNotes(tx, known, row.userId, row.description);
+            await appendEntityNotes(tx, foldInto, row.userId, row.description);
         }
-        return known;
+        return foldInto;
     }
 
     if (row.description) {
