@@ -16,7 +16,7 @@ import {
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import { contentWriterRefusal } from "@/lib/sharing/writer-rule";
 import type { SpeakerNameResolver } from "@/lib/transcription/turns";
 
 export type AttributionSource =
@@ -110,10 +110,11 @@ interface CopyMatchingSpeakerAttributionsArgs {
     /** The transcript they are offered on, e.g. `riffado`. */
     targetSource: string;
     /**
-     * The organization account: nothing is offered while the recording is
-     * shared with it, as the owner's copy is frozen.
+     * Who offers them, and the organization account sharing is decided
+     * against: nothing is offered unless that actor may change the
+     * recording now (`writerRefusal`), checked under the recording lock.
      */
-    frozenWhileSharedWith?: string | null;
+    writer: { actorUserId: string; orgUserId: string | null };
 }
 
 /**
@@ -133,11 +134,12 @@ export async function copyMatchingSpeakerAttributions({
     recordingId,
     sourceSource,
     targetSource,
-    frozenWhileSharedWith,
+    writer,
 }: CopyMatchingSpeakerAttributionsArgs): Promise<number> {
     return db.transaction(async (tx) => {
         // Held against a concurrent rewrite of either transcript, which
-        // locks the recording for update, and against a share.
+        // locks the recording for update, and against a share or a
+        // withdrawal.
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -149,8 +151,11 @@ export async function copyMatchingSpeakerAttributions({
             )
             .for("share");
         if (
-            frozenWhileSharedWith &&
-            (await isRecordingShared(recordingId, frozenWhileSharedWith, tx))
+            await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                ...writer,
+            })
         ) {
             return 0;
         }

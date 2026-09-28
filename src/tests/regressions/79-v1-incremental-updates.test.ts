@@ -415,6 +415,10 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
             where: vi.fn().mockResolvedValue(undefined),
         });
         const tx = {
+            // The recording, locked while the change is checked and made.
+            select: vi
+                .fn()
+                .mockReturnValue(lockedRecordingRows([{ deletedAt: null }])),
             delete: vi.fn().mockReturnValue({
                 where: vi.fn().mockReturnValue({
                     returning: vi.fn().mockResolvedValue([{ id: "enh-1" }]),
@@ -449,6 +453,9 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
             selectRows([{ id: recordingId, userId }]),
         );
         const tx = {
+            select: vi
+                .fn()
+                .mockReturnValue(lockedRecordingRows([{ deletedAt: null }])),
             delete: vi.fn().mockReturnValue({
                 where: vi.fn().mockReturnValue({
                     returning: vi.fn().mockResolvedValue([]),

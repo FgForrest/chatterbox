@@ -423,9 +423,13 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 `/api/recordings/${REC}/speakers?view=org`,
             );
             expect(speakers.status).toBe(200);
-            // Sharing took the Organization's own copy.
+            // One recording: the Organization view shows the owner's.
+            const [ownerTranscript] = await db()
+                .select({ id: transcriptions.id })
+                .from(transcriptions)
+                .where(eq(transcriptions.recordingId, REC));
             await expect(speakers.json()).resolves.toMatchObject({
-                fallback: false,
+                transcriptionId: ownerTranscript?.id,
             });
             const orgPath = `/api/recordings/${REC}/speakers?view=org`;
             const change = async (user: string, body: object) =>
@@ -463,7 +467,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 }),
             ).toBe(200);
 
-            // The owner's own transcript is frozen while shared.
+            // The owner may not change it while shared.
             const privatePath = `/api/recordings/${REC}/speakers`;
             const frozen = await call(putSpeaker, OWNER, privatePath, {
                 method: "PUT",
@@ -486,29 +490,20 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             ).toHaveLength(1);
         });
 
-        it("shows nothing of the owner's once the Organization's copy is gone", async () => {
+        it("shows nothing once Organization retention removed the transcript", async () => {
             const orgPath = `/api/recordings/${REC}/speakers?view=org`;
             const seen = await seenVersion(orgUserId, orgPath);
-            // Organization retention removes its copy.
+            // Organization retention removes the recording's transcript.
             await db()
                 .delete(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
+                .where(eq(transcriptions.recordingId, REC));
 
-            // The owner's transcript is not shown in its place...
             expect((await call(getSpeakers, MEMBER, orgPath)).status).toBe(404);
-            // ...and a change made on the copy that was shown finds nothing
-            // to name: the snapshot is never taken again.
             const change = await call(putSpeaker, orgUserId, orgPath, {
                 method: "PUT",
                 ...json({ ...seen, label: "speaker_0", displayName: "Eva" }),
             });
             expect(change.status).toBe(404);
-            expect(
-                await db()
-                    .select()
-                    .from(transcriptions)
-                    .where(eq(transcriptions.userId, orgUserId)),
-            ).toEqual([]);
         });
 
         it("queues Organization work for its account only and lets every viewer follow it", async () => {
@@ -551,8 +546,8 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 params: { id: jobId },
             });
             expect(followed.status).toBe(200);
-            // The owner's private view has its own job slot, and is frozen
-            // while shared.
+            // The owner's private view has its own job slot, and may not
+            // run while shared.
             const privateView = await call(
                 getTranscribe,
                 OWNER,
@@ -662,13 +657,6 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
         });
 
         it("removes the Organization view with the recording", async () => {
-            // Sharing took the Organization's own copy.
-            expect(
-                await db()
-                    .select()
-                    .from(transcriptions)
-                    .where(eq(transcriptions.userId, orgUserId)),
-            ).toHaveLength(1);
             expect(
                 (
                     await call(
@@ -690,14 +678,17 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             ).toBe(404);
         });
 
-        it("lets anyone clear the Organization summary but never the owner's", async () => {
-            const response = await call(
-                deleteSummary,
-                MEMBER,
-                `/api/recordings/${REC}/summary?view=org`,
-                { method: "DELETE" },
-            );
-            expect(response.status).toBe(200);
+        it("lets only the organization account clear the summary", async () => {
+            expect(
+                (
+                    await call(
+                        deleteSummary,
+                        MEMBER,
+                        `/api/recordings/${REC}/summary?view=org`,
+                        { method: "DELETE" },
+                    )
+                ).status,
+            ).toBe(403);
             expect(
                 (
                     await call(
@@ -708,6 +699,16 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                     )
                 ).status,
             ).toBe(404);
+            expect(
+                (
+                    await call(
+                        deleteSummary,
+                        orgUserId,
+                        `/api/recordings/${REC}/summary?view=org`,
+                        { method: "DELETE" },
+                    )
+                ).status,
+            ).toBe(200);
         });
     });
 });

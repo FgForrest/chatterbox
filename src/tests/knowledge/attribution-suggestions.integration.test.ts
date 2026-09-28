@@ -660,17 +660,13 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         await put(ALICE, { label: "speaker_1", unknown: true });
         await share();
 
-        // The Organization's own copy: the organization account curates it.
+        // Shared, the organization account curates it.
         await put(orgUserId, { label: "speaker_0" }, "?view=org");
-        const [copy] = await db()
-            .select({ id: transcriptions.id })
-            .from(transcriptions)
-            .where(eq(transcriptions.userId, orgUserId));
         const orgJana = await person(orgUserId, "Jana N.");
         await appDb.transaction((tx) =>
             insertSuggestionsInTx(tx, {
-                userId: orgUserId,
-                transcriptionId: copy?.id ?? "",
+                userId: ALICE,
+                transcriptionId: transcriptId,
                 rows: [suggestion("speaker_0", orgJana)],
             }),
         );
@@ -681,12 +677,14 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         expect(await labelsSeenBy(BOB, "?view=org")).toEqual([
             "speaker_1:confirmed",
         ]);
+        // The owner may not act on it while shared, in either view.
         expect(await labelsSeenBy(ALICE, "?view=org")).toEqual([
             "speaker_1:confirmed",
         ]);
+        expect(await labelsSeenBy(ALICE, "")).toEqual(["speaker_1:confirmed"]);
     });
 
-    it("copies unknown and the confirmer into the Organization view", async () => {
+    it("keeps unknown and the confirmer when shared", async () => {
         const orgUserId = (await ensureOrgAccount()) ?? "";
         const [root] = await db()
             .select({ id: recordingFolders.id })
@@ -700,35 +698,35 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             folderId: root?.id ?? "",
         });
 
-        // Sharing made the copy.
-        const [copy] = await db()
-            .select({ id: transcriptions.id })
-            .from(transcriptions)
-            .where(eq(transcriptions.userId, orgUserId));
-        const copied = await db()
+        // One recording: the owner's rows are what the Organization reads,
+        // naming the human who confirmed each.
+        const shared = await db()
             .select()
             .from(transcriptSpeakers)
-            .where(eq(transcriptSpeakers.transcriptionId, copy?.id ?? ""))
+            .where(eq(transcriptSpeakers.transcriptionId, transcriptId))
             .orderBy(transcriptSpeakers.label);
-        expect(copied).toEqual([
-            // The row belongs to the organization account, and names the
-            // human who confirmed it.
+        expect(shared).toEqual([
             expect.objectContaining({
                 label: "speaker_0",
-                userId: orgUserId,
+                userId: ALICE,
                 status: "confirmed",
                 markedUnknown: false,
                 confirmedByUserId: ALICE,
             }),
             expect.objectContaining({
                 label: "speaker_1",
-                userId: orgUserId,
+                userId: ALICE,
                 personId: null,
                 status: "confirmed",
                 markedUnknown: true,
                 confirmedByUserId: ALICE,
             }),
         ]);
+        const [petr] = await db()
+            .select({ userId: people.userId })
+            .from(people)
+            .where(eq(people.id, shared[0]?.personId ?? ""));
+        expect(petr?.userId).toBe(orgUserId);
     });
     describe("serialized with transcript rewrites", () => {
         /** Lock the recording as a transcript rewrite does. */
@@ -866,6 +864,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
                 recordingId: REC,
                 sourceSource: "plaud",
                 targetSource: "riffado",
+                writer: { actorUserId: ALICE, orgUserId: null },
             });
             expect(await stillWaiting(copied)).toBe(true);
             await change.commit();
@@ -934,15 +933,11 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             const orgUserId = await share();
             // Take the answer back, leaving the label open to a suggestion.
             await put(orgUserId, { label: "speaker_0" }, "?view=org");
-            const [copy] = await db()
-                .select({ id: transcriptions.id })
-                .from(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
             const orgJana = await person(orgUserId, "Jana N.");
             await appDb.transaction((tx) =>
                 insertSuggestionsInTx(tx, {
-                    userId: orgUserId,
-                    transcriptionId: copy?.id ?? "",
+                    userId: ALICE,
+                    transcriptionId: transcriptId,
                     rows: [suggestion("speaker_0", orgJana)],
                 }),
             );
@@ -956,7 +951,12 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             const refused = await db()
                 .select()
                 .from(transcriptSpeakerRejections)
-                .where(eq(transcriptSpeakerRejections.userId, orgUserId));
+                .where(
+                    eq(
+                        transcriptSpeakerRejections.transcriptionId,
+                        transcriptId,
+                    ),
+                );
             expect(refused).toEqual([]);
 
             expect((await put(orgUserId, reject, "?view=org")).status).toBe(
@@ -965,7 +965,12 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             const kept = await db()
                 .select({ label: transcriptSpeakerRejections.label })
                 .from(transcriptSpeakerRejections)
-                .where(eq(transcriptSpeakerRejections.userId, orgUserId));
+                .where(
+                    eq(
+                        transcriptSpeakerRejections.transcriptionId,
+                        transcriptId,
+                    ),
+                );
             expect(kept).toEqual([{ label: "speaker_0" }]);
         });
 

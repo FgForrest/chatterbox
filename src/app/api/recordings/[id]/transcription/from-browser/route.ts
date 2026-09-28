@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
-import { recordingShared } from "@/lib/sharing/frozen";
+import { recordingShared } from "@/lib/sharing/writer";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
 type IdContext = { params: Promise<{ id: string }> };

@@ -837,13 +837,6 @@ export function TranscriptionPanel({
                                         : i18n("Expand summary")}
                                 </button>
 
-                                {summaryData.fallback && (
-                                    <p className="text-xs text-muted-foreground">
-                                        {i18n(
-                                            "Showing the owner's summary. Re-summarize to create the Organization version.",
-                                        )}
-                                    </p>
-                                )}
                                 {summaryExpanded && (
                                     <section
                                         aria-label={i18n("Summary content")}

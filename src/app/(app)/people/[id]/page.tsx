@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
@@ -10,6 +10,7 @@ import { auth } from "@/lib/auth";
 import { decryptText } from "@/lib/encryption/fields";
 import { getPerson } from "@/lib/knowledge/people";
 import { getOrgUserId } from "@/lib/org/config";
+import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +29,9 @@ export default async function PersonPage({ params }: Params) {
     if (!person) {
         notFound();
     }
-    // The Organization view's attributions exist only for shared recordings,
-    // which everyone may open; nobody else's private transcripts are read.
+    // The viewer's own recordings, and the shared ones, which everyone may
+    // open; nobody else's private transcripts are read.
     const orgUserId = await getOrgUserId();
-    const attributors = orgUserId ? [userId, orgUserId] : [userId];
 
     // Where this person has been heard. Joined through the transcript rather
     // than the recording, because an attribution belongs to one transcript
@@ -57,7 +57,10 @@ export default async function PersonPage({ params }: Params) {
         .innerJoin(recordings, eq(recordings.id, transcriptions.recordingId))
         .where(
             and(
-                inArray(transcriptSpeakers.userId, attributors),
+                or(
+                    eq(transcriptSpeakers.userId, userId),
+                    orgUserId ? sharedRecordingCondition(orgUserId) : undefined,
+                ),
                 eq(transcriptSpeakers.personId, id),
                 eq(transcriptSpeakers.status, "confirmed"),
                 isNull(recordings.deletedAt),
@@ -92,10 +95,11 @@ export default async function PersonPage({ params }: Params) {
                             label: row.label,
                             status: row.status,
                             source: row.source,
+                            // Someone else's recording is open only shared.
                             view:
-                                row.attributor === orgUserId
-                                    ? ("org" as const)
-                                    : ("private" as const),
+                                row.attributor === userId
+                                    ? ("private" as const)
+                                    : ("org" as const),
                         }))
                         .sort((a, b) =>
                             b.recordedAt.localeCompare(a.recordedAt),

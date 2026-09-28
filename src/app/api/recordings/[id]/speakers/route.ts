@@ -16,14 +16,12 @@ import {
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
-import { assertOrgScopeWritable } from "@/lib/org/config";
 import {
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
-import { orgContentChanged } from "@/lib/sharing/notify";
-import { changeOrgTranscriptSpeaker } from "@/lib/sharing/org-transcript";
-import { effectiveViewReader } from "@/lib/sharing/view-content";
+import { notifyIfShared } from "@/lib/sharing/notify";
+import { assertMayChange } from "@/lib/sharing/writer";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -38,49 +36,54 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     if (view === "org") {
         const access = await requireRecordingView(session.user.id, id, view);
-        const reader = await effectiveViewReader(id, access, "transcript");
-        const transcript = await requireTranscript(reader.userId, id, request);
+        const transcript = await requireTranscript(
+            access.ownerUserId,
+            id,
+            request,
+        );
         const speakers = await getTranscriptSpeakers(
-            reader.userId,
+            access.ownerUserId,
             transcript.id,
             { orgPeopleOnly: true },
         );
         return NextResponse.json({
             transcriptionId: transcript.id,
             revision: transcript.revision,
-            fallback: reader.fallback,
             speakers: orgViewSpeakers(speakers, {
                 curator: session.user.id === access.orgUserId,
-                ownersTranscript: reader.fallback,
             }),
         });
     }
 
-    await requireRecordingView(session.user.id, id, "private");
+    const access = await requireRecordingView(session.user.id, id, "private");
     const transcript = await requireTranscript(session.user.id, id, request);
+    const speakers = await getTranscriptSpeakers(
+        session.user.id,
+        transcript.id,
+    );
 
     return NextResponse.json({
         transcriptionId: transcript.id,
         revision: transcript.revision,
-        speakers: await getTranscriptSpeakers(session.user.id, transcript.id),
+        // Shared, a suggestion is the organization account's to review.
+        speakers: access.shared
+            ? speakers.filter((speaker) => speaker.status === "confirmed")
+            : speakers,
     });
 });
 
 /**
  * The speaker rows the Organization view shows.
  *
- * A suggestion is shown only to whoever may act on it: on the
- * Organization's own transcript that is the organization account, which
- * curates it. Everyone else reads the confirmed names, without who
- * confirmed them. On the owner's transcript, shown until the Organization
- * has its own, a suggestion is the owner's to review, so nobody sees it
- * here.
+ * A suggestion is shown only to whoever may act on it: the organization
+ * account, which changes a shared recording. Everyone else reads the
+ * confirmed names, without who confirmed them.
  */
 function orgViewSpeakers(
     speakers: TranscriptSpeaker[],
-    viewer: { curator: boolean; ownersTranscript: boolean },
+    viewer: { curator: boolean },
 ): TranscriptSpeaker[] {
-    if (viewer.curator && !viewer.ownersTranscript) return speakers;
+    if (viewer.curator) return speakers;
     return speakers.flatMap((speaker) =>
         speaker.status === "confirmed"
             ? [{ ...speaker, confirmedByUserId: null }]
@@ -251,12 +254,11 @@ function personNotFound(): AppError {
  * is the only evidence this feature treats as strong enough to reach a
  * summary or an export.
  *
- * `?view=org` changes a speaker of the Organization view, for everyone, and
- * only the organization account may (403 for anyone else): only
- * Organization people may be picked, a new name becomes an Organization
- * person, and the owner's own transcript is never touched. The owner's own
- * transcript of a shared recording is frozen until it is withdrawn (409
- * RECORDING_SHARED).
+ * A shared recording is one recording, and only the organization account
+ * changes its speakers, on the Organization view (403 for anyone else):
+ * only Organization people may be picked there, and a new name becomes an
+ * Organization person. Its owner withdraws it before changing them (409
+ * RECORDING_SHARED); both are checked again under the recording lock.
  */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -264,80 +266,37 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
     const change = readChange(await request.json().catch(() => null));
+    const orgView = view === "org";
 
-    if (view === "org" && access.orgUserId) {
-        assertOrgScopeWritable();
-        const orgUserId = access.orgUserId;
-        // A shared recording's speakers are the organization account's to
-        // change; everyone else reads them.
-        if (session.user.id !== orgUserId) {
-            throw new AppError(
-                ErrorCode.FORBIDDEN,
-                "Only the organization account changes a shared recording's speakers",
-                403,
-            );
-        }
+    assertMayChange(access, session.user.id);
 
-        // Checked before anything is copied, so a bad request leaves no trace.
-        let personId: string | null = null;
-        if (change.kind === "name" && change.personId) {
-            const person = await currentPerson(
-                session.user.id,
-                change.personId,
-            );
-            if (!person || person.scope !== "org") throw personNotFound();
-            personId = person.id;
-        }
-        if (change.kind === "reject") {
-            const person = await getPerson(session.user.id, change.personId);
-            if (!person || person.scope !== "org") throw personNotFound();
-        }
-
-        const result = await changeOrgTranscriptSpeaker({
-            recordingId: id,
-            source: requestedSource(request),
-            owners: access,
-            actorUserId: session.user.id,
-            seen: change,
-            label: change.label,
-            answer: answerOf(change, personId),
-        });
-        await orgContentChanged(id);
-        return NextResponse.json({
-            transcriptionId: result.transcriptionId,
-            revision: result.revision,
-            speakers: orgViewSpeakers(
-                await getTranscriptSpeakers(orgUserId, result.transcriptionId, {
-                    orgPeopleOnly: true,
-                }),
-                { curator: true, ownersTranscript: false },
-            ),
-        });
-    }
-
-    const transcript = await requireTranscript(session.user.id, id, request);
+    const ownerUserId = access.ownerUserId;
+    const transcript = await requireTranscript(ownerUserId, id, request);
     assertSeenVersion(change, transcript);
 
+    // Checked before anything is written, so a bad request leaves no trace.
     let existingPersonId: string | null = null;
     if (change.kind === "name" && change.personId) {
         const person = await currentPerson(session.user.id, change.personId);
-        if (!person) throw personNotFound();
+        if (!person || (orgView && person.scope !== "org")) {
+            throw personNotFound();
+        }
         existingPersonId = person.id;
     } else if (change.kind === "reject") {
-        if (!(await getPerson(session.user.id, change.personId))) {
+        const person = await getPerson(session.user.id, change.personId);
+        if (!person || (orgView && person.scope !== "org")) {
             throw personNotFound();
         }
     }
 
     await changeTranscriptSpeaker({
-        userId: session.user.id,
+        userId: ownerUserId,
         transcriptionId: transcript.id,
         revision: change.revision,
         label: change.label,
         answer: answerOf(change, existingPersonId),
         actorUserId: session.user.id,
-        // Shared, the owner's transcript stays as it was shared.
-        frozenWhileSharedWith: access.orgUserId,
+        orgUserId: access.orgUserId,
     });
 
     // A suggestion is never shown outside this panel, so taking one back
@@ -350,23 +309,24 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             .update(recordings)
             .set({ updatedAt: new Date() })
             .where(
-                and(
-                    eq(recordings.id, id),
-                    eq(recordings.userId, session.user.id),
-                ),
+                and(eq(recordings.id, id), eq(recordings.userId, ownerUserId)),
             );
 
-        await refreshExistingRecordingSidecars(session.user.id, id);
+        await refreshExistingRecordingSidecars(ownerUserId, id);
+        await notifyIfShared(id);
     }
 
-    const speakers: TranscriptSpeaker[] = await getTranscriptSpeakers(
-        session.user.id,
+    const speakers = await getTranscriptSpeakers(
+        ownerUserId,
         transcript.id,
+        orgView ? { orgPeopleOnly: true } : undefined,
     );
     return NextResponse.json({
         transcriptionId: transcript.id,
         revision: transcript.revision,
-        speakers,
+        speakers: orgView
+            ? orgViewSpeakers(speakers, { curator: true })
+            : speakers,
     });
 });
 
@@ -412,7 +372,7 @@ async function currentPerson(userId: string, personId: string) {
 //
 // A recording can hold more than one transcript, and their speaker labels
 // are not interchangeable, so the caller says which by source. Defaults to
-// the user's own.
+// Riffado's own.
 async function requireTranscript(
     userId: string,
     recordingId: string,

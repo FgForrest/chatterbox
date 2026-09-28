@@ -196,9 +196,8 @@ describeWithDatabase("transcript revision (PostgreSQL)", () => {
         expect(await revisions()).toEqual([0]);
     });
 
-    it("keeps the original's number on the Organization copy", async () => {
+    it("counts on through the organization account's rewrites of a shared transcript", async () => {
         await write("first");
-        await write("second");
         const orgUserId = (await ensureOrgAccount()) ?? "";
         const [root] = await db()
             .select({ id: recordingFolders.id })
@@ -210,19 +209,20 @@ describeWithDatabase("transcript revision (PostgreSQL)", () => {
             folderId: root?.id ?? "",
         });
 
-        // Sharing took the copy.
-        const rows = await db()
-            .select({
-                id: transcriptions.id,
-                userId: transcriptions.userId,
-                revision: transcriptions.revision,
-            })
-            .from(transcriptions)
-            .where(eq(transcriptions.recordingId, REC));
-        const original = rows.find((row) => row.userId === ALICE);
-        const copy = rows.find((row) => row.userId === orgUserId);
-        expect(copy?.id).not.toBe(original?.id);
-        expect(original?.revision).toBe(1);
-        expect(copy?.revision).toBe(1);
+        const { committed } = await upsertTranscription({
+            userId: ALICE,
+            actorUserId: orgUserId,
+            recordingId: REC,
+            text: "second",
+            detectedLanguage: "en",
+            source: "riffado",
+            provider: "openai",
+            model: "whisper-1",
+        });
+
+        // One transcript, the owner's, one version further.
+        expect(committed).toBe(true);
+        expect(await revisions()).toEqual([1]);
+        expect(await revisions(orgUserId)).toEqual([]);
     });
 });

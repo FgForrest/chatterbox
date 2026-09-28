@@ -45,11 +45,14 @@ import {
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
-import { freezingOrgUserId, isPrivateCopyFrozen } from "@/lib/sharing/frozen";
-import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
-import { takeOrgSnapshot } from "@/lib/sharing/org-transcript";
+import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import {
+    contentWriterRefusal,
+    contentWriterRefusalNow,
+    sharingOrgUserId,
+    type WriterRefusal,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
@@ -82,8 +85,8 @@ export type TranscribeErrorCode =
     | "HOSTED_LOCKED_OUT"
     | "MYNAH_BUDGET_EXHAUSTED"
     /**
-     * Shared with the Organization: the owner's transcripts are frozen, and
-     * only the organization account transcribes the Organization view.
+     * Shared with the Organization: only the organization account changes
+     * it, on the Organization view; its owner withdraws it first.
      */
     | "RECORDING_SHARED"
     | "TRANSCRIPTION_FAILED";
@@ -148,9 +151,10 @@ export async function storeBrowserTranscription(
     }
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
-    const RECORDING_FROZEN = Symbol("recording-frozen");
-    // Before the transaction; see `freezingOrgUserId`.
-    const frozenFor = await freezingOrgUserId();
+    const RECORDING_REFUSED = Symbol("recording-refused");
+    let refused: WriterRefusal | null = null;
+    // Before the transaction; see `sharingOrgUserId`.
+    const orgUserId = await sharingOrgUserId();
     try {
         await db.transaction(async (tx) => {
             const [stillActive] = await tx
@@ -167,14 +171,14 @@ export async function storeBrowserTranscription(
             if (!stillActive || stillActive.deletedAt) {
                 throw RECORDING_TOMBSTONED;
             }
-            // Shared since the browser started: the transcript stays as it
-            // was shared.
-            if (
-                frozenFor &&
-                (await isRecordingShared(recordingId, frozenFor, tx))
-            ) {
-                throw RECORDING_FROZEN;
-            }
+            // Shared since the browser started: the Organization's now.
+            refused = await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId: userId,
+                orgUserId,
+            });
+            if (refused) throw RECORDING_REFUSED;
 
             const [existing] = await tx
                 .select({
@@ -254,6 +258,9 @@ export async function storeBrowserTranscription(
                 );
         });
     } catch (txError) {
+        if (txError === RECORDING_REFUSED && refused) {
+            return refusedResult(refused);
+        }
         if (txError === RECORDING_TOMBSTONED) {
             return {
                 success: false,
@@ -261,7 +268,6 @@ export async function storeBrowserTranscription(
                 errorCode: "RECORDING_DELETED",
             };
         }
-        if (txError === RECORDING_FROZEN) return recordingSharedResult();
         throw txError;
     }
 
@@ -368,37 +374,26 @@ async function transcribeRecordingInner(
         };
     }
     const orgView = ctx.view === "org";
-    // `userId` is the owner of the rows this run reads and writes; on the
-    // private view that is also the actor and the recording's owner.
+    // `userId` is the owner of the recording and of the rows this run reads
+    // and writes, in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
     // A shared recording is the organization account's to transcribe, on
     // the Organization view, while the Organization accepts changes; its
-    // private copy stays as it was shared. Checked where the run starts,
-    // whoever queued it and whenever, so no provider is paid for a
-    // transcript that would be refused. The write checks again.
-    if (orgView) {
-        if (!isOrgScopeEnabled()) {
-            return recordingSharedResult(
-                "The Organization is read-only on this instance",
-            );
-        }
-        if (ctx.actorUserId !== ctx.contentUserId) {
-            return recordingSharedResult();
-        }
-    } else if (await isPrivateCopyFrozen(recordingId)) {
-        return recordingSharedResult();
+    // owner withdraws it first. Checked where the run starts, whoever
+    // queued it and whenever, so no provider is paid for a transcript that
+    // would be refused. The write checks again, under the lock.
+    if (orgView && !isOrgScopeEnabled()) {
+        return recordingSharedResult(
+            "The Organization is read-only on this instance",
+        );
     }
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+    });
+    if (refusal) return refusedResult(refusal);
     try {
-        // Shared before snapshots existed: the owner's transcripts, with
-        // their names, become the Organization's first, so this run's
-        // rewrite carries the names instead of starting without them.
-        if (orgView) {
-            await takeOrgSnapshot(recordingId, {
-                ownerUserId: ctx.ownerUserId,
-                contentUserId: ctx.contentUserId,
-            });
-        }
-
         // Hosted lockout: a lapsed account is read-only. No-op on
         // self-host (isHostedLockedOut always false there).
         if (await isHostedLockedOut(ctx.actorUserId)) {
@@ -746,11 +741,10 @@ async function transcribeRecordingInner(
             model: persistModel,
             turns,
             allowReaped: (opts.trigger ?? "manual") === "manual",
-            recordingOwnerId: ctx.ownerUserId,
-            producedByUserId: ctx.actorUserId,
+            actorUserId: ctx.actorUserId,
         });
 
-        if (!committed && reason === "shared") return recordingSharedResult();
+        if (!committed && reason) return refusedResult(reason);
         if (!committed) {
             return {
                 success: false,
@@ -767,7 +761,6 @@ async function transcribeRecordingInner(
             turns,
         }).labels.length;
         if (
-            !orgView &&
             !existingTranscription &&
             opts.force &&
             opts.attributionSource &&
@@ -779,28 +772,28 @@ async function transcribeRecordingInner(
                 recordingId,
                 sourceSource: opts.attributionSource,
                 targetSource: "riffado",
-                // Shared since the transcript was written: frozen.
-                frozenWhileSharedWith: await freezingOrgUserId(),
+                // Shared or withdrawn since the transcript was written:
+                // someone else's to change now.
+                writer: {
+                    actorUserId: ctx.actorUserId,
+                    orgUserId: await sharingOrgUserId(),
+                },
             });
         }
 
-        if (!orgView) {
-            await exportRecordingSidecarsIfEnabled(
-                userId,
-                recordingId,
-                "transcript",
-                "riffado",
-            );
-        }
+        await exportRecordingSidecarsIfEnabled(
+            userId,
+            recordingId,
+            "transcript",
+            "riffado",
+        );
 
         // The previous transcript is being overwritten, so any existing
         // summary now references stale source text. Drop it so readers never
         // see "fresh transcript + old summary". If auto-summarize is on, a
         // fresh summary is generated below; otherwise the recording shows no
-        // summary until the user clicks "Generate summary" manually. An
-        // Organization summary may also predate its first own transcript,
-        // having been made from the owner's, so it goes either way.
-        if (orgView || (existingTranscription?.text && opts.force)) {
+        // summary until someone clicks "Generate summary" manually.
+        if (existingTranscription?.text && opts.force) {
             await db
                 .delete(aiEnhancements)
                 .where(
@@ -810,14 +803,12 @@ async function transcribeRecordingInner(
                         eq(aiEnhancements.source, "riffado"),
                     ),
                 );
-            if (!orgView) {
-                await removeRecordingSidecar(
-                    userId,
-                    recordingId,
-                    "summary",
-                    "riffado",
-                );
-            }
+            await removeRecordingSidecar(
+                userId,
+                recordingId,
+                "summary",
+                "riffado",
+            );
         }
 
         if (autoGenerateTitle && transcriptionText.trim()) {
@@ -908,12 +899,8 @@ async function transcribeRecordingInner(
             }
         }
 
-        if (orgView) {
-            await orgContentChanged(recordingId);
-        } else {
-            await emitEvent("transcription.completed", userId, recordingId);
-            await notifyIfShared(recordingId);
-        }
+        await emitEvent("transcription.completed", userId, recordingId);
+        await notifyIfShared(recordingId);
         await captureServerEvent({
             distinctId: ctx.actorUserId,
             event: "recording_transcribed",
@@ -1038,6 +1025,16 @@ function recordingSharedResult(
     error = "This recording is shared with the Organization; only its account transcribes it",
 ): TranscribeResult {
     return { success: false, error, errorCode: "RECORDING_SHARED" };
+}
+
+function refusedResult(refusal: WriterRefusal): TranscribeResult {
+    return refusal === "shared"
+        ? recordingSharedResult()
+        : {
+              success: false,
+              error: "Recording not found",
+              errorCode: "RECORDING_NOT_FOUND",
+          };
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {

@@ -1,12 +1,10 @@
 /**
- * A change in the Organization view lands only on the transcript it was
- * made on, against a real PostgreSQL.
+ * Changing a speaker of a shared recording, against a real PostgreSQL.
  *
- * On a recording shared before snapshots existed, until the Organization
- * has its own transcript, the view shows the owner's, and the first change
- * takes the Organization's copy. The change must still be refused when the
- * Organization's transcript appeared meanwhile, and the copy must carry the
- * names of the text it copied, whatever the owner rewrites alongside.
+ * A shared recording is one recording: the organization account's change
+ * lands on the owner's transcript, and only on the text it was made on.
+ * The owner and members may not change it, and after a withdrawal the
+ * organization account may not either, while the owner may again.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.
@@ -59,11 +57,9 @@ const { dbProxy, dbRef, mockEnv, hooks } = vi.hoisted(() => {
     return {
         dbProxy: proxy,
         dbRef: ref,
-        // Run once, at the start of the next Organization change or the
-        // next promotion of a copied name.
+        // Run once, at the start of the next speaker change.
         hooks: {
             beforeChange: null as null | (() => Promise<void>),
-            onPromote: null as null | (() => void),
         },
         mockEnv: {
             IS_HOSTED: false,
@@ -108,36 +104,19 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 // Another writer committing between the route's checks and the change.
-vi.mock("@/lib/sharing/org-transcript", async () => {
+vi.mock("@/lib/knowledge/speaker-changes", async () => {
     const actual = await vi.importActual<
-        typeof import("@/lib/sharing/org-transcript")
-    >("@/lib/sharing/org-transcript");
+        typeof import("@/lib/knowledge/speaker-changes")
+    >("@/lib/knowledge/speaker-changes");
     return {
         ...actual,
-        changeOrgTranscriptSpeaker: async (
-            ...args: Parameters<typeof actual.changeOrgTranscriptSpeaker>
+        changeTranscriptSpeaker: async (
+            ...args: Parameters<typeof actual.changeTranscriptSpeaker>
         ) => {
             const run = hooks.beforeChange;
             hooks.beforeChange = null;
             await run?.();
-            return actual.changeOrgTranscriptSpeaker(...args);
-        },
-    };
-});
-// Another writer starting while the copy is being made.
-vi.mock("@/lib/knowledge/people", async () => {
-    const actual = await vi.importActual<
-        typeof import("@/lib/knowledge/people")
-    >("@/lib/knowledge/people");
-    return {
-        ...actual,
-        promotePersonInTx: (
-            ...args: Parameters<typeof actual.promotePersonInTx>
-        ) => {
-            const run = hooks.onPromote;
-            hooks.onPromote = null;
-            run?.();
-            return actual.promotePersonInTx(...args);
+            return actual.changeTranscriptSpeaker(...args);
         },
     };
 });
@@ -147,6 +126,7 @@ import {
     PUT as putSpeakerRoute,
 } from "@/app/api/recordings/[id]/speakers/route";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 
@@ -163,9 +143,9 @@ type Handler = (
     context: { params: Promise<Record<string, string>> },
 ) => Promise<Response>;
 
-function request(user: string, init: RequestInit = {}) {
+function request(user: string, init: RequestInit = {}, view = "org") {
     return new Request(
-        `http://localhost/api/recordings/${REC}/speakers?view=org`,
+        `http://localhost/api/recordings/${REC}/speakers${view === "org" ? "?view=org" : ""}`,
         {
             ...init,
             headers: {
@@ -176,9 +156,9 @@ function request(user: string, init: RequestInit = {}) {
     );
 }
 
-async function shownVersion(user: string) {
+async function shownVersion(user: string, view = "org") {
     const response = await (getSpeakersRoute as unknown as Handler)(
-        request(user),
+        request(user, {}, view),
         { params: Promise.resolve({ id: REC }) },
     );
     const body = (await response.json()) as {
@@ -192,12 +172,17 @@ async function put(
     user: string,
     seen: { transcriptionId: string; revision: number },
     body: object,
+    view = "org",
 ) {
     return (putSpeakerRoute as unknown as Handler)(
-        request(user, {
-            method: "PUT",
-            body: JSON.stringify({ ...seen, ...body }),
-        }),
+        request(
+            user,
+            {
+                method: "PUT",
+                body: JSON.stringify({ ...seen, ...body }),
+            },
+            view,
+        ),
         { params: Promise.resolve({ id: REC }) },
     );
 }
@@ -207,7 +192,7 @@ function turn(speaker: string, startMs: number, endMs: number, text: string) {
 }
 
 describeWithDatabase(
-    "changing a speaker in the Organization view (PostgreSQL)",
+    "changing a speaker of a shared recording (PostgreSQL)",
     () => {
         let database: TestPostgresDatabase | null = null;
         let orgUserId = "";
@@ -235,7 +220,6 @@ describeWithDatabase(
 
         beforeEach(async () => {
             hooks.beforeChange = null;
-            hooks.onPromote = null;
             await db().delete(users);
             await db()
                 .insert(users)
@@ -263,61 +247,103 @@ describeWithDatabase(
                 });
         });
 
-        async function ownerTranscript(
-            turns: ReturnType<typeof turn>[],
-        ): Promise<string> {
+        /** The owner's transcript, with Jana and Petr named on it. */
+        async function namedTranscript() {
             const [row] = await db()
                 .insert(transcriptions)
                 .values({
                     recordingId: REC,
                     userId: OWNER,
                     text: encryptText(
-                        turns.map((t) => `${t.speaker}: ${t.text}`).join("\n"),
+                        firstTurns
+                            .map((t) => `${t.speaker}: ${t.text}`)
+                            .join("\n"),
                     ),
-                    turns: encryptJsonField(turns),
+                    turns: encryptJsonField(firstTurns),
                     provider: "elevenlabs",
                     model: MODEL,
                     source: "riffado",
                 })
                 .returning({ id: transcriptions.id });
-            return row?.id ?? "";
+            const [jana, petr] = await db()
+                .insert(people)
+                .values([
+                    { userId: OWNER, displayName: encryptText("Jana") },
+                    { userId: OWNER, displayName: encryptText("Petr") },
+                ])
+                .returning({ id: people.id });
+            await db()
+                .insert(transcriptSpeakers)
+                .values(
+                    [
+                        ["speaker_0", jana?.id],
+                        ["speaker_1", petr?.id],
+                    ].map(([label, personId]) => ({
+                        userId: OWNER,
+                        transcriptionId: row?.id ?? "",
+                        label: label ?? "",
+                        personId,
+                        source: "user" as const,
+                        status: "confirmed" as const,
+                        confirmedByUserId: OWNER,
+                    })),
+                );
+            return {
+                transcriptionId: row?.id ?? "",
+                jana: jana?.id ?? "",
+                petr: petr?.id ?? "",
+            };
         }
 
-        /**
-         * Shared before snapshots existed: the Organization view shows the
-         * owner's transcript until its first change, or the backfill, takes
-         * the Organization's copy.
-         */
         async function share() {
             const [root] = await db()
                 .select({ id: recordingFolders.id })
                 .from(recordingFolders)
                 .where(eq(recordingFolders.userId, orgUserId));
-            await db()
-                .insert(recordingFolderAssignments)
-                .values({
-                    userId: OWNER,
-                    recordingId: REC,
-                    folderId: root?.id ?? "",
-                });
+            await addRecordingToFolder({
+                userId: OWNER,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
         }
 
-        async function orgRows() {
-            return db()
-                .select({
-                    transcriptionId: transcriptSpeakers.transcriptionId,
-                    label: transcriptSpeakers.label,
-                    personId: transcriptSpeakers.personId,
-                })
-                .from(transcriptSpeakers)
-                .where(eq(transcriptSpeakers.userId, orgUserId));
+        async function byLabel(transcriptionId: string) {
+            return Object.fromEntries(
+                (
+                    await db()
+                        .select({
+                            label: transcriptSpeakers.label,
+                            personId: transcriptSpeakers.personId,
+                            markedUnknown: transcriptSpeakers.markedUnknown,
+                            confirmedByUserId:
+                                transcriptSpeakers.confirmedByUserId,
+                        })
+                        .from(transcriptSpeakers)
+                        .where(
+                            eq(
+                                transcriptSpeakers.transcriptionId,
+                                transcriptionId,
+                            ),
+                        )
+                ).map((row) => [
+                    row.label,
+                    {
+                        name: row.markedUnknown ? "unknown" : row.personId,
+                        by: row.confirmedByUserId,
+                    },
+                ]),
+            );
         }
 
-        async function orgPeopleNamed() {
-            return db()
-                .select({ id: people.id })
+        async function orgPeopleNamed(displayName: string) {
+            const rows = await db()
+                .select({ id: people.id, displayName: people.displayName })
                 .from(people)
                 .where(eq(people.userId, orgUserId));
+            const { decryptText } = await import("@/lib/encryption/fields");
+            return rows.filter(
+                (row) => decryptText(row.displayName) === displayName,
+            );
         }
 
         const firstTurns = [
@@ -325,64 +351,71 @@ describeWithDatabase(
             turn("speaker_1", 10_000, 20_000, "I am Petr."),
         ];
 
-        it("refuses a change made on the owner's transcript once the Organization re-transcribed", async () => {
-            await ownerTranscript(firstTurns);
+        it("lands the organization account's change on the owner's transcript, with Organization people", async () => {
+            const named = await namedTranscript();
+            await share();
+            const seen = await shownVersion(orgUserId);
+            expect(seen.transcriptionId).toBe(named.transcriptionId);
+
+            expect(
+                (
+                    await put(orgUserId, seen, {
+                        label: "speaker_0",
+                        displayName: "Karel",
+                    })
+                ).status,
+            ).toBe(200);
+
+            const [karel] = await orgPeopleNamed("Karel");
+            expect(karel).toBeDefined();
+            expect(await byLabel(named.transcriptionId)).toEqual({
+                speaker_0: { name: karel?.id, by: orgUserId },
+                speaker_1: { name: named.petr, by: OWNER },
+            });
+            // One recording: nothing was written anywhere else.
+            const rows = await db()
+                .select({ userId: transcriptions.userId })
+                .from(transcriptions)
+                .where(eq(transcriptions.recordingId, REC));
+            expect(rows).toEqual([{ userId: OWNER }]);
+        });
+
+        it("refuses a change made on text the organization account re-transcribed meanwhile", async () => {
+            const named = await namedTranscript();
             await share();
             const seen = await shownVersion(orgUserId);
 
-            // The Organization's own transcript, new text at revision 0,
-            // commits after the route checked what Bob saw.
+            // Its own re-transcription commits after the route checked
+            // what the tab saw.
             hooks.beforeChange = async () => {
                 const result = await upsertTranscription({
-                    userId: orgUserId,
-                    recordingOwnerId: OWNER,
+                    userId: OWNER,
+                    actorUserId: orgUserId,
                     recordingId: REC,
                     text: "speaker_0: I am Petr.\nspeaker_1: I am Jana.",
                     detectedLanguage: null,
                     source: "riffado",
                     provider: "elevenlabs",
                     model: MODEL,
+                    allowReaped: true,
                 });
                 expect(result.committed).toBe(true);
             };
 
             const response = await put(orgUserId, seen, {
                 label: "speaker_0",
-                displayName: "Jana",
+                displayName: "Karel",
             });
             expect(response.status).toBe(409);
-            expect(await orgRows()).toEqual([]);
             // The refused change created nobody.
-            expect(await orgPeopleNamed()).toEqual([]);
-        });
+            expect(await orgPeopleNamed("Karel")).toEqual([]);
 
-        it("refuses a stale view of the owner's transcript after another tab's first change", async () => {
-            await ownerTranscript(firstTurns);
-            await share();
-            const firstTab = await shownVersion(orgUserId);
-            const secondTab = await shownVersion(orgUserId);
-
-            expect(
-                (
-                    await put(orgUserId, secondTab, {
-                        label: "speaker_1",
-                        unknown: true,
-                    })
-                ).status,
-            ).toBe(200);
-            expect(
-                (
-                    await put(orgUserId, firstTab, {
-                        label: "speaker_0",
-                        unknown: true,
-                    })
-                ).status,
-            ).toBe(409);
-
-            // Reloaded, the tab shows the Organization's copy and can
-            // change it.
+            // Reloaded, the tab shows the new revision and can change it.
             const reloaded = await shownVersion(orgUserId);
-            expect(reloaded.transcriptionId).not.toBe(firstTab.transcriptionId);
+            expect(reloaded).toEqual({
+                transcriptionId: named.transcriptionId,
+                revision: seen.revision + 1,
+            });
             expect(
                 (
                     await put(orgUserId, reloaded, {
@@ -393,122 +426,85 @@ describeWithDatabase(
             ).toBe(200);
         });
 
-        it("refuses members: the organization account changes a shared recording's speakers", async () => {
-            await ownerTranscript(firstTurns);
+        it("refuses members, and the owner until they withdraw it", async () => {
+            const named = await namedTranscript();
             await share();
-            const response = await put(BOB, await shownVersion(BOB), {
+
+            const member = await put(BOB, await shownVersion(BOB), {
                 label: "speaker_0",
-                displayName: "Jana",
+                displayName: "Karel",
             });
-            expect(response.status).toBe(403);
-            expect(await orgRows()).toEqual([]);
-            expect(await orgPeopleNamed()).toEqual([]);
+            expect(member.status).toBe(403);
+
+            const ownerSeen = await shownVersion(OWNER, "private");
+            const owner = await put(
+                OWNER,
+                ownerSeen,
+                { label: "speaker_0", unknown: true },
+                "private",
+            );
+            expect(owner.status).toBe(409);
+            await expect(owner.json()).resolves.toMatchObject({
+                code: "RECORDING_SHARED",
+            });
+            expect(await orgPeopleNamed("Karel")).toEqual([]);
+            expect(await byLabel(named.transcriptionId)).toEqual({
+                speaker_0: { name: named.jana, by: OWNER },
+                speaker_1: { name: named.petr, by: OWNER },
+            });
         });
 
-        it("copies the names of the text it copies, and the owner cannot rewrite it alongside", async () => {
-            const ownId = await ownerTranscript(firstTurns);
-            const [jana, petr] = await db()
-                .insert(people)
-                .values([
-                    { userId: OWNER, displayName: encryptText("Jana") },
-                    { userId: OWNER, displayName: encryptText("Petr") },
-                ])
-                .returning({ id: people.id });
-            await db()
-                .insert(transcriptSpeakers)
-                .values([
-                    {
-                        userId: OWNER,
-                        transcriptionId: ownId,
-                        label: "speaker_0",
-                        personId: jana?.id,
-                        source: "user",
-                        status: "confirmed",
-                        confirmedByUserId: OWNER,
-                    },
-                    {
-                        userId: OWNER,
-                        transcriptionId: ownId,
-                        label: "speaker_1",
-                        personId: petr?.id,
-                        source: "user",
-                        status: "confirmed",
-                        confirmedByUserId: OWNER,
-                    },
-                ]);
+        it("refuses the owner's change the share committed under, whoever waited", async () => {
+            const named = await namedTranscript();
+            const seen = await shownVersion(OWNER, "private");
+            // Shared after the route let the owner through.
+            hooks.beforeChange = share;
+
+            const response = await put(
+                OWNER,
+                seen,
+                { label: "speaker_0", unknown: true },
+                "private",
+            );
+
+            expect(response.status).toBe(409);
+            expect(await byLabel(named.transcriptionId)).toMatchObject({
+                speaker_0: { name: named.jana },
+            });
+        });
+
+        it("gives it back as the Organization left it: the owner changes it, the organization account no longer", async () => {
+            const named = await namedTranscript();
             await share();
             const seen = await shownVersion(orgUserId);
+            await put(orgUserId, seen, {
+                label: "speaker_1",
+                unknown: true,
+            });
 
-            // The owner re-transcribes, numbering the voices the other way,
-            // as the copy is being made: shared, the owner's transcript is
-            // frozen, so the rewrite waits for the copy and writes nothing.
-            let rewrite: Promise<unknown> = Promise.resolve();
-            hooks.onPromote = () => {
-                rewrite = upsertTranscription({
-                    userId: OWNER,
-                    recordingId: REC,
-                    text: "speaker_1: I am Jana.\nspeaker_0: I am Petr.",
-                    turns: [
-                        turn("speaker_1", 0, 10_000, "I am Jana."),
-                        turn("speaker_0", 10_000, 20_000, "I am Petr."),
-                    ],
-                    detectedLanguage: null,
-                    source: "riffado",
-                    provider: "elevenlabs",
-                    model: MODEL,
-                });
-            };
-            const response = await put(orgUserId, seen, {
+            // Withdrawn after the organization account opened the view.
+            hooks.beforeChange = () => unshareRecording(OWNER, REC);
+            const late = await put(orgUserId, seen, {
                 label: "speaker_0",
                 unknown: true,
             });
-            expect(await rewrite).toEqual({
-                committed: false,
-                reason: "shared",
-            });
-            expect(response.status).toBe(200);
+            expect(late.status).toBe(404);
 
-            const byLabel = async (transcriptionId: string) =>
-                Object.fromEntries(
-                    (
-                        await db()
-                            .select({
-                                label: transcriptSpeakers.label,
-                                personId: transcriptSpeakers.personId,
-                                markedUnknown: transcriptSpeakers.markedUnknown,
-                            })
-                            .from(transcriptSpeakers)
-                            .where(
-                                eq(
-                                    transcriptSpeakers.transcriptionId,
-                                    transcriptionId,
-                                ),
-                            )
-                    ).map((row) => [
-                        row.label,
-                        row.markedUnknown ? "unknown" : row.personId,
-                    ]),
-                );
-            const [copy] = await db()
-                .select({ id: transcriptions.id })
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, REC),
-                        eq(transcriptions.userId, orgUserId),
-                    ),
-                );
-            // The copy holds the first text: Petr on speaker_1, and the
-            // organization account's answer on speaker_0, where Jana was.
-            expect(await byLabel(copy?.id ?? "")).toEqual({
-                speaker_0: "unknown",
-                speaker_1: petr?.id,
+            expect(await byLabel(named.transcriptionId)).toEqual({
+                speaker_0: { name: named.jana, by: OWNER },
+                speaker_1: { name: "unknown", by: orgUserId },
             });
-            // The owner's transcript is as it was shared.
-            expect(await byLabel(ownId)).toEqual({
-                speaker_0: jana?.id,
-                speaker_1: petr?.id,
-            });
+            const ownerSeen = await shownVersion(OWNER, "private");
+            expect(
+                (
+                    await put(
+                        OWNER,
+                        ownerSeen,
+                        { label: "speaker_1", personId: named.petr },
+                        "private",
+                    )
+                ).status,
+            ).toBe(200);
         });
     },
 );

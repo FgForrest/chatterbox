@@ -602,7 +602,7 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
         });
     });
 
-    describe("naming speakers in the Organization view", () => {
+    describe("naming the speakers of a shared recording", () => {
         let ownTranscript = "";
 
         beforeEach(async () => {
@@ -626,7 +626,7 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             });
         }
 
-        it("names on the Organization's copy and never touches the owner's transcript", async () => {
+        it("names on the owner's transcript, with Organization people only", async () => {
             const bobsPrivate = await person(BOB, "Bob's friend");
             // Only Organization people name its speakers.
             expect(
@@ -644,57 +644,42 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             });
             expect(response.status).toBe(200);
 
-            const orgTranscripts = await db()
-                .select()
+            // One recording: the owner's transcript, and no other.
+            const rows = await db()
+                .select({ id: transcriptions.id })
                 .from(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
-            expect(orgTranscripts).toHaveLength(1);
-            // Copied when Alice shared it.
-            expect(orgTranscripts[0]?.producedByUserId).toBe(ALICE);
-            const orgNames = await buildNameResolver(
-                orgUserId,
-                orgTranscripts[0]?.id ?? "",
-            );
-            expect(orgNames?.("speaker_0")).toBe("Jana");
-            expect(orgNames?.("speaker_1")).toBe("Petr");
+                .where(eq(transcriptions.recordingId, REC));
+            expect(rows).toEqual([{ id: ownTranscript }]);
+            const names = await buildNameResolver(ALICE, ownTranscript);
+            expect(names?.("speaker_0")).toBe("Jana");
+            expect(names?.("speaker_1")).toBe("Petr");
 
             const orgPeople = await listPeople(orgUserId);
             expect(orgPeople.map((p) => p.displayName).sort()).toEqual([
                 "Jana",
                 "Petr",
             ]);
-            const aliceNames = await buildNameResolver(ALICE, ownTranscript);
-            expect(aliceNames?.("speaker_1")).toBeNull();
 
             const read = await call(
                 getSpeakersRoute,
-                ALICE,
+                BOB,
                 `/api/recordings/${REC}/speakers?view=org`,
                 { params: { id: REC } },
             );
             const body = (await read.json()) as {
-                fallback: boolean;
+                transcriptionId: string;
                 speakers: { label: string }[];
             };
-            expect(body.fallback).toBe(false);
+            expect(body.transcriptionId).toBe(ownTranscript);
             expect(body.speakers.map((s) => s.label).sort()).toEqual([
                 "speaker_0",
                 "speaker_1",
             ]);
         });
 
-        it("never shows the owner's private person in the Organization view", async () => {
-            // Shared before snapshots existed, the view shows the owner's
-            // transcript until the Organization takes its copy.
-            await unshareRecording(ALICE, REC);
-            await db().insert(recordingFolderAssignments).values({
-                userId: ALICE,
-                recordingId: REC,
-                folderId: orgRootId,
-            });
-            // A name on the owner's transcript the Organization never took:
-            // sharing promotes every name it copies, so only a row written
-            // outside the share can be one.
+        it("never shows a private person in the Organization view", async () => {
+            // A name no share promoted: written outside it, as a recording
+            // shared before sharing promoted names could still hold.
             const secret = await person(ALICE, "Dr. Private");
             await db()
                 .update(transcriptSpeakers)
@@ -705,8 +690,6 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                         eq(transcriptSpeakers.label, "speaker_1"),
                     ),
                 );
-            // The view falls back to the owner's transcript; the name stays
-            // private.
             const read = await call(
                 getSpeakersRoute,
                 BOB,
@@ -714,17 +697,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 { params: { id: REC } },
             );
             const body = (await read.json()) as {
-                fallback: boolean;
                 speakers: { label: string; personName: string | null }[];
             };
-            expect(body.fallback).toBe(true);
             expect(
                 body.speakers.find((s) => s.label === "speaker_1")
                     ?.personName ?? null,
             ).toBeNull();
         });
 
-        it("copies every source of the owner's transcript into the Organization view", async () => {
+        it("shows every source of the owner's transcript in the Organization view", async () => {
             await unshareRecording(ALICE, REC);
             const [plaud] = await db()
                 .insert(transcriptions)
@@ -742,14 +723,14 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
 
             await share();
 
-            const copies = await db()
-                .select({ source: transcriptions.source })
-                .from(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
-            expect(copies.map((row) => row.source).sort()).toEqual([
-                "plaud",
-                "riffado",
-            ]);
+            const read = await call(
+                getSpeakersRoute,
+                BOB,
+                `/api/recordings/${REC}/speakers?view=org&source=plaud`,
+                { params: { id: REC } },
+            );
+            const body = (await read.json()) as { transcriptionId: string };
+            expect(body.transcriptionId).toBe(plaud?.id);
         });
 
         it("carries names through an Organization re-transcription by speech overlap", async () => {
@@ -764,7 +745,8 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             ];
             const orgRun = (speakers: [string, string]) =>
                 upsertTranscription({
-                    userId: orgUserId,
+                    userId: ALICE,
+                    actorUserId: orgUserId,
                     recordingId: REC,
                     text: DIALOG,
                     detectedLanguage: "en",
@@ -772,19 +754,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                     provider: "openai",
                     model: "gpt-4o-transcribe-diarize",
                     turns: turns(...speakers),
-                    recordingOwnerId: ALICE,
-                    producedByUserId: orgUserId,
                 });
-            // The copy has no timings, so the first timed run can only pair
-            // its speakers by order, which leaves Jana a suggestion; the
-            // organization account confirms her on the timed text.
+            // The shared transcript has no timings, so the first timed run
+            // can only pair its speakers by order, which leaves Jana a
+            // suggestion; the organization account confirms her on the
+            // timed text.
             expect((await orgRun(["speaker_0", "speaker_1"])).committed).toBe(
                 true,
             );
-            const [orgTranscript] = await db()
-                .select({ id: transcriptions.id })
-                .from(transcriptions)
-                .where(eq(transcriptions.userId, orgUserId));
+            const orgTranscript = { id: ownTranscript };
             const jana = (await listPeople(orgUserId))[0]?.id ?? "";
             await db()
                 .update(transcriptSpeakers)

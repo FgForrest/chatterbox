@@ -10,14 +10,14 @@ import {
 type Executor = Pick<typeof db, "select">;
 
 /**
- * The share gate over the transcripts `contentUserId` holds for a
- * recording, and their speaker rows. Sharing passes the organization
- * account, so it judges the copies it is about to publish.
+ * The share gate over a recording's transcripts, which its owner holds,
+ * and their speaker rows: a shared recording is one recording, so these
+ * are exactly what the Organization will read.
  */
 export async function loadShareGate(
     executor: Executor,
     recordingId: string,
-    contentUserId: string,
+    ownerUserId: string,
 ): Promise<ShareGateProblem[]> {
     const transcripts = await executor
         .select({
@@ -31,7 +31,7 @@ export async function loadShareGate(
         .where(
             and(
                 eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, contentUserId),
+                eq(transcriptions.userId, ownerUserId),
             ),
         )
         .orderBy(asc(transcriptions.source));

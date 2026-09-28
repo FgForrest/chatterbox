@@ -328,9 +328,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                 ),
             );
 
-        // Every content row of the recording, not only the owner's: the
-        // Organization view of a shared recording is owned by the
-        // organization account and must go for everyone at once.
+        // Every content row of the recording, whichever account holds it:
+        // it goes for everyone at once, the Organization included.
         await tx
             .delete(transcriptions)
             .where(eq(transcriptions.recordingId, id));

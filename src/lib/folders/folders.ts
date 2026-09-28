@@ -1,13 +1,11 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    aiEnhancements,
     asyncJobs,
     folderExportConfigurations,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
-    transcriptions,
     users,
 } from "@/db/schema";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
@@ -25,7 +23,7 @@ import {
 import { notifyOrgChange } from "@/lib/org/events";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
-import { snapshotRecordingForOrgInTx } from "@/lib/sharing/org-transcript";
+import { publishSpeakerNamesInTx } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type {
     FolderKind,
@@ -887,7 +885,7 @@ export async function addRecordingToFolder(input: {
         db.transaction(async (tx) => {
             if (target.scope === "org") {
                 await lockOrgTree(tx);
-                // Before the recording: the snapshot promotes people, and a
+                // Before the recording: sharing promotes people, and a
                 // promotion may merge them, which locks recordings.
                 await lockOrgPeople(tx);
             }
@@ -916,29 +914,12 @@ export async function addRecordingToFolder(input: {
             );
             if (target.scope !== "org" || wasShared) return;
 
-            // Not shared, so nothing of the Organization's is left of it. A
-            // marker or rows a path around the unshare left behind (the
-            // organization account deleted and made again, its folders
-            // gone with it) would make the snapshot a no-op, and the gate
-            // refuse this recording for good.
-            await deleteOrgRows(tx, target.ownerId, input.recordingId);
-            await tx
-                .update(recordings)
-                .set({ orgSnapshotAt: null })
-                .where(eq(recordings.id, input.recordingId));
-            await snapshotRecordingForOrgInTx(
-                tx,
-                input.recordingId,
-                {
-                    ownerUserId: input.userId,
-                    contentUserId: target.ownerId,
-                },
-                input.userId,
-            );
+            // A shared recording is one recording: the Organization reads
+            // the owner's rows, so those are what must pass.
             const problems = await loadShareGate(
                 tx,
                 input.recordingId,
-                target.ownerId,
+                input.userId,
             );
             if (problems.length > 0) {
                 throw new AppError(
@@ -948,6 +929,11 @@ export async function addRecordingToFolder(input: {
                     { problems },
                 );
             }
+            await publishSpeakerNamesInTx(tx, {
+                recordingId: input.recordingId,
+                ownerUserId: input.userId,
+                orgUserId: target.ownerId,
+            });
         }),
     );
     if (target.scope === "org") {
@@ -1010,7 +996,7 @@ export async function removeRecordingFromFolder(input: {
                     eq(recordingFolderAssignments.folderId, input.folderId),
                 ),
             );
-        await deleteOrgViewIfUnshared(tx, target.ownerId, input.recordingId);
+        await endSharingIfUnfiled(tx, target.ownerId, input.recordingId);
     });
     await orgTreeChanged();
 }
@@ -1045,7 +1031,7 @@ export async function unshareRecording(
                     ),
                 );
         }
-        await deleteOrgViewIfUnshared(tx, orgUserId, recordingId);
+        await endSharingIfUnfiled(tx, orgUserId, recordingId);
     });
     await orgTreeChanged();
 }
@@ -1078,13 +1064,14 @@ async function requireRecordingOwnerForSharing(
 }
 
 /**
- * Delete the Organization view of a recording that is no longer shared.
+ * End the sharing of a recording that has left the last Organization folder.
  *
- * Its transcript, summary and speaker names were produced for the
- * organization; once the owner withdraws the recording nobody else may keep
- * reading them. Queued Organization jobs are cancelled with them.
+ * A shared recording is one recording, and its owner gets it back as the
+ * Organization left it: every transcript, name and summary stays. What the
+ * organization account queued on it is cancelled, as it may change the
+ * recording no longer.
  */
-async function deleteOrgViewIfUnshared(
+async function endSharingIfUnfiled(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
@@ -1106,12 +1093,10 @@ async function deleteOrgViewIfUnshared(
     if (remaining.length > 0) return;
 
     const now = new Date();
-    // Sharing it again takes a fresh snapshot.
     await tx
         .update(recordings)
-        .set({ unsharedAt: now, orgSnapshotAt: null })
+        .set({ unsharedAt: now })
         .where(eq(recordings.id, recordingId));
-    await deleteOrgRows(tx, orgUserId, recordingId);
     await tx
         .update(asyncJobs)
         .set({
@@ -1130,33 +1115,6 @@ async function deleteOrgViewIfUnshared(
                     recordingJobSubject(recordingId, "org"),
                 ),
                 inArray(asyncJobs.status, ["pending", "processing"]),
-            ),
-        );
-}
-
-/**
- * Delete the Organization's transcripts and summaries of a recording; its
- * speaker rows go with the transcripts.
- */
-async function deleteOrgRows(
-    tx: Tx,
-    orgUserId: string,
-    recordingId: string,
-): Promise<void> {
-    await tx
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, orgUserId),
-            ),
-        );
-    await tx
-        .delete(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, orgUserId),
             ),
         );
 }

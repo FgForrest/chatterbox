@@ -19,10 +19,6 @@ import { isAdminEmail } from "@/lib/hosted/admin/guard";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
-import {
-    readOrgViewSummaryRecordingIds,
-    readOrgViewTranscriptRows,
-} from "@/lib/sharing/view-content";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { serializeRecording } from "@/types/recording";
@@ -94,8 +90,8 @@ function primaryVariants(
 }
 
 /**
- * The Organization library: every shared recording, read through its
- * Organization view (the organization's rows, else the owner's).
+ * The Organization library: every shared recording, with its owner's rows,
+ * as a shared recording is one recording.
  */
 async function loadOrganizationLibrary(
     viewerId: string,
@@ -113,7 +109,6 @@ async function loadOrganizationLibrary(
             deviceSn: recordings.deviceSn,
             waveformPeaks: recordings.waveformPeaks,
             audioReapedAt: recordings.audioReapedAt,
-            orgSnapshotAt: recordings.orgSnapshotAt,
             ownerName: users.name,
             ownerEmail: users.email,
         })
@@ -126,22 +121,49 @@ async function loadOrganizationLibrary(
             ),
         )
         .orderBy(desc(recordings.startTime));
-    const refs = rows.map((row) => ({
-        id: row.id,
-        ownerUserId: row.userId,
-        orgSnapshotAt: row.orgSnapshotAt,
-    }));
-    const [{ rows: transcriptRows }, summaryIds] = await Promise.all([
-        readOrgViewTranscriptRows(refs, orgUserId),
-        readOrgViewSummaryRecordingIds(refs, orgUserId),
+    const [transcriptRows, summaryRows] = await Promise.all([
+        db
+            .select({ transcription: transcriptions })
+            .from(transcriptions)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, transcriptions.recordingId),
+                    eq(recordings.userId, transcriptions.userId),
+                ),
+            )
+            .where(
+                and(
+                    isNull(recordings.deletedAt),
+                    sharedRecordingCondition(orgUserId),
+                ),
+            )
+            .then((found) => found.map((row) => row.transcription)),
+        db
+            .select({ recordingId: aiEnhancements.recordingId })
+            .from(aiEnhancements)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, aiEnhancements.recordingId),
+                    eq(recordings.userId, aiEnhancements.userId),
+                ),
+            )
+            .where(
+                and(
+                    isNotNull(aiEnhancements.summary),
+                    isNull(recordings.deletedAt),
+                    sharedRecordingCondition(orgUserId),
+                ),
+            ),
     ]);
+    const summaryIds = new Set(summaryRows.map((row) => row.recordingId));
     const transcriptIds = new Set(transcriptRows.map((row) => row.recordingId));
     const variants = buildTranscriptVariants(transcriptRows, preferredSource);
     const library = rows.map(
         ({
             waveformPeaks,
             audioReapedAt,
-            orgSnapshotAt: _snapshot,
             userId,
             ownerName,
             ownerEmail,

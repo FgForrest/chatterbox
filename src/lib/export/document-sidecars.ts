@@ -209,17 +209,14 @@ export async function exportRecordingSidecars(
 
 /** Build the same portable Markdown document used for disk sidecars. */
 /**
- * Render a recording's transcript or summary as Markdown.
- *
- * `userId` owns the content rows read; `ownerUserId`, when different, owns
- * the recording itself (the Organization view of a shared recording).
+ * Render a recording's transcript or summary as Markdown, from the rows its
+ * owner holds: a shared recording is one recording.
  */
 export async function getRecordingMarkdownDocument(
-    userId: string,
+    ownerUserId: string,
     recordingId: string,
     kind: SidecarKind,
     source?: string,
-    ownerUserId: string = userId,
     /** Rendering for the Organization view: name Organization people only. */
     orgPeopleOnly = false,
 ): Promise<RecordingMarkdownDocument | null> {
@@ -238,7 +235,7 @@ export async function getRecordingMarkdownDocument(
 
     const title = decryptText(recording.filename);
     return renderRecordingMarkdownDocument(
-        userId,
+        ownerUserId,
         recording,
         title,
         kind,
@@ -263,7 +260,6 @@ async function renderRecordingMarkdownDocument(
             recording.id,
             source,
             undefined,
-            userId,
             orgPeopleOnly,
         );
         const { primary } = projection;
@@ -318,7 +314,6 @@ async function renderRecordingMarkdownDocument(
         recording.id,
         enhancement.source,
         enhancement.transcriptionId,
-        recording.userId,
         orgPeopleOnly,
     );
     const filename = sidecarKey(storagePath, kind, enhancement.source)
@@ -388,7 +383,6 @@ async function loadSidecarProjectionContext(
     recordingId: string,
     source?: string,
     transcriptionId?: string | null,
-    ownerUserId: string = userId,
     orgPeopleOnly = false,
 ): Promise<SidecarProjectionContext> {
     const rows = await db
@@ -400,27 +394,6 @@ async function loadSidecarProjectionContext(
                 eq(transcriptions.userId, userId),
             ),
         );
-    // An Organization summary may have been made from the owner's transcript
-    // before the organization had its own; that is the one it names.
-    if (
-        transcriptionId &&
-        ownerUserId !== userId &&
-        !rows.some((row) => row.id === transcriptionId)
-    ) {
-        rows.push(
-            ...(await db
-                .select()
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.id, transcriptionId),
-                        eq(transcriptions.recordingId, recordingId),
-                        eq(transcriptions.userId, ownerUserId),
-                    ),
-                )),
-        );
-    }
-
     const [settings] = await db
         .select({ preferred: userSettings.preferredTranscriptSource })
         .from(userSettings)

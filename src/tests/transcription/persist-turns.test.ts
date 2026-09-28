@@ -26,8 +26,11 @@ vi.mock("@/lib/knowledge/speaker-labels", () => ({
 }));
 // Whether a recording is shared is tested against a real database
 // (`freeze.integration.test.ts`); here only what the write does with it.
-vi.mock("@/lib/sharing/frozen", () => ({
-    freezingOrgUserId: vi.fn(async () => "org-account"),
+vi.mock("@/lib/sharing/writer", async () => ({
+    ...(await vi.importActual<typeof import("@/lib/sharing/writer-rule")>(
+        "@/lib/sharing/writer-rule",
+    )),
+    sharingOrgUserId: vi.fn(async () => "org-account"),
 }));
 vi.mock("@/lib/sharing/shared", () => ({
     isRecordingShared: vi.fn(async () => false),
@@ -90,9 +93,14 @@ function stubTransaction(
     return harness;
 }
 
-function upsert(turns?: TranscriptTurn[], allowReaped = false) {
+function upsert(
+    turns?: TranscriptTurn[],
+    allowReaped = false,
+    actorUserId?: string,
+) {
     return upsertTranscription({
         userId: "user-1",
+        actorUserId,
         recordingId: "rec-1",
         text: "speaker_0: Ahoj.",
         detectedLanguage: "cs",
@@ -207,6 +215,30 @@ describe("upsertTranscription and turns", () => {
         expect(harness.inserted).toHaveLength(0);
         expect(harness.updated).toHaveLength(0);
         expect(remapTranscriptAttributionsInTx).not.toHaveBeenCalled();
+    });
+
+    it("lets the organization account rewrite a shared recording's transcript", async () => {
+        const harness = stubTransaction({ id: "tr-1" });
+        (isRecordingShared as Mock).mockResolvedValueOnce(true);
+
+        expect(await upsert(TURNS, false, "org-account")).toEqual({
+            committed: true,
+        });
+        expect(harness.updated[0]).toMatchObject({
+            producedByUserId: "org-account",
+        });
+        expect(remapTranscriptAttributionsInTx).toHaveBeenCalledOnce();
+    });
+
+    it("writes nothing for the organization account once the recording is withdrawn", async () => {
+        const harness = stubTransaction({ id: "tr-1" });
+
+        expect(await upsert(TURNS, false, "org-account")).toEqual({
+            committed: false,
+            reason: "withdrawn",
+        });
+        expect(harness.inserted).toHaveLength(0);
+        expect(harness.updated).toHaveLength(0);
     });
 
     it("does not recreate an explicitly erased transcript automatically", async () => {

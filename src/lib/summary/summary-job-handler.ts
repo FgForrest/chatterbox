@@ -103,6 +103,15 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                 ...(result.multiPass ? { multiPass: result.multiPass } : {}),
             };
         } catch (error) {
+            // Shared since it was queued: an automatic run has nothing to
+            // do, and nothing failed. A person who asked is told why.
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.RECORDING_SHARED &&
+                payload.trigger !== "manual"
+            ) {
+                return { skipped: "shared" };
+            }
             // Emit only when this failure is final. A `summary.failed` per
             // attempt would tell a subscriber the summary failed and then
             // have it succeed a minute later, which is worse for them than

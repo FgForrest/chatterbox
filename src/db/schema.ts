@@ -387,12 +387,6 @@ export const recordings = pgTable(
         // retention waits a grace period after it, so withdrawing a recording
         // colleagues relied on never deletes its audio the same hour.
         unsharedAt: timestamp("unshared_at"),
-        // When the Organization took its own copy of this recording's
-        // transcripts, speaker names and summaries. Taken once per sharing
-        // and cleared by unshare: while set nothing is copied again, so a
-        // transcript that arrives later never reaches the Organization
-        // ungated, and what Organization retention removed stays removed.
-        orgSnapshotAt: timestamp("org_snapshot_at"),
         // When a person last set the title. Null means the title is still a
         // machine's (a Plaud filename, an upload's name, a generated one)
         // and may be replaced by a generated title or Plaud's filename; set,

@@ -97,11 +97,6 @@ export interface SummaryData {
      * to the default prompt instead. Only present on POST responses.
      */
     promptFallback?: boolean;
-    /**
-     * Organization view only: the summary shown is the owner's, because the
-     * organization has not produced its own yet.
-     */
-    fallback?: boolean;
 }
 
 interface UseTranscriptionSummaryOptions {

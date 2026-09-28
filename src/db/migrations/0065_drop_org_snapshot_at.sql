@@ -1,0 +1,1 @@
+ALTER TABLE "recordings" DROP COLUMN "org_snapshot_at";

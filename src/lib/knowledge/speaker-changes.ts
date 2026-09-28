@@ -15,8 +15,7 @@ import {
     writeSpeakerInTx,
 } from "@/lib/knowledge/attribution";
 import { createPersonInTx } from "@/lib/knowledge/people";
-import { recordingShared } from "@/lib/sharing/frozen";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -40,11 +39,14 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
     /** The human answering, recorded on what they confirm. */
     actorUserId: string;
     /**
-     * The organization account, on a change to the owner's own transcript:
-     * refused (409) while the recording is shared with it, as its private
-     * copy is frozen. Checked under the recording lock sharing takes.
+     * The organization account sharing is decided against
+     * (`sharingOrgUserId`), or null when this instance shows none. Unless
+     * the actor may change the recording now (`writerRefusal`) the change
+     * is refused, under the recording lock sharing and withdrawal take:
+     * 409 for the owner of a shared recording, 404 for the organization
+     * account after a withdrawal.
      */
-    frozenWhileSharedWith?: string | null;
+    orgUserId: string | null;
 }
 
 /**
@@ -65,25 +67,22 @@ export async function changeTranscriptSpeaker(
 
 /**
  * `changeTranscriptSpeaker` inside a caller's transaction. A new person
- * belongs to the transcript's owner, as their knowledge base names the
- * speakers of their transcripts.
+ * belongs to whoever names them: the owner's knowledge base on their own
+ * recording, the Organization's on a shared one, which only the
+ * organization account changes.
  */
 export async function changeTranscriptSpeakerInTx(
     tx: Tx,
-    {
-        answer,
-        actorUserId,
-        frozenWhileSharedWith,
-        ...version
-    }: SpeakerChangeArgs,
+    { answer, actorUserId, orgUserId, ...version }: SpeakerChangeArgs,
 ): Promise<string | null> {
     const { recordingId } = await lockForSpeakerChange(tx, version);
-    if (
-        frozenWhileSharedWith &&
-        (await isRecordingShared(recordingId, frozenWhileSharedWith, tx))
-    ) {
-        throw recordingShared();
-    }
+    const refusal = await contentWriterRefusal(tx, {
+        recordingId,
+        ownerUserId: version.userId,
+        actorUserId,
+        orgUserId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
     const where = {
         userId: version.userId,
         transcriptionId: version.transcriptionId,
@@ -96,12 +95,9 @@ export async function changeTranscriptSpeakerInTx(
                     ? answer.personId
                     : (
                           await createPersonInTx(tx, {
-                              userId: version.userId,
+                              userId: actorUserId,
                               displayName: answer.displayName,
-                              createdByUserId:
-                                  actorUserId === version.userId
-                                      ? null
-                                      : actorUserId,
+                              createdByUserId: null,
                           })
                       ).id;
             await writeSpeakerInTx(tx, {

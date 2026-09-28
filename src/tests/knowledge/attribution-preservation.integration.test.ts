@@ -227,6 +227,7 @@ describeWithDatabase(
                 recordingId: REC,
                 sourceSource: "plaud",
                 targetSource: "riffado",
+                writer: { actorUserId: ALICE, orgUserId: null },
             });
         }
 

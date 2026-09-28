@@ -29,9 +29,12 @@ import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import { captureServerEvent } from "@/lib/posthog-server";
 import type { RecordingView } from "@/lib/sharing/access";
-import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
+import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
-import { findOrgSummarySource } from "@/lib/sharing/view-content";
+import {
+    contentWriterRefusalNow,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import {
     clampRounds,
@@ -111,6 +114,33 @@ export interface GenerateSummaryResult {
  * this happen, and the job-level retry (minutes apart, in the worker) is the
  * right instrument for an outage that lasts longer than a moment.
  */
+/** Which transcript an Organization summary is made from, most preferred first. */
+const ORG_SUMMARY_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
+
+/**
+ * The transcript an Organization summary is made from, of those its owner
+ * holds: a provider's output over an edit, and both over an import.
+ */
+async function findOrgSummarySource(
+    recordingId: string,
+    ownerUserId: string,
+): Promise<typeof transcriptions.$inferSelect | undefined> {
+    const rows = await db
+        .select()
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, ownerUserId),
+            ),
+        );
+    for (const source of ORG_SUMMARY_SOURCE_ORDER) {
+        const row = rows.find((item) => item.source === source);
+        if (row) return row;
+    }
+    return undefined;
+}
+
 const PASS_RETRY_ATTEMPTS = 3;
 const PASS_RETRY_BASE_MS = 1_500;
 const PASS_RETRY_MAX_MS = 15_000;
@@ -151,7 +181,15 @@ export async function generateSummaryForRecording(
         );
     }
     const orgView = ctx.view === "org";
+    // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
+    // Before the provider is paid; the write checks again under the lock.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
 
     const [recording] = await db
         .select()
@@ -173,8 +211,10 @@ export async function generateSummaryForRecording(
         );
     }
 
+    // A recording shared before sharing needed a named transcript may hold
+    // only an import; the Organization summarizes what it has.
     const transcription = orgView
-        ? await findOrgSummarySource(recordingId, ctx)
+        ? await findOrgSummarySource(recordingId, userId)
         : (
               await db
                   .select()
@@ -475,7 +515,7 @@ Correct the serialization without dropping or inventing information. Return exac
 
     const { summary, keyPoints, actionItems } = payload;
 
-    const { committed } = await upsertEnhancement({
+    const { committed, reason } = await upsertEnhancement({
         userId,
         recordingId,
         transcriptionId: transcription.id,
@@ -487,25 +527,21 @@ Correct the serialization without dropping or inventing information. Return exac
         model,
         multiPass,
         allowReaped: (opts.trigger ?? "manual") === "manual",
-        recordingOwnerId: ctx.ownerUserId,
-        producedByUserId: ctx.actorUserId,
+        actorUserId: ctx.actorUserId,
     });
 
+    if (!committed && reason) throw writerRefusalError(reason);
     if (!committed) {
         throw new AppError(ErrorCode.NOT_FOUND, "Recording was deleted", 410);
     }
 
-    if (orgView) {
-        await orgContentChanged(recordingId);
-    } else {
-        await exportRecordingSidecarsIfEnabled(
-            userId,
-            recordingId,
-            "summary",
-            "riffado",
-        );
-        await notifyIfShared(recordingId);
-    }
+    await exportRecordingSidecarsIfEnabled(
+        userId,
+        recordingId,
+        "summary",
+        "riffado",
+    );
+    await notifyIfShared(recordingId);
 
     await captureServerEvent({
         distinctId: ctx.actorUserId,

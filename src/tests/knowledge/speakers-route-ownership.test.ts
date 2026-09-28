@@ -38,6 +38,9 @@ vi.mock("@/lib/sharing/access", () => ({
     requireRecordingView: vi.fn(async (userId: string) => ({
         ownerUserId: userId,
         contentUserId: userId,
+        view: "private",
+        shared: false,
+        orgUserId: null,
     })),
 }));
 
