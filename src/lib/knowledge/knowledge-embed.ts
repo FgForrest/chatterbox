@@ -14,10 +14,22 @@
  * generation, so it never queues itself again.
  */
 
-import { and, eq, inArray, isNull, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+    and,
+    eq,
+    gt,
+    inArray,
+    isNull,
+    ne,
+    notExists,
+    notInArray,
+    or,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
 import {
+    asyncJobs,
     knowledgeEntities,
     knowledgeFactEvidence,
     knowledgeFacts,
@@ -201,16 +213,105 @@ export interface EmbedResult {
     active: string | null;
 }
 
+/** How many items are embedded and written at a time. */
+const CHUNK_SIZE = 64;
+
+/**
+ * Write the vectors of the items in `chunk` that still exist in `scope`,
+ * in one transaction. Their rows are held (FOR KEY SHARE) while it
+ * writes, so what is written cannot lose its item before it commits; an
+ * item gone since the texts were rendered is skipped, and the scope
+ * generation it moved queues the next run. Returns how many were written.
+ */
+async function writeChunk(
+    scope: string,
+    generation: string,
+    chunk: readonly (Rendered & { inputHmac: string })[],
+    vectors: readonly Float32Array[],
+): Promise<number> {
+    return db.transaction(async (tx) => {
+        const entityIds = chunk.flatMap((item) =>
+            item.entityId ? [item.entityId] : [],
+        );
+        const factIds = chunk.flatMap((item) =>
+            item.factId ? [item.factId] : [],
+        );
+        const present = new Set<string>();
+        if (entityIds.length > 0) {
+            const rows = await tx
+                .select({ id: knowledgeEntities.id })
+                .from(knowledgeEntities)
+                .where(
+                    and(
+                        inArray(knowledgeEntities.id, entityIds),
+                        eq(knowledgeEntities.userId, scope),
+                    ),
+                )
+                .for("key share");
+            for (const row of rows) present.add(row.id);
+        }
+        if (factIds.length > 0) {
+            const rows = await tx
+                .select({ id: knowledgeFacts.id })
+                .from(knowledgeFacts)
+                .where(
+                    and(
+                        inArray(knowledgeFacts.id, factIds),
+                        eq(knowledgeFacts.userId, scope),
+                    ),
+                )
+                .for("key share");
+            for (const row of rows) present.add(row.id);
+        }
+        let written = 0;
+        for (const [index, item] of chunk.entries()) {
+            if (!present.has(item.entityId ?? item.factId ?? "")) continue;
+            const vector = vectors[index] as Float32Array;
+            await tx
+                .insert(knowledgeVectors)
+                .values({
+                    userId: scope,
+                    entityId: item.entityId,
+                    factId: item.factId,
+                    vectorGeneration: generation,
+                    dim: vector.length,
+                    vector: encryptText(encodeVector(vector)),
+                    inputHmac: item.inputHmac,
+                })
+                .onConflictDoUpdate({
+                    target: [
+                        knowledgeVectors.entityId,
+                        knowledgeVectors.factId,
+                        knowledgeVectors.vectorGeneration,
+                    ],
+                    set: {
+                        dim: vector.length,
+                        vector: encryptText(encodeVector(vector)),
+                        inputHmac: item.inputHmac,
+                        createdAt: new Date(),
+                    },
+                });
+            written++;
+        }
+        return written;
+    });
+}
+
 /**
  * Bring `scope`'s vectors up to date in the client's generation: embed
- * what changed, drop what is gone, and once nothing is missing make the
- * generation the one searched and drop the others. Throws
- * `EmbeddingUnavailable` when the service fails; what was stored stays,
- * and the generation searched stays the old one.
+ * what changed, a chunk at a time, each written in its own transaction;
+ * then drop what is gone, make the generation the one searched and drop
+ * the others. Throws `EmbeddingUnavailable` when the service fails, and
+ * the signal's reason when cancelled (checked between chunks): the
+ * chunks written stay, and the generation searched stays the old one.
  */
 export async function embedScope(
     scope: string,
     client: EmbeddingClient,
+    {
+        signal,
+        chunkSize = CHUNK_SIZE,
+    }: { signal?: AbortSignal; chunkSize?: number } = {},
 ): Promise<EmbedResult> {
     const generation = vectorGenerationFor(client.model);
     // Read before rendering: what the vectors are made from is at least
@@ -243,36 +344,20 @@ export async function embedScope(
         }))
         .filter((item) => held.get(itemKey(item)) !== item.inputHmac);
 
-    const vectors = await client.embed(stale.map((item) => item.text));
+    let embedded = 0;
+    for (let start = 0; start < stale.length; start += chunkSize) {
+        signal?.throwIfAborted();
+        const chunk = stale.slice(start, start + chunkSize);
+        const vectors = await client.embed(
+            chunk.map((item) => item.text),
+            { signal },
+        );
+        embedded += await writeChunk(scope, generation, chunk, vectors);
+    }
+    signal?.throwIfAborted();
+
     let removed = 0;
     await db.transaction(async (tx) => {
-        for (const [index, item] of stale.entries()) {
-            const vector = vectors[index] as Float32Array;
-            await tx
-                .insert(knowledgeVectors)
-                .values({
-                    userId: scope,
-                    entityId: item.entityId,
-                    factId: item.factId,
-                    vectorGeneration: generation,
-                    dim: vector.length,
-                    vector: encryptText(encodeVector(vector)),
-                    inputHmac: item.inputHmac,
-                })
-                .onConflictDoUpdate({
-                    target: [
-                        knowledgeVectors.entityId,
-                        knowledgeVectors.factId,
-                        knowledgeVectors.vectorGeneration,
-                    ],
-                    set: {
-                        dim: vector.length,
-                        vector: encryptText(encodeVector(vector)),
-                        inputHmac: item.inputHmac,
-                        createdAt: new Date(),
-                    },
-                });
-        }
         // What no longer renders (gone, replaced, its description cleared).
         const current = rendered.map((item) => item.entityId ?? item.factId);
         const gone = await tx
@@ -334,7 +419,7 @@ export async function embedScope(
                 },
             });
     });
-    return { embedded: stale.length, removed, active: generation };
+    return { embedded, removed, active: generation };
 }
 
 export const knowledgeEmbedJobHandler: JobHandler<Record<string, never>> = {
@@ -346,15 +431,28 @@ export const knowledgeEmbedJobHandler: JobHandler<Record<string, never>> = {
     run: async (context) => {
         const client = embeddingClient();
         if (!client) return { skipped: "unavailable" };
-        const result = await embedScope(context.userId, client);
+        const result = await embedScope(context.userId, client, {
+            signal: context.signal,
+        });
         return { ...result };
     },
 };
 
-/** Queue a run for every scope whose vectors are behind. */
-export async function seedKnowledgeEmbedJobs(): Promise<number> {
-    const client = embeddingClient();
-    if (!client) return 0;
+/** A scope whose run failed waits this long before it is queued again. */
+const FAILED_RUN_PAUSE_MS = 30 * 60 * 1000;
+
+/**
+ * Queue a run for every scope whose vectors are behind. Nothing while the
+ * service is paused (its breaker is open), and not a scope whose last run
+ * failed less than half an hour ago: its attempts are spent, and asking
+ * every minute would only fail again.
+ */
+export async function seedKnowledgeEmbedJobs({
+    client = embeddingClient(),
+}: {
+    client?: EmbeddingClient | null;
+} = {}): Promise<number> {
+    if (!client?.available) return 0;
     const generation = vectorGenerationFor(client.model);
     const behind = await db
         .select({ userId: knowledgeScopeGenerations.userId })
@@ -364,10 +462,31 @@ export async function seedKnowledgeEmbedJobs(): Promise<number> {
             eq(knowledgeVectorState.userId, knowledgeScopeGenerations.userId),
         )
         .where(
-            or(
-                isNull(knowledgeVectorState.userId),
-                sql`${knowledgeVectorState.embeddedAt} is distinct from ${knowledgeScopeGenerations.generation}`,
-                sql`${knowledgeVectorState.activeGeneration} is distinct from ${generation}`,
+            and(
+                or(
+                    isNull(knowledgeVectorState.userId),
+                    sql`${knowledgeVectorState.embeddedAt} is distinct from ${knowledgeScopeGenerations.generation}`,
+                    sql`${knowledgeVectorState.activeGeneration} is distinct from ${generation}`,
+                ),
+                notExists(
+                    db
+                        .select({ id: asyncJobs.id })
+                        .from(asyncJobs)
+                        .where(
+                            and(
+                                eq(asyncJobs.kind, KNOWLEDGE_EMBED_JOB_KIND),
+                                eq(
+                                    asyncJobs.subjectId,
+                                    sql`'knowledge:' || ${knowledgeScopeGenerations.userId}`,
+                                ),
+                                eq(asyncJobs.status, "failed"),
+                                gt(
+                                    asyncJobs.completedAt,
+                                    new Date(Date.now() - FAILED_RUN_PAUSE_MS),
+                                ),
+                            ),
+                        ),
+                ),
             ),
         )
         .limit(200);

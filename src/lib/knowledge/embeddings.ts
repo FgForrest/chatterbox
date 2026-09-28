@@ -6,7 +6,10 @@
  * Texts go in batches, each with a timeout; vectors come back
  * L2-normalized, so a cosine is a dot product (`vector-search.ts`). After
  * repeated failures a circuit breaker stops asking for a while: callers
- * fall back to matching names by their words, and say so.
+ * fall back to matching names by their words, and say so. A request the
+ * service refuses (a 4xx other than a timeout or a rate limit) says
+ * nothing about whether it is up, and a run its caller cancels failed
+ * nothing: neither counts.
  */
 
 import { env } from "@/lib/env";
@@ -15,6 +18,22 @@ export class EmbeddingUnavailable extends Error {
     constructor(message: string, options?: { cause?: unknown }) {
         super(message, options);
         this.name = "EmbeddingUnavailable";
+    }
+}
+
+class HttpStatusError extends Error {
+    constructor(readonly status: number) {
+        super(`HTTP ${status}`);
+    }
+
+    /** Refused for what was asked, not because the service is struggling. */
+    get refused(): boolean {
+        return (
+            this.status >= 400 &&
+            this.status < 500 &&
+            this.status !== 408 &&
+            this.status !== 429
+        );
     }
 }
 
@@ -53,8 +72,14 @@ export class EmbeddingClient {
         return this.now() >= this.openUntil;
     }
 
-    /** One normalized vector per text, in order. */
-    async embed(texts: readonly string[]): Promise<Float32Array[]> {
+    /**
+     * One normalized vector per text, in order. `signal` cancels between
+     * and during batches, throwing its reason.
+     */
+    async embed(
+        texts: readonly string[],
+        { signal }: { signal?: AbortSignal } = {},
+    ): Promise<Float32Array[]> {
         if (texts.length === 0) return [];
         if (!this.available) {
             throw new EmbeddingUnavailable("The embedding service is paused");
@@ -62,8 +87,9 @@ export class EmbeddingClient {
         const size = this.options.batchSize ?? 32;
         const vectors: Float32Array[] = [];
         for (let start = 0; start < texts.length; start += size) {
+            signal?.throwIfAborted();
             vectors.push(
-                ...(await this.batch(texts.slice(start, start + size))),
+                ...(await this.batch(texts.slice(start, start + size), signal)),
             );
         }
         return vectors;
@@ -73,7 +99,10 @@ export class EmbeddingClient {
         return (this.options.now ?? Date.now)();
     }
 
-    private async batch(input: string[]): Promise<Float32Array[]> {
+    private async batch(
+        input: string[],
+        cancel?: AbortSignal,
+    ): Promise<Float32Array[]> {
         const fetch = this.options.fetch ?? globalThis.fetch;
         const url = `${this.options.baseUrl.replace(/\/+$/, "")}/embeddings`;
         try {
@@ -86,11 +115,14 @@ export class EmbeddingClient {
                         : {}),
                 },
                 body: JSON.stringify({ model: this.options.model, input }),
-                signal: AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
+                signal: AbortSignal.any([
+                    AbortSignal.timeout(this.options.timeoutMs ?? 20_000),
+                    ...(cancel ? [cancel] : []),
+                ]),
                 redirect: "error",
             });
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                throw new HttpStatusError(response.status);
             }
             const body = (await response.json()) as {
                 data?: { index: number; embedding: number[] }[];
@@ -104,6 +136,15 @@ export class EmbeddingClient {
             this.failures = 0;
             return data.map((item) => normalize(item.embedding));
         } catch (error) {
+            if (cancel?.aborted) throw cancel.reason;
+            if (error instanceof HttpStatusError && error.refused) {
+                throw new EmbeddingUnavailable(
+                    "The embedding service refused",
+                    {
+                        cause: error,
+                    },
+                );
+            }
             this.failures++;
             if (this.failures >= (this.options.failureThreshold ?? 3)) {
                 this.openUntil = this.now() + (this.options.openMs ?? 60_000);

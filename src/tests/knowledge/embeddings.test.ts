@@ -8,7 +8,13 @@ import {
 } from "@/lib/knowledge/embeddings";
 
 /** A fake OpenAI-compatible endpoint: each text becomes [length, 1, 0]. */
-function fakeFetch(options: { fail?: () => boolean; delayMs?: number } = {}) {
+function fakeFetch(
+    options: {
+        fail?: () => boolean;
+        status?: () => number;
+        delayMs?: number;
+    } = {},
+) {
     const calls: {
         url: string;
         body: { model: string; input: string[] };
@@ -33,6 +39,8 @@ function fakeFetch(options: { fail?: () => boolean; delayMs?: number } = {}) {
         if (options.fail?.()) {
             return new Response("down", { status: 503 });
         }
+        const status = options.status?.() ?? 200;
+        if (status !== 200) return new Response("no", { status });
         return Response.json({
             data: (body.input as string[])
                 .map((text, index) => ({
@@ -114,6 +122,47 @@ describe("EmbeddingClient", () => {
         expect(client.available).toBe(true);
         await expect(client.embed(["a"])).resolves.toHaveLength(1);
         expect(calls).toHaveLength(3);
+    });
+
+    it("does not pause for a refused request, but does for a rate limit", async () => {
+        let status = 400;
+        const { fetch } = fakeFetch({ status: () => status });
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            failureThreshold: 2,
+            fetch,
+        });
+        for (let i = 0; i < 3; i++) {
+            await expect(client.embed(["a"])).rejects.toBeInstanceOf(
+                EmbeddingUnavailable,
+            );
+        }
+        expect(client.available).toBe(true);
+        status = 429;
+        for (let i = 0; i < 2; i++) {
+            await expect(client.embed(["a"])).rejects.toBeInstanceOf(
+                EmbeddingUnavailable,
+            );
+        }
+        expect(client.available).toBe(false);
+    });
+
+    it("stops when its caller cancels, without counting it as a failure", async () => {
+        const { fetch, calls } = fakeFetch({ delayMs: 200 });
+        const client = new EmbeddingClient({
+            baseUrl: "http://embeddings/v1",
+            model: "m",
+            batchSize: 1,
+            failureThreshold: 1,
+            fetch,
+        });
+        const controller = new AbortController();
+        const run = client.embed(["a", "b"], { signal: controller.signal });
+        controller.abort(new Error("cancelled"));
+        await expect(run).rejects.toThrow("cancelled");
+        expect(calls).toHaveLength(1);
+        expect(client.available).toBe(true);
     });
 
     it("embeds nothing without asking", async () => {

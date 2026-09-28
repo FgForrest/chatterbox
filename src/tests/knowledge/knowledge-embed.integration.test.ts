@@ -22,6 +22,7 @@ import {
 } from "vitest";
 import {
     asyncJobs,
+    knowledgeFacts,
     knowledgeVectorState,
     knowledgeVectors,
     people,
@@ -93,7 +94,7 @@ import {
     deleteEntity,
     renameEntity,
 } from "@/lib/knowledge/entities";
-import { confirmManualFact } from "@/lib/knowledge/facts";
+import { confirmManualFact, deleteFact } from "@/lib/knowledge/facts";
 import {
     embedScope,
     seedKnowledgeEmbedJobs,
@@ -135,6 +136,8 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
     let baseUrl = "";
     let down = false;
     let embedded: string[] = [];
+    // Runs while a request is answered: what changes during a run.
+    let meanwhile: (() => Promise<void>) | null = null;
     let jan = "";
 
     function db() {
@@ -156,7 +159,10 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
             request.on("data", (chunk) => {
                 body += chunk;
             });
-            request.on("end", () => {
+            request.on("end", async () => {
+                const during = meanwhile;
+                meanwhile = null;
+                await during?.();
                 if (down || request.url !== "/v1/embeddings") {
                     response.writeHead(503).end("down");
                     return;
@@ -192,6 +198,7 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
     beforeEach(async () => {
         down = false;
         embedded = [];
+        meanwhile = null;
         knowledgeStore().invalidateAll();
         await db().delete(users);
         await db()
@@ -335,5 +342,83 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
             .from(asyncJobs)
             .where(eq(asyncJobs.userId, ALICE));
         expect(again).toEqual([]);
+    });
+
+    const stateOf = async (scope: string) =>
+        (
+            await db()
+                .select()
+                .from(knowledgeVectorState)
+                .where(eq(knowledgeVectorState.userId, scope))
+        )[0];
+
+    it("keeps what still exists when something goes during a run", async () => {
+        const orion = await aliceKnows();
+        const [fact] = await db()
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts);
+        meanwhile = () => deleteFact(ALICE, fact?.id ?? "");
+
+        const result = await embedScope(ALICE, client());
+
+        expect(result.active).toBe("fake-a#r1");
+        expect(await vectorsOf(ALICE)).toEqual([
+            expect.objectContaining({ entityId: orion, factId: null }),
+        ]);
+        // Made from what was read before the fact went: another run follows.
+        await seedKnowledgeEmbedJobs();
+        expect(
+            await db()
+                .select({ userId: asyncJobs.userId })
+                .from(asyncJobs)
+                .where(eq(asyncJobs.userId, ALICE)),
+        ).toHaveLength(1);
+    });
+
+    it("stops between batches when its job is cancelled, activating nothing", async () => {
+        await aliceKnows();
+        const controller = new AbortController();
+        meanwhile = async () => controller.abort(new Error("cancelled"));
+        await expect(
+            embedScope(ALICE, client(), {
+                signal: controller.signal,
+                chunkSize: 1,
+            }),
+        ).rejects.toThrow("cancelled");
+        expect(await vectorsOf(ALICE)).toEqual([]);
+        expect(await stateOf(ALICE)).toBeUndefined();
+    });
+
+    it("queues nothing while the service is paused", async () => {
+        await aliceKnows();
+        const paused = new EmbeddingClient({
+            baseUrl,
+            model: "fake-a",
+            failureThreshold: 1,
+        });
+        down = true;
+        await expect(paused.embed(["x"])).rejects.toBeInstanceOf(
+            EmbeddingUnavailable,
+        );
+        expect(await seedKnowledgeEmbedJobs({ client: paused })).toBe(0);
+    });
+
+    it("waits half an hour before queuing again a scope whose run failed", async () => {
+        await aliceKnows();
+        const failed = (minutesAgo: number) =>
+            db()
+                .insert(asyncJobs)
+                .values({
+                    userId: ALICE,
+                    kind: "knowledge.embed",
+                    subjectId: `knowledge:${ALICE}`,
+                    status: "failed",
+                    completedAt: new Date(Date.now() - minutesAgo * 60_000),
+                });
+        await failed(5);
+        expect(await seedKnowledgeEmbedJobs()).toBe(0);
+        await db().delete(asyncJobs);
+        await failed(31);
+        expect(await seedKnowledgeEmbedJobs()).toBe(1);
     });
 });
