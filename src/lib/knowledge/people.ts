@@ -5,9 +5,7 @@ import {
     knowledgeAliases,
     people,
     personNotes,
-    recordings,
     transcriptCorrections,
-    transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
     users,
@@ -21,6 +19,7 @@ import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
 import {
     lockOrgPeople,
     lockOrgPeopleShared,
+    lockRecordingsNaming,
     orgOwnedCondition,
 } from "@/lib/knowledge/org-people";
 import {
@@ -383,7 +382,7 @@ async function mergeInTx(
     winnerId: string,
     loserId: string,
 ): Promise<void> {
-    await lockRecordingsNaming(tx, [winnerId, loserId]);
+    await lockRecordingsNaming(tx, { personIds: [winnerId, loserId] });
 
     const attributionColumns = {
         id: transcriptSpeakers.id,
@@ -500,52 +499,6 @@ async function mergeInTx(
         .update(people)
         .set({ mergedIntoId: winnerId, updatedAt: new Date() })
         .where(eq(people.mergedIntoId, loserId));
-}
-
-/**
- * Lock, in id order, the recordings of every transcript that names one of
- * `personIds` or rejects them for a label: the lock a transcript rewrite
- * takes, shared, so moving these people's rows waits for a rewrite in
- * progress and holds off the next one.
- */
-async function lockRecordingsNaming(
-    tx: Tx,
-    personIds: string[],
-): Promise<void> {
-    const named = tx
-        .select({ id: transcriptSpeakers.transcriptionId })
-        .from(transcriptSpeakers)
-        .where(inArray(transcriptSpeakers.personId, personIds));
-    const rejected = tx
-        .select({ id: transcriptSpeakerRejections.transcriptionId })
-        .from(transcriptSpeakerRejections)
-        .where(inArray(transcriptSpeakerRejections.personId, personIds));
-    const corrected = tx
-        .select({ id: transcriptCorrections.transcriptionId })
-        .from(transcriptCorrections)
-        .where(inArray(transcriptCorrections.targetPersonId, personIds));
-    const touched = await tx
-        .selectDistinct({ recordingId: transcriptions.recordingId })
-        .from(transcriptions)
-        .where(
-            or(
-                inArray(transcriptions.id, named),
-                inArray(transcriptions.id, rejected),
-                inArray(transcriptions.id, corrected),
-            ),
-        );
-    if (touched.length === 0) return;
-    await tx
-        .select({ id: recordings.id })
-        .from(recordings)
-        .where(
-            inArray(
-                recordings.id,
-                touched.map((row) => row.recordingId),
-            ),
-        )
-        .orderBy(recordings.id)
-        .for("share");
 }
 
 /**
@@ -693,6 +646,9 @@ export async function deletePerson(
             .where(
                 or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
             );
+        await lockRecordingsNaming(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
         const scopes = await scopesNamingInTx(tx, {
             personIds: doomed.map((person) => person.id),
         });

@@ -1,6 +1,15 @@
-import { type Column, sql } from "drizzle-orm";
+import { type Column, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import { users } from "@/db/schema";
+import {
+    knowledgeFactEvidence,
+    knowledgeFacts,
+    recordings,
+    transcriptCorrections,
+    transcriptions,
+    transcriptSpeakerRejections,
+    transcriptSpeakers,
+    users,
+} from "@/db/schema";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -41,4 +50,115 @@ export async function lockOrgPeopleShared(tx: Tx): Promise<void> {
     await tx.execute(
         sql`select pg_advisory_xact_lock_shared(${ORG_PEOPLE_LOCK})`,
     );
+}
+
+/**
+ * Lock, in id order, the recordings of every transcript that names one of
+ * these people or entities: a speaker answer (confirmation or rejection),
+ * a correction targeting them, or evidence of a fact naming them. A
+ * transcript rewrite takes its recording's lock before it moves those
+ * rows, so a merge or a deletion moving or deleting them takes the same
+ * lock, shared: it waits for a rewrite in progress and holds off the next
+ * one. `factIds` adds the recordings with evidence of those facts. Taken
+ * after the Organization-people lock.
+ */
+export async function lockRecordingsNaming(
+    tx: Tx,
+    {
+        personIds = [],
+        entityIds = [],
+        factIds = [],
+    }: {
+        personIds?: readonly string[];
+        entityIds?: readonly string[];
+        factIds?: readonly string[];
+    },
+): Promise<void> {
+    const persons = [...personIds];
+    const entities = [...entityIds];
+    const inTranscripts: SQL[] = [];
+    const factNaming: SQL[] = [];
+    if (persons.length > 0) {
+        inTranscripts.push(
+            inArray(
+                transcriptions.id,
+                tx
+                    .select({ id: transcriptSpeakers.transcriptionId })
+                    .from(transcriptSpeakers)
+                    .where(inArray(transcriptSpeakers.personId, persons)),
+            ),
+            inArray(
+                transcriptions.id,
+                tx
+                    .select({ id: transcriptSpeakerRejections.transcriptionId })
+                    .from(transcriptSpeakerRejections)
+                    .where(
+                        inArray(transcriptSpeakerRejections.personId, persons),
+                    ),
+            ),
+            inArray(
+                transcriptions.id,
+                tx
+                    .select({ id: transcriptCorrections.transcriptionId })
+                    .from(transcriptCorrections)
+                    .where(
+                        inArray(transcriptCorrections.targetPersonId, persons),
+                    ),
+            ),
+        );
+        factNaming.push(
+            inArray(knowledgeFacts.subjectPersonId, persons),
+            inArray(knowledgeFacts.objectPersonId, persons),
+        );
+    }
+    if (entities.length > 0) {
+        inTranscripts.push(
+            inArray(
+                transcriptions.id,
+                tx
+                    .select({ id: transcriptCorrections.transcriptionId })
+                    .from(transcriptCorrections)
+                    .where(
+                        inArray(transcriptCorrections.targetEntityId, entities),
+                    ),
+            ),
+        );
+        factNaming.push(
+            inArray(knowledgeFacts.subjectEntityId, entities),
+            inArray(knowledgeFacts.objectEntityId, entities),
+        );
+    }
+    if (factIds.length > 0) {
+        factNaming.push(inArray(knowledgeFacts.id, [...factIds]));
+    }
+    if (factNaming.length === 0) return;
+    const named =
+        inTranscripts.length > 0
+            ? await tx
+                  .selectDistinct({ recordingId: transcriptions.recordingId })
+                  .from(transcriptions)
+                  .where(or(...inTranscripts))
+            : [];
+    const evidenced = await tx
+        .selectDistinct({ recordingId: knowledgeFactEvidence.recordingId })
+        .from(knowledgeFactEvidence)
+        .where(
+            inArray(
+                knowledgeFactEvidence.factId,
+                tx
+                    .select({ id: knowledgeFacts.id })
+                    .from(knowledgeFacts)
+                    .where(or(...factNaming)),
+            ),
+        );
+    const touched = [
+        ...new Set([...named, ...evidenced].map((row) => row.recordingId)),
+    ];
+    if (touched.length === 0) return;
+    await tx
+        .select({ id: recordings.id })
+        .from(recordings)
+        .where(inArray(recordings.id, touched))
+        .orderBy(recordings.id)
+        .for("share");
 }

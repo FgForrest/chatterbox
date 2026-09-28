@@ -19,9 +19,7 @@ import {
     knowledgeEntities,
     knowledgeEntityNotes,
     knowledgeEntityTypes,
-    recordings,
     transcriptCorrections,
-    transcriptions,
     users,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -29,7 +27,11 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { lockOrgPeople, orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeople,
+    lockRecordingsNaming,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
     scopesNamingInTx,
@@ -473,39 +475,6 @@ async function appendEntityNotes(
 }
 
 /**
- * Lock, in id order, the recordings of every transcript with a correction
- * targeting one of `entityIds`: the lock a transcript rewrite takes before
- * it moves corrections, shared, so a merge or an erasure moving or deleting
- * these rows neither waits on a rewrite holding some of them nor holds
- * rows the rewrite is about to take.
- */
-async function lockRecordingsCorrecting(
-    tx: Tx,
-    entityIds: string[],
-): Promise<void> {
-    const correcting = tx
-        .select({ id: transcriptCorrections.transcriptionId })
-        .from(transcriptCorrections)
-        .where(inArray(transcriptCorrections.targetEntityId, entityIds));
-    const touched = await tx
-        .selectDistinct({ recordingId: transcriptions.recordingId })
-        .from(transcriptions)
-        .where(inArray(transcriptions.id, correcting));
-    if (touched.length === 0) return;
-    await tx
-        .select({ id: recordings.id })
-        .from(recordings)
-        .where(
-            inArray(
-                recordings.id,
-                touched.map((row) => row.recordingId),
-            ),
-        )
-        .orderBy(recordings.id)
-        .for("share");
-}
-
-/**
  * Move everything that names `loserId` onto `winnerId` and leave a
  * tombstone. Works on ids alone; callers authorize and take the
  * Organization-people lock first.
@@ -515,7 +484,7 @@ async function mergeEntitiesInTx(
     winnerId: string,
     loserId: string,
 ): Promise<void> {
-    await lockRecordingsCorrecting(tx, [winnerId, loserId]);
+    await lockRecordingsNaming(tx, { entityIds: [winnerId, loserId] });
 
     // Two corrections never cover the same words, so repointing collides
     // with nothing.
@@ -676,10 +645,9 @@ export async function deleteEntity(
                     eq(knowledgeEntities.mergedIntoId, entityId),
                 ),
             );
-        await lockRecordingsCorrecting(
-            tx,
-            doomed.map((row) => row.id),
-        );
+        await lockRecordingsNaming(tx, {
+            entityIds: doomed.map((row) => row.id),
+        });
         // Read before the delete: it takes everyone's aliases, notes, facts
         // and corrections naming these.
         const scopes = await scopesNamingInTx(tx, {

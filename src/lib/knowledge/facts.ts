@@ -39,6 +39,7 @@ import {
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeopleShared,
+    lockRecordingsNaming,
     orgOwnedCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -527,6 +528,8 @@ export async function deleteFact(
     factId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        // The rewrite's lock first, as it takes it before the facts.
+        await lockRecordingsNaming(tx, { factIds: [factId] });
         const [own] = await tx
             .select({ id: knowledgeFacts.id })
             .from(knowledgeFacts)

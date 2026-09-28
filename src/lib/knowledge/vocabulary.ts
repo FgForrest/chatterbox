@@ -29,7 +29,11 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeople,
+    lockRecordingsNaming,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
     scopesNamingInTx,
@@ -588,9 +592,9 @@ async function usesOfType(
  * is refused (409, `details.count`), so nothing is deleted that the person
  * did not see counted.
  *
- * The entities' corrections go by cascade, without the recording locks a
- * transcript rewrite takes: a rare deadlock with a rewrite is aborted by
- * Postgres and the delete can be retried.
+ * Like deleting a person or an entity, it takes the Organization-people
+ * lock and then the recordings a transcript rewrite would lock, of every
+ * transcript whose corrections or evidence go with it.
  */
 export async function deleteOwnType(
     userId: string,
@@ -599,6 +603,7 @@ export async function deleteOwnType(
     confirmCount: number,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await lockOrgPeople(tx);
         const { id } = await lockOwnType(tx, kind, userId, key);
         const count = await usesOfType(tx, kind, userId, key);
         if (count !== confirmCount) {
@@ -613,11 +618,23 @@ export async function deleteOwnType(
         // everyone's aliases, notes, facts and corrections naming them.
         const scopes = await scopesUsingTypeInTx(tx, kind, key);
         scopes.add(userId);
+        if (kind === "relation" && count > 0) {
+            const facts = await tx
+                .select({ id: knowledgeFacts.id })
+                .from(knowledgeFacts)
+                .where(usesOfTypeCondition(kind, userId, key));
+            await lockRecordingsNaming(tx, {
+                factIds: facts.map((row) => row.id),
+            });
+        }
         if (kind === "entity" && count > 0) {
             const doomed = await tx
                 .select({ id: knowledgeEntities.id })
                 .from(knowledgeEntities)
                 .where(usesOfTypeCondition(kind, userId, key));
+            await lockRecordingsNaming(tx, {
+                entityIds: doomed.map((row) => row.id),
+            });
             for (const scope of await scopesNamingInTx(tx, {
                 entityIds: doomed.map((row) => row.id),
             })) {
