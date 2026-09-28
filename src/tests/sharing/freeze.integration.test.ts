@@ -1,0 +1,346 @@
+/**
+ * A shared recording is frozen where its data is written, against a real
+ * PostgreSQL.
+ *
+ * The routes refuse early, but a run queued or started before the share
+ * reaches the writer after it: the provider job, a transcript made in the
+ * browser, a Plaud import. Each must write nothing to the owner's copy,
+ * and the job must end as skipped, not failed.
+ *
+ * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
+ * create scratch databases on.
+ */
+
+import { and, eq } from "drizzle-orm";
+import {
+    afterAll,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from "vitest";
+import {
+    apiCredentials,
+    recordingFolders,
+    recordings,
+    transcriptions,
+    userSettings,
+    users,
+} from "@/db/schema";
+import {
+    createMigratedTestDatabase,
+    getTestDatabaseUrl,
+    type TestPostgresDatabase,
+} from "@/tests/integration/postgres";
+
+const { dbProxy, dbRef, mockEnv, provider } = vi.hoisted(() => {
+    const ref: { current: Record<PropertyKey, unknown> | null } = {
+        current: null,
+    };
+    const proxy = new Proxy(
+        {},
+        {
+            get: (_target, property: string | symbol) => {
+                const current = ref.current;
+                if (!current) {
+                    throw new Error("test database was not initialized");
+                }
+                const value = current[property];
+                return typeof value === "function"
+                    ? value.bind(current)
+                    : value;
+            },
+        },
+    );
+    return {
+        dbProxy: proxy,
+        dbRef: ref,
+        provider: {
+            calls: 0,
+            // Run once, while the provider is transcribing.
+            during: null as null | (() => Promise<void>),
+        },
+        mockEnv: {
+            IS_HOSTED: false,
+            SELF_HOST_MODE: "shared",
+            ORG_ACCOUNT_EMAIL: "org@example.test",
+            ORG_ACCOUNT_PASSWORD: "organization-password",
+            ENCRYPTION_KEY:
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+            DATABASE_URL: "postgres://unused",
+            WHISPER_REQUEST_TIMEOUT_MS: 60_000,
+        },
+    };
+});
+
+vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
+vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerEvent: vi.fn().mockResolvedValue(undefined),
+    captureServerException: vi.fn(),
+}));
+vi.mock("@/lib/folder-exports/jobs", () => ({
+    enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/webhooks/emit", () => ({
+    emitEvent: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/export/document-sidecars", () => ({
+    exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
+    refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
+    removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/storage/factory", () => ({
+    createUserStorageProvider: vi.fn().mockResolvedValue({
+        downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio-bytes")),
+    }),
+}));
+vi.mock("@/lib/transcription/elevenlabs-transcribe", () => ({
+    elevenLabsTranscribe: vi.fn(async () => {
+        provider.calls += 1;
+        const run = provider.during;
+        provider.during = null;
+        await run?.();
+        return { text: "A new transcript.", detectedLanguage: "en" };
+    }),
+}));
+vi.mock("@/lib/auth-server", async () => {
+    const { AppError, ErrorCode } =
+        await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
+    return {
+        requireApiSession: vi.fn(async (request: Request) => {
+            const id = request.headers.get("x-test-user");
+            if (!id) {
+                throw new AppError(
+                    ErrorCode.AUTH_SESSION_MISSING,
+                    "Unauthorized",
+                    401,
+                );
+            }
+            return { user: { id, email: `${id}@example.test` } };
+        }),
+    };
+});
+
+import { POST as postBrowserTranscript } from "@/app/api/recordings/[id]/transcription/from-browser/route";
+import { encrypt } from "@/lib/encryption";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { addRecordingToFolder } from "@/lib/folders/folders";
+import { ensureOrgAccount } from "@/lib/org/account";
+import { upsertTranscription } from "@/lib/transcription/persist";
+import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
+
+const testDatabaseUrl = getTestDatabaseUrl();
+const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
+
+const OWNER = "user-owner";
+const BOB = "user-bob";
+const REC = "rec-frozen";
+const SHARED_TEXT = "What was shared.";
+
+type Handler = (
+    request: Request,
+    context: { params: Promise<Record<string, string>> },
+) => Promise<Response>;
+
+describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
+    let database: TestPostgresDatabase | null = null;
+    let orgUserId = "";
+
+    function db() {
+        if (!database) throw new Error("test database was not initialized");
+        return database.db;
+    }
+
+    beforeAll(async () => {
+        database = await createMigratedTestDatabase(
+            testDatabaseUrl ?? "",
+            "frozen",
+        );
+        dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
+    }, 120_000);
+
+    afterAll(async () => {
+        dbRef.current = null;
+        await database?.dispose();
+    }, 30_000);
+
+    beforeEach(async () => {
+        provider.calls = 0;
+        provider.during = null;
+        await db().delete(users);
+        await db()
+            .insert(users)
+            .values([
+                { id: OWNER, email: "owner@example.test" },
+                { id: BOB, email: "bob@example.test" },
+            ]);
+        orgUserId = (await ensureOrgAccount()) ?? "";
+        await db()
+            .insert(recordings)
+            .values({
+                id: REC,
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: "plaud-1",
+                filename: encryptText("Weekly"),
+                duration: 60_000,
+                startTime: new Date("2026-09-01T10:00:00Z"),
+                endTime: new Date("2026-09-01T10:01:00Z"),
+                filesize: 11,
+                fileMd5: "0".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/rec.mp3`,
+                plaudVersion: "1",
+            });
+        // Transcribed without speakers, so nothing stands in the way of
+        // sharing it.
+        await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                text: encryptText(SHARED_TEXT),
+                provider: "openai",
+                model: "whisper-1",
+                source: "riffado",
+            });
+        for (const userId of [OWNER, BOB]) {
+            await db()
+                .insert(apiCredentials)
+                .values({
+                    userId,
+                    provider: "ElevenLabs",
+                    apiKey: encrypt("test-key"),
+                    defaultModel: "scribe_v1",
+                    isDefaultTranscription: true,
+                });
+            await db()
+                .insert(userSettings)
+                .values({ userId, autoGenerateTitle: false });
+        }
+    });
+
+    async function share() {
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: REC,
+            folderId: root?.id ?? "",
+        });
+    }
+
+    async function textOf(userId: string, source = "riffado") {
+        const [row] = await db()
+            .select({ text: transcriptions.text })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, REC),
+                    eq(transcriptions.userId, userId),
+                    eq(transcriptions.source, source),
+                ),
+            );
+        return row ? decryptText(row.text) : null;
+    }
+
+    function runJob(
+        userId: string,
+        view: "private" | "org",
+    ): ReturnType<typeof transcriptionJobHandler.run> {
+        return transcriptionJobHandler.run({
+            payload: {
+                recordingId: REC,
+                trigger: "manual",
+                force: true,
+                view,
+            },
+            userId,
+        } as Parameters<typeof transcriptionJobHandler.run>[0]);
+    }
+
+    it("lets a provider run that began before the share write nothing after it, and skips its job", async () => {
+        provider.during = share;
+
+        expect(await runJob(OWNER, "private")).toEqual({ skipped: "shared" });
+
+        expect(provider.calls).toBe(1);
+        expect(await textOf(OWNER)).toBe(SHARED_TEXT);
+        expect(await textOf(orgUserId)).toBe(SHARED_TEXT);
+    });
+
+    it("never pays a provider for a run queued before the share and started after it", async () => {
+        await share();
+
+        expect(await runJob(OWNER, "private")).toEqual({ skipped: "shared" });
+        expect(provider.calls).toBe(0);
+    });
+
+    it("refuses a member's Organization run where it executes", async () => {
+        await share();
+
+        expect(await runJob(BOB, "org")).toEqual({ skipped: "shared" });
+        expect(provider.calls).toBe(0);
+        expect(await textOf(orgUserId)).toBe(SHARED_TEXT);
+    });
+
+    it("refuses a transcript made in the browser once the recording is shared", async () => {
+        await share();
+
+        const response = await (postBrowserTranscript as unknown as Handler)(
+            new Request(
+                `http://localhost/api/recordings/${REC}/transcription/from-browser`,
+                {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        "x-test-user": OWNER,
+                    },
+                    body: JSON.stringify({
+                        text: "Made in the browser.",
+                        model: "whisper-base",
+                    }),
+                },
+            ),
+            { params: Promise.resolve({ id: REC }) },
+        );
+
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+            code: "RECORDING_SHARED",
+        });
+        expect(await textOf(OWNER)).toBe(SHARED_TEXT);
+    });
+
+    it("refuses a Plaud import while the recording is shared, and takes it once withdrawn", async () => {
+        await share();
+        const plaudImport = () =>
+            upsertTranscription({
+                userId: OWNER,
+                recordingId: REC,
+                text: "From Plaud.",
+                detectedLanguage: "en",
+                source: "plaud",
+                provider: "plaud",
+                model: "plaud-native",
+            });
+
+        expect(await plaudImport()).toEqual({
+            committed: false,
+            reason: "shared",
+        });
+        expect(await textOf(OWNER, "plaud")).toBeNull();
+
+        const { unshareRecording } = await import("@/lib/folders/folders");
+        await unshareRecording(OWNER, REC);
+        expect(await plaudImport()).toEqual({ committed: true });
+        expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
+    });
+});

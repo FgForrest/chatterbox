@@ -31,6 +31,7 @@ import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { useUploadQueue } from "@/hooks/use-upload-queue";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
+import { sharedRecordingIds } from "@/lib/folders/hierarchy";
 import {
     requestNotificationPermission,
     showNewRecordingNotification,
@@ -276,6 +277,17 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
+    // A shared recording is the organization account's to change: its
+    // Organization view for anyone else, and its owner's private copy.
+    const sharedIds = useMemo(
+        () => sharedRecordingIds(folderOrganization),
+        [folderOrganization],
+    );
+    const selectedTranscriptReadOnly = selectedRecording
+        ? currentIsOrgView
+            ? !isOrgAccount
+            : sharedIds.has(selectedRecording.id)
+        : false;
 
     // Keep currentRecording in sync with the recordings prop (updated
     // after refresh()). If the previously-selected recording is no
@@ -1064,6 +1076,9 @@ export function Workstation({
                                     onTranscribe={handleTranscribe}
                                     onTranscribeComplete={refresh}
                                     onTranscriptStale={refresh}
+                                    transcriptReadOnly={
+                                        selectedTranscriptReadOnly
+                                    }
                                     onSelectRecording={setCurrentRecording}
                                     onRenamed={handleRenamed}
                                     onDelete={handleDelete}

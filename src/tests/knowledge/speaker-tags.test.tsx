@@ -69,11 +69,15 @@ function SpeakerTagsHarness({
     onSeek,
     shownVersion,
     onStale,
+    readOnly,
+    speakers = [{ speaker: "speaker_0", label: "Speaker 0" }],
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
     onSeek?: (ms: number) => void;
     shownVersion?: { transcriptionId: string; revision: number };
     onStale?: () => void;
+    readOnly?: boolean;
+    speakers?: { speaker: string; label: string }[];
 }) {
     const [attributions, setAttributions] = useState<SpeakerAttributions>({});
     const handleAttributionsChange = useCallback(
@@ -88,12 +92,13 @@ function SpeakerTagsHarness({
         <SpeakerTags
             recordingId="rec-1"
             source="riffado"
-            speakers={[{ speaker: "speaker_0", label: "Speaker 0" }]}
+            speakers={speakers}
             attributions={attributions}
             onAttributionsChange={handleAttributionsChange}
             onSeek={onSeek}
             shownVersion={shownVersion}
             onStale={onStale}
+            readOnly={readOnly}
         />
     );
 }
@@ -175,6 +180,79 @@ describe("SpeakerTags", () => {
             ...VERSION,
             label: "speaker_0",
         });
+    });
+
+    it("shows a shared recording's speakers without a way to change them", async () => {
+        const fetchMock = stubFetch({
+            initialSpeakers: [
+                {
+                    label: "speaker_0",
+                    personId: "person-1",
+                    personName: "Jan",
+                    status: "confirmed",
+                },
+                {
+                    label: "speaker_1",
+                    personId: null,
+                    personName: null,
+                    status: "confirmed",
+                    markedUnknown: true,
+                },
+            ],
+        });
+        render(
+            <SpeakerTagsHarness
+                onAttributionsChange={vi.fn()}
+                readOnly
+                speakers={[
+                    { speaker: "speaker_0", label: "Speaker 0" },
+                    { speaker: "speaker_1", label: "Speaker 1" },
+                    { speaker: "speaker_2", label: "Speaker 2" },
+                ]}
+            />,
+        );
+
+        const personLink = await screen.findByRole("link", { name: "Jan" });
+        expect(personLink.getAttribute("href")).toBe("/people/person-1");
+        expect(await screen.findByText("Speaker 1: unknown")).toBeDefined();
+        expect(screen.getByText("Speaker 2")).toBeDefined();
+        expect(screen.getByText("Managed by the Organization")).toBeDefined();
+        expect(screen.queryAllByRole("button")).toEqual([]);
+        expect(
+            fetchMock.mock.calls.some(([, init]) => init?.method === "PUT"),
+        ).toBe(false);
+    });
+
+    it("says a recording shared meanwhile is managed by the Organization", async () => {
+        const onStale = vi.fn();
+        const fetchMock = stubFetch({});
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) =>
+                init?.method === "PUT"
+                    ? response(
+                          {
+                              error: "This recording is shared with the Organization",
+                              code: "RECORDING_SHARED",
+                          },
+                          409,
+                      )
+                    : response({ ...VERSION, speakers: [] }),
+        );
+        renderTags(vi.fn(), undefined, { onStale });
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Speaker 0" }),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: /unknown/i }),
+        );
+
+        await waitFor(() => {
+            expect(toastError).toHaveBeenCalledWith(
+                "This recording was shared meanwhile. The Organization manages its speakers now.",
+            );
+        });
+        expect(onStale).toHaveBeenCalled();
     });
 
     it("marks a speaker unknown from the picker and clears it again", async () => {

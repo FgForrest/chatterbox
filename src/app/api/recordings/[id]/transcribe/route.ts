@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { requireApiSession } from "@/lib/auth-server";
-import { apiHandler } from "@/lib/errors";
+import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import {
     recordingJobSubject,
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
+import { isPrivateCopyFrozen, recordingShared } from "@/lib/sharing/frozen";
 import {
     enqueueTranscriptionJob,
     TRANSCRIPTION_JOB_KIND,
@@ -20,8 +21,10 @@ type IdContext = { params: Promise<{ id: string }> };
  * with upload and Plaud-sync auto-transcription, so concurrent triggers all
  * converge on the database's one-active-job constraint.
  *
- * `?view=org` transcribes the Organization view of a shared recording with
- * the caller's own provider; it never touches the owner's transcript.
+ * `?view=org` transcribes the Organization view of a shared recording, for
+ * the organization account only (403 for anyone else); it never touches the
+ * owner's transcript. The owner's own transcript of a shared recording is
+ * frozen until it is withdrawn (409 RECORDING_SHARED).
  *
  * Request body (all optional):
  *   - `providerId`: use a specific configured provider instead of the
@@ -32,8 +35,20 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
-    await requireRecordingView(session.user.id, id, view);
-    if (view === "org") assertOrgScopeWritable();
+    const access = await requireRecordingView(session.user.id, id, view);
+    if (view === "org") {
+        assertOrgScopeWritable();
+        if (session.user.id !== access.orgUserId) {
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Only the organization account transcribes a shared recording",
+                403,
+            );
+        }
+    } else if (await isPrivateCopyFrozen(id)) {
+        // The run checks again when it starts, and when it writes.
+        throw recordingShared();
+    }
 
     const body = (await request.json().catch(() => ({}))) as Record<
         string,

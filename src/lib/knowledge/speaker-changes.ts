@@ -15,6 +15,8 @@ import {
     writeSpeakerInTx,
 } from "@/lib/knowledge/attribution";
 import { createPersonInTx } from "@/lib/knowledge/people";
+import { recordingShared } from "@/lib/sharing/frozen";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -37,6 +39,12 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
     answer: SpeakerAnswer;
     /** The human answering, recorded on what they confirm. */
     actorUserId: string;
+    /**
+     * The organization account, on a change to the owner's own transcript:
+     * refused (409) while the recording is shared with it, as its private
+     * copy is frozen. Checked under the recording lock sharing takes.
+     */
+    frozenWhileSharedWith?: string | null;
 }
 
 /**
@@ -62,9 +70,20 @@ export async function changeTranscriptSpeaker(
  */
 export async function changeTranscriptSpeakerInTx(
     tx: Tx,
-    { answer, actorUserId, ...version }: SpeakerChangeArgs,
+    {
+        answer,
+        actorUserId,
+        frozenWhileSharedWith,
+        ...version
+    }: SpeakerChangeArgs,
 ): Promise<string | null> {
-    await lockForSpeakerChange(tx, version);
+    const { recordingId } = await lockForSpeakerChange(tx, version);
+    if (
+        frozenWhileSharedWith &&
+        (await isRecordingShared(recordingId, frozenWhileSharedWith, tx))
+    ) {
+        throw recordingShared();
+    }
     const where = {
         userId: version.userId,
         transcriptionId: version.transcriptionId,

@@ -10,17 +10,13 @@ import {
     type TranscriptSpeaker,
     transcriptChanged,
 } from "@/lib/knowledge/attribution";
-import {
-    getPerson,
-    MAX_DISPLAY_NAME_LENGTH,
-    promotePerson,
-} from "@/lib/knowledge/people";
+import { getPerson, MAX_DISPLAY_NAME_LENGTH } from "@/lib/knowledge/people";
 import {
     changeTranscriptSpeaker,
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
-import { assertOrgScopeWritable, isOrgScopeEnabled } from "@/lib/org/config";
+import { assertOrgScopeWritable } from "@/lib/org/config";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -255,9 +251,12 @@ function personNotFound(): AppError {
  * is the only evidence this feature treats as strong enough to reach a
  * summary or an export.
  *
- * `?view=org` changes a speaker of the Organization view, for everyone: only
+ * `?view=org` changes a speaker of the Organization view, for everyone, and
+ * only the organization account may (403 for anyone else): only
  * Organization people may be picked, a new name becomes an Organization
- * person, and the owner's own transcript is never touched.
+ * person, and the owner's own transcript is never touched. The owner's own
+ * transcript of a shared recording is frozen until it is withdrawn (409
+ * RECORDING_SHARED).
  */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -269,7 +268,15 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     if (view === "org" && access.orgUserId) {
         assertOrgScopeWritable();
         const orgUserId = access.orgUserId;
-        const curator = session.user.id === orgUserId;
+        // A shared recording's speakers are the organization account's to
+        // change; everyone else reads them.
+        if (session.user.id !== orgUserId) {
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "Only the organization account changes a shared recording's speakers",
+                403,
+            );
+        }
 
         // Checked before anything is copied, so a bad request leaves no trace.
         let personId: string | null = null;
@@ -282,15 +289,6 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             personId = person.id;
         }
         if (change.kind === "reject") {
-            // Only the curator is shown suggestions here, so only the
-            // curator can have one to refuse.
-            if (!curator) {
-                throw new AppError(
-                    ErrorCode.FORBIDDEN,
-                    "Only the organization account reviews suggestions",
-                    403,
-                );
-            }
             const person = await getPerson(session.user.id, change.personId);
             if (!person || person.scope !== "org") throw personNotFound();
         }
@@ -312,7 +310,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
                 await getTranscriptSpeakers(orgUserId, result.transcriptionId, {
                     orgPeopleOnly: true,
                 }),
-                { curator, ownersTranscript: false },
+                { curator: true, ownersTranscript: false },
             ),
         });
     }
@@ -331,41 +329,20 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         }
     }
 
-    const personId = await changeTranscriptSpeaker({
+    await changeTranscriptSpeaker({
         userId: session.user.id,
         transcriptionId: transcript.id,
         revision: change.revision,
         label: change.label,
         answer: answerOf(change, existingPersonId),
         actorUserId: session.user.id,
+        // Shared, the owner's transcript stays as it was shared.
+        frozenWhileSharedWith: access.orgUserId,
     });
 
     // A suggestion is never shown outside this panel, so taking one back
     // changes nothing anyone else reads.
     if (change.kind !== "reject") {
-        // While the Organization view still shows this transcript, a name
-        // confirmed on it is a name everyone reads, so its person joins the
-        // Organization's knowledge base.
-        if (
-            personId &&
-            access.shared &&
-            access.orgUserId &&
-            isOrgScopeEnabled()
-        ) {
-            const reader = await effectiveViewReader(
-                id,
-                {
-                    ownerUserId: access.ownerUserId,
-                    contentUserId: access.orgUserId,
-                },
-                "transcript",
-            );
-            if (reader.fallback) {
-                await promotePerson(personId, access.orgUserId);
-                await orgContentChanged(id);
-            }
-        }
-
         // A rename changes what every downstream reader of this recording
         // sees, and `GET /api/v1/recordings` pages on `updatedAt`, so a client
         // syncing incrementally would otherwise never learn about it.

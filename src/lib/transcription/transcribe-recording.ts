@@ -44,6 +44,7 @@ import {
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
+import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
 import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -77,6 +78,11 @@ export type TranscribeErrorCode =
     | "AUDIO_REAPED"
     | "HOSTED_LOCKED_OUT"
     | "MYNAH_BUDGET_EXHAUSTED"
+    /**
+     * Shared with the Organization: the owner's transcripts are frozen, and
+     * only the organization account transcribes the Organization view.
+     */
+    | "RECORDING_SHARED"
     | "TRANSCRIPTION_FAILED";
 
 export interface StoreBrowserTranscriptionInput {
@@ -139,6 +145,7 @@ export async function storeBrowserTranscription(
     }
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
+    const RECORDING_FROZEN = Symbol("recording-frozen");
     try {
         await db.transaction(async (tx) => {
             const [stillActive] = await tx
@@ -154,6 +161,11 @@ export async function storeBrowserTranscription(
                 .limit(1);
             if (!stillActive || stillActive.deletedAt) {
                 throw RECORDING_TOMBSTONED;
+            }
+            // Shared since the browser started: the transcript stays as it
+            // was shared.
+            if (await isPrivateCopyFrozen(recordingId, tx)) {
+                throw RECORDING_FROZEN;
             }
 
             const [existing] = await tx
@@ -241,6 +253,7 @@ export async function storeBrowserTranscription(
                 errorCode: "RECORDING_DELETED",
             };
         }
+        if (txError === RECORDING_FROZEN) return recordingSharedResult();
         throw txError;
     }
 
@@ -350,6 +363,17 @@ async function transcribeRecordingInner(
     // `userId` is the owner of the rows this run reads and writes; on the
     // private view that is also the actor and the recording's owner.
     const userId = ctx.contentUserId;
+    // A shared recording is the organization account's to transcribe, on
+    // the Organization view; its private copy stays as it was shared.
+    // Checked where the run starts, whoever queued it, so no provider is
+    // paid for a transcript that would be refused. The write checks again.
+    if (
+        orgView
+            ? ctx.actorUserId !== ctx.contentUserId
+            : await isPrivateCopyFrozen(recordingId)
+    ) {
+        return recordingSharedResult();
+    }
     try {
         // Hosted lockout: a lapsed account is read-only. No-op on
         // self-host (isHostedLockedOut always false there).
@@ -688,7 +712,7 @@ async function transcribeRecordingInner(
         // tombstone-aware, source-scoped upsert. The persisted model is the
         // *actual* model used (may differ from the provider default when the
         // manual route supplied an override).
-        const { committed } = await upsertTranscription({
+        const { committed, reason } = await upsertTranscription({
             userId,
             recordingId,
             text: transcriptionText,
@@ -702,6 +726,7 @@ async function transcribeRecordingInner(
             producedByUserId: ctx.actorUserId,
         });
 
+        if (!committed && reason === "shared") return recordingSharedResult();
         if (!committed) {
             return {
                 success: false,
@@ -981,6 +1006,14 @@ async function transcribeRecordingInner(
             errorCode: "TRANSCRIPTION_FAILED",
         };
     }
+}
+
+function recordingSharedResult(): TranscribeResult {
+    return {
+        success: false,
+        error: "This recording is shared with the Organization; only its account transcribes it",
+        errorCode: "RECORDING_SHARED",
+    };
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {

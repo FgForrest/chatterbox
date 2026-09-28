@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { parseApiError } from "@/lib/api-errors";
+import { sharedRecordingIds } from "@/lib/folders/hierarchy";
 import type { FolderOrganization } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
@@ -225,6 +226,10 @@ export function RecordingWorkstation({
                             onTranscribe={handleTranscribe}
                             onTranscribeComplete={refresh}
                             onTranscriptStale={refresh}
+                            // Shared, the owner's copy is frozen.
+                            readOnly={sharedRecordingIds(
+                                folderOrganization,
+                            ).has(recording.id)}
                             onSeekToTurn={
                                 recording.audioReaped
                                     ? undefined

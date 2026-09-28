@@ -271,6 +271,8 @@ describe("Sync", () => {
                 {
                     transcriptMode: "plaud_only",
                     excludeIds: [],
+                    // No Organization in this deployment.
+                    excludeSharedWith: null,
                 },
             );
             await vi.waitFor(() => {
@@ -339,6 +341,8 @@ describe("Sync", () => {
                 {
                     transcriptMode: "keep_both",
                     excludeIds: [],
+                    // No Organization in this deployment.
+                    excludeSharedWith: null,
                 },
             );
         });

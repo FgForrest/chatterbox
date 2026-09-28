@@ -768,14 +768,3 @@ export async function lockOrgPeople(tx: Tx): Promise<void> {
         sql`select pg_advisory_xact_lock(hashtext('riffado:org-people'))`,
     );
 }
-
-/** Promote one person, e.g. after it was confirmed on a shared transcript. */
-export async function promotePerson(
-    personId: string,
-    orgUserId: string,
-): Promise<string | null> {
-    return db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        return promotePersonInTx(tx, personId, orgUserId);
-    });
-}

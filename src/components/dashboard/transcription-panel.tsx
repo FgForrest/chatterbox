@@ -102,6 +102,13 @@ interface TranscriptionPanelProps {
     onSeekToTurn?: (startMs: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
+    /**
+     * The transcript is not the viewer's to change: a shared recording's
+     * private copy is frozen, and on the Organization view only its account
+     * changes it. Speakers are shown read-only and no transcription is
+     * offered.
+     */
+    readOnly?: boolean;
 }
 
 function SourceSwitcher({
@@ -214,6 +221,7 @@ export function TranscriptionPanel({
     onTranscriptStale,
     onSeekToTurn,
     getPlaybackMs,
+    readOnly = false,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
     const summaryPresetCopy = useSummaryPresetCopy();
@@ -492,7 +500,7 @@ export function TranscriptionPanel({
                                     view={view}
                                 />
                             )}
-                            {activeTranscript?.text && (
+                            {activeTranscript?.text && !readOnly && (
                                 <Button
                                     onClick={() =>
                                         onTranscribe(activeTranscript.source)
@@ -517,49 +525,51 @@ export function TranscriptionPanel({
                                     {i18n("Re-transcribe")}
                                 </Button>
                             )}
-                            {!activeTranscript?.text && !isTranscribing && (
-                                <>
-                                    <Button
-                                        onClick={() => onTranscribe()}
-                                        size="sm"
-                                        disabled={
-                                            isTranscribing ||
-                                            recording.audioReaped
-                                        }
-                                        title={
-                                            recording.audioReaped
-                                                ? i18n(
-                                                      "Audio was removed by your retention policy",
-                                                  )
-                                                : undefined
-                                        }
-                                    >
-                                        <Sparkles className="size-4 mr-2" />{" "}
-                                        {i18n("Transcribe")}
-                                    </Button>
-                                    {!orgView && (
-                                        <TranscribeInBrowserButton
-                                            recordingId={recording.id}
+                            {!activeTranscript?.text &&
+                                !isTranscribing &&
+                                !readOnly && (
+                                    <>
+                                        <Button
+                                            onClick={() => onTranscribe()}
+                                            size="sm"
                                             disabled={
                                                 isTranscribing ||
                                                 recording.audioReaped
                                             }
-                                            onComplete={
-                                                // Falling back to `onTranscribe` here
-                                                // would kick off a redundant SERVER
-                                                // transcription right after a
-                                                // successful browser one, possibly
-                                                // overwriting it. Callers that care
-                                                // about refreshing after a browser
-                                                // transcription must pass
-                                                // `onTranscribeComplete` explicitly.
-                                                onTranscribeComplete ??
-                                                (() => {})
+                                            title={
+                                                recording.audioReaped
+                                                    ? i18n(
+                                                          "Audio was removed by your retention policy",
+                                                      )
+                                                    : undefined
                                             }
-                                        />
-                                    )}
-                                </>
-                            )}
+                                        >
+                                            <Sparkles className="size-4 mr-2" />{" "}
+                                            {i18n("Transcribe")}
+                                        </Button>
+                                        {!orgView && (
+                                            <TranscribeInBrowserButton
+                                                recordingId={recording.id}
+                                                disabled={
+                                                    isTranscribing ||
+                                                    recording.audioReaped
+                                                }
+                                                onComplete={
+                                                    // Falling back to `onTranscribe` here
+                                                    // would kick off a redundant SERVER
+                                                    // transcription right after a
+                                                    // successful browser one, possibly
+                                                    // overwriting it. Callers that care
+                                                    // about refreshing after a browser
+                                                    // transcription must pass
+                                                    // `onTranscribeComplete` explicitly.
+                                                    onTranscribeComplete ??
+                                                    (() => {})
+                                                }
+                                            />
+                                        )}
+                                    </>
+                                )}
                         </div>
                     </div>
                     {activeTranscript && speakerTags.length > 0 && (
@@ -578,6 +588,7 @@ export function TranscriptionPanel({
                             onSeek={onSeekToTurn}
                             shownVersion={activeTranscript.version}
                             onStale={onTranscriptStale}
+                            readOnly={readOnly}
                         />
                     )}
                 </CardHeader>

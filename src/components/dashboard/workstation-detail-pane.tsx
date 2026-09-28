@@ -45,6 +45,8 @@ interface Props {
     onTranscribeComplete?: () => void;
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
     onTranscriptStale?: () => void;
+    /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
+    transcriptReadOnly?: boolean;
     onSelectRecording: (r: Recording) => void;
     onRenamed?: (filename: string) => void;
     onDelete: (recording: Recording) => Promise<void>;
@@ -95,6 +97,7 @@ export function WorkstationDetailPane({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
+    transcriptReadOnly,
     onSelectRecording,
     onRenamed,
     onDelete,
@@ -205,6 +208,7 @@ export function WorkstationDetailPane({
                             onTranscribe={onTranscribe}
                             onTranscribeComplete={onTranscribeComplete}
                             onTranscriptStale={onTranscriptStale}
+                            readOnly={transcriptReadOnly}
                             onSeekToTurn={
                                 currentRecording.audioReaped
                                     ? undefined

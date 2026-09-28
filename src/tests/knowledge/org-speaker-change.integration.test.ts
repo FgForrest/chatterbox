@@ -155,7 +155,6 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const OWNER = "user-owner";
 const BOB = "user-bob";
-const CAROL = "user-carol";
 const REC = "rec-shared";
 const MODEL = "scribe_v2+diarize";
 
@@ -243,7 +242,6 @@ describeWithDatabase(
                 .values([
                     { id: OWNER, email: "owner@example.test" },
                     { id: BOB, email: "bob@example.test" },
-                    { id: CAROL, email: "carol@example.test" },
                 ]);
             orgUserId = (await ensureOrgAccount()) ?? "";
             await db()
@@ -330,7 +328,7 @@ describeWithDatabase(
         it("refuses a change made on the owner's transcript once the Organization re-transcribed", async () => {
             await ownerTranscript(firstTurns);
             await share();
-            const seen = await shownVersion(BOB);
+            const seen = await shownVersion(orgUserId);
 
             // The Organization's own transcript, new text at revision 0,
             // commits after the route checked what Bob saw.
@@ -348,7 +346,7 @@ describeWithDatabase(
                 expect(result.committed).toBe(true);
             };
 
-            const response = await put(BOB, seen, {
+            const response = await put(orgUserId, seen, {
                 label: "speaker_0",
                 displayName: "Jana",
             });
@@ -358,32 +356,36 @@ describeWithDatabase(
             expect(await orgPeopleNamed()).toEqual([]);
         });
 
-        it("refuses a stale view of the owner's transcript after another member's first change", async () => {
+        it("refuses a stale view of the owner's transcript after another tab's first change", async () => {
             await ownerTranscript(firstTurns);
             await share();
-            const bobSaw = await shownVersion(BOB);
-            const carolSaw = await shownVersion(CAROL);
-            expect(bobSaw).toEqual(carolSaw);
+            const firstTab = await shownVersion(orgUserId);
+            const secondTab = await shownVersion(orgUserId);
 
             expect(
                 (
-                    await put(CAROL, carolSaw, {
+                    await put(orgUserId, secondTab, {
                         label: "speaker_1",
                         unknown: true,
                     })
                 ).status,
             ).toBe(200);
             expect(
-                (await put(BOB, bobSaw, { label: "speaker_0", unknown: true }))
-                    .status,
+                (
+                    await put(orgUserId, firstTab, {
+                        label: "speaker_0",
+                        unknown: true,
+                    })
+                ).status,
             ).toBe(409);
 
-            // Reloaded, Bob sees the Organization's copy and can change it.
-            const reloaded = await shownVersion(BOB);
-            expect(reloaded.transcriptionId).not.toBe(bobSaw.transcriptionId);
+            // Reloaded, the tab shows the Organization's copy and can
+            // change it.
+            const reloaded = await shownVersion(orgUserId);
+            expect(reloaded.transcriptionId).not.toBe(firstTab.transcriptionId);
             expect(
                 (
-                    await put(BOB, reloaded, {
+                    await put(orgUserId, reloaded, {
                         label: "speaker_0",
                         unknown: true,
                     })
@@ -391,7 +393,19 @@ describeWithDatabase(
             ).toBe(200);
         });
 
-        it("copies the names of the text it copies, while the owner rewrites alongside", async () => {
+        it("refuses members: the organization account changes a shared recording's speakers", async () => {
+            await ownerTranscript(firstTurns);
+            await share();
+            const response = await put(BOB, await shownVersion(BOB), {
+                label: "speaker_0",
+                displayName: "Jana",
+            });
+            expect(response.status).toBe(403);
+            expect(await orgRows()).toEqual([]);
+            expect(await orgPeopleNamed()).toEqual([]);
+        });
+
+        it("copies the names of the text it copies, and the owner cannot rewrite it alongside", async () => {
             const ownId = await ownerTranscript(firstTurns);
             const [jana, petr] = await db()
                 .insert(people)
@@ -423,10 +437,11 @@ describeWithDatabase(
                     },
                 ]);
             await share();
-            const seen = await shownVersion(BOB);
+            const seen = await shownVersion(orgUserId);
 
             // The owner re-transcribes, numbering the voices the other way,
-            // as the copy is being made.
+            // as the copy is being made: shared, the owner's transcript is
+            // frozen, so the rewrite waits for the copy and writes nothing.
             let rewrite: Promise<unknown> = Promise.resolve();
             hooks.onPromote = () => {
                 rewrite = upsertTranscription({
@@ -443,11 +458,14 @@ describeWithDatabase(
                     model: MODEL,
                 });
             };
-            const response = await put(BOB, seen, {
+            const response = await put(orgUserId, seen, {
                 label: "speaker_0",
                 unknown: true,
             });
-            await rewrite;
+            expect(await rewrite).toEqual({
+                committed: false,
+                reason: "shared",
+            });
             expect(response.status).toBe(200);
 
             const byLabel = async (transcriptionId: string) =>
@@ -480,16 +498,16 @@ describeWithDatabase(
                         eq(transcriptions.userId, orgUserId),
                     ),
                 );
-            // The copy holds the first text: Petr on speaker_1, and Bob's
-            // answer on speaker_0, where Jana was.
+            // The copy holds the first text: Petr on speaker_1, and the
+            // organization account's answer on speaker_0, where Jana was.
             expect(await byLabel(copy?.id ?? "")).toEqual({
                 speaker_0: "unknown",
                 speaker_1: petr?.id,
             });
-            // The owner's rewrite moved the owner's names onto its new labels.
+            // The owner's transcript is as it was shared.
             expect(await byLabel(ownId)).toEqual({
-                speaker_1: jana?.id,
-                speaker_0: petr?.id,
+                speaker_0: jana?.id,
+                speaker_1: petr?.id,
             });
         });
     },

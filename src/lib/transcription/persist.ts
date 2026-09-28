@@ -5,6 +5,7 @@ import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -80,15 +81,20 @@ export interface UpsertEnhancementArgs {
 }
 
 /**
- * Result of a tombstone-aware upsert. `committed: false` means the recording
- * was soft-deleted mid-flight and nothing was written — callers should treat
- * that as a skip (e.g. RECORDING_DELETED), not a hard error.
+ * Result of a tombstone-aware upsert. `committed: false` means nothing was
+ * written — callers should treat that as a skip, not a hard error:
+ * - `reason: "shared"`: the recording is shared with the Organization, so
+ *   its private transcripts are frozen (RECORDING_SHARED);
+ * - otherwise it was soft-deleted mid-flight, its transcript erased, or
+ *   (Organization view) it is no longer shared (e.g. RECORDING_DELETED).
  */
 export interface UpsertResult {
     committed: boolean;
+    reason?: "shared";
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
+const RECORDING_FROZEN = Symbol("recording-frozen");
 
 // Both upserts run inside a transaction that takes a row-level write lock
 // (`FOR UPDATE`) on the recording and re-checks the soft-delete tombstone, so
@@ -148,6 +154,13 @@ export async function upsertTranscription(
                 (orgView && !(await isRecordingShared(recordingId, userId, tx)))
             ) {
                 throw RECORDING_WRITE_BLOCKED;
+            }
+            // Shared, the owner's transcripts stay as they were shared, from
+            // every writer: a provider run, a Plaud import. Checked under
+            // the lock sharing takes, so a run that began before the share
+            // and ends after it writes nothing.
+            if (!orgView && (await isPrivateCopyFrozen(recordingId, tx))) {
+                throw RECORDING_FROZEN;
             }
 
             const [current] = await tx
@@ -236,6 +249,9 @@ export async function upsertTranscription(
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };
+        }
+        if (txError === RECORDING_FROZEN) {
+            return { committed: false, reason: "shared" };
         }
         throw txError;
     }

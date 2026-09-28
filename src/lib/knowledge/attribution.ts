@@ -268,12 +268,12 @@ export async function getTranscriptSpeakers(
  * re-transcription never interleave: the change either lands before the
  * rewrite, which then moves it onto the new labels, or it sees the new
  * revision and is refused instead of naming a label that now means
- * someone else.
+ * someone else. Returns the recording it locked.
  */
 export async function lockForSpeakerChange(
     tx: Tx,
     { userId, transcriptionId, revision }: TranscriptVersion,
-): Promise<void> {
+): Promise<{ recordingId: string }> {
     const [recording] = await tx
         .select({ id: recordings.id })
         .from(recordings)
@@ -308,6 +308,7 @@ export async function lockForSpeakerChange(
         );
     }
     if (transcript.revision !== revision) throw transcriptChanged();
+    return { recordingId: recording.id };
 }
 
 /** A change was made on a transcript version that is no longer the one shown. */

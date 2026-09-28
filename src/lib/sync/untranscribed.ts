@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
+import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
 /** Max already-synced recordings to retry per sync. */
 export const AUTO_TRANSCRIBE_RETRY_LIMIT = 5;
@@ -20,6 +21,11 @@ export type AutoTranscribeRetryOptions = {
     /** When set, only these recording ids are considered. */
     onlyIds?: readonly string[];
     limit?: number;
+    /**
+     * The organization account: recordings shared with it are left out,
+     * their private copy being frozen until they are withdrawn.
+     */
+    excludeSharedWith?: string | null;
 };
 
 /**
@@ -74,6 +80,11 @@ export async function listUntranscribedRecordingIds(
     }
     if (onlyIds.length > 0) {
         conditions.push(inArray(recordings.id, [...onlyIds]));
+    }
+    if (options.excludeSharedWith) {
+        conditions.push(
+            not(sharedRecordingCondition(options.excludeSharedWith)),
+        );
     }
 
     const rows = await db

@@ -45,6 +45,12 @@ function failedResultError(
                 "The hosted account cannot transcribe recordings",
                 403,
             );
+        case "RECORDING_SHARED":
+            return new CompletedTranscriptionFailure(
+                ErrorCode.RECORDING_SHARED,
+                "The recording is shared with the Organization",
+                409,
+            );
         case "MYNAH_BUDGET_EXHAUSTED":
             return new CompletedTranscriptionFailure(
                 ErrorCode.MYNAH_BUDGET_EXHAUSTED,
@@ -95,6 +101,11 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             force: payload.force,
             view: payload.view,
         });
+        // Shared since it was queued, or queued on the Organization view by
+        // someone other than its account: nothing to do, and nothing failed.
+        if (result.errorCode === "RECORDING_SHARED") {
+            return { skipped: "shared" };
+        }
         if (!result.success) throw failedResultError(result.errorCode);
         return { transcribed: true };
     },

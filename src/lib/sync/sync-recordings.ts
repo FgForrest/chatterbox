@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, notInArray, or } from "drizzle-orm";
+import { and, eq, isNull, ne, not, notInArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -20,6 +20,7 @@ import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
+import { getOrgUserId } from "@/lib/org/config";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     findInlineContent,
@@ -35,6 +36,10 @@ import {
 } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
+import {
+    isRecordingShared,
+    sharedRecordingCondition,
+} from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
     claimAutoTranscribeIds,
@@ -95,6 +100,13 @@ interface SyncContext {
     notificationEmail: string | null;
     locale: AppLocale | null;
     barkPushUrl: string | null;
+    /**
+     * The organization account, or null without an Organization. A
+     * recording shared with it takes no Plaud transcript and no automatic
+     * transcription: its private copy is frozen until it is withdrawn, and
+     * the next sync after that fills the gap.
+     */
+    orgUserId: string | null;
 }
 
 /** A freshly-synced recording that Plaud may hold transcript/summary content
@@ -189,7 +201,7 @@ function buildImportCandidate(
 }
 
 async function loadPlaudContentGaps(
-    userId: string,
+    { userId, orgUserId }: Pick<SyncContext, "userId" | "orgUserId">,
     recordingId: string,
     flags: {
         isTrans: boolean;
@@ -217,7 +229,10 @@ async function loadPlaudContentGaps(
             )
             .limit(1);
         if (existing) hasPlaudTranscript = true;
-        else needsTranscript = true;
+        else
+            needsTranscript = !(
+                orgUserId && (await isRecordingShared(recordingId, orgUserId))
+            );
     }
 
     let needsSummary = false;
@@ -242,6 +257,7 @@ async function loadPlaudContentGaps(
 async function hasUnseenPlaudContentGaps(
     userId: string,
     seenRecordingIds: Set<string>,
+    orgUserId: string | null,
 ): Promise<boolean> {
     const conditions = [
         eq(recordings.userId, userId),
@@ -251,6 +267,10 @@ async function hasUnseenPlaudContentGaps(
             and(
                 isNull(transcriptions.id),
                 isNull(recordings.transcriptReapedAt),
+                // Frozen while shared: not a gap this sync can fill.
+                orgUserId
+                    ? not(sharedRecordingCondition(orgUserId))
+                    : undefined,
             ),
             and(isNull(aiEnhancements.id), isNull(recordings.summaryReapedAt)),
         ),
@@ -338,7 +358,7 @@ async function processRecording(
                 );
                 if (importCandidate) {
                     const gaps = await loadPlaudContentGaps(
-                        context.userId,
+                        context,
                         existingRecording.id,
                         {
                             isTrans: importCandidate.isTrans,
@@ -373,7 +393,7 @@ async function processRecording(
                 );
                 if (importCandidate) {
                     const gaps = await loadPlaudContentGaps(
-                        context.userId,
+                        context,
                         existingRecording.id,
                         {
                             isTrans: importCandidate.isTrans,
@@ -770,6 +790,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 settings?.notificationEmail || user?.email || null,
             locale: normalizeLocale(user?.uiLocale),
             barkPushUrl: settings?.barkPushUrl || null,
+            orgUserId: await getOrgUserId(),
         };
 
         const plaudClient = await createPlaudClient(
@@ -856,6 +877,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                             !(await hasUnseenPlaudContentGaps(
                                 userId,
                                 seenRecordingIds,
+                                context.orgUserId,
                             ))
                         ) {
                             hasMore = false;
@@ -962,6 +984,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             try {
                 retryIds = await listAutoTranscribeRetryIds(userId, {
                     transcriptMode: context.transcriptMode,
+                    excludeSharedWith: context.orgUserId,
                 });
             } catch (error) {
                 console.error("Auto-transcribe retry lookup failed:", error);
@@ -1068,7 +1091,7 @@ async function importPlaudContent(
         if (tokenDead) break;
         try {
             const gaps = await loadPlaudContentGaps(
-                context.userId,
+                context,
                 candidate.recordingId,
                 {
                     isTrans: candidate.isTrans,

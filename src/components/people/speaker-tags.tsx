@@ -6,7 +6,7 @@ import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
-import { toastApiError } from "@/lib/api-errors";
+import { parseApiError, toastApiError } from "@/lib/api-errors";
 import {
     type SpeakerAttributions,
     speakerAnchorId,
@@ -47,6 +47,11 @@ interface SpeakerTagsProps {
     shownVersion?: TranscriptVersionRef;
     /** The transcript on screen was replaced: reload the page's transcripts. */
     onStale?: () => void;
+    /**
+     * Show the names without changing them: the Organization manages the
+     * speakers of a shared recording.
+     */
+    readOnly?: boolean;
 }
 
 /** One stored transcript, at one revision. */
@@ -146,6 +151,7 @@ export function SpeakerTags({
     onSeek,
     shownVersion,
     onStale,
+    readOnly = false,
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
     const speakersUrl = withRecordingView(
@@ -263,11 +269,18 @@ export function SpeakerTags({
             return false;
         }
         if (response.status === 409) {
-            // Re-transcribed meanwhile: the label may mean someone else now.
+            const error = await parseApiError(response);
             toast.error(
-                i18n(
-                    "This transcript changed meanwhile. Its speakers were reloaded; try again.",
-                ),
+                error.code === "RECORDING_SHARED"
+                    ? // Shared meanwhile: the page reloads it as read-only.
+                      i18n(
+                          "This recording was shared meanwhile. The Organization manages its speakers now.",
+                      )
+                    : // Re-transcribed meanwhile: the label may mean someone
+                      // else now.
+                      i18n(
+                          "This transcript changed meanwhile. Its speakers were reloaded; try again.",
+                      ),
             );
             onStaleRef.current?.();
             await load();
@@ -288,6 +301,54 @@ export function SpeakerTags({
     }
 
     if (speakers.length === 0) return null;
+
+    if (readOnly) {
+        return (
+            <fieldset
+                className="flex flex-wrap items-center gap-2 pt-3"
+                aria-label={i18n("Transcript speakers")}
+            >
+                {speakers.map((speaker, index) => {
+                    const attribution = attributions[speaker.speaker];
+                    const accent =
+                        SPEAKER_ACCENTS[index % SPEAKER_ACCENTS.length];
+                    const dot = (
+                        <span className={`size-1.5 rounded-full ${accent}`} />
+                    );
+                    if (attribution) {
+                        return (
+                            <Link
+                                key={speaker.speaker}
+                                id={speakerAnchorId(speaker.speaker)}
+                                href={`/people/${attribution.personId}`}
+                                className="inline-flex h-8 items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-medium transition-colors hover:bg-primary/20"
+                            >
+                                {dot}
+                                {attribution.name}
+                            </Link>
+                        );
+                    }
+                    return (
+                        <span
+                            key={speaker.speaker}
+                            id={speakerAnchorId(speaker.speaker)}
+                            className="inline-flex h-8 items-center gap-2 rounded-full border bg-muted/30 px-3 text-xs font-medium text-muted-foreground"
+                        >
+                            {dot}
+                            {unknownLabels.has(speaker.speaker)
+                                ? i18n("{speaker}: unknown", {
+                                      speaker: speaker.label,
+                                  })
+                                : speaker.label}
+                        </span>
+                    );
+                })}
+                <span className="text-xs text-muted-foreground">
+                    {i18n("Managed by the Organization")}
+                </span>
+            </fieldset>
+        );
+    }
 
     const openSpeaker = speakers.find(
         (speaker) => speaker.speaker === openLabel,

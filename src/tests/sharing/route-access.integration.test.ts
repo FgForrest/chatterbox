@@ -416,7 +416,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             expect(still?.deletedAt).toBeNull();
         });
 
-        it("names Organization speakers only with Organization people", async () => {
+        it("names Organization speakers only by its account, with Organization people", async () => {
             const speakers = await call(
                 getSpeakers,
                 MEMBER,
@@ -427,56 +427,80 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             await expect(speakers.json()).resolves.toMatchObject({
                 fallback: false,
             });
+            const orgPath = `/api/recordings/${REC}/speakers?view=org`;
+            const change = async (user: string, body: object) =>
+                (
+                    await call(putSpeaker, user, orgPath, {
+                        method: "PUT",
+                        ...json({
+                            ...(await seenVersion(user, orgPath)),
+                            ...body,
+                        }),
+                    })
+                ).status;
+
+            // Members read the speakers; the organization account names them.
+            expect(
+                await change(MEMBER, {
+                    label: "speaker_0",
+                    displayName: "Eva",
+                }),
+            ).toBe(403);
             const [privatePerson] = await db()
                 .insert(people)
-                .values({ userId: MEMBER, displayName: encryptText("Mine") })
+                .values({ userId: OWNER, displayName: encryptText("Mine") })
                 .returning({ id: people.id });
             expect(
-                (
-                    await call(
-                        putSpeaker,
-                        MEMBER,
-                        `/api/recordings/${REC}/speakers?view=org`,
-                        {
-                            method: "PUT",
-                            ...json({
-                                ...(await seenVersion(
-                                    MEMBER,
-                                    `/api/recordings/${REC}/speakers?view=org`,
-                                )),
-                                label: "speaker_0",
-                                personId: privatePerson?.id,
-                            }),
-                        },
-                    )
-                ).status,
+                await change(orgUserId, {
+                    label: "speaker_0",
+                    personId: privatePerson?.id,
+                }),
             ).toBe(404);
+            expect(
+                await change(orgUserId, {
+                    label: "speaker_0",
+                    displayName: "Eva",
+                }),
+            ).toBe(200);
+
+            // The owner's own transcript is frozen while shared.
+            const privatePath = `/api/recordings/${REC}/speakers`;
+            const frozen = await call(putSpeaker, OWNER, privatePath, {
+                method: "PUT",
+                ...json({
+                    ...(await seenVersion(OWNER, privatePath)),
+                    label: "speaker_0",
+                    displayName: "Eva",
+                }),
+            });
+            expect(frozen.status).toBe(409);
+            await expect(frozen.json()).resolves.toMatchObject({
+                code: "RECORDING_SHARED",
+            });
+            // Refused before anyone was created.
+            expect(
+                await db()
+                    .select()
+                    .from(people)
+                    .where(eq(people.userId, OWNER)),
+            ).toHaveLength(1);
+        });
+
+        it("queues Organization work for its account only and lets every viewer follow it", async () => {
+            // Members read a shared recording; its account re-transcribes it.
             expect(
                 (
                     await call(
-                        putSpeaker,
+                        postTranscribe,
                         MEMBER,
-                        `/api/recordings/${REC}/speakers?view=org`,
-                        {
-                            method: "PUT",
-                            ...json({
-                                ...(await seenVersion(
-                                    MEMBER,
-                                    `/api/recordings/${REC}/speakers?view=org`,
-                                )),
-                                label: "speaker_0",
-                                displayName: "Eva",
-                            }),
-                        },
+                        `/api/recordings/${REC}/transcribe?view=org`,
+                        { method: "POST" },
                     )
                 ).status,
-            ).toBe(200);
-        });
-
-        it("queues Organization work as the member and lets every viewer follow it", async () => {
+            ).toBe(403);
             const queued = await call(
                 postTranscribe,
-                MEMBER,
+                orgUserId,
                 `/api/recordings/${REC}/transcribe?view=org`,
                 { method: "POST" },
             );
@@ -486,7 +510,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 .select()
                 .from(asyncJobs)
                 .where(eq(asyncJobs.id, jobId));
-            expect(job?.userId).toBe(MEMBER);
+            expect(job?.userId).toBe(orgUserId);
             expect(job?.subjectId).toBe(`org:${REC}`);
             expect(job?.payload).toMatchObject({ view: "org" });
 
@@ -498,17 +522,28 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
             await expect(owner.json()).resolves.toEqual({
                 activeJob: { jobId, status: "pending" },
             });
-            const followed = await call(getJob, OWNER, `/api/jobs/${jobId}`, {
+            const followed = await call(getJob, MEMBER, `/api/jobs/${jobId}`, {
                 params: { id: jobId },
             });
             expect(followed.status).toBe(200);
-            // The owner's private view has its own job slot.
+            // The owner's private view has its own job slot, and is frozen
+            // while shared.
             const privateView = await call(
                 getTranscribe,
                 OWNER,
                 `/api/recordings/${REC}/transcribe`,
             );
             await expect(privateView.json()).resolves.toEqual({});
+            const frozen = await call(
+                postTranscribe,
+                OWNER,
+                `/api/recordings/${REC}/transcribe`,
+                { method: "POST" },
+            );
+            expect(frozen.status).toBe(409);
+            await expect(frozen.json()).resolves.toMatchObject({
+                code: "RECORDING_SHARED",
+            });
         });
 
         it("lets members move but not withdraw, and lets the owner withdraw", async () => {
