@@ -92,3 +92,22 @@ FROM "users" AS "u", "recordings" AS "r"
 WHERE "org"."user_id" = "u"."id"
   AND "u"."role" = 'org'
   AND "r"."id" = "org"."recording_id";
+--> statement-breakpoint
+-- A kind now present is not reaped: the owner's retention or erase marked
+-- its own rows gone while the Organization's stayed, and those are the
+-- recording's now. Left set, the marker would hide them from every policy.
+UPDATE "recordings" AS "r"
+SET "transcript_reaped_at" = NULL
+WHERE "r"."transcript_reaped_at" IS NOT NULL
+  AND EXISTS (
+      SELECT 1 FROM "transcriptions" AS "t"
+      WHERE "t"."recording_id" = "r"."id" AND "t"."user_id" = "r"."user_id"
+  );
+--> statement-breakpoint
+UPDATE "recordings" AS "r"
+SET "summary_reaped_at" = NULL
+WHERE "r"."summary_reaped_at" IS NOT NULL
+  AND EXISTS (
+      SELECT 1 FROM "ai_enhancements" AS "e"
+      WHERE "e"."recording_id" = "r"."id" AND "e"."user_id" = "r"."user_id"
+  );

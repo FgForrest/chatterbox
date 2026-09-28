@@ -132,6 +132,15 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
             .returning({ id: recordingFolders.id });
         await recording("rec-shared");
         await recording("rec-withdrawn");
+        // The owner's retention had reaped their rows; the Organization's
+        // stayed, and become the recording's here.
+        await db()
+            .update(recordings)
+            .set({
+                transcriptReapedAt: new Date("2026-09-10T00:00:00Z"),
+                summaryReapedAt: new Date("2026-09-10T00:00:00Z"),
+            })
+            .where(eq(recordings.id, "rec-shared"));
         await db()
             .insert(recordingFolderAssignments)
             .values({
@@ -270,5 +279,14 @@ describeWithDatabase("merging the Organization's rows (PostgreSQL)", () => {
                 .from(transcriptions)
                 .where(eq(transcriptions.userId, ORG)),
         ).toEqual([]);
+        // Present again, so no longer marked reaped: retention sees them.
+        const [shared] = await db()
+            .select({
+                transcript: recordings.transcriptReapedAt,
+                summary: recordings.summaryReapedAt,
+            })
+            .from(recordings)
+            .where(eq(recordings.id, "rec-shared"));
+        expect(shared).toEqual({ transcript: null, summary: null });
     });
 });
