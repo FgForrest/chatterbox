@@ -1040,6 +1040,162 @@ export const transcriptSpeakerRejections = pgTable(
     }),
 );
 
+// Knowledge vocabulary: the kinds of things and relations facts are made of,
+// in three layers. Core rows (no owner) ship with the code; the organization
+// account's rows are the Organization's shared vocabulary; a user's rows are
+// their private vocabulary, visible and usable by them alone.
+//
+// Non-core keys are generated, never derived from the label: a key is stored
+// in the clear, and a private type's name is the user's to keep private.
+export const knowledgeEntityTypes = pgTable(
+    "knowledge_entity_types",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // Null for core types.
+        userId: text("user_id").references(() => users.id, {
+            onDelete: "cascade",
+        }),
+        key: varchar("key", { length: 64 }).notNull(),
+        // Encrypted; core labels are English source strings.
+        label: text("label").notNull(),
+        // `domainLookupHash("entity-type-label", label)`.
+        labelHmac: varchar("label_hmac", { length: 64 }).notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"active" | "retired">()
+            .notNull()
+            .default("active"),
+        // Set on a private type when the Organization adopted one of the
+        // same name: the user's later facts use the shared key.
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        ownerKeyUnique: unique("knowledge_entity_types_owner_key_unique")
+            .on(table.userId, table.key)
+            .nullsNotDistinct(),
+        ownerLabelUnique: unique("knowledge_entity_types_owner_label_unique")
+            .on(table.userId, table.labelHmac)
+            .nullsNotDistinct(),
+    }),
+);
+
+export const knowledgeRelationTypes = pgTable(
+    "knowledge_relation_types",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // Null for core relations.
+        userId: text("user_id").references(() => users.id, {
+            onDelete: "cascade",
+        }),
+        key: varchar("key", { length: 64 }).notNull(),
+        // Encrypted; core labels are English source strings.
+        label: text("label").notNull(),
+        // `domainLookupHash("relation-type-label", label)`.
+        labelHmac: varchar("label_hmac", { length: 64 }).notNull(),
+        // Entity type keys the subject and the object may have.
+        subjectTypes: jsonb("subject_types").$type<string[]>().notNull(),
+        objectTypes: jsonb("object_types").$type<string[]>().notNull(),
+        // `literal`: the object is text (a role, a definition), not an entity.
+        objectKind: varchar("object_kind", { length: 16 })
+            .$type<"entity" | "literal">()
+            .notNull(),
+        // `one`: a subject has at most one object at a time, so a new one
+        // replaces the old (asked, never silent).
+        cardinality: varchar("cardinality", { length: 8 })
+            .$type<"one" | "many">()
+            .notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"active" | "retired">()
+            .notNull()
+            .default("active"),
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        ownerKeyUnique: unique("knowledge_relation_types_owner_key_unique")
+            .on(table.userId, table.key)
+            .nullsNotDistinct(),
+        ownerLabelUnique: unique("knowledge_relation_types_owner_label_unique")
+            .on(table.userId, table.labelHmac)
+            .nullsNotDistinct(),
+    }),
+);
+
+// Relation phrases users suggested to the Organization. Only the phrase
+// travels (encrypted), counted once per suggesting user; nothing of the
+// facts it came from.
+export const knowledgeVocabularyProposals = pgTable(
+    "knowledge_vocabulary_proposals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        phrase: text("phrase").notNull(),
+        // `domainLookupHash("vocabulary-phrase", phrase)`.
+        phraseHmac: varchar("phrase_hmac", { length: 64 }).notNull(),
+        // How many suggested it is counted from the votes, which go with
+        // their accounts.
+        status: varchar("status", { length: 16 })
+            .$type<"open" | "adopted" | "rejected">()
+            .notNull()
+            .default("open"),
+        // The Organization key it was adopted as.
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        phraseUnique: unique("knowledge_vocabulary_proposals_phrase_unique").on(
+            table.phraseHmac,
+        ),
+    }),
+);
+
+// Who suggested which phrase: counts each user once, and lets a user's
+// archive and erasure find what they suggested.
+export const knowledgeVocabularyProposalVotes = pgTable(
+    "knowledge_vocabulary_proposal_votes",
+    {
+        proposalId: text("proposal_id")
+            .notNull()
+            .references(() => knowledgeVocabularyProposals.id, {
+                onDelete: "cascade",
+            }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.proposalId, table.userId] }),
+        userIdIdx: index("knowledge_vocabulary_proposal_votes_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// One counter for the whole vocabulary. A Learn run records the version it
+// was made with; a change of any type bumps it.
+export const knowledgeVocabularyVersion = pgTable(
+    "knowledge_vocabulary_version",
+    {
+        id: integer("id").primaryKey(),
+        version: integer("version").notNull().default(0),
+    },
+);
+
 // AI Enhancements
 export const aiEnhancements = pgTable(
     "ai_enhancements",

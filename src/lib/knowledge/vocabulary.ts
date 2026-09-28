@@ -1,0 +1,702 @@
+/**
+ * The knowledge vocabulary in the database: core types (seeded), the
+ * Organization's, and each user's private ones.
+ *
+ * Who may do what:
+ * - a user creates, renames and deletes their own private types, and
+ *   suggests relation phrases to the Organization (only the phrase goes);
+ * - the organization account creates Organization types and adopts
+ *   suggested phrases;
+ * - core types change only with the code.
+ *
+ * Every change bumps the vocabulary version in its transaction, so a Learn
+ * run can tell the vocabulary it was made with is no longer current.
+ */
+
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { db } from "@/db";
+import {
+    knowledgeEntityTypes,
+    knowledgeRelationTypes,
+    knowledgeVocabularyProposals,
+    knowledgeVocabularyProposalVotes,
+    knowledgeVocabularyVersion,
+} from "@/db/schema";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
+import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    CORE_ENTITY_TYPES,
+    CORE_RELATIONS,
+    deniedTopicOf,
+} from "@/lib/knowledge/vocabulary-core";
+import { isOrgAccount } from "@/lib/org/config";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Executor = Pick<typeof db, "select">;
+
+export type TypeKind = "entity" | "relation";
+export type TypeLayer = "core" | "org" | "private";
+
+export const MAX_TYPE_LABEL_LENGTH = 80;
+
+export interface EntityType {
+    kind: "entity";
+    key: string;
+    label: string;
+    layer: TypeLayer;
+    /** A private type the Organization adopted: new facts use this key. */
+    adoptedAsKey: string | null;
+}
+
+export interface RelationType {
+    kind: "relation";
+    key: string;
+    label: string;
+    layer: TypeLayer;
+    adoptedAsKey: string | null;
+    subjectTypes: string[];
+    objectTypes: string[];
+    objectKind: "entity" | "literal";
+    cardinality: "one" | "many";
+}
+
+export interface Vocabulary {
+    entityTypes: EntityType[];
+    relationTypes: RelationType[];
+}
+
+const LABEL_DOMAIN: Record<TypeKind, string> = {
+    entity: "entity-type-label",
+    relation: "relation-type-label",
+};
+const PHRASE_DOMAIN = "vocabulary-phrase";
+
+function tableOf(kind: TypeKind) {
+    return kind === "entity" ? knowledgeEntityTypes : knowledgeRelationTypes;
+}
+
+/** Make the vocabulary's version one higher; last in its transaction. */
+export async function bumpVocabularyVersionInTx(tx: Tx): Promise<void> {
+    await tx
+        .insert(knowledgeVocabularyVersion)
+        .values({ id: 1, version: 1 })
+        .onConflictDoUpdate({
+            target: knowledgeVocabularyVersion.id,
+            set: { version: sql`${knowledgeVocabularyVersion.version} + 1` },
+        });
+}
+
+/** The vocabulary's current version (0 before anything changed it). */
+export async function vocabularyVersion(
+    executor: Executor = db,
+): Promise<number> {
+    const [row] = await executor
+        .select({ version: knowledgeVocabularyVersion.version })
+        .from(knowledgeVocabularyVersion)
+        .where(eq(knowledgeVocabularyVersion.id, 1))
+        .limit(1);
+    return row?.version ?? 0;
+}
+
+/**
+ * Write the core vocabulary, or bring it up to date with the code.
+ * Idempotent: a row the code has not changed is left alone, and the version
+ * moves only when a core row was added or changed.
+ */
+export async function seedCoreVocabulary(): Promise<void> {
+    await db.transaction(async (tx) => {
+        let changed = false;
+        for (const type of CORE_ENTITY_TYPES) {
+            const [row] = await tx
+                .insert(knowledgeEntityTypes)
+                .values({
+                    userId: null,
+                    key: type.key,
+                    label: encryptText(type.label),
+                    labelHmac: domainLookupHash(
+                        LABEL_DOMAIN.entity,
+                        type.label,
+                    ),
+                })
+                .onConflictDoUpdate({
+                    target: [
+                        knowledgeEntityTypes.userId,
+                        knowledgeEntityTypes.key,
+                    ],
+                    set: {
+                        label: encryptText(type.label),
+                        labelHmac: domainLookupHash(
+                            LABEL_DOMAIN.entity,
+                            type.label,
+                        ),
+                        status: "active",
+                    },
+                    setWhere: sql`${knowledgeEntityTypes.labelHmac} is distinct from excluded.label_hmac or ${knowledgeEntityTypes.status} <> 'active'`,
+                })
+                .returning({ key: knowledgeEntityTypes.key });
+            if (row) changed = true;
+        }
+        for (const relation of CORE_RELATIONS) {
+            const values = {
+                label: encryptText(relation.label),
+                labelHmac: domainLookupHash(
+                    LABEL_DOMAIN.relation,
+                    relation.label,
+                ),
+                subjectTypes: [...relation.subjectTypes],
+                objectTypes: [...relation.objectTypes],
+                objectKind: relation.objectKind,
+                cardinality: relation.cardinality,
+            };
+            const [row] = await tx
+                .insert(knowledgeRelationTypes)
+                .values({ userId: null, key: relation.key, ...values })
+                .onConflictDoUpdate({
+                    target: [
+                        knowledgeRelationTypes.userId,
+                        knowledgeRelationTypes.key,
+                    ],
+                    set: { ...values, status: "active" },
+                    setWhere: sql`(${knowledgeRelationTypes.labelHmac}, ${knowledgeRelationTypes.subjectTypes}, ${knowledgeRelationTypes.objectTypes}, ${knowledgeRelationTypes.objectKind}, ${knowledgeRelationTypes.cardinality}, ${knowledgeRelationTypes.status}) is distinct from (excluded.label_hmac, excluded.subject_types, excluded.object_types, excluded.object_kind, excluded.cardinality, 'active')`,
+                })
+                .returning({ key: knowledgeRelationTypes.key });
+            if (row) changed = true;
+        }
+        if (changed) await bumpVocabularyVersionInTx(tx);
+    });
+}
+
+/**
+ * Seed the core vocabulary at startup. Never throws: a failed seed leaves
+ * the previous core in place, and the next start tries again.
+ */
+export async function startCoreVocabularySeed(): Promise<void> {
+    try {
+        await seedCoreVocabulary();
+    } catch (error) {
+        console.error(
+            "[vocabulary] could not seed the core vocabulary:",
+            error,
+        );
+    }
+}
+
+function layerOf(ownerUserId: string | null, orgOwned: boolean): TypeLayer {
+    if (ownerUserId === null) return "core";
+    return orgOwned ? "org" : "private";
+}
+
+/**
+ * The vocabulary `userId` may use: core, the Organization's, and their own
+ * private types, unless `sharedOnly` (a shared recording's Learn run, which
+ * reads and writes the shared layer alone). Retired types are left out.
+ */
+export async function vocabularyVisibleTo(
+    userId: string,
+    { sharedOnly = false }: { sharedOnly?: boolean } = {},
+): Promise<Vocabulary> {
+    const visible = (
+        column:
+            | typeof knowledgeEntityTypes.userId
+            | typeof knowledgeRelationTypes.userId,
+    ) =>
+        sharedOnly
+            ? or(isNull(column), orgOwnedCondition(column))
+            : or(isNull(column), orgOwnedCondition(column), eq(column, userId));
+
+    const entityRows = await db
+        .select({
+            key: knowledgeEntityTypes.key,
+            label: knowledgeEntityTypes.label,
+            userId: knowledgeEntityTypes.userId,
+            adoptedAsKey: knowledgeEntityTypes.adoptedAsKey,
+            orgOwned: sql<boolean>`coalesce(${orgOwnedCondition(knowledgeEntityTypes.userId)}, false)`,
+        })
+        .from(knowledgeEntityTypes)
+        .where(
+            and(
+                visible(knowledgeEntityTypes.userId),
+                eq(knowledgeEntityTypes.status, "active"),
+            ),
+        );
+    const relationRows = await db
+        .select({
+            key: knowledgeRelationTypes.key,
+            label: knowledgeRelationTypes.label,
+            userId: knowledgeRelationTypes.userId,
+            adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+            subjectTypes: knowledgeRelationTypes.subjectTypes,
+            objectTypes: knowledgeRelationTypes.objectTypes,
+            objectKind: knowledgeRelationTypes.objectKind,
+            cardinality: knowledgeRelationTypes.cardinality,
+            orgOwned: sql<boolean>`coalesce(${orgOwnedCondition(knowledgeRelationTypes.userId)}, false)`,
+        })
+        .from(knowledgeRelationTypes)
+        .where(
+            and(
+                visible(knowledgeRelationTypes.userId),
+                eq(knowledgeRelationTypes.status, "active"),
+            ),
+        );
+
+    return {
+        entityTypes: entityRows.map((row) => ({
+            kind: "entity" as const,
+            key: row.key,
+            label: decryptText(row.label),
+            layer: layerOf(row.userId, row.orgOwned),
+            adoptedAsKey: row.adoptedAsKey,
+        })),
+        relationTypes: relationRows.map((row) => ({
+            kind: "relation" as const,
+            key: row.key,
+            label: decryptText(row.label),
+            layer: layerOf(row.userId, row.orgOwned),
+            adoptedAsKey: row.adoptedAsKey,
+            subjectTypes: row.subjectTypes,
+            objectTypes: row.objectTypes,
+            objectKind: row.objectKind,
+            cardinality: row.cardinality,
+        })),
+    };
+}
+
+function cleanLabel(label: string): string {
+    const clean = label.trim().replace(/\s+/g, " ");
+    if (!clean) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A type needs a name",
+            400,
+            {
+                field: "label",
+            },
+        );
+    }
+    if (clean.length > MAX_TYPE_LABEL_LENGTH) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            `A type's name must be ${MAX_TYPE_LABEL_LENGTH} characters or fewer`,
+            400,
+            { field: "label", maxLength: MAX_TYPE_LABEL_LENGTH },
+        );
+    }
+    const denied = deniedTopicOf(clean);
+    if (denied) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Knowledge about people's health, family, personality, performance or demographics is not kept",
+            400,
+            { field: "label", deniedTopic: denied.id },
+        );
+    }
+    return clean;
+}
+
+/**
+ * Refuse a label the owner already uses, or one the core or Organization
+ * vocabulary has: that type is there to use. Asked only about the layers
+ * the owner can see, so the answer reveals nobody else's private types.
+ */
+async function assertLabelFree(
+    tx: Tx,
+    kind: TypeKind,
+    ownerUserId: string,
+    labelHmac: string,
+    exceptKey?: string,
+): Promise<void> {
+    const table = tableOf(kind);
+    const [taken] = await tx
+        .select({ key: table.key })
+        .from(table)
+        .where(
+            and(
+                eq(table.labelHmac, labelHmac),
+                or(
+                    isNull(table.userId),
+                    orgOwnedCondition(table.userId),
+                    eq(table.userId, ownerUserId),
+                ),
+                eq(table.status, "active"),
+            ),
+        )
+        .limit(1);
+    if (taken && taken.key !== exceptKey) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "A type with this name already exists",
+            409,
+            { field: "label" },
+        );
+    }
+}
+
+/**
+ * Entity type keys `ownerUserId` may relate: core, the Organization's, and
+ * theirs; refused if any given one is not among them.
+ */
+async function assertEntityTypesUsable(
+    tx: Tx,
+    ownerUserId: string,
+    keys: readonly string[],
+): Promise<void> {
+    if (keys.length === 0) return;
+    const rows = await tx
+        .select({ key: knowledgeEntityTypes.key })
+        .from(knowledgeEntityTypes)
+        .where(
+            and(
+                inArray(knowledgeEntityTypes.key, [...keys]),
+                or(
+                    isNull(knowledgeEntityTypes.userId),
+                    orgOwnedCondition(knowledgeEntityTypes.userId),
+                    eq(knowledgeEntityTypes.userId, ownerUserId),
+                ),
+                eq(knowledgeEntityTypes.status, "active"),
+            ),
+        );
+    const found = new Set(rows.map((row) => row.key));
+    if (keys.some((key) => !found.has(key))) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Unknown entity type",
+            400,
+            { field: "types" },
+        );
+    }
+}
+
+export type NewTypeSpec =
+    | { kind: "entity"; label: string }
+    | {
+          kind: "relation";
+          label: string;
+          subjectTypes: string[];
+          objectTypes: string[];
+          objectKind: "entity" | "literal";
+          cardinality: "one" | "many";
+      };
+
+async function insertTypeInTx(
+    tx: Tx,
+    ownerUserId: string,
+    actorUserId: string,
+    keyPrefix: "u" | "o",
+    spec: NewTypeSpec,
+): Promise<string> {
+    const label = cleanLabel(spec.label);
+    const labelHmac = domainLookupHash(LABEL_DOMAIN[spec.kind], label);
+    await assertLabelFree(tx, spec.kind, ownerUserId, labelHmac);
+    const key = `${keyPrefix}_${nanoid(12)}`;
+    if (spec.kind === "entity") {
+        await tx.insert(knowledgeEntityTypes).values({
+            userId: ownerUserId,
+            key,
+            label: encryptText(label),
+            labelHmac,
+            createdByUserId: actorUserId,
+        });
+    } else {
+        await assertEntityTypesUsable(tx, ownerUserId, [
+            ...spec.subjectTypes,
+            ...spec.objectTypes,
+        ]);
+        if (spec.subjectTypes.length === 0) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "A relation needs the kinds of things it relates",
+                400,
+                { field: "subjectTypes" },
+            );
+        }
+        if (
+            (spec.objectKind === "literal") !==
+            (spec.objectTypes.length === 0)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "A relation to text has no object types, and one to things has some",
+                400,
+                { field: "objectTypes" },
+            );
+        }
+        await tx.insert(knowledgeRelationTypes).values({
+            userId: ownerUserId,
+            key,
+            label: encryptText(label),
+            labelHmac,
+            subjectTypes: [...new Set(spec.subjectTypes)],
+            objectTypes: [...new Set(spec.objectTypes)],
+            objectKind: spec.objectKind,
+            cardinality: spec.cardinality,
+            createdByUserId: actorUserId,
+        });
+    }
+    await bumpVocabularyVersionInTx(tx);
+    return key;
+}
+
+function organizationOnly(): AppError {
+    return new AppError(
+        ErrorCode.FORBIDDEN,
+        "Only the organization account changes the Organization's vocabulary",
+        403,
+    );
+}
+
+function typeNotFound(): AppError {
+    return new AppError(ErrorCode.NOT_FOUND, "Type not found", 404);
+}
+
+/** Create one of the user's private types. Returns its key. */
+export async function createPrivateType(
+    userId: string,
+    spec: NewTypeSpec,
+): Promise<string> {
+    // The organization account's types are the Organization's.
+    if (await isOrgAccount(userId)) throw organizationOnly();
+    return db.transaction((tx) =>
+        insertTypeInTx(tx, userId, userId, "u", spec),
+    );
+}
+
+/** Create an Organization type. The organization account only. */
+export async function createOrgType(
+    actorUserId: string,
+    spec: NewTypeSpec,
+): Promise<string> {
+    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    return db.transaction((tx) =>
+        insertTypeInTx(tx, actorUserId, actorUserId, "o", spec),
+    );
+}
+
+/**
+ * The owner's own active type of a kind, locked for a change, or 404. Core
+ * types and other accounts' types answer the same, so nothing reveals them.
+ */
+async function lockOwnType(
+    tx: Tx,
+    kind: TypeKind,
+    ownerUserId: string,
+    key: string,
+): Promise<{ id: string }> {
+    const table = tableOf(kind);
+    const [row] = await tx
+        .select({ id: table.id })
+        .from(table)
+        .where(
+            and(
+                eq(table.userId, ownerUserId),
+                eq(table.key, key),
+                eq(table.status, "active"),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    if (!row) throw typeNotFound();
+    return row;
+}
+
+/** Rename one of the user's own types (private, or the Organization's by its account). */
+export async function renameOwnType(
+    userId: string,
+    kind: TypeKind,
+    key: string,
+    newLabel: string,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        const { id } = await lockOwnType(tx, kind, userId, key);
+        const label = cleanLabel(newLabel);
+        const labelHmac = domainLookupHash(LABEL_DOMAIN[kind], label);
+        await assertLabelFree(tx, kind, userId, labelHmac, key);
+        const table = tableOf(kind);
+        await tx
+            .update(table)
+            .set({
+                label: encryptText(label),
+                labelHmac,
+                updatedAt: new Date(),
+            })
+            .where(eq(table.id, id));
+        await bumpVocabularyVersionInTx(tx);
+    });
+}
+
+/**
+ * How many facts use a type. Facts arrive with Task 2.6; until then none
+ * can, and deleting asks to confirm zero.
+ */
+async function factsUsingType(
+    _tx: Tx,
+    _kind: TypeKind,
+    _ownerUserId: string,
+    _key: string,
+): Promise<number> {
+    return 0;
+}
+
+/**
+ * Delete one of the user's own types and, with it, the facts that use it.
+ * `confirmCount` must be the number of those facts the person was shown;
+ * any other number is refused (409, `details.count`), so nothing is deleted
+ * that the person did not see counted.
+ */
+export async function deleteOwnType(
+    userId: string,
+    kind: TypeKind,
+    key: string,
+    confirmCount: number,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        const { id } = await lockOwnType(tx, kind, userId, key);
+        const count = await factsUsingType(tx, kind, userId, key);
+        if (count !== confirmCount) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The number of facts using this type has changed",
+                409,
+                { count },
+            );
+        }
+        const table = tableOf(kind);
+        await tx.delete(table).where(eq(table.id, id));
+        await bumpVocabularyVersionInTx(tx);
+    });
+}
+
+/**
+ * Suggest a relation phrase to the Organization. Only the phrase travels,
+ * counted once per user; suggesting it again changes nothing.
+ */
+export async function proposePhrase(
+    userId: string,
+    phrase: string,
+): Promise<void> {
+    const clean = cleanLabel(phrase);
+    const phraseHmac = domainLookupHash(PHRASE_DOMAIN, clean);
+    await db.transaction(async (tx) => {
+        const [proposal] = await tx
+            .insert(knowledgeVocabularyProposals)
+            .values({ phrase: encryptText(clean), phraseHmac })
+            .onConflictDoUpdate({
+                target: knowledgeVocabularyProposals.phraseHmac,
+                // A no-op write, so the row comes back either way.
+                set: { phraseHmac },
+            })
+            .returning({ id: knowledgeVocabularyProposals.id });
+        if (!proposal) return;
+        await tx
+            .insert(knowledgeVocabularyProposalVotes)
+            .values({ proposalId: proposal.id, userId })
+            .onConflictDoNothing();
+    });
+}
+
+export interface VocabularyProposal {
+    id: string;
+    phrase: string;
+    count: number;
+    status: "open" | "adopted" | "rejected";
+}
+
+/**
+ * The suggested phrases, most frequent first. The organization account
+ * only. An open phrase nobody stands behind any more (its voters' accounts
+ * are gone) is left out.
+ */
+export async function listVocabularyProposals(
+    actorUserId: string,
+): Promise<VocabularyProposal[]> {
+    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    const count = sql<number>`count(${knowledgeVocabularyProposalVotes.userId})::int`;
+    const rows = await db
+        .select({
+            id: knowledgeVocabularyProposals.id,
+            phrase: knowledgeVocabularyProposals.phrase,
+            count,
+            status: knowledgeVocabularyProposals.status,
+        })
+        .from(knowledgeVocabularyProposals)
+        .leftJoin(
+            knowledgeVocabularyProposalVotes,
+            eq(
+                knowledgeVocabularyProposalVotes.proposalId,
+                knowledgeVocabularyProposals.id,
+            ),
+        )
+        .groupBy(knowledgeVocabularyProposals.id)
+        .having(
+            sql`${count} > 0 or ${knowledgeVocabularyProposals.status} <> 'open'`,
+        )
+        .orderBy(desc(count));
+    return rows.map((row) => ({ ...row, phrase: decryptText(row.phrase) }));
+}
+
+/**
+ * Adopt a suggested phrase as an Organization relation type. Private
+ * relation types of the same name record the new key (`adoptedAsKey`), so
+ * their owners' later facts use the shared one. Returns the new key.
+ */
+export async function adoptPhrase(
+    actorUserId: string,
+    proposalId: string,
+    spec: Omit<Extract<NewTypeSpec, { kind: "relation" }>, "kind" | "label"> & {
+        label?: string;
+    },
+): Promise<string> {
+    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    return db.transaction(async (tx) => {
+        const [proposal] = await tx
+            .select({
+                phrase: knowledgeVocabularyProposals.phrase,
+                status: knowledgeVocabularyProposals.status,
+            })
+            .from(knowledgeVocabularyProposals)
+            .where(eq(knowledgeVocabularyProposals.id, proposalId))
+            .for("update")
+            .limit(1);
+        if (!proposal || proposal.status !== "open") {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Suggestion not found",
+                404,
+            );
+        }
+        const label = spec.label ?? decryptText(proposal.phrase);
+        const key = await insertTypeInTx(tx, actorUserId, actorUserId, "o", {
+            kind: "relation",
+            label,
+            subjectTypes: spec.subjectTypes,
+            objectTypes: spec.objectTypes,
+            objectKind: spec.objectKind,
+            cardinality: spec.cardinality,
+        });
+        await tx
+            .update(knowledgeVocabularyProposals)
+            .set({
+                status: "adopted",
+                adoptedAsKey: key,
+                updatedAt: new Date(),
+            })
+            .where(eq(knowledgeVocabularyProposals.id, proposalId));
+        const labelHmac = domainLookupHash(
+            LABEL_DOMAIN.relation,
+            cleanLabel(label),
+        );
+        await tx
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: key, updatedAt: new Date() })
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.labelHmac, labelHmac),
+                    sql`${knowledgeRelationTypes.userId} is not null`,
+                    sql`not ${orgOwnedCondition(knowledgeRelationTypes.userId)}`,
+                ),
+            );
+        return key;
+    });
+}

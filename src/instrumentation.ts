@@ -38,6 +38,10 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
+type VocabularyModule = {
+    startCoreVocabularySeed: () => Promise<void>;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -130,6 +134,12 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
+
+    // Before the first request too: a person's vocabulary, and a Learn run's
+    // prompt, are built on the core types.
+    const { startCoreVocabularySeed } =
+        require("./lib/knowledge/vocabulary") as VocabularyModule;
+    await startCoreVocabularySeed();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

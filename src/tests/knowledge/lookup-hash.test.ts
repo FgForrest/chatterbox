@@ -7,7 +7,7 @@ vi.mock("../../lib/env", () => ({
     },
 }));
 
-const { lookupHash, normalizeForLookup } = await import(
+const { domainLookupHash, lookupHash, normalizeForLookup } = await import(
     "../../lib/knowledge/lookup-hash"
 );
 
@@ -36,5 +36,25 @@ describe("lookupHash", () => {
         const hash = lookupHash("jan@fg.cz");
         expect(hash).not.toContain("jan");
         expect(hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+});
+
+describe("domainLookupHash", () => {
+    it("separates equal values of different kinds", () => {
+        expect(domainLookupHash("relation-label", "leads")).not.toBe(
+            domainLookupHash("entity-name", "leads"),
+        );
+    });
+
+    it("folds case, composition and inner whitespace", () => {
+        expect(domainLookupHash("entity-name", "  Café   Orion ")).toBe(
+            domainLookupHash("entity-name", "cafe\u0301 orion"),
+        );
+    });
+
+    it("is not the plain lookup hash of the value", () => {
+        expect(domainLookupHash("entity-name", "orion")).not.toBe(
+            lookupHash("orion"),
+        );
     });
 });

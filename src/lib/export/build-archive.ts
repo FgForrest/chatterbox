@@ -4,6 +4,10 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    knowledgeEntityTypes,
+    knowledgeRelationTypes,
+    knowledgeVocabularyProposals,
+    knowledgeVocabularyProposalVotes,
     people,
     personNotes,
     recordingFolderAssignments,
@@ -230,6 +234,11 @@ export async function buildAndUploadExportArchive(input: {
             rejections: number;
         };
         organization?: { folders: number; assignments: number };
+        vocabulary?: {
+            entityTypes: number;
+            relationTypes: number;
+            suggestedPhrases: number;
+        };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -529,6 +538,24 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
+    // The user's own vocabulary, and the phrases they suggested to the
+    // Organization (only the phrase went there).
+    const vocabulary = await collectVocabulary(userId);
+    if (
+        vocabulary.entityTypes.length > 0 ||
+        vocabulary.relationTypes.length > 0 ||
+        vocabulary.suggestedPhrases.length > 0
+    ) {
+        archive.append(Buffer.from(JSON.stringify(vocabulary, null, 2)), {
+            name: "knowledge/vocabulary.json",
+        });
+        manifest.vocabulary = {
+            entityTypes: vocabulary.entityTypes.length,
+            relationTypes: vocabulary.relationTypes.length,
+            suggestedPhrases: vocabulary.suggestedPhrases.length,
+        };
+    }
+
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {
         name: "manifest.json",
     });
@@ -737,6 +764,85 @@ async function collectKnowledgeBase(
         rejections: rejectionRows.map((row) => ({
             ...row,
             createdAt: row.createdAt.toISOString(),
+        })),
+    };
+}
+
+interface ArchivedVocabulary {
+    entityTypes: {
+        key: string;
+        label: string;
+        adoptedAsKey: string | null;
+        createdAt: string;
+    }[];
+    relationTypes: {
+        key: string;
+        label: string;
+        subjectTypes: string[];
+        objectTypes: string[];
+        objectKind: string;
+        cardinality: string;
+        adoptedAsKey: string | null;
+        createdAt: string;
+    }[];
+    suggestedPhrases: { phrase: string; status: string }[];
+}
+
+// The user's private vocabulary, decrypted. The entity types it relates are
+// core keys, the user's own, or the Organization's, whose keys stay stable.
+async function collectVocabulary(userId: string): Promise<ArchivedVocabulary> {
+    const [entityRows, relationRows, phraseRows] = await Promise.all([
+        db
+            .select({
+                key: knowledgeEntityTypes.key,
+                label: knowledgeEntityTypes.label,
+                adoptedAsKey: knowledgeEntityTypes.adoptedAsKey,
+                createdAt: knowledgeEntityTypes.createdAt,
+            })
+            .from(knowledgeEntityTypes)
+            .where(eq(knowledgeEntityTypes.userId, userId)),
+        db
+            .select({
+                key: knowledgeRelationTypes.key,
+                label: knowledgeRelationTypes.label,
+                subjectTypes: knowledgeRelationTypes.subjectTypes,
+                objectTypes: knowledgeRelationTypes.objectTypes,
+                objectKind: knowledgeRelationTypes.objectKind,
+                cardinality: knowledgeRelationTypes.cardinality,
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                createdAt: knowledgeRelationTypes.createdAt,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.userId, userId)),
+        db
+            .select({
+                phrase: knowledgeVocabularyProposals.phrase,
+                status: knowledgeVocabularyProposals.status,
+            })
+            .from(knowledgeVocabularyProposalVotes)
+            .innerJoin(
+                knowledgeVocabularyProposals,
+                eq(
+                    knowledgeVocabularyProposals.id,
+                    knowledgeVocabularyProposalVotes.proposalId,
+                ),
+            )
+            .where(eq(knowledgeVocabularyProposalVotes.userId, userId)),
+    ]);
+    return {
+        entityTypes: entityRows.map((row) => ({
+            ...row,
+            label: decryptText(row.label),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        relationTypes: relationRows.map((row) => ({
+            ...row,
+            label: decryptText(row.label),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        suggestedPhrases: phraseRows.map((row) => ({
+            phrase: decryptText(row.phrase),
+            status: row.status,
         })),
     };
 }

@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import { type people, users } from "@/db/schema";
+import { type Column, sql } from "drizzle-orm";
+import { users } from "@/db/schema";
 
 /**
  * SQL predicate: the row belongs to the organization account.
@@ -8,6 +8,6 @@ import { type people, users } from "@/db/schema";
  * the environment nor the org account's id, and an Organization person
  * keeps resolving if the scope is later switched off.
  */
-export function orgOwnedCondition(column: typeof people.userId) {
+export function orgOwnedCondition(column: Column) {
     return sql`${column} in (select ${users.id} from ${users} where ${users.role} = 'org')`;
 }

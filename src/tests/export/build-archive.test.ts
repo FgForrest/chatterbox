@@ -54,6 +54,33 @@ vi.mock("@/db/schema", () => ({
         recordingId: "recordingFolderAssignments.recordingId",
         folderId: "recordingFolderAssignments.folderId",
     },
+    knowledgeEntityTypes: {
+        userId: "knowledgeEntityTypes.userId",
+        key: "knowledgeEntityTypes.key",
+        label: "knowledgeEntityTypes.label",
+        adoptedAsKey: "knowledgeEntityTypes.adoptedAsKey",
+        createdAt: "knowledgeEntityTypes.createdAt",
+    },
+    knowledgeRelationTypes: {
+        userId: "knowledgeRelationTypes.userId",
+        key: "knowledgeRelationTypes.key",
+        label: "knowledgeRelationTypes.label",
+        subjectTypes: "knowledgeRelationTypes.subjectTypes",
+        objectTypes: "knowledgeRelationTypes.objectTypes",
+        objectKind: "knowledgeRelationTypes.objectKind",
+        cardinality: "knowledgeRelationTypes.cardinality",
+        adoptedAsKey: "knowledgeRelationTypes.adoptedAsKey",
+        createdAt: "knowledgeRelationTypes.createdAt",
+    },
+    knowledgeVocabularyProposals: {
+        id: "knowledgeVocabularyProposals.id",
+        phrase: "knowledgeVocabularyProposals.phrase",
+        status: "knowledgeVocabularyProposals.status",
+    },
+    knowledgeVocabularyProposalVotes: {
+        proposalId: "knowledgeVocabularyProposalVotes.proposalId",
+        userId: "knowledgeVocabularyProposalVotes.userId",
+    },
 }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: (v: string | null) => (v == null ? v : `decrypted:${v}`),
@@ -370,6 +397,79 @@ describe("buildAndUploadExportArchive", () => {
         expect(manifest.organization).toEqual({ folders: 2, assignments: 1 });
     });
 
+    it("carries the user's own vocabulary and the phrases they suggested", async () => {
+        mockSelectSequence([
+            // recordings, people, attributions, rejected suggestions,
+            // folders, assignments
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [
+                {
+                    key: "u_type1",
+                    label: "enc-Supplier",
+                    adoptedAsKey: null,
+                    createdAt: new Date("2026-01-04T00:00:00Z"),
+                },
+            ],
+            [
+                {
+                    key: "u_rel1",
+                    label: "enc-mentors",
+                    subjectTypes: ["person"],
+                    objectTypes: ["person"],
+                    objectKind: "entity",
+                    cardinality: "many",
+                    adoptedAsKey: "o_rel1",
+                    createdAt: new Date("2026-01-05T00:00:00Z"),
+                },
+            ],
+            [{ phrase: "enc-mentors", status: "adopted" }],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/vocabulary.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const vocabulary = JSON.parse(
+            entries
+                .get("knowledge/vocabulary.json")
+                ?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(vocabulary.entityTypes).toEqual([
+            {
+                key: "u_type1",
+                label: "decrypted:enc-Supplier",
+                adoptedAsKey: null,
+                createdAt: "2026-01-04T00:00:00.000Z",
+            },
+        ]);
+        expect(vocabulary.relationTypes[0]).toMatchObject({
+            key: "u_rel1",
+            label: "decrypted:enc-mentors",
+            objectTypes: ["person"],
+            adoptedAsKey: "o_rel1",
+        });
+        expect(vocabulary.suggestedPhrases).toEqual([
+            { phrase: "decrypted:enc-mentors", status: "adopted" },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.vocabulary).toEqual({
+            entityTypes: 1,
+            relationTypes: 1,
+            suggestedPhrases: 1,
+        });
+    });
+
     it("carries the transcription ids the attributions are keyed on", async () => {
         storage.files.set("audio/rec-1.mp3", Buffer.from("audio"));
         mockSelectSequence([
@@ -679,6 +779,7 @@ describe("buildAndUploadExportArchive", () => {
 
         const entries = await readZipEntries(storage.uploaded as Buffer);
         expect([...entries.keys()]).not.toContain("knowledge/people.json");
+        expect([...entries.keys()]).not.toContain("knowledge/vocabulary.json");
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );
