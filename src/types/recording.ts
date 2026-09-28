@@ -16,6 +16,8 @@ export type Recording = Omit<RecordingQueryResult, "startTime"> & {
      */
     hasTranscript?: boolean;
     hasSummary?: boolean;
+    /** A Learn review waits for the viewer on it. */
+    needsReview?: boolean;
     /**
      * Coarse normalized amplitude peaks ([0, 1]) for waveform rendering.
      * Decoded client-side on first listen and cached server-side. Null
@@ -47,6 +49,7 @@ export function serializeRecording(
     flags?: {
         hasTranscript?: boolean;
         hasSummary?: boolean;
+        needsReview?: boolean;
         waveformPeaks?: number[] | null;
         audioReaped?: boolean;
         view?: RecordingView;
@@ -59,6 +62,7 @@ export function serializeRecording(
         startTime: recording.startTime.toISOString(),
         hasTranscript: flags?.hasTranscript ?? false,
         hasSummary: flags?.hasSummary ?? false,
+        ...(flags?.needsReview ? { needsReview: true } : {}),
         audioReaped: flags?.audioReaped ?? false,
         // Empty arrays would be invalid per the field contract ("null
         // when never decoded"); collapse them to null at the

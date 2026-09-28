@@ -16,6 +16,7 @@ import { exportProvidersAvailability } from "@/lib/folder-exports/configurations
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { isAdminEmail } from "@/lib/hosted/admin/guard";
+import { recordingsNeedingReview } from "@/lib/learn/pending";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
@@ -97,6 +98,8 @@ async function loadOrganizationLibrary(
     viewerId: string,
     orgUserId: string,
     preferredSource: string,
+    /** Recordings whose review waits for the viewer (the organization account's). */
+    reviewIds: ReadonlySet<string> = new Set(),
 ) {
     const rows = await db
         .select({
@@ -174,6 +177,7 @@ async function loadOrganizationLibrary(
                 {
                     hasTranscript: transcriptIds.has(row.id),
                     hasSummary: summaryIds.has(row.id),
+                    needsReview: reviewIds.has(row.id),
                     audioReaped: audioReapedAt !== null,
                     waveformPeaks: Array.isArray(waveformPeaks)
                         ? (waveformPeaks as number[])
@@ -284,6 +288,10 @@ export default async function DashboardPage() {
     const ownTranscriptions = viewerIsOrgAccount ? [] : userTranscriptions;
     const summaryIds = new Set(userSummaryRows.map((r) => r.recordingId));
     const transcriptIds = new Set(ownTranscriptions.map((t) => t.recordingId));
+    const reviewIds = await recordingsNeedingReview(
+        session.user.id,
+        viewerIsOrgAccount,
+    );
 
     // Content fields are encrypted at rest; decrypt server-side (this is
     // an RSC — client never sees a key) before serializing for the
@@ -295,6 +303,7 @@ export default async function DashboardPage() {
                 {
                     hasTranscript: transcriptIds.has(r.id),
                     hasSummary: summaryIds.has(r.id),
+                    needsReview: reviewIds.has(r.id),
                     audioReaped: audioReapedAt !== null,
                     // jsonb comes back already-parsed; coerce to the typed shape.
                     waveformPeaks: Array.isArray(waveformPeaks)
@@ -317,6 +326,7 @@ export default async function DashboardPage() {
               session.user.id,
               orgUserId,
               preferredTranscriptSource,
+              viewerIsOrgAccount ? reviewIds : new Set(),
           )
         : null;
 

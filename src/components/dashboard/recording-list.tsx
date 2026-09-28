@@ -95,6 +95,12 @@ export function RecordingList({
     const [dateTimeFormat] = useState<DateTimeFormat>(initialDateTimeFormat);
     const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
     const [query, setQuery] = useState("");
+    // Only the recordings a Learn review waits on.
+    const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
+    const reviewCount = useMemo(
+        () => recordings.filter((r) => r.needsReview).length,
+        [recordings],
+    );
     const [visibleCount, setVisibleCount] = useState(initialChunkSize);
     const searchRef = useRef<HTMLInputElement>(null);
     const sentinelRef = useRef<HTMLDivElement>(null);
@@ -115,13 +121,17 @@ export function RecordingList({
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
+        const pool =
+            needsReviewOnly && reviewCount > 0
+                ? recordings.filter((r) => r.needsReview)
+                : recordings;
         const base = q
-            ? recordings.filter((r) => {
+            ? pool.filter((r) => {
                   if (r.filename.toLowerCase().includes(q)) return true;
                   const t = transcriptions.get(r.id);
                   return !!t?.text && t.text.toLowerCase().includes(q);
               })
-            : recordings;
+            : pool;
 
         const sorted = [...base];
         switch (sortOrder) {
@@ -144,7 +154,14 @@ export function RecordingList({
                 break;
         }
         return sorted;
-    }, [recordings, transcriptions, query, sortOrder]);
+    }, [
+        recordings,
+        transcriptions,
+        query,
+        sortOrder,
+        needsReviewOnly,
+        reviewCount,
+    ]);
 
     const visible = filtered.slice(0, visibleCount);
 
@@ -261,6 +278,9 @@ export function RecordingList({
                     sortOrder={sortOrder}
                     onSortOrderChange={setSortOrderPersisted}
                     onOrganize={onOrganize}
+                    reviewCount={reviewCount}
+                    needsReviewOnly={needsReviewOnly && reviewCount > 0}
+                    onNeedsReviewOnlyChange={setNeedsReviewOnly}
                 />
 
                 {pendingUploads.length > 0 && (

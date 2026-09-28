@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowDownAZ, FolderTree, Search, X } from "lucide-react";
+import {
+    ArrowDownAZ,
+    FolderTree,
+    GraduationCap,
+    Search,
+    X,
+} from "lucide-react";
 import { useExtracted } from "next-intl";
 import type * as React from "react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +32,9 @@ export function RecordingListToolbar({
     sortOrder,
     onSortOrderChange,
     onOrganize,
+    reviewCount = 0,
+    needsReviewOnly = false,
+    onNeedsReviewOnlyChange,
 }: {
     query: string;
     onQueryChange: (next: string) => void;
@@ -36,6 +45,10 @@ export function RecordingListToolbar({
     sortOrder: SortOrder;
     onSortOrderChange: (next: SortOrder) => void;
     onOrganize: () => void;
+    /** Recordings a Learn review waits on; the toggle shows when there are any. */
+    reviewCount?: number;
+    needsReviewOnly?: boolean;
+    onNeedsReviewOnlyChange?: (next: boolean) => void;
 }) {
     const i18n = useExtracted();
     return (
@@ -114,6 +127,22 @@ export function RecordingListToolbar({
                             </DropdownMenuRadioGroup>
                         </DropdownMenuContent>
                     </DropdownMenu>
+                    {reviewCount > 0 && onNeedsReviewOnlyChange && (
+                        <Button
+                            variant={needsReviewOnly ? "secondary" : "ghost"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            aria-pressed={needsReviewOnly}
+                            onClick={() =>
+                                onNeedsReviewOnlyChange(!needsReviewOnly)
+                            }
+                        >
+                            <GraduationCap className="size-3.5" />
+                            {i18n("Needs review ({count})", {
+                                count: String(reviewCount),
+                            })}
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         size="sm"
