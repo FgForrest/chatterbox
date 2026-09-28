@@ -92,7 +92,12 @@ export async function changeTranscriptSpeakerInTx(
     return named;
 }
 
-async function answerSpeakerInTx(
+/**
+ * The answer alone, inside a caller's transaction, which took the
+ * Organization-people lock (shared) first: the scopes it touched are added
+ * to `scopes`, for the caller to bump once, last (a finished review).
+ */
+export async function answerSpeakerInTx(
     tx: Tx,
     { answer, actorUserId, orgUserId, ...version }: SpeakerChangeArgs,
     scopes: Set<string>,

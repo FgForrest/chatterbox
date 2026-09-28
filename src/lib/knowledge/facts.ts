@@ -347,78 +347,91 @@ export interface RecordingFactArgs extends FactArgs {
 export async function confirmFactFromRecording(
     args: RecordingFactArgs,
 ): Promise<string> {
+    return db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
+        const factId = await confirmFactFromRecordingInTx(tx, args);
+        await bumpScopeInTx(tx, [args.actorUserId]);
+        return factId;
+    });
+}
+
+/**
+ * `confirmFactFromRecording` inside a caller's transaction, which took the
+ * Organization-people lock (shared) first and bumps the actor's scope
+ * once, last, with everything else it changed (a finished review).
+ */
+export async function confirmFactFromRecordingInTx(
+    tx: Tx,
+    args: RecordingFactArgs,
+): Promise<string> {
     if (args.startMs < 0 || args.endMs < args.startMs) {
         throw invalid("The time range is not valid", "startMs");
     }
-    return db.transaction(async (tx) => {
-        await lockOrgPeopleShared(tx);
-        const { recordingId, revision, turns } = await lockTranscriptForChange(
-            tx,
-            { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
-            args,
+    const { recordingId, revision, turns } = await lockTranscriptForChange(
+        tx,
+        { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
+        args,
+    );
+    if (revision !== args.revision) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "The transcript changed; reload",
+            409,
         );
-        if (revision !== args.revision) {
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "The transcript changed; reload",
-                409,
-            );
+    }
+    const quote = quoteFromTurns(turns, args.startMs, args.endMs);
+    if (!quote) throw invalid("Nothing was said then", "startMs");
+    const speakerLabel = args.speakerLabel ?? null;
+    if (speakerLabel) {
+        if (
+            !speakerLabelsForTranscript({ text: "", turns }).includes(
+                speakerLabel,
+            )
+        ) {
+            throw invalid("No such speaker", "speakerLabel");
         }
-        const quote = quoteFromTurns(turns, args.startMs, args.endMs);
-        if (!quote) throw invalid("Nothing was said then", "startMs");
-        const speakerLabel = args.speakerLabel ?? null;
-        if (speakerLabel) {
-            if (
-                !speakerLabelsForTranscript({ text: "", turns }).includes(
-                    speakerLabel,
-                )
-            ) {
-                throw invalid("No such speaker", "speakerLabel");
-            }
-            await assertSpeakerInFact(tx, args, speakerLabel);
-        }
-        const factId = await confirmFactInTx(tx, {
-            ...args,
-            scopeUserId: args.actorUserId,
-            origin: "recording",
-        });
-        await tx
-            .insert(knowledgeFactEvidence)
-            .values({
-                userId: args.actorUserId,
-                factId,
-                transcriptionId: args.transcriptionId,
-                recordingId,
+        await assertSpeakerInFact(tx, args, speakerLabel);
+    }
+    const factId = await confirmFactInTx(tx, {
+        ...args,
+        scopeUserId: args.actorUserId,
+        origin: "recording",
+    });
+    await tx
+        .insert(knowledgeFactEvidence)
+        .values({
+            userId: args.actorUserId,
+            factId,
+            transcriptionId: args.transcriptionId,
+            recordingId,
+            transcriptRevision: revision,
+            startMs: args.startMs,
+            endMs: args.endMs,
+            speakerLabel,
+            dependsOnSpeaker: speakerLabel !== null,
+            quote: encryptText(quote),
+            confirmedByUserId: args.actorUserId,
+        })
+        // The same words confirmed again: whatever review they were
+        // under, a person has just said they support the fact.
+        .onConflictDoUpdate({
+            target: [
+                knowledgeFactEvidence.factId,
+                knowledgeFactEvidence.transcriptionId,
+                knowledgeFactEvidence.startMs,
+                knowledgeFactEvidence.endMs,
+            ],
+            set: {
+                status: "supported",
                 transcriptRevision: revision,
-                startMs: args.startMs,
-                endMs: args.endMs,
                 speakerLabel,
                 dependsOnSpeaker: speakerLabel !== null,
                 quote: encryptText(quote),
                 confirmedByUserId: args.actorUserId,
-            })
-            // The same words confirmed again: whatever review they were
-            // under, a person has just said they support the fact.
-            .onConflictDoUpdate({
-                target: [
-                    knowledgeFactEvidence.factId,
-                    knowledgeFactEvidence.transcriptionId,
-                    knowledgeFactEvidence.startMs,
-                    knowledgeFactEvidence.endMs,
-                ],
-                set: {
-                    status: "supported",
-                    transcriptRevision: revision,
-                    speakerLabel,
-                    dependsOnSpeaker: speakerLabel !== null,
-                    quote: encryptText(quote),
-                    confirmedByUserId: args.actorUserId,
-                    confirmedAt: new Date(),
-                },
-            });
-        await bumpScopeInTx(tx, [args.actorUserId]);
-        return factId;
-    });
+                confirmedAt: new Date(),
+            },
+        });
+    return factId;
 }
 
 /**

@@ -492,6 +492,27 @@ export async function createPrivateType(
     });
 }
 
+/**
+ * A new type of the actor's own, inside a caller's transaction, which
+ * checked who the actor is and bumps their scope once, last (a finished
+ * review): a private type for a member, an Organization type for the
+ * organization account. Returns its key.
+ */
+export async function createOwnTypeInTx(
+    tx: Tx,
+    actorUserId: string,
+    organization: boolean,
+    spec: NewTypeSpec,
+): Promise<string> {
+    return insertTypeInTx(
+        tx,
+        actorUserId,
+        actorUserId,
+        organization ? "o" : "u",
+        spec,
+    );
+}
+
 /** Create an Organization type. The organization account only. */
 export async function createOrgType(
     actorUserId: string,
@@ -831,24 +852,31 @@ export async function proposePhrase(
     userId: string,
     phrase: string,
 ): Promise<void> {
+    await db.transaction((tx) => proposePhraseInTx(tx, userId, phrase));
+}
+
+/** `proposePhrase` inside a caller's transaction (a finished review). */
+export async function proposePhraseInTx(
+    tx: Tx,
+    userId: string,
+    phrase: string,
+): Promise<void> {
     const clean = cleanLabel(phrase);
     const phraseHmac = domainLookupHash(PHRASE_DOMAIN, clean);
-    await db.transaction(async (tx) => {
-        const [proposal] = await tx
-            .insert(knowledgeVocabularyProposals)
-            .values({ phrase: encryptText(clean), phraseHmac })
-            .onConflictDoUpdate({
-                target: knowledgeVocabularyProposals.phraseHmac,
-                // A no-op write, so the row comes back either way.
-                set: { phraseHmac },
-            })
-            .returning({ id: knowledgeVocabularyProposals.id });
-        if (!proposal) return;
-        await tx
-            .insert(knowledgeVocabularyProposalVotes)
-            .values({ proposalId: proposal.id, userId })
-            .onConflictDoNothing();
-    });
+    const [proposal] = await tx
+        .insert(knowledgeVocabularyProposals)
+        .values({ phrase: encryptText(clean), phraseHmac })
+        .onConflictDoUpdate({
+            target: knowledgeVocabularyProposals.phraseHmac,
+            // A no-op write, so the row comes back either way.
+            set: { phraseHmac },
+        })
+        .returning({ id: knowledgeVocabularyProposals.id });
+    if (!proposal) return;
+    await tx
+        .insert(knowledgeVocabularyProposalVotes)
+        .values({ proposalId: proposal.id, userId })
+        .onConflictDoNothing();
 }
 
 export interface VocabularyProposal {

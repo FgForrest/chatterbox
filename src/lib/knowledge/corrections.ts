@@ -48,6 +48,8 @@ import {
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 const HEARD_DOMAIN = "correction-heard";
 
 /**
@@ -150,79 +152,89 @@ function cleanReplacement(
 export async function acceptCorrection(
     args: AcceptCorrectionArgs,
 ): Promise<string> {
-    const { anchor, kind, actorUserId } = args;
-    const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const { revision, turns, language, provider } =
-            await lockTranscriptForChange(tx, args, args);
-        if (revision !== args.revision) throw transcriptChanged();
-        if (!anchorMatches(anchor, turns)) {
-            throw invalid("Those words are not at that place", "anchor");
-        }
-        const onTurn = await tx
-            .select({
-                turnIndex: transcriptCorrections.turnIndex,
-                charStart: transcriptCorrections.charStart,
-                charEnd: transcriptCorrections.charEnd,
-            })
-            .from(transcriptCorrections)
-            .where(
-                and(
-                    eq(
-                        transcriptCorrections.transcriptionId,
-                        args.transcriptionId,
-                    ),
-                    eq(transcriptCorrections.turnIndex, anchor.turnIndex),
-                    // Only what the actor's view shows: a waiting private
-                    // correction neither blocks nor gives itself away.
-                    readCorrection(args.userId),
-                ),
-            );
-        if (onTurn.some((other) => anchorsOverlap(other, anchor))) {
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "Those words already carry a correction",
-                409,
-            );
-        }
-        const target = await resolveTargetInTx(tx, actorUserId, args.target);
-        const [row] = await tx
-            .insert(transcriptCorrections)
-            .values({
-                // The writer rule made the actor the owner on a private
-                // recording and the organization account on a shared one:
-                // the scope.
-                userId: actorUserId,
-                transcriptionId: args.transcriptionId,
-                transcriptRevision: revision,
-                turnIndex: anchor.turnIndex,
-                charStart: anchor.charStart,
-                charEnd: anchor.charEnd,
-                heard: encryptText(anchor.heard),
-                heardHmac: domainLookupHash(HEARD_DOMAIN, anchor.heard),
-                kind,
-                targetPersonId: "personId" in target ? target.personId : null,
-                targetEntityId: "entityId" in target ? target.entityId : null,
-                replacement: replacement ? encryptText(replacement) : null,
-                preTicked: args.preTicked ?? false,
-                createdByUserId: actorUserId,
-            })
-            .returning({ id: transcriptCorrections.id });
-        const id = (row as { id: string }).id;
-        if (kind === "correct" && !args.preTicked) {
-            await teachHeardAsInTx(tx, {
-                scopeUserId: actorUserId,
-                target,
-                heard: anchor.heard,
-                language,
-                provider,
-                correctionId: id,
-            });
-        }
-        await bumpScopeInTx(tx, [actorUserId]);
+        const id = await acceptCorrectionInTx(tx, args);
+        await bumpScopeInTx(tx, [args.actorUserId]);
         return id;
     });
+}
+
+/**
+ * `acceptCorrection` inside a caller's transaction, which took the
+ * Organization-people lock (shared) first and bumps the actor's scope
+ * once, last, with everything else it changed (a finished review).
+ */
+export async function acceptCorrectionInTx(
+    tx: Tx,
+    args: AcceptCorrectionArgs,
+): Promise<string> {
+    const { anchor, kind, actorUserId } = args;
+    const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
+    const { revision, turns, language, provider } =
+        await lockTranscriptForChange(tx, args, args);
+    if (revision !== args.revision) throw transcriptChanged();
+    if (!anchorMatches(anchor, turns)) {
+        throw invalid("Those words are not at that place", "anchor");
+    }
+    const onTurn = await tx
+        .select({
+            turnIndex: transcriptCorrections.turnIndex,
+            charStart: transcriptCorrections.charStart,
+            charEnd: transcriptCorrections.charEnd,
+        })
+        .from(transcriptCorrections)
+        .where(
+            and(
+                eq(transcriptCorrections.transcriptionId, args.transcriptionId),
+                eq(transcriptCorrections.turnIndex, anchor.turnIndex),
+                // Only what the actor's view shows: a waiting private
+                // correction neither blocks nor gives itself away.
+                readCorrection(args.userId),
+            ),
+        );
+    if (onTurn.some((other) => anchorsOverlap(other, anchor))) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Those words already carry a correction",
+            409,
+        );
+    }
+    const target = await resolveTargetInTx(tx, actorUserId, args.target);
+    const [row] = await tx
+        .insert(transcriptCorrections)
+        .values({
+            // The writer rule made the actor the owner on a private
+            // recording and the organization account on a shared one:
+            // the scope.
+            userId: actorUserId,
+            transcriptionId: args.transcriptionId,
+            transcriptRevision: revision,
+            turnIndex: anchor.turnIndex,
+            charStart: anchor.charStart,
+            charEnd: anchor.charEnd,
+            heard: encryptText(anchor.heard),
+            heardHmac: domainLookupHash(HEARD_DOMAIN, anchor.heard),
+            kind,
+            targetPersonId: "personId" in target ? target.personId : null,
+            targetEntityId: "entityId" in target ? target.entityId : null,
+            replacement: replacement ? encryptText(replacement) : null,
+            preTicked: args.preTicked ?? false,
+            createdByUserId: actorUserId,
+        })
+        .returning({ id: transcriptCorrections.id });
+    const id = (row as { id: string }).id;
+    if (kind === "correct" && !args.preTicked) {
+        await teachHeardAsInTx(tx, {
+            scopeUserId: actorUserId,
+            target,
+            heard: anchor.heard,
+            language,
+            provider,
+            correctionId: id,
+        });
+    }
+    return id;
 }
 
 /**
