@@ -423,8 +423,9 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 `/api/recordings/${REC}/speakers?view=org`,
             );
             expect(speakers.status).toBe(200);
+            // Sharing took the Organization's own copy.
             await expect(speakers.json()).resolves.toMatchObject({
-                fallback: true,
+                fallback: false,
             });
             const [privatePerson] = await db()
                 .insert(people)
@@ -601,16 +602,13 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
         });
 
         it("removes the Organization view with the recording", async () => {
-            await db()
-                .insert(transcriptions)
-                .values({
-                    recordingId: REC,
-                    userId: orgUserId,
-                    text: encryptText("org copy"),
-                    provider: "openai",
-                    model: "whisper-1",
-                    source: "riffado",
-                });
+            // Sharing took the Organization's own copy.
+            expect(
+                await db()
+                    .select()
+                    .from(transcriptions)
+                    .where(eq(transcriptions.userId, orgUserId)),
+            ).toHaveLength(1);
             expect(
                 (
                     await call(

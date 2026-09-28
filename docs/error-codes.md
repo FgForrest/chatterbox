@@ -125,6 +125,12 @@ rephrased between releases without notice; `code` will not.
 | `RECORDING_NOT_FOUND`             |   404  | Recording doesn't exist for this user (alias of `NOT_FOUND`). |
 | `RECORDING_STREAM_INVALID_RANGE`  |   416  | Audio streaming `Range` header is malformed or out of bounds. |
 
+## Sharing
+
+| Code                       | Status | `details`      | When                                                                                                                                                                                                  |
+| -------------------------- | -----: | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SHARE_REQUIREMENTS_UNMET` |   409  | `{ problems }` | Filing a recording into the Organization was refused. `problems` lists `{ kind: "no_transcript" }`, `{ kind: "unresolved_speakers", source, labels }` (speakers nobody named or marked unknown) and `{ kind: "learn_unfinished", runs }`. |
+
 ## Notifications
 
 | Code                  | Status | When                                                |

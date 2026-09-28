@@ -569,6 +569,9 @@ export async function mergePeople(
     if (keepId === loserId) return;
 
     await db.transaction(async (tx) => {
+        // Before anything is read: a share promoting either person decides
+        // whose they are, and a merge must see the outcome.
+        await lockOrgPeople(tx);
         const loser = await requireManageable(tx, actorId, loserId);
         const keep = await readPersonRow(tx, keepId);
         if (!keep || (keep.userId !== actorId && keep.ownerRole !== "org")) {
@@ -610,6 +613,10 @@ export async function deletePerson(
     personId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        // Before anything is read: a share may be promoting this person,
+        // and the private record it read would be the Organization's by
+        // the time it is deleted.
+        await lockOrgPeople(tx);
         const row = await requireManageable(tx, actorId, personId);
         if (row.ownerRole === "org") {
             await tx
@@ -735,20 +742,23 @@ export async function promotePersonInTx(
     }
 
     await moveNotesToOverlay(tx, row, row.id);
-    await tx
+    const [promoted] = await tx
         .update(people)
         .set({
             userId: orgUserId,
             createdByUserId: row.userId,
             updatedAt: new Date(),
         })
-        .where(eq(people.id, row.id));
-    return row.id;
+        .where(eq(people.id, row.id))
+        .returning({ id: people.id });
+    // Deleted since it was read: there is nobody to promote.
+    return promoted?.id ?? null;
 }
 
 /**
  * Serialize promotions, so two recordings shared at once cannot both create
- * an Organization person for the same email.
+ * an Organization person for the same email, and a delete or merge cannot
+ * act on a private person a share is promoting.
  *
  * Taken before any recording lock: a promotion may merge people, and a
  * merge locks the recordings that name them.
@@ -767,41 +777,5 @@ export async function promotePerson(
     return db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         return promotePersonInTx(tx, personId, orgUserId);
-    });
-}
-
-/**
- * Promote everyone confirmed on the owner's transcripts of a recording.
- *
- * Called when the recording is shared and the Organization view shows the
- * owner's transcripts: each name visible there becomes an Organization
- * person. Suggestions are left alone -- they are the owner's to review.
- */
-export async function promoteRecordingPeople(
-    recordingId: string,
-    ownerUserId: string,
-    orgUserId: string,
-): Promise<void> {
-    await db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        const rows = await tx
-            .selectDistinct({ personId: transcriptSpeakers.personId })
-            .from(transcriptSpeakers)
-            .innerJoin(
-                transcriptions,
-                eq(transcriptions.id, transcriptSpeakers.transcriptionId),
-            )
-            .innerJoin(people, eq(people.id, transcriptSpeakers.personId))
-            .where(
-                and(
-                    eq(transcriptions.recordingId, recordingId),
-                    eq(transcriptions.userId, ownerUserId),
-                    eq(transcriptSpeakers.status, "confirmed"),
-                    eq(people.userId, ownerUserId),
-                ),
-            );
-        for (const { personId } of rows) {
-            if (personId) await promotePersonInTx(tx, personId, orgUserId);
-        }
     });
 }

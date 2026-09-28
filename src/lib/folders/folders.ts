@@ -15,7 +15,7 @@ import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import { promoteRecordingPeople } from "@/lib/knowledge/people";
+import { lockOrgPeople } from "@/lib/knowledge/people";
 import {
     assertOrgScopeWritable,
     getOrgUserId,
@@ -23,6 +23,9 @@ import {
 } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
 import { recordingJobSubject } from "@/lib/sharing/access";
+import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import { snapshotRecordingForOrgInTx } from "@/lib/sharing/org-transcript";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import type {
     FolderKind,
     FolderOrganization,
@@ -844,6 +847,11 @@ async function pruneRedundantAssignments(
  * File a recording in a folder.
  *
  * Filing in the Organization tree is sharing, so only the owner may do it.
+ * The first Organization folder shares the recording, in one transaction:
+ * the assignment, the Organization's snapshot, and the share gate run on
+ * that snapshot, so what gets published is exactly what passed. A refused
+ * share leaves no assignment and no Organization rows. Filing an already
+ * shared recording into another Organization folder is not gated.
  */
 export async function addRecordingToFolder(input: {
     userId: string;
@@ -874,24 +882,64 @@ export async function addRecordingToFolder(input: {
     }
     assertWritable(target);
 
-    await db.transaction(async (tx) => {
-        if (target.scope === "org") await lockOrgTree(tx);
-        await tx
-            .insert(recordingFolderAssignments)
-            .values({
-                userId: input.userId,
-                recordingId: input.recordingId,
-                folderId: target.folder.id,
-            })
-            .onConflictDoNothing();
-        await pruneRedundantAssignments(tx, target.ownerId, input.recordingId);
-    });
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            if (target.scope === "org") {
+                await lockOrgTree(tx);
+                // Before the recording: the snapshot promotes people, and a
+                // promotion may merge them, which locks recordings.
+                await lockOrgPeople(tx);
+            }
+            await lockRecording(tx, input.recordingId);
+            // Deleted, or given away, since the check above.
+            await requireOwnedRecording(tx, input.userId, input.recordingId);
+            const wasShared =
+                target.scope === "org" &&
+                (await isRecordingShared(
+                    input.recordingId,
+                    target.ownerId,
+                    tx,
+                ));
+            await tx
+                .insert(recordingFolderAssignments)
+                .values({
+                    userId: input.userId,
+                    recordingId: input.recordingId,
+                    folderId: target.folder.id,
+                })
+                .onConflictDoNothing();
+            await pruneRedundantAssignments(
+                tx,
+                target.ownerId,
+                input.recordingId,
+            );
+            if (target.scope !== "org" || wasShared) return;
+
+            await snapshotRecordingForOrgInTx(
+                tx,
+                input.recordingId,
+                {
+                    ownerUserId: input.userId,
+                    contentUserId: target.ownerId,
+                },
+                input.userId,
+            );
+            const problems = await loadShareGate(
+                tx,
+                input.recordingId,
+                target.ownerId,
+            );
+            if (problems.length > 0) {
+                throw new AppError(
+                    ErrorCode.SHARE_REQUIREMENTS_UNMET,
+                    "Name every speaker and finish the review before sharing",
+                    409,
+                    { problems },
+                );
+            }
+        }),
+    );
     if (target.scope === "org") {
-        await promoteSharedNames(
-            input.recordingId,
-            input.userId,
-            target.ownerId,
-        );
         await orgTreeChanged();
     } else {
         await scheduleExportProjection(input.userId);
@@ -899,28 +947,27 @@ export async function addRecordingToFolder(input: {
 }
 
 /**
- * Sharing shows the owner's transcripts in the Organization view until the
- * organization has its own; every name confirmed on them becomes an
- * Organization person, so the shared view and everyone's knowledge base
- * agree on who is speaking.
+ * Run a transaction again, once, when PostgreSQL broke a deadlock by
+ * aborting it. Anything else, a refusal included, is thrown as it is.
  */
-async function promoteSharedNames(
-    recordingId: string,
-    ownerUserId: string,
-    orgUserId: string,
-): Promise<void> {
-    const [own] = await db
-        .select({ id: transcriptions.id })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, orgUserId),
-            ),
-        )
-        .limit(1);
-    if (own) return;
-    await promoteRecordingPeople(recordingId, ownerUserId, orgUserId);
+async function retryOnDeadlock<T>(run: () => Promise<T>): Promise<T> {
+    try {
+        return await run();
+    } catch (error) {
+        if (!isDeadlock(error)) throw error;
+        return run();
+    }
+}
+
+function isDeadlock(error: unknown): boolean {
+    for (
+        let current: unknown = error;
+        current && typeof current === "object";
+        current = (current as { cause?: unknown }).cause
+    ) {
+        if ((current as { code?: unknown }).code === "40P01") return true;
+    }
+    return false;
 }
 
 /**

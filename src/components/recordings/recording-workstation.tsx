@@ -19,8 +19,9 @@ import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { parseApiError } from "@/lib/api-errors";
 import type { FolderOrganization } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
@@ -60,6 +61,7 @@ export function RecordingWorkstation({
     initialFolderOrganization,
 }: RecordingWorkstationProps) {
     const i18n = useExtracted();
+    const shareRefusal = useShareRefusal();
     const { push, refresh } = useRouter();
     const [filename, setFilename] = useState(recording.filename);
     const [folderOrganization, setFolderOrganization] =
@@ -148,15 +150,15 @@ export function RecordingWorkstation({
                     ...current,
                     assignments: previous,
                 }));
+                const error = await parseApiError(response);
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not update folder assignment"),
-                    ),
+                    shareRefusal(error) ??
+                        (error.error ||
+                            i18n("Could not update folder assignment")),
                 );
             }
         },
-        [folderOrganization.assignments, recording.id, i18n],
+        [folderOrganization.assignments, recording.id, i18n, shareRefusal],
     );
 
     return (

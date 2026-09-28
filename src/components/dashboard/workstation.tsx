@@ -25,10 +25,11 @@ import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import { useOrgEvents } from "@/hooks/use-org-events";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTheme } from "@/hooks/use-theme";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { useUploadQueue } from "@/hooks/use-upload-queue";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import {
     requestNotificationPermission,
@@ -147,6 +148,7 @@ export function Workstation({
     isOrgAccount = false,
 }: WorkstationProps) {
     const i18n = useExtracted();
+    const shareRefusal = useShareRefusal();
     const { refresh } = useRouter();
     // A stable empty list: a fresh `[]` per render would re-run every effect
     // that depends on it, and one of them resets optimistic renames.
@@ -790,14 +792,34 @@ export function Workstation({
                     ...current,
                     assignments: previous,
                 }));
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        assigned
-                            ? i18n("Could not add recording to folder")
-                            : i18n("Could not remove recording from folder"),
-                    ),
-                );
+                const error = await parseApiError(response);
+                const refusal = shareRefusal(error);
+                if (refusal) {
+                    const recording = recordings.find(
+                        (candidate) => candidate.id === recordingId,
+                    );
+                    toast.error(refusal, {
+                        action: recording
+                            ? {
+                                  label: i18n("Open recording"),
+                                  onClick: () => {
+                                      setCurrentRecording(recording);
+                                      setSelectedFolderId(null);
+                                      setMobileView("detail");
+                                  },
+                              }
+                            : undefined,
+                    });
+                } else {
+                    toast.error(
+                        error.error ||
+                            (assigned
+                                ? i18n("Could not add recording to folder")
+                                : i18n(
+                                      "Could not remove recording from folder",
+                                  )),
+                    );
+                }
                 throw new Error(i18n("Could not update folder assignment"));
             }
             // Sharing or unsharing changes the Organization library itself.
@@ -813,7 +835,9 @@ export function Workstation({
             folderOrganization.assignments,
             folderOrganization.folders,
             i18n,
+            recordings,
             refresh,
+            shareRefusal,
         ],
     );
 

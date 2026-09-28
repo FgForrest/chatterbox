@@ -25,10 +25,12 @@ import {
     accounts,
     aiEnhancements,
     asyncJobs,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -38,7 +40,7 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, hooks } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -60,6 +62,8 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     return {
         dbProxy: proxy,
         dbRef: ref,
+        // Run once, inside the next share, right after its snapshot.
+        hooks: { afterSnapshot: null as null | (() => Promise<void>) },
         mockEnv: {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared" as "shared" | "local",
@@ -83,7 +87,26 @@ vi.mock("@/lib/posthog-server", () => ({
 vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
+// Another writer arriving while a share holds its locks.
+vi.mock("@/lib/sharing/org-transcript", async () => {
+    const actual = await vi.importActual<
+        typeof import("@/lib/sharing/org-transcript")
+    >("@/lib/sharing/org-transcript");
+    return {
+        ...actual,
+        snapshotRecordingForOrgInTx: async (
+            ...args: Parameters<typeof actual.snapshotRecordingForOrgInTx>
+        ) => {
+            const copies = await actual.snapshotRecordingForOrgInTx(...args);
+            const run = hooks.afterSnapshot;
+            hooks.afterSnapshot = null;
+            await run?.();
+            return copies;
+        },
+    };
+});
 
+import { db as appDb } from "@/db";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError } from "@/lib/errors";
 import {
@@ -98,7 +121,13 @@ import {
     retireLegacyPublicRoots,
     unshareRecording,
 } from "@/lib/folders/folders";
+import {
+    clearTranscriptSpeaker,
+    deleteSpeakerInTx,
+    lockForSpeakerChange,
+} from "@/lib/knowledge/attribution";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { deletePerson, lockOrgPeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
 import {
     requireRecordingView,
@@ -111,6 +140,48 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const ALICE = "user-alice";
 const BOB = "user-bob";
+
+type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+
+/**
+ * Run `work` in a transaction that stays open, holding its locks, until
+ * `commit` is called: another writer caught in the middle of its work.
+ */
+async function holdTransaction(work: (tx: Tx) => Promise<void>) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let ready = () => {};
+    const worked = new Promise<void>((resolve) => {
+        ready = resolve;
+    });
+    const done = appDb.transaction(async (tx) => {
+        await work(tx);
+        ready();
+        await released;
+    });
+    await Promise.race([worked, done]);
+    return {
+        commit: async () => {
+            release();
+            await done;
+        },
+    };
+}
+
+/** Whether `promise` is still pending after a moment: waiting on a lock. */
+async function stillWaiting(promise: Promise<unknown>): Promise<boolean> {
+    const pending = Symbol("pending");
+    const first = await Promise.race([
+        promise.then(
+            () => null,
+            () => null,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(pending), 300)),
+    ]);
+    return first === pending;
+}
 
 async function expectStatus(promise: Promise<unknown>, status: number) {
     const error = await promise.then(
@@ -156,7 +227,11 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             ]);
     });
 
-    async function insertRecording(id: string, userId: string) {
+    async function insertRecording(
+        id: string,
+        userId: string,
+        { transcribed = true }: { transcribed?: boolean } = {},
+    ) {
         await db()
             .insert(recordings)
             .values({
@@ -174,6 +249,32 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 storagePath: `${userId}/${id}.mp3`,
                 plaudVersion: "1",
             });
+        // Transcribed, without speakers: nothing stands in the way of
+        // sharing it.
+        if (transcribed) await insertTranscript(id, userId);
+    }
+
+    async function insertTranscript(
+        recordingId: string,
+        userId: string,
+        {
+            text = "Hello.",
+            model = "whisper-1",
+            source = "riffado",
+        }: { text?: string; model?: string; source?: string } = {},
+    ): Promise<string> {
+        const [row] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId,
+                userId,
+                text: encryptText(text),
+                provider: "openai",
+                model,
+                source,
+            })
+            .returning({ id: transcriptions.id });
+        return row?.id ?? "";
     }
 
     async function orgRootId(): Promise<string> {
@@ -632,15 +733,6 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 provider: "openai",
                 model: "whisper-1",
             });
-            await upsertTranscription({
-                userId: ALICE,
-                recordingId: "rec-a",
-                text: "private transcript",
-                detectedLanguage: "en",
-                source: "riffado",
-                provider: "openai",
-                model: "whisper-1",
-            });
             await db()
                 .insert(asyncJobs)
                 .values({
@@ -660,6 +752,12 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             const [job] = await db().select().from(asyncJobs);
             expect(job?.status).toBe("failed");
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
+            // Sharing it again takes a fresh snapshot.
+            const [recording] = await db()
+                .select({ orgSnapshotAt: recordings.orgSnapshotAt })
+                .from(recordings)
+                .where(eq(recordings.id, "rec-a"));
+            expect(recording?.orgSnapshotAt).toBeNull();
         });
     });
 
@@ -793,7 +891,9 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 .select()
                 .from(transcriptions)
                 .where(eq(transcriptions.userId, ALICE));
-            expect(owned).toHaveLength(0);
+            expect(owned.map((item) => decryptText(item.text))).toEqual([
+                "Hello.",
+            ]);
         });
 
         it("writes nothing once the recording is no longer shared", async () => {
@@ -813,8 +913,341 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             expect(committed).toBe(false);
             const rows = await db().select().from(aiEnhancements);
             expect(rows).toHaveLength(0);
-            const transcripts = await db().select().from(transcriptions);
+            const transcripts = await db()
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, org));
             expect(transcripts).toHaveLength(0);
+        });
+    });
+
+    describe("sharing is gated on the snapshot", () => {
+        const DIARIZED = "gpt-4o-transcribe-diarize";
+        const DIALOG = "speaker_0: Hello.\nspeaker_1: Hi there.";
+
+        /** Alice's recording with a diarized transcript per source. */
+        async function meeting(sources = ["riffado"]) {
+            await insertRecording("rec-a", ALICE, { transcribed: false });
+            const ids: Record<string, string> = {};
+            for (const source of sources) {
+                ids[source] = await insertTranscript("rec-a", ALICE, {
+                    text: DIALOG,
+                    model: DIARIZED,
+                    source,
+                });
+            }
+            return ids;
+        }
+
+        async function person(name: string): Promise<string> {
+            const [row] = await db()
+                .insert(people)
+                .values({ userId: ALICE, displayName: encryptText(name) })
+                .returning({ id: people.id });
+            return row?.id ?? "";
+        }
+
+        /** Alice's answer: a person, or unknown when null. */
+        async function answer(
+            transcriptionId: string,
+            label: string,
+            personId: string | null,
+        ) {
+            await db()
+                .insert(transcriptSpeakers)
+                .values({
+                    userId: ALICE,
+                    transcriptionId,
+                    label,
+                    personId,
+                    markedUnknown: personId === null,
+                    source: "user",
+                    status: "confirmed",
+                    confirmedByUserId: ALICE,
+                });
+        }
+
+        /** A meeting whose speakers are Jana and someone unknown. */
+        async function answeredMeeting() {
+            const { riffado } = await meeting();
+            const jana = await person("Jana");
+            await answer(riffado ?? "", "speaker_0", jana);
+            await answer(riffado ?? "", "speaker_1", null);
+            return { transcript: riffado ?? "", jana };
+        }
+
+        async function share(folderId?: string) {
+            await addRecordingToFolder({
+                userId: ALICE,
+                recordingId: "rec-a",
+                folderId: folderId ?? (await orgRootId()),
+            });
+        }
+
+        async function refusal(promise: Promise<unknown>) {
+            const error = await promise.then(
+                () => null,
+                (caught: unknown) => caught,
+            );
+            expect(error).toBeInstanceOf(AppError);
+            return error as AppError;
+        }
+
+        async function orgTranscripts() {
+            return db()
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, await orgUser()));
+        }
+
+        async function orgNames() {
+            return db()
+                .select({
+                    label: transcriptSpeakers.label,
+                    personId: transcriptSpeakers.personId,
+                    markedUnknown: transcriptSpeakers.markedUnknown,
+                    confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+                })
+                .from(transcriptSpeakers)
+                .where(eq(transcriptSpeakers.userId, await orgUser()))
+                .orderBy(transcriptSpeakers.label);
+        }
+
+        async function assignments() {
+            return db()
+                .select({ folderId: recordingFolderAssignments.folderId })
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.recordingId, "rec-a"));
+        }
+
+        async function marker() {
+            const [row] = await db()
+                .select({ orgSnapshotAt: recordings.orgSnapshotAt })
+                .from(recordings)
+                .where(eq(recordings.id, "rec-a"));
+            return row?.orgSnapshotAt ?? null;
+        }
+
+        async function ownerOf(personId: string) {
+            const [row] = await db()
+                .select({ userId: people.userId })
+                .from(people)
+                .where(eq(people.id, personId));
+            return row?.userId ?? null;
+        }
+
+        it("refuses a speaker nobody named, and leaves nothing behind", async () => {
+            const { riffado } = await meeting();
+            const jana = await person("Jana");
+            await answer(riffado ?? "", "speaker_0", jana);
+
+            const error = await refusal(share());
+
+            expect(error.statusCode).toBe(409);
+            expect(error.code).toBe("SHARE_REQUIREMENTS_UNMET");
+            expect(error.details).toEqual({
+                problems: [
+                    {
+                        kind: "unresolved_speakers",
+                        source: "riffado",
+                        labels: ["speaker_1"],
+                    },
+                ],
+            });
+            expect(await assignments()).toEqual([]);
+            expect(await orgTranscripts()).toEqual([]);
+            expect(await marker()).toBeNull();
+            expect(await ownerOf(jana)).toBe(ALICE);
+            expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
+        });
+
+        it("refuses a recording without a transcript", async () => {
+            await insertRecording("rec-a", ALICE, { transcribed: false });
+            const error = await refusal(share());
+            expect(error.details).toEqual({
+                problems: [{ kind: "no_transcript" }],
+            });
+            expect(await assignments()).toEqual([]);
+        });
+
+        it("shares a recording whose every speaker is answered, as the Organization's own copy", async () => {
+            const { riffado, plaud } = await meeting(["riffado", "plaud"]);
+            const jana = await person("Jana");
+            for (const id of [riffado ?? "", plaud ?? ""]) {
+                await answer(id, "speaker_0", jana);
+                await answer(id, "speaker_1", null);
+            }
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    recordingId: "rec-a",
+                    userId: ALICE,
+                    transcriptionId: riffado,
+                    summary: encryptText("What was said"),
+                    provider: "openai",
+                    model: "gpt",
+                    source: "riffado",
+                });
+
+            await share();
+
+            expect(await assignments()).toHaveLength(1);
+            const copies = await orgTranscripts();
+            expect(copies.map((row) => row.source).sort()).toEqual([
+                "plaud",
+                "riffado",
+            ]);
+            const [summary] = await db()
+                .select()
+                .from(aiEnhancements)
+                .where(eq(aiEnhancements.userId, await orgUser()));
+            expect(summary?.transcriptionId).toBe(
+                copies.find((row) => row.source === "riffado")?.id,
+            );
+            expect(await orgNames()).toEqual(
+                [jana, jana, null, null].map((personId, index) => ({
+                    label: index < 2 ? "speaker_0" : "speaker_1",
+                    personId,
+                    markedUnknown: personId === null,
+                    confirmedByUserId: ALICE,
+                })),
+            );
+            expect(await ownerOf(jana)).toBe(await orgUser());
+            expect(await marker()).not.toBeNull();
+        });
+
+        it("files a shared recording into another Organization folder without the gate or a copy", async () => {
+            await answeredMeeting();
+            await share();
+            const sales = await createFolder({
+                userId: BOB,
+                parentId: await orgRootId(),
+                name: "Sales",
+            });
+            // A transcript nobody answered for, arriving after the snapshot.
+            await insertTranscript("rec-a", ALICE, {
+                text: DIALOG,
+                model: DIARIZED,
+                source: "plaud",
+            });
+
+            await share(sales.id);
+
+            // Filed in Sales, which makes the root assignment redundant.
+            expect(await assignments()).toEqual([{ folderId: sales.id }]);
+            expect((await orgTranscripts()).map((row) => row.source)).toEqual([
+                "riffado",
+            ]);
+        });
+
+        it("takes a fresh snapshot when shared again", async () => {
+            const { transcript } = await answeredMeeting();
+            await share();
+            await unshareRecording(ALICE, "rec-a");
+            expect(await orgTranscripts()).toEqual([]);
+            expect(await marker()).toBeNull();
+
+            const petr = await person("Petr");
+            await db()
+                .update(transcriptSpeakers)
+                .set({ personId: petr, markedUnknown: false })
+                .where(
+                    and(
+                        eq(transcriptSpeakers.transcriptionId, transcript),
+                        eq(transcriptSpeakers.label, "speaker_1"),
+                    ),
+                );
+            await share();
+
+            expect(await orgTranscripts()).toHaveLength(1);
+            expect(
+                (await orgNames()).find((row) => row.label === "speaker_1")
+                    ?.personId,
+            ).toBe(petr);
+            expect(await marker()).not.toBeNull();
+        });
+
+        describe("racing a share", () => {
+            it("refuses when a speaker's answer is taken back first", async () => {
+                const { transcript } = await answeredMeeting();
+                const clearing = await holdTransaction(async (tx) => {
+                    await lockForSpeakerChange(tx, {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        revision: 0,
+                    });
+                    await deleteSpeakerInTx(tx, {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        label: "speaker_1",
+                    });
+                });
+
+                const sharing = share();
+                expect(await stillWaiting(sharing)).toBe(true);
+                await clearing.commit();
+
+                expect((await refusal(sharing)).statusCode).toBe(409);
+                expect(await assignments()).toEqual([]);
+                expect(await orgTranscripts()).toEqual([]);
+            });
+
+            it("shares the answer when it is taken back after the snapshot", async () => {
+                const { transcript } = await answeredMeeting();
+                let clearing: Promise<unknown> = Promise.resolve();
+                hooks.afterSnapshot = async () => {
+                    clearing = clearTranscriptSpeaker({
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        revision: 0,
+                        label: "speaker_1",
+                    });
+                    expect(await stillWaiting(clearing)).toBe(true);
+                };
+
+                await share();
+                await Promise.allSettled([clearing]);
+
+                expect(
+                    (await orgNames()).find((row) => row.label === "speaker_1"),
+                ).toMatchObject({ personId: null, markedUnknown: true });
+            });
+
+            it("refuses when a named person is deleted first", async () => {
+                const { jana } = await answeredMeeting();
+                // deletePerson, caught between its delete and its commit.
+                const deleting = await holdTransaction(async (tx) => {
+                    await lockOrgPeople(tx);
+                    await tx.delete(people).where(eq(people.id, jana));
+                });
+
+                const sharing = share();
+                expect(await stillWaiting(sharing)).toBe(true);
+                await deleting.commit();
+
+                expect((await refusal(sharing)).statusCode).toBe(409);
+                expect(await assignments()).toEqual([]);
+                expect(await orgTranscripts()).toEqual([]);
+            });
+
+            it("shares the name when the person's deletion comes after the snapshot", async () => {
+                const { jana } = await answeredMeeting();
+                let deleting: Promise<unknown> = Promise.resolve();
+                hooks.afterSnapshot = async () => {
+                    deleting = deletePerson(ALICE, jana);
+                    expect(await stillWaiting(deleting)).toBe(true);
+                };
+
+                await share();
+
+                // By then an Organization person, not the owner's to delete.
+                expect((await refusal(deleting)).statusCode).toBe(403);
+                expect(await ownerOf(jana)).toBe(await orgUser());
+                expect(
+                    (await orgNames()).find((row) => row.label === "speaker_0")
+                        ?.personId,
+                ).toBe(jana);
+            });
         });
     });
 });

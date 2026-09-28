@@ -12,7 +12,7 @@
  * create scratch databases on.
  */
 
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -633,13 +633,14 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             .select({ id: recordingFolders.id })
             .from(recordingFolders)
             .where(eq(recordingFolders.userId, orgUserId));
+        const share = () =>
+            addRecordingToFolder({
+                userId: ALICE,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
         const jana = await person(ALICE, "Jana");
         await suggest([suggestion("speaker_0", jana)]);
-        await addRecordingToFolder({
-            userId: ALICE,
-            recordingId: REC,
-            folderId: root?.id ?? "",
-        });
         const labelsSeenBy = async (user: string, query: string) => {
             const response = await (getSpeakersRoute as unknown as Handler)(
                 request(user, query),
@@ -651,19 +652,16 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             return body.speakers.map((row) => `${row.label}:${row.status}`);
         };
 
-        // The owner reviews suggestions on their own transcript.
+        // The owner reviews suggestions on their own transcript, and must
+        // before sharing: a suggestion is no answer.
         expect(await labelsSeenBy(ALICE, "")).toEqual(["speaker_0:suggested"]);
-        // Shown in the Organization view, the owner's transcript is the
-        // owner's to review: nobody sees its suggestions there.
-        expect(await labelsSeenBy(orgUserId, "?view=org")).toEqual([]);
-        expect(await labelsSeenBy(BOB, "?view=org")).toEqual([]);
+        await expect(share()).rejects.toMatchObject({ statusCode: 409 });
+        await put(ALICE, { label: "speaker_0", personId: jana });
+        await put(ALICE, { label: "speaker_1", unknown: true });
+        await share();
 
         // The Organization's own copy: the organization account curates it.
-        await put(
-            orgUserId,
-            { label: "speaker_1", unknown: true },
-            "?view=org",
-        );
+        await put(orgUserId, { label: "speaker_0" }, "?view=org");
         const [copy] = await db()
             .select({ id: transcriptions.id })
             .from(transcriptions)
@@ -686,17 +684,6 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         expect(await labelsSeenBy(ALICE, "?view=org")).toEqual([
             "speaker_1:confirmed",
         ]);
-
-        // A member's change answers with confirmed rows only, too.
-        const response = await put(
-            BOB,
-            { label: "speaker_1", displayName: "Petr" },
-            "?view=org",
-        );
-        const body = (await response.json()) as {
-            speakers: { status: string }[];
-        };
-        expect(body.speakers.map((row) => row.status)).toEqual(["confirmed"]);
     });
 
     it("copies unknown and the confirmer into the Organization view", async () => {
@@ -705,6 +692,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             .select({ id: recordingFolders.id })
             .from(recordingFolders)
             .where(eq(recordingFolders.userId, orgUserId));
+        await put(ALICE, { label: "speaker_0", displayName: "Petr" });
         await put(ALICE, { label: "speaker_1", unknown: true });
         await addRecordingToFolder({
             userId: ALICE,
@@ -712,14 +700,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             folderId: root?.id ?? "",
         });
 
-        // The first edit in the Organization view makes its copy.
-        const response = await put(
-            BOB,
-            { label: "speaker_0", displayName: "Petr" },
-            "?view=org",
-        );
-        expect(response.status).toBe(200);
-
+        // Sharing made the copy.
         const [copy] = await db()
             .select({ id: transcriptions.id })
             .from(transcriptions)
@@ -727,35 +708,27 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         const copied = await db()
             .select()
             .from(transcriptSpeakers)
-            .where(
-                and(
-                    eq(transcriptSpeakers.transcriptionId, copy?.id ?? ""),
-                    eq(transcriptSpeakers.label, "speaker_1"),
-                ),
-            );
+            .where(eq(transcriptSpeakers.transcriptionId, copy?.id ?? ""))
+            .orderBy(transcriptSpeakers.label);
         expect(copied).toEqual([
+            // The row belongs to the organization account, and names the
+            // human who confirmed it.
             expect.objectContaining({
+                label: "speaker_0",
+                userId: orgUserId,
+                status: "confirmed",
+                markedUnknown: false,
+                confirmedByUserId: ALICE,
+            }),
+            expect.objectContaining({
+                label: "speaker_1",
+                userId: orgUserId,
                 personId: null,
                 status: "confirmed",
                 markedUnknown: true,
                 confirmedByUserId: ALICE,
             }),
         ]);
-        const [named] = await db()
-            .select()
-            .from(transcriptSpeakers)
-            .where(
-                and(
-                    eq(transcriptSpeakers.transcriptionId, copy?.id ?? ""),
-                    eq(transcriptSpeakers.label, "speaker_0"),
-                ),
-            );
-        // Bob acted in the Organization view; the row belongs to the
-        // organization account, and names him as the one who confirmed it.
-        expect(named).toMatchObject({
-            userId: orgUserId,
-            confirmedByUserId: BOB,
-        });
     });
     describe("serialized with transcript rewrites", () => {
         /** Lock the recording as a transcript rewrite does. */
@@ -940,7 +913,10 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
     });
 
     describe("the Organization view", () => {
+        /** Shared once both speakers are answered: nobody Alice knows. */
         async function share(): Promise<string> {
+            await put(ALICE, { label: "speaker_0", unknown: true });
+            await put(ALICE, { label: "speaker_1", unknown: true });
             const orgUserId = (await ensureOrgAccount()) ?? "";
             const [root] = await db()
                 .select({ id: recordingFolders.id })
@@ -956,11 +932,8 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
 
         it("lets only the organization account refuse a suggestion", async () => {
             const orgUserId = await share();
-            await put(
-                orgUserId,
-                { label: "speaker_1", unknown: true },
-                "?view=org",
-            );
+            // Take the answer back, leaving the label open to a suggestion.
+            await put(orgUserId, { label: "speaker_0" }, "?view=org");
             const [copy] = await db()
                 .select({ id: transcriptions.id })
                 .from(transcriptions)
@@ -998,11 +971,6 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
 
         it("tells only the organization account who confirmed a name", async () => {
             const orgUserId = await share();
-            await put(
-                BOB,
-                { label: "speaker_0", displayName: "Petr" },
-                "?view=org",
-            );
             const confirmers = async (user: string) => {
                 const response = await (getSpeakersRoute as unknown as Handler)(
                     request(user, "?view=org"),
@@ -1013,9 +981,9 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
                 };
                 return body.speakers.map((row) => row.confirmedByUserId);
             };
-            expect(await confirmers(BOB)).toEqual([null]);
-            expect(await confirmers(ALICE)).toEqual([null]);
-            expect(await confirmers(orgUserId)).toEqual([BOB]);
+            expect(await confirmers(BOB)).toEqual([null, null]);
+            expect(await confirmers(ALICE)).toEqual([null, null]);
+            expect(await confirmers(orgUserId)).toEqual([ALICE, ALICE]);
         });
     });
 });

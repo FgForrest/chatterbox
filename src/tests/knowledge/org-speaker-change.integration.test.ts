@@ -2,8 +2,9 @@
  * A change in the Organization view lands only on the transcript it was
  * made on, against a real PostgreSQL.
  *
- * Until the Organization has its own transcript, the view shows the owner's,
- * and the first change copies it. The change must still be refused when the
+ * On a recording shared before snapshots existed, until the Organization
+ * has its own transcript, the view shows the owner's, and the first change
+ * takes the Organization's copy. The change must still be refused when the
  * Organization's transcript appeared meanwhile, and the copy must carry the
  * names of the text it copied, whatever the owner rewrites alongside.
  *
@@ -23,6 +24,7 @@ import {
 } from "vitest";
 import {
     people,
+    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
@@ -145,7 +147,6 @@ import {
     PUT as putSpeakerRoute,
 } from "@/app/api/recordings/[id]/speakers/route";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
-import { addRecordingToFolder } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 
@@ -284,16 +285,23 @@ describeWithDatabase(
             return row?.id ?? "";
         }
 
+        /**
+         * Shared before snapshots existed: the Organization view shows the
+         * owner's transcript until its first change, or the backfill, takes
+         * the Organization's copy.
+         */
         async function share() {
             const [root] = await db()
                 .select({ id: recordingFolders.id })
                 .from(recordingFolders)
                 .where(eq(recordingFolders.userId, orgUserId));
-            await addRecordingToFolder({
-                userId: OWNER,
-                recordingId: REC,
-                folderId: root?.id ?? "",
-            });
+            await db()
+                .insert(recordingFolderAssignments)
+                .values({
+                    userId: OWNER,
+                    recordingId: REC,
+                    folderId: root?.id ?? "",
+                });
         }
 
         async function orgRows() {

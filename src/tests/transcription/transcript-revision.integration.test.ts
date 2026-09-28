@@ -85,7 +85,6 @@ vi.mock("@/lib/webhooks/emit", () => ({
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
-import { changeOrgTranscriptSpeaker } from "@/lib/sharing/org-transcript";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
@@ -211,20 +210,19 @@ describeWithDatabase("transcript revision (PostgreSQL)", () => {
             folderId: root?.id ?? "",
         });
 
-        const [original] = await db()
-            .select({ id: transcriptions.id })
+        // Sharing took the copy.
+        const rows = await db()
+            .select({
+                id: transcriptions.id,
+                userId: transcriptions.userId,
+                revision: transcriptions.revision,
+            })
             .from(transcriptions)
             .where(eq(transcriptions.recordingId, REC));
-        const copy = await changeOrgTranscriptSpeaker({
-            recordingId: REC,
-            source: "riffado",
-            owners: { ownerUserId: ALICE, contentUserId: orgUserId },
-            actorUserId: ALICE,
-            seen: { transcriptionId: original?.id ?? "", revision: 1 },
-            label: "speaker_0",
-            answer: { kind: "unknown" },
-        });
-        expect(copy.transcriptionId).not.toBe(original?.id);
-        expect(copy.revision).toBe(1);
+        const original = rows.find((row) => row.userId === ALICE);
+        const copy = rows.find((row) => row.userId === orgUserId);
+        expect(copy?.id).not.toBe(original?.id);
+        expect(original?.revision).toBe(1);
+        expect(copy?.revision).toBe(1);
     });
 });
