@@ -2,8 +2,12 @@
 
 import { GraduationCap, Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import {
+    type LearnMarks,
+    learnMarksFrom,
+} from "@/components/learn/learn-marks";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -62,6 +66,7 @@ export function LearnReview({
     turns,
     onSeek,
     onFinished,
+    onMarks,
 }: {
     recordingId: string;
     view?: RecordingView;
@@ -70,6 +75,8 @@ export function LearnReview({
     onSeek?: (ms: number) => void;
     /** The transcript's speakers and corrections changed: reload them. */
     onFinished?: () => void;
+    /** The ready review's proposals, for the transcript to show in place. */
+    onMarks?: (marks: LearnMarks | null) => void;
 }) {
     const i18n = useExtracted();
     const [state, setState] = useState<ReviewState | null>(null);
@@ -162,6 +169,19 @@ export function LearnReview({
                 : current,
         );
     };
+
+    // The latest `decide`, for marks made from an earlier render.
+    const decideRef = useRef(decide);
+    decideRef.current = decide;
+    useEffect(() => {
+        onMarks?.(
+            learnMarksFrom(state, (itemId, decision) => {
+                const item = state?.items.find((other) => other.id === itemId);
+                if (item) void decideRef.current(item, decision);
+            }),
+        );
+    }, [state, onMarks]);
+    useEffect(() => () => onMarks?.(null), [onMarks]);
 
     const finish = async () => {
         if (!state) return;

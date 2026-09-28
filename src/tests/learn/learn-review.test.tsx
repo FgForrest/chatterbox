@@ -164,4 +164,57 @@ describe("LearnReview", () => {
             }),
         );
     });
+
+    it("hands its proposals to the transcript, and a tick there is kept like one here", async () => {
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review": READY,
+            "PATCH /api/recordings/rec-1/review/items/i-correction": {
+                version: 1,
+            },
+        });
+        const onMarks = vi.fn();
+        const { unmount } = render(
+            <LearnReview
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                onMarks={onMarks}
+            />,
+        );
+        await waitFor(() =>
+            expect(onMarks).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    corrections: [
+                        expect.objectContaining({
+                            itemId: "i-correction",
+                            ticked: true,
+                        }),
+                    ],
+                }),
+            ),
+        );
+        onMarks.mock.lastCall?.[0].decide("i-correction", "rejected");
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/items/i-correction",
+                expect.objectContaining({
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        decision: "rejected",
+                        version: 0,
+                        choice: null,
+                    }),
+                }),
+            ),
+        );
+        await waitFor(() =>
+            expect(onMarks).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    corrections: [expect.objectContaining({ ticked: false })],
+                }),
+            ),
+        );
+        unmount();
+        expect(onMarks).toHaveBeenLastCalledWith(null);
+    });
 });

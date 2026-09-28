@@ -16,6 +16,7 @@ import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
 import { Markdown } from "@/components/markdown";
 import {
@@ -283,6 +284,8 @@ export function TranscriptionPanel({
     // A fresh object per jump, so jumping to the same topic twice scrolls
     // and highlights twice.
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
+    // The ready review's proposals, shown in the transcript it was made on.
+    const [learnMarks, setLearnMarks] = useState<LearnMarks | null>(null);
     const handleSelectTopic = (index: number) => {
         const topic = topics?.[index];
         if (!topic) return;
@@ -652,6 +655,7 @@ export function TranscriptionPanel({
                                         turns={activeTranscript.turns ?? []}
                                         onSeek={onSeekToTurn}
                                         onFinished={onTranscriptStale}
+                                        onMarks={setLearnMarks}
                                     />
                                 )}
                             </div>
@@ -674,6 +678,15 @@ export function TranscriptionPanel({
                                             topics={topics}
                                             highlightedTopic={
                                                 topicJump?.index ?? null
+                                            }
+                                            // A mix is not the transcript
+                                            // Learn read.
+                                            learnMarks={
+                                                canLearn &&
+                                                activeTranscript.source !==
+                                                    "mixed"
+                                                    ? learnMarks
+                                                    : null
                                             }
                                         />
                                     </section>
