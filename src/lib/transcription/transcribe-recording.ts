@@ -35,14 +35,14 @@ import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
-    storeGeneratedTitle,
-    titleStillGenerated,
-} from "@/lib/recordings/generated-title";
-import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
+import {
+    storeGeneratedTitle,
+    titleStillGenerated,
+} from "@/lib/recordings/generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
