@@ -1,24 +1,43 @@
-import { db } from "@/db";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { getOrgUserId } from "@/lib/org/config";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
-type Executor = Pick<typeof db, "select">;
+/**
+ * A shared recording's private copy is frozen: the owner's transcripts and
+ * speakers stay as they were shared until the owner withdraws it.
+ *
+ * The freeze follows the Organization this instance shows. Switched to
+ * `local` mode there is none, and the owner's copy is theirs again. That
+ * never reaches the Organization: its snapshot is rows of its own, which
+ * nothing the owner does afterwards changes. For the same reason the
+ * owner's retention and erasure still delete their own copy.
+ */
 
 /**
- * Whether a recording's private copy is frozen: it is shared with the
- * Organization, so its transcripts and speakers stay as they were shared
- * until the owner withdraws it. Pass the transaction holding the recording
- * lock, so the answer holds for the write it guards.
+ * The organization account a private copy can be frozen for, or null when
+ * this instance shows no Organization.
+ *
+ * Resolve it before the write's transaction, then check sharing through
+ * that transaction (`isRecordingShared(recordingId, orgUserId, tx)`):
+ * looked up inside, it would take a second pooled connection while the
+ * first holds the recording lock, and enough concurrent writers would
+ * exhaust the pool.
+ */
+export function freezingOrgUserId(): Promise<string | null> {
+    return getOrgUserId();
+}
+
+/**
+ * Whether a recording's private copy is frozen right now. Outside a
+ * transaction only: for refusing early, before work that a write would
+ * refuse anyway.
  */
 export async function isPrivateCopyFrozen(
     recordingId: string,
-    executor: Executor = db,
 ): Promise<boolean> {
-    const orgUserId = await getOrgUserId();
+    const orgUserId = await freezingOrgUserId();
     return (
-        orgUserId !== null &&
-        (await isRecordingShared(recordingId, orgUserId, executor))
+        orgUserId !== null && (await isRecordingShared(recordingId, orgUserId))
     );
 }
 

@@ -153,6 +153,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
+import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
@@ -496,5 +497,78 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
         await unshareRecording(OWNER, REC);
         expect(await plaudImport()).toEqual({ committed: true });
         expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
+    });
+
+    it("offers no Plaud names on the owner's transcript once it is shared", async () => {
+        const turns = [
+            { speaker: "speaker_0", startMs: 0, endMs: 10_000, text: "Hi." },
+        ];
+        await db()
+            .update(transcriptions)
+            .set({
+                text: encryptText("speaker_0: Hi."),
+                turns: encryptJsonField(turns),
+                model: "scribe_v1",
+            })
+            .where(eq(transcriptions.userId, OWNER));
+        const [plaud] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                text: encryptText("speaker_0: Hi."),
+                turns: encryptJsonField(turns),
+                provider: "plaud",
+                model: "plaud-native",
+                source: "plaud",
+            })
+            .returning({ id: transcriptions.id });
+        const [jana] = await db()
+            .insert(people)
+            .values({ userId: OWNER, displayName: encryptText("Jana") })
+            .returning({ id: people.id });
+        await db()
+            .insert(transcriptSpeakers)
+            .values({
+                userId: OWNER,
+                transcriptionId: plaud?.id ?? "",
+                label: "speaker_0",
+                personId: jana?.id,
+                source: "user",
+                status: "confirmed",
+                confirmedByUserId: OWNER,
+            });
+        const offer = () =>
+            copyMatchingSpeakerAttributions({
+                userId: OWNER,
+                recordingId: REC,
+                sourceSource: "plaud",
+                targetSource: "riffado",
+                frozenWhileSharedWith: orgUserId,
+            });
+        // Shared as it was before the gate, with a speaker nobody named.
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: OWNER,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
+
+        expect(await offer()).toBe(0);
+        const offered = await db()
+            .select()
+            .from(transcriptSpeakers)
+            .where(eq(transcriptSpeakers.status, "suggested"));
+        expect(offered).toEqual([]);
+
+        // Withdrawn, the owner's copy is theirs again.
+        const { unshareRecording } = await import("@/lib/folders/folders");
+        await unshareRecording(OWNER, REC);
+        expect(await offer()).toBe(1);
     });
 });

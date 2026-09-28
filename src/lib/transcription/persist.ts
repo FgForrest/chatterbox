@@ -5,7 +5,7 @@ import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
-import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
+import { freezingOrgUserId } from "@/lib/sharing/frozen";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -126,6 +126,8 @@ export async function upsertTranscription(
     const ownerId = args.recordingOwnerId ?? userId;
     const orgView = ownerId !== userId;
     const producedByUserId = args.producedByUserId ?? userId;
+    // Before the transaction; see `freezingOrgUserId`.
+    const frozenFor = orgView ? null : await freezingOrgUserId();
 
     try {
         await db.transaction(async (tx) => {
@@ -159,7 +161,10 @@ export async function upsertTranscription(
             // every writer: a provider run, a Plaud import. Checked under
             // the lock sharing takes, so a run that began before the share
             // and ends after it writes nothing.
-            if (!orgView && (await isPrivateCopyFrozen(recordingId, tx))) {
+            if (
+                frozenFor &&
+                (await isRecordingShared(recordingId, frozenFor, tx))
+            ) {
                 throw RECORDING_FROZEN;
             }
 

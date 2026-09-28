@@ -45,10 +45,11 @@ import {
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
-import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
+import { freezingOrgUserId, isPrivateCopyFrozen } from "@/lib/sharing/frozen";
 import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
 import { takeOrgSnapshot } from "@/lib/sharing/org-transcript";
 import { resolveRunContext } from "@/lib/sharing/run-context";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
@@ -148,6 +149,8 @@ export async function storeBrowserTranscription(
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
     const RECORDING_FROZEN = Symbol("recording-frozen");
+    // Before the transaction; see `freezingOrgUserId`.
+    const frozenFor = await freezingOrgUserId();
     try {
         await db.transaction(async (tx) => {
             const [stillActive] = await tx
@@ -166,7 +169,10 @@ export async function storeBrowserTranscription(
             }
             // Shared since the browser started: the transcript stays as it
             // was shared.
-            if (await isPrivateCopyFrozen(recordingId, tx)) {
+            if (
+                frozenFor &&
+                (await isRecordingShared(recordingId, frozenFor, tx))
+            ) {
                 throw RECORDING_FROZEN;
             }
 
@@ -773,6 +779,8 @@ async function transcribeRecordingInner(
                 recordingId,
                 sourceSource: opts.attributionSource,
                 targetSource: "riffado",
+                // Shared since the transcript was written: frozen.
+                frozenWhileSharedWith: await freezingOrgUserId(),
             });
         }
 

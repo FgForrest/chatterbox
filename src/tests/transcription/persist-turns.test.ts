@@ -25,14 +25,17 @@ vi.mock("@/lib/knowledge/speaker-labels", () => ({
     storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
 }));
 // Whether a recording is shared is tested against a real database
-// (`org-scope.integration.test.ts`); here only what the write does with it.
+// (`freeze.integration.test.ts`); here only what the write does with it.
 vi.mock("@/lib/sharing/frozen", () => ({
-    isPrivateCopyFrozen: vi.fn(async () => false),
+    freezingOrgUserId: vi.fn(async () => "org-account"),
+}));
+vi.mock("@/lib/sharing/shared", () => ({
+    isRecordingShared: vi.fn(async () => false),
 }));
 
 import { db } from "@/db";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
-import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -195,7 +198,7 @@ describe("upsertTranscription and turns", () => {
 
     it("writes nothing to the owner's transcript while it is shared", async () => {
         const harness = stubTransaction({ id: "tr-1" });
-        (isPrivateCopyFrozen as Mock).mockResolvedValueOnce(true);
+        (isRecordingShared as Mock).mockResolvedValueOnce(true);
 
         expect(await upsert(TURNS)).toEqual({
             committed: false,
