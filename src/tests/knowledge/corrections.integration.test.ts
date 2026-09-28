@@ -87,7 +87,7 @@ vi.mock("@/lib/webhooks/emit", () => ({
 }));
 
 import { encryptText } from "@/lib/encryption/fields";
-import { addRecordingToFolder } from "@/lib/folders/folders";
+import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import {
     acceptCorrection,
     listCorrections,
@@ -467,14 +467,50 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
 
         // Sharing published the owner's correction (and made Jan the
         // Organization's); one it could not publish stays the owner's.
+        // Everyone reads the Organization's while it is shared, the owner
+        // too: their unpublishable one waits unseen.
         await ownersPrivateCorrection("Orionu");
-        const orgView = await listCorrections(OWNER, transcriptId, {
-            orgOnly: true,
-        });
-        expect(orgView.map((c) => c.heard)).toEqual(["Novák", "Honzo"]);
         expect(
             (await listCorrections(OWNER, transcriptId)).map((c) => c.heard),
-        ).toEqual(["Novák", "Orionu", "Honzo"]);
+        ).toEqual(["Novák", "Honzo"]);
+    });
+
+    it("lets the curator correct words a waiting private correction covers, and the Organization's wins at withdrawal", async () => {
+        await share();
+        await ownersPrivateCorrection("Novák");
+        await ownersPrivateCorrection("Orionu");
+        const curators = await correct({
+            target: { personId: orgJan },
+            replacement: "Novotný",
+            actorUserId: orgUserId,
+        });
+        expect(
+            (await listCorrections(OWNER, transcriptId)).map((c) => c.id),
+        ).toEqual([curators]);
+
+        await unshareRecording(OWNER, REC);
+
+        const back = await listCorrections(OWNER, transcriptId);
+        expect(back.map((c) => [c.heard, c.targetPersonId])).toEqual([
+            ["Novák", orgJan],
+            ["Orionu", jan],
+        ]);
+        expect(back[0]?.id).toBe(curators);
+    });
+
+    it("keeps the Organization's correction, not a waiting one on the same words, through a re-transcription", async () => {
+        await share();
+        await ownersPrivateCorrection("Novák");
+        const curators = await correct({
+            target: { personId: orgJan },
+            actorUserId: orgUserId,
+        });
+        await write(FIRST, orgUserId);
+        expect(
+            await db()
+                .select({ id: transcriptCorrections.id })
+                .from(transcriptCorrections),
+        ).toEqual([{ id: curators }]);
     });
 
     it("keeps each scope's corrections in its scope, and rechecks them all", async () => {
@@ -528,7 +564,10 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
             },
         ]);
         // The curator takes back only the Organization's.
-        const [owners] = await listCorrections(OWNER, transcriptId);
+        const [owners] = await db()
+            .select({ id: transcriptCorrections.id })
+            .from(transcriptCorrections)
+            .where(eq(transcriptCorrections.userId, OWNER));
         expect(
             await refusal(
                 revertCorrection({

@@ -597,18 +597,6 @@ describeWithDatabase("entities and aliases (PostgreSQL)", () => {
     });
 
     describe("corrections on entities", () => {
-        it("hides a private entity's corrections from the Organization view", async () => {
-            const orion = await createEntity(ALICE, {
-                typeKey: "project",
-                name: "Orion",
-            });
-            await correctOryon(orion.id);
-            expect(
-                await listCorrections(ALICE, transcriptId, { orgOnly: true }),
-            ).toEqual([]);
-            expect(await listCorrections(ALICE, transcriptId)).toHaveLength(1);
-        });
-
         it("answers another account's entity as a missing one", async () => {
             const bobs = await createEntity(BOB, {
                 typeKey: "project",

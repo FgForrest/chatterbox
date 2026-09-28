@@ -6,7 +6,7 @@
  * the summary path loads them: nothing here may validate the environment.
  */
 
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { db } from "@/db";
 import { transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
@@ -14,6 +14,7 @@ import {
     type AnchorPosition,
     remapCorrectionAnchors,
 } from "@/lib/knowledge/correction-anchors";
+import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -60,6 +61,10 @@ export async function recheckCorrectionsInTx(
         .from(transcriptCorrections)
         .where(ofTranscript)
         .orderBy(
+            // Where two land on the same words the first keeps them: the
+            // Organization's, which a shared recording shows, before the
+            // owner's waiting ones.
+            desc(orgOwnedCondition(transcriptCorrections.userId)),
             asc(transcriptCorrections.turnIndex),
             asc(transcriptCorrections.charStart),
             asc(transcriptCorrections.createdAt),

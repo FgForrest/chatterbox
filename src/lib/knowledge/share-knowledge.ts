@@ -20,14 +20,17 @@
  *   is pruned. The corrections on the transcripts, and the heard-as forms
  *   they taught, return to the owner's scope: the owner gets the recording
  *   back as the Organization left it, which is what they saw of it all
- *   along. Promoted people and entities stay the Organization's.
+ *   along. An owner's correction that waited unpublished goes where an
+ *   Organization one covers the same words, and returns otherwise.
+ *   Promoted people and entities stay the Organization's.
  *
  * Both run inside the transaction that shares or withdraws, under the
  * Organization-people lock and the recording lock, and return the scopes
  * they touched for the caller to bump at its end.
  */
 
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNull, lt } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import type { db } from "@/db";
 import {
     knowledgeAliases,
@@ -439,6 +442,42 @@ export async function withdrawKnowledgeInTx(
         ...new Set(removed.map((row) => row.factId)),
     ]);
 
+    // The owner's corrections that waited while shared give way where the
+    // Organization's returning ones cover the same words (their heard-as
+    // forms go with them).
+    const returning = alias(transcriptCorrections, "returning");
+    await tx.delete(transcriptCorrections).where(
+        and(
+            inArray(transcriptCorrections.transcriptionId, transcriptIds),
+            eq(transcriptCorrections.userId, ownerUserId),
+            exists(
+                tx
+                    .select({ id: returning.id })
+                    .from(returning)
+                    .where(
+                        and(
+                            eq(returning.userId, orgUserId),
+                            eq(
+                                returning.transcriptionId,
+                                transcriptCorrections.transcriptionId,
+                            ),
+                            eq(
+                                returning.turnIndex,
+                                transcriptCorrections.turnIndex,
+                            ),
+                            lt(
+                                returning.charStart,
+                                transcriptCorrections.charEnd,
+                            ),
+                            lt(
+                                transcriptCorrections.charStart,
+                                returning.charEnd,
+                            ),
+                        ),
+                    ),
+            ),
+        ),
+    );
     const corrections = await tx
         .update(transcriptCorrections)
         .set({ userId: ownerUserId, updatedAt: new Date() })
