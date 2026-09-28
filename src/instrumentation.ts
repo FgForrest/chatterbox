@@ -38,6 +38,10 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
+type OrgSnapshotBackfillModule = {
+    startOrgSnapshotBackfill: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -130,6 +134,12 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
+
+    // Recordings shared before the Organization took its own snapshot get
+    // one. After the organization account exists; in the background.
+    const { startOrgSnapshotBackfill } =
+        require("./lib/sharing/snapshot-backfill") as OrgSnapshotBackfillModule;
+    startOrgSnapshotBackfill();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever
