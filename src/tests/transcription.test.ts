@@ -63,6 +63,18 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+// Storing the title runs as written (the database mock answers it); the
+// re-read before the Plaud push is steered per test.
+const { titleStillGenerated } = vi.hoisted(() => ({
+    titleStillGenerated: vi.fn(),
+}));
+vi.mock("@/lib/recordings/generated-title", async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import("@/lib/recordings/generated-title")
+    >()),
+    titleStillGenerated,
+}));
+
 vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
     refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
@@ -525,6 +537,61 @@ describe("Transcription", () => {
             ).toBe(true);
             expect(refreshExistingRecordingSidecars).not.toHaveBeenCalled();
             expect(createPlaudClient).not.toHaveBeenCalled();
+        });
+        describe("pushing the generated title to Plaud", () => {
+            function stubPlaud() {
+                (db.select as Mock).mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    id: "conn-1",
+                                    bearerToken: "token",
+                                    apiBase: null,
+                                    workspaceId: "ws-1",
+                                },
+                            ]),
+                        }),
+                    }),
+                });
+                const updateFilename = vi.fn().mockResolvedValue(undefined);
+                (createPlaudClient as Mock).mockResolvedValue({
+                    updateFilename,
+                    workspaceId: "ws-1",
+                });
+                return updateFilename;
+            }
+
+            it("pushes it while nobody renamed the recording", async () => {
+                stubTitledRun({ syncTitleToPlaud: true, retitled: true });
+                const updateFilename = stubPlaud();
+                titleStillGenerated.mockResolvedValue(true);
+
+                await transcribeRecording(mockUserId, mockRecordingId);
+
+                expect(titleStillGenerated).toHaveBeenCalledWith(
+                    mockUserId,
+                    mockRecordingId,
+                );
+                expect(updateFilename).toHaveBeenCalledWith(
+                    "plaud-1",
+                    "Generated Title",
+                );
+            });
+
+            it("keeps it from Plaud once a person renamed the recording", async () => {
+                stubTitledRun({ syncTitleToPlaud: true, retitled: true });
+                const updateFilename = stubPlaud();
+                titleStillGenerated.mockResolvedValue(false);
+
+                const result = await transcribeRecording(
+                    mockUserId,
+                    mockRecordingId,
+                );
+
+                expect(result.success).toBe(true);
+                expect(updateFilename).not.toHaveBeenCalled();
+            });
         });
     });
 

@@ -35,6 +35,10 @@ import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
+    storeGeneratedTitle,
+    titleStillGenerated,
+} from "@/lib/recordings/generated-title";
+import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
@@ -772,28 +776,15 @@ async function transcribeRecordingInner(
                     transcriptionText,
                 );
 
-                // Written only while no person has set a title, checked in
-                // the update itself: a rename committing while the title
-                // was being generated wins, and then nothing below runs.
-                const [retitled] = generatedTitle
-                    ? await db
-                          .update(recordings)
-                          .set({
-                              // Encrypted at rest; the plaintext is still
-                              // at hand for the optional Plaud push below.
-                              filename: encryptText(generatedTitle),
-                              updatedAt: new Date(),
-                          })
-                          .where(
-                              and(
-                                  eq(recordings.id, recordingId),
-                                  eq(recordings.userId, userId),
-                                  isNull(recordings.deletedAt),
-                                  isNull(recordings.titleEditedAt),
-                              ),
-                          )
-                          .returning({ id: recordings.id })
-                    : [];
+                // Not stored when a person has set a title, and then
+                // nothing below runs.
+                const retitled = generatedTitle
+                    ? await storeGeneratedTitle(
+                          userId,
+                          recordingId,
+                          generatedTitle,
+                      )
+                    : false;
 
                 if (generatedTitle && retitled) {
                     // The export was planned under the old title above;
@@ -814,10 +805,20 @@ async function transcribeRecordingInner(
                                     connection.apiBase,
                                     connection.workspaceId,
                                 );
-                                await plaudClient.updateFilename(
-                                    recording.plaudFileId,
-                                    generatedTitle,
-                                );
+                                // A person may have renamed it since the
+                                // title was stored. Their title stays
+                                // here, so Plaud must not get this one.
+                                if (
+                                    await titleStillGenerated(
+                                        userId,
+                                        recordingId,
+                                    )
+                                ) {
+                                    await plaudClient.updateFilename(
+                                        recording.plaudFileId,
+                                        generatedTitle,
+                                    );
+                                }
                                 // Backfill workspaceId if newly resolved.
                                 // Always scope user-owned UPDATEs by userId
                                 // even when filtering by id (per AGENTS.md).
