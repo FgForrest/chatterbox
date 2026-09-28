@@ -1415,6 +1415,160 @@ export const transcriptCorrections = pgTable(
     }),
 );
 
+// A confirmed fact: subject, relation, object. It lives in a scope (a
+// user's private layer, or the Organization's) and, unless a person
+// entered it by hand, lasts while evidence for it does.
+export const knowledgeFacts = pgTable(
+    "knowledge_facts",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        subjectPersonId: text("subject_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        subjectEntityId: text("subject_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        // A relation type's key; like entity type keys, one key names one
+        // type.
+        relationKey: varchar("relation_key", { length: 64 }).notNull(),
+        objectPersonId: text("object_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        objectEntityId: text("object_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        // Encrypted text, on relations whose object is text (a role).
+        objectLiteral: text("object_literal"),
+        // `p:<id>` or `e:<id>`; the object's may also be `l:` plus
+        // `domainLookupHash("fact-literal", literal)`.
+        subjectKey: varchar("subject_key", { length: 80 }).notNull(),
+        objectKey: varchar("object_key", { length: 80 }).notNull(),
+        origin: varchar("origin", { length: 16 })
+            .$type<"recording" | "manual">()
+            .notNull(),
+        // On a single-valued relation, the fact that took this one's place.
+        replacedByFactId: text("replaced_by_fact_id").references(
+            (): AnyPgColumn => knowledgeFacts.id,
+            { onDelete: "set null" },
+        ),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        factUnique: unique("knowledge_facts_unique").on(
+            table.userId,
+            table.subjectKey,
+            table.relationKey,
+            table.objectKey,
+        ),
+        subjectPersonIdx: index("knowledge_facts_subject_person_id_idx").on(
+            table.subjectPersonId,
+        ),
+        subjectEntityIdx: index("knowledge_facts_subject_entity_id_idx").on(
+            table.subjectEntityId,
+        ),
+        objectPersonIdx: index("knowledge_facts_object_person_id_idx").on(
+            table.objectPersonId,
+        ),
+        objectEntityIdx: index("knowledge_facts_object_entity_id_idx").on(
+            table.objectEntityId,
+        ),
+        replacedByIdx: index("knowledge_facts_replaced_by_fact_id_idx").on(
+            table.replacedByFactId,
+        ),
+        oneSubject: check(
+            "knowledge_facts_one_subject_check",
+            sql`num_nonnulls(${table.subjectPersonId}, ${table.subjectEntityId}) = 1`,
+        ),
+        oneObject: check(
+            "knowledge_facts_one_object_check",
+            sql`num_nonnulls(${table.objectPersonId}, ${table.objectEntityId}, ${table.objectLiteral}) = 1`,
+        ),
+        originCheck: check(
+            "knowledge_facts_origin_check",
+            sql`${table.origin} in ('recording', 'manual')`,
+        ),
+    }),
+);
+
+// Where a fact was said: a stretch of one transcript's audio time, with the
+// words a person confirmed there. Goes with the transcript.
+export const knowledgeFactEvidence = pgTable(
+    "knowledge_fact_evidence",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The fact's scope.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        factId: text("fact_id")
+            .notNull()
+            .references(() => knowledgeFacts.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        startMs: integer("start_ms").notNull(),
+        endMs: integer("end_ms").notNull(),
+        // The label whose speaker the fact is about, when it is (`Speaker 1
+        // said "I lead Orion"`): renaming that speaker puts it to review.
+        speakerLabel: varchar("speaker_label", { length: 64 }),
+        dependsOnSpeaker: boolean("depends_on_speaker")
+            .notNull()
+            .default(false),
+        quote: text("quote").notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"supported" | "wording_changed" | "speaker_changed">()
+            .notNull()
+            .default("supported"),
+        confirmedByUserId: text("confirmed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        confirmedAt: timestamp("confirmed_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        evidenceUnique: unique("knowledge_fact_evidence_unique").on(
+            table.factId,
+            table.transcriptionId,
+            table.startMs,
+            table.endMs,
+        ),
+        transcriptIdx: index("knowledge_fact_evidence_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        recordingIdx: index("knowledge_fact_evidence_recording_id_idx").on(
+            table.recordingId,
+        ),
+        userIdIdx: index("knowledge_fact_evidence_user_id_idx").on(
+            table.userId,
+        ),
+        statusCheck: check(
+            "knowledge_fact_evidence_status_check",
+            sql`${table.status} in ('supported', 'wording_changed', 'speaker_changed')`,
+        ),
+        rangeCheck: check(
+            "knowledge_fact_evidence_range_check",
+            sql`${table.startMs} >= 0 and ${table.startMs} <= ${table.endMs}`,
+        ),
+    }),
+);
+
 // AI Enhancements
 export const aiEnhancements = pgTable(
     "ai_enhancements",

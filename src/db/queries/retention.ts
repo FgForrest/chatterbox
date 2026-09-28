@@ -19,6 +19,10 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import {
+    factsEvidencedOnInTx,
+    pruneUnsupportedFactsInTx,
+} from "@/lib/knowledge/fact-evidence";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
 /** One kind of data a retention policy can remove. */
@@ -518,6 +522,8 @@ export async function deleteTranscriptsForRecording(
 ): Promise<number> {
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
+        // Facts said only here decay with the transcript.
+        const factIds = await factsEvidencedOnInTx(tx, recordingId);
         const rows = await tx
             .delete(transcriptions)
             .where(
@@ -527,6 +533,7 @@ export async function deleteTranscriptsForRecording(
                 ),
             )
             .returning({ id: transcriptions.id });
+        await pruneUnsupportedFactsInTx(tx, factIds);
         // Stamping a recording that had no transcript would be a lie, and
         // would suppress auto-transcription of it for good.
         if (rows.length > 0) {

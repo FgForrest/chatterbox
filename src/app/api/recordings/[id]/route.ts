@@ -15,6 +15,10 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { lockOrgTree } from "@/lib/folders/folders";
+import {
+    factsEvidencedOnInTx,
+    pruneUnsupportedFactsInTx,
+} from "@/lib/knowledge/fact-evidence";
 import { getOrgUserId } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
 import { deleteRecordingStorageArtifacts } from "@/lib/recordings/erase";
@@ -383,10 +387,13 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             );
 
         // Every content row of the recording, whichever account holds it:
-        // it goes for everyone at once, the Organization included.
+        // it goes for everyone at once, the Organization included, and the
+        // facts said only here with it.
+        const factIds = await factsEvidencedOnInTx(tx, id);
         await tx
             .delete(transcriptions)
             .where(eq(transcriptions.recordingId, id));
+        await pruneUnsupportedFactsInTx(tx, factIds);
 
         await tx
             .delete(aiEnhancements)

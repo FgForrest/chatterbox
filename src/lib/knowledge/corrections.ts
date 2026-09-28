@@ -18,7 +18,7 @@
 
 import { and, asc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
-import { recordings, transcriptCorrections, transcriptions } from "@/db/schema";
+import { transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -37,11 +37,7 @@ import {
 } from "@/lib/knowledge/correction-anchors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
-import { readTranscriptTurns } from "@/lib/transcription/read-turns";
-import type { TranscriptTurn } from "@/lib/transcription/turns";
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 
 const HEARD_DOMAIN = "correction-heard";
 /** Long enough for any name or term, short enough to keep it one. */
@@ -91,71 +87,6 @@ function correctionNotFound(): AppError {
 
 function invalid(message: string, field: string): AppError {
     return new AppError(ErrorCode.INVALID_INPUT, message, 400, { field });
-}
-
-/**
- * Lock a transcript for a change to its corrections, after its recording
- * (the lock sharing and withdrawal take), and check the writer rule under
- * it. Returns the transcript's revision and turns. 404 alike for a missing
- * transcript and another account's.
- */
-async function lockTranscriptForChange(
-    tx: Tx,
-    { userId, transcriptionId }: Omit<TranscriptVersion, "revision">,
-    { actorUserId, orgUserId }: Writer,
-): Promise<{
-    revision: number;
-    turns: TranscriptTurn[] | null;
-    language: string | null;
-    provider: string | null;
-}> {
-    const [recording] = await tx
-        .select({ id: recordings.id })
-        .from(recordings)
-        .innerJoin(
-            transcriptions,
-            eq(transcriptions.recordingId, recordings.id),
-        )
-        .where(
-            and(
-                eq(transcriptions.id, transcriptionId),
-                eq(transcriptions.userId, userId),
-            ),
-        )
-        .for("share", { of: recordings });
-    const [transcript] = recording
-        ? await tx
-              .select({
-                  revision: transcriptions.revision,
-                  turns: transcriptions.turns,
-                  language: transcriptions.detectedLanguage,
-                  provider: transcriptions.provider,
-              })
-              .from(transcriptions)
-              .where(
-                  and(
-                      eq(transcriptions.id, transcriptionId),
-                      eq(transcriptions.userId, userId),
-                  ),
-              )
-              .for("update")
-        : [];
-    if (!recording || !transcript) {
-        throw new AppError(ErrorCode.NOT_FOUND, "Transcript not found", 404);
-    }
-    const refusal = await contentWriterRefusal(tx, {
-        recordingId: recording.id,
-        ownerUserId: userId,
-        actorUserId,
-        orgUserId,
-    });
-    if (refusal) throw writerRefusalError(refusal);
-    return {
-        revision: transcript.revision,
-        turns: readTranscriptTurns(transcript),
-        language: transcript.language,
-        provider: transcript.provider,
-    };
 }
 
 function cleanReplacement(

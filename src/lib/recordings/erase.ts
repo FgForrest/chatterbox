@@ -14,6 +14,10 @@ import {
     orgTreeChanged,
     withdrawRecordingInTx,
 } from "@/lib/folders/folders";
+import {
+    factsEvidencedOnInTx,
+    pruneUnsupportedFactsInTx,
+} from "@/lib/knowledge/fact-evidence";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { sidecarKey } from "@/lib/recordings/storage-files";
 import { isRecordingShared } from "@/lib/sharing/shared";
@@ -235,6 +239,8 @@ export async function eraseLocalArtifact(
                 ["transcription", "summary", "topics"],
                 now,
             );
+            // Facts said only here go with the transcript.
+            const factIds = await factsEvidencedOnInTx(tx, recordingId);
             await tx
                 .delete(transcriptions)
                 .where(
@@ -243,6 +249,7 @@ export async function eraseLocalArtifact(
                         eq(transcriptions.userId, userId),
                     ),
                 );
+            await pruneUnsupportedFactsInTx(tx, factIds);
             await tx
                 .update(recordings)
                 .set({ transcriptReapedAt: now, updatedAt: now })

@@ -6,7 +6,9 @@
  * should not load the people knowledge base to do so.
  */
 
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { transcriptSpeakers } from "@/db/schema";
 import {
     deleteSpeakerInTx,
     lockForSpeakerChange,
@@ -14,6 +16,7 @@ import {
     type TranscriptVersion,
     writeSpeakerInTx,
 } from "@/lib/knowledge/attribution";
+import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
 
@@ -88,6 +91,36 @@ export async function changeTranscriptSpeakerInTx(
         transcriptionId: version.transcriptionId,
         label: version.label,
     };
+    // What the label answered before: facts that depend on who spoke there
+    // go to review when that changes, and only then.
+    const [before] = await tx
+        .select({
+            personId: transcriptSpeakers.personId,
+            status: transcriptSpeakers.status,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+        })
+        .from(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.transcriptionId, version.transcriptionId),
+                eq(transcriptSpeakers.label, version.label),
+            ),
+        )
+        .limit(1);
+    const answered =
+        before?.status === "confirmed"
+            ? before.markedUnknown
+                ? "unknown"
+                : before.personId
+            : null;
+    const speakerChanged = async (now: string | null) => {
+        if (answered !== null && answered !== now) {
+            await markSpeakerDependentEvidenceInTx(tx, {
+                transcriptionId: version.transcriptionId,
+                label: version.label,
+            });
+        }
+    };
     switch (answer.kind) {
         case "name": {
             const personId =
@@ -107,6 +140,7 @@ export async function changeTranscriptSpeakerInTx(
                 status: "confirmed",
                 confirmedByUserId: actorUserId,
             });
+            await speakerChanged(personId);
             return personId;
         }
         case "unknown":
@@ -118,9 +152,11 @@ export async function changeTranscriptSpeakerInTx(
                 markedUnknown: true,
                 confirmedByUserId: actorUserId,
             });
+            await speakerChanged("unknown");
             return null;
         case "clear":
             await deleteSpeakerInTx(tx, where);
+            await speakerChanged(null);
             return null;
         case "reject":
             await rejectInTx(tx, { ...where, personId: answer.personId });

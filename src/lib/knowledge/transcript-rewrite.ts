@@ -6,14 +6,17 @@
  *
  * - speaker rows and rejections, by speech overlap
  *   (`remapTranscriptAttributionsInTx`);
- * - corrections, by their words (`recheckCorrectionsInTx`).
+ * - corrections, by their words (`recheckCorrectionsInTx`);
+ * - fact evidence, by the words at its time and the voice it depends on
+ *   (`recheckEvidenceInTx`).
  *
- * Fact evidence and pending Learn runs join it with them.
+ * Pending Learn runs join it with them.
  */
 
 import type { db } from "@/db";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
+import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -32,5 +35,10 @@ export async function transcriptRewrittenInTx(
         transcriptionId: args.transcriptionId,
         previousTurns: args.previous.turns,
         nextTurns: args.next.turns,
+    });
+    await recheckEvidenceInTx(tx, {
+        transcriptionId: args.transcriptionId,
+        previous: args.previous,
+        next: args.next,
     });
 }

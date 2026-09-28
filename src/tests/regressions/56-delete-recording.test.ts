@@ -95,6 +95,12 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
     transcribeRecording: vi.fn().mockResolvedValue({ success: true }),
 }));
 
+// Pruning facts with their transcripts is tested against a real database
+// (`facts.integration.test.ts`).
+vi.mock("@/lib/knowledge/fact-evidence", () => ({
+    factsEvidencedOnInTx: vi.fn().mockResolvedValue([]),
+    pruneUnsupportedFactsInTx: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));

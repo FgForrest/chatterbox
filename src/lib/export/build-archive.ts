@@ -8,6 +8,8 @@ import {
     knowledgeEntities,
     knowledgeEntityNotes,
     knowledgeEntityTypes,
+    knowledgeFactEvidence,
+    knowledgeFacts,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
     knowledgeVocabularyProposalVotes,
@@ -245,6 +247,7 @@ export async function buildAndUploadExportArchive(input: {
             suggestedPhrases: number;
         };
         entities?: { entities: number; aliases: number; notes: number };
+        facts?: { facts: number; evidence: number };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -583,6 +586,25 @@ export async function buildAndUploadExportArchive(input: {
             entities: entities.entities.length,
             aliases: entities.aliases.length,
             notes: entities.notes.length,
+        };
+    }
+
+    // Facts and where they were said, with the quotes; the Organization's
+    // people and entities they name that the files above do not carry.
+    const facts = await collectFacts(userId, {
+        people: new Set([
+            ...knowledge.people.map((person) => person.id),
+            ...entities.people.map((person) => person.id),
+        ]),
+        entities: new Set(entities.entities.map((entity) => entity.id)),
+    });
+    if (facts.facts.length > 0) {
+        archive.append(Buffer.from(JSON.stringify(facts, null, 2)), {
+            name: "knowledge/facts.json",
+        });
+        manifest.facts = {
+            facts: facts.facts.length,
+            evidence: facts.evidence.length,
         };
     }
 
@@ -1063,6 +1085,137 @@ async function collectEntities(
         people: personRows.map((row) => ({
             ...row,
             displayName: decryptText(row.displayName),
+        })),
+    };
+}
+
+interface ArchivedFacts {
+    facts: {
+        id: string;
+        subjectPersonId: string | null;
+        subjectEntityId: string | null;
+        relationKey: string;
+        objectPersonId: string | null;
+        objectEntityId: string | null;
+        objectLiteral: string | null;
+        origin: string;
+        replacedByFactId: string | null;
+        createdAt: string;
+    }[];
+    evidence: {
+        factId: string;
+        transcriptionId: string;
+        recordingId: string;
+        transcriptRevision: number;
+        startMs: number;
+        endMs: number;
+        speakerLabel: string | null;
+        dependsOnSpeaker: boolean;
+        quote: string;
+        status: string;
+        confirmedAt: string;
+    }[];
+    /** Organization people and entities the facts name, not archived elsewhere. */
+    people: { id: string; displayName: string; mergedIntoId: string | null }[];
+    entities: {
+        id: string;
+        typeKey: string;
+        name: string;
+        mergedIntoId: string | null;
+    }[];
+}
+
+async function collectFacts(
+    userId: string,
+    archived: { people: ReadonlySet<string>; entities: ReadonlySet<string> },
+): Promise<ArchivedFacts> {
+    const [factRows, evidenceRows] = await Promise.all([
+        db
+            .select({
+                id: knowledgeFacts.id,
+                subjectPersonId: knowledgeFacts.subjectPersonId,
+                subjectEntityId: knowledgeFacts.subjectEntityId,
+                relationKey: knowledgeFacts.relationKey,
+                objectPersonId: knowledgeFacts.objectPersonId,
+                objectEntityId: knowledgeFacts.objectEntityId,
+                objectLiteral: knowledgeFacts.objectLiteral,
+                origin: knowledgeFacts.origin,
+                replacedByFactId: knowledgeFacts.replacedByFactId,
+                createdAt: knowledgeFacts.createdAt,
+            })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, userId)),
+        db
+            .select({
+                factId: knowledgeFactEvidence.factId,
+                transcriptionId: knowledgeFactEvidence.transcriptionId,
+                recordingId: knowledgeFactEvidence.recordingId,
+                transcriptRevision: knowledgeFactEvidence.transcriptRevision,
+                startMs: knowledgeFactEvidence.startMs,
+                endMs: knowledgeFactEvidence.endMs,
+                speakerLabel: knowledgeFactEvidence.speakerLabel,
+                dependsOnSpeaker: knowledgeFactEvidence.dependsOnSpeaker,
+                quote: knowledgeFactEvidence.quote,
+                status: knowledgeFactEvidence.status,
+                confirmedAt: knowledgeFactEvidence.confirmedAt,
+            })
+            .from(knowledgeFactEvidence)
+            .where(eq(knowledgeFactEvidence.userId, userId)),
+    ]);
+    const missing = (ids: (string | null)[], have: ReadonlySet<string>) => [
+        ...new Set(ids.filter((id): id is string => !!id && !have.has(id))),
+    ];
+    const personIds = missing(
+        factRows.flatMap((row) => [row.subjectPersonId, row.objectPersonId]),
+        archived.people,
+    );
+    const entityIds = missing(
+        factRows.flatMap((row) => [row.subjectEntityId, row.objectEntityId]),
+        archived.entities,
+    );
+    const personRows =
+        personIds.length > 0
+            ? await db
+                  .select({
+                      id: people.id,
+                      displayName: people.displayName,
+                      mergedIntoId: people.mergedIntoId,
+                  })
+                  .from(people)
+                  .where(inArray(people.id, personIds))
+            : [];
+    const entityRows =
+        entityIds.length > 0
+            ? await db
+                  .select({
+                      id: knowledgeEntities.id,
+                      typeKey: knowledgeEntities.typeKey,
+                      name: knowledgeEntities.name,
+                      mergedIntoId: knowledgeEntities.mergedIntoId,
+                  })
+                  .from(knowledgeEntities)
+                  .where(inArray(knowledgeEntities.id, entityIds))
+            : [];
+    return {
+        facts: factRows.map((row) => ({
+            ...row,
+            objectLiteral: row.objectLiteral
+                ? decryptText(row.objectLiteral)
+                : null,
+            createdAt: row.createdAt.toISOString(),
+        })),
+        evidence: evidenceRows.map((row) => ({
+            ...row,
+            quote: decryptText(row.quote),
+            confirmedAt: row.confirmedAt.toISOString(),
+        })),
+        people: personRows.map((row) => ({
+            ...row,
+            displayName: decryptText(row.displayName),
+        })),
+        entities: entityRows.map((row) => ({
+            ...row,
+            name: decryptText(row.name),
         })),
     };
 }

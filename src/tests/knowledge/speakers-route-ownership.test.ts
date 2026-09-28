@@ -190,6 +190,8 @@ describe("speakers route and ownership", () => {
             // The recording, then the transcript, locked for the change.
             [{ id: RECORDING_ID }],
             [{ revision: 0 }],
+            // What the label answered before: nothing yet.
+            [],
             [],
         );
         const values = vi.fn().mockReturnValue({

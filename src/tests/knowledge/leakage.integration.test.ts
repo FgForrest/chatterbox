@@ -96,6 +96,11 @@ import {
     renameEntity,
 } from "@/lib/knowledge/entities";
 import {
+    confirmManualFact,
+    deleteFact,
+    listFacts,
+} from "@/lib/knowledge/facts";
+import {
     createPrivateType,
     deleteOwnType,
     listVocabularyProposals,
@@ -418,6 +423,58 @@ describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
                 await refusal(removeAlias(BOB, aliasId)),
                 await refusal(removeAlias(BOB, "no-such")),
             );
+        });
+    });
+
+    describe("facts", () => {
+        async function aliceWithFact() {
+            const [jan, pavel] = await db()
+                .insert(people)
+                .values([
+                    { userId: ALICE, displayName: encryptText("Jan") },
+                    { userId: ALICE, displayName: encryptText("Pavel") },
+                ])
+                .returning({ id: people.id });
+            const factId = await confirmManualFact(ALICE, {
+                subject: { personId: jan?.id ?? "" },
+                relationKey: "reports_to",
+                object: { personId: pavel?.id ?? "" },
+            });
+            return { jan: jan?.id ?? "", pavel: pavel?.id ?? "", factId };
+        }
+
+        it("lists none of another account's facts", async () => {
+            const { jan } = await aliceWithFact();
+            for (const viewer of [BOB, orgUserId]) {
+                expect(await listFacts(viewer, { personId: jan })).toEqual([]);
+            }
+        });
+
+        it("answers a fact about another account's person, or their fact, as missing", async () => {
+            const { jan, pavel, factId } = await aliceWithFact();
+            const [bobs] = await db()
+                .insert(people)
+                .values({ userId: BOB, displayName: encryptText("Petr") })
+                .returning({ id: people.id });
+            const state = (subject: string, object: string) =>
+                confirmManualFact(BOB, {
+                    subject: { personId: subject },
+                    relationKey: "reports_to",
+                    object: { personId: object },
+                });
+            expectSameRefusal(
+                await refusal(state(jan, bobs?.id ?? "")),
+                await refusal(state("no-such", bobs?.id ?? "")),
+            );
+            expectSameRefusal(
+                await refusal(state(bobs?.id ?? "", pavel)),
+                await refusal(state(bobs?.id ?? "", "no-such")),
+            );
+            expectSameRefusal(
+                await refusal(deleteFact(BOB, factId)),
+                await refusal(deleteFact(BOB, "no-such")),
+            );
+            expect(await listFacts(ALICE, { personId: jan })).toHaveLength(1);
         });
     });
 });

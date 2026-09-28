@@ -491,6 +491,13 @@
       "when": 1790615806297,
       "tag": "0069_knowledge_entities",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1790616541829,
+      "tag": "0070_knowledge_facts",
+      "breakpoints": true
     }
   ]
 }

@@ -93,6 +93,33 @@ vi.mock("@/db/schema", () => ({
         provider: "knowledgeAliases.provider",
         createdAt: "knowledgeAliases.createdAt",
     },
+    knowledgeFacts: {
+        id: "knowledgeFacts.id",
+        userId: "knowledgeFacts.userId",
+        subjectPersonId: "knowledgeFacts.subjectPersonId",
+        subjectEntityId: "knowledgeFacts.subjectEntityId",
+        relationKey: "knowledgeFacts.relationKey",
+        objectPersonId: "knowledgeFacts.objectPersonId",
+        objectEntityId: "knowledgeFacts.objectEntityId",
+        objectLiteral: "knowledgeFacts.objectLiteral",
+        origin: "knowledgeFacts.origin",
+        replacedByFactId: "knowledgeFacts.replacedByFactId",
+        createdAt: "knowledgeFacts.createdAt",
+    },
+    knowledgeFactEvidence: {
+        userId: "knowledgeFactEvidence.userId",
+        factId: "knowledgeFactEvidence.factId",
+        transcriptionId: "knowledgeFactEvidence.transcriptionId",
+        recordingId: "knowledgeFactEvidence.recordingId",
+        transcriptRevision: "knowledgeFactEvidence.transcriptRevision",
+        startMs: "knowledgeFactEvidence.startMs",
+        endMs: "knowledgeFactEvidence.endMs",
+        speakerLabel: "knowledgeFactEvidence.speakerLabel",
+        dependsOnSpeaker: "knowledgeFactEvidence.dependsOnSpeaker",
+        quote: "knowledgeFactEvidence.quote",
+        status: "knowledgeFactEvidence.status",
+        confirmedAt: "knowledgeFactEvidence.confirmedAt",
+    },
     knowledgeEntityNotes: {
         entityId: "knowledgeEntityNotes.entityId",
         userId: "knowledgeEntityNotes.userId",
@@ -718,6 +745,87 @@ describe("buildAndUploadExportArchive", () => {
         });
     });
 
+    it("carries facts, where they were said, and the Organization's people they name", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions,
+            // corrections, folders, assignments, entity types, relation
+            // types, suggested phrases, entities, aliases, entity notes,
+            // correction targets
+            ...Array.from({ length: 14 }, () => []),
+            // facts
+            [
+                {
+                    id: "f-1",
+                    subjectPersonId: "p-org",
+                    subjectEntityId: null,
+                    relationKey: "has_role",
+                    objectPersonId: null,
+                    objectEntityId: null,
+                    objectLiteral: "enc-CTO",
+                    origin: "recording",
+                    replacedByFactId: null,
+                    createdAt: new Date("2026-03-03T00:00:00Z"),
+                },
+            ],
+            // evidence
+            [
+                {
+                    factId: "f-1",
+                    transcriptionId: "tr-1",
+                    recordingId: "rec-1",
+                    transcriptRevision: 2,
+                    startMs: 724_000,
+                    endMs: 739_000,
+                    speakerLabel: "speaker_1",
+                    dependsOnSpeaker: true,
+                    quote: "enc-I am the CTO",
+                    status: "supported",
+                    confirmedAt: new Date("2026-03-04T00:00:00Z"),
+                },
+            ],
+            // the Organization people named
+            [{ id: "p-org", displayName: "enc-Jan", mergedIntoId: null }],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/facts.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const archived = JSON.parse(
+            entries.get("knowledge/facts.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(archived.facts).toEqual([
+            expect.objectContaining({
+                id: "f-1",
+                relationKey: "has_role",
+                objectLiteral: "decrypted:enc-CTO",
+            }),
+        ]);
+        expect(archived.evidence).toEqual([
+            expect.objectContaining({
+                factId: "f-1",
+                quote: "decrypted:enc-I am the CTO",
+                dependsOnSpeaker: true,
+            }),
+        ]);
+        expect(archived.people).toEqual([
+            {
+                id: "p-org",
+                displayName: "decrypted:enc-Jan",
+                mergedIntoId: null,
+            },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.facts).toEqual({ facts: 1, evidence: 1 });
+    });
+
     it("carries the transcription ids the attributions are keyed on", async () => {
         storage.files.set("audio/rec-1.mp3", Buffer.from("audio"));
         mockSelectSequence([
@@ -1029,6 +1137,7 @@ describe("buildAndUploadExportArchive", () => {
         expect([...entries.keys()]).not.toContain("knowledge/people.json");
         expect([...entries.keys()]).not.toContain("knowledge/vocabulary.json");
         expect([...entries.keys()]).not.toContain("knowledge/entities.json");
+        expect([...entries.keys()]).not.toContain("knowledge/facts.json");
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );

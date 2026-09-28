@@ -19,6 +19,7 @@ import { db } from "@/db";
 import {
     knowledgeEntities,
     knowledgeEntityTypes,
+    knowledgeFacts,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
     knowledgeVocabularyProposalVotes,
@@ -530,27 +531,33 @@ export async function renameOwnType(
 /**
  * What goes with a type when its owner deletes it: their entities of an
  * entity type (with everything naming them), or their facts of a relation
- * type. Facts arrive with Task 2.6; until then a relation type has none.
+ * type (with their evidence).
  *
- * Only the owner's: another account's private entities of an Organization
- * type keep its key, and are theirs to retype.
+ * Only the owner's: another account's private entities or facts of an
+ * Organization type keep its key, and are theirs to change.
  */
+function usesOfTypeCondition(kind: TypeKind, ownerUserId: string, key: string) {
+    return kind === "entity"
+        ? and(
+              eq(knowledgeEntities.userId, ownerUserId),
+              eq(knowledgeEntities.typeKey, key),
+          )
+        : and(
+              eq(knowledgeFacts.userId, ownerUserId),
+              eq(knowledgeFacts.relationKey, key),
+          );
+}
+
 async function usesOfType(
     tx: Tx,
     kind: TypeKind,
     ownerUserId: string,
     key: string,
 ): Promise<number> {
-    if (kind === "relation") return 0;
     const [row] = await tx
         .select({ count: sql<number>`count(*)::int` })
-        .from(knowledgeEntities)
-        .where(
-            and(
-                eq(knowledgeEntities.userId, ownerUserId),
-                eq(knowledgeEntities.typeKey, key),
-            ),
-        );
+        .from(kind === "entity" ? knowledgeEntities : knowledgeFacts)
+        .where(usesOfTypeCondition(kind, ownerUserId, key));
     return row?.count ?? 0;
 }
 
@@ -581,15 +588,10 @@ export async function deleteOwnType(
                 { count },
             );
         }
-        if (kind === "entity" && count > 0) {
+        if (count > 0) {
             await tx
-                .delete(knowledgeEntities)
-                .where(
-                    and(
-                        eq(knowledgeEntities.userId, userId),
-                        eq(knowledgeEntities.typeKey, key),
-                    ),
-                );
+                .delete(kind === "entity" ? knowledgeEntities : knowledgeFacts)
+                .where(usesOfTypeCondition(kind, userId, key));
         }
         const table = tableOf(kind);
         await tx.delete(table).where(eq(table.id, id));
