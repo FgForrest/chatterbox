@@ -38,6 +38,7 @@ import {
 } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
+    lockOrgPeople,
     lockOrgPeopleShared,
     lockRecordingsNaming,
     orgOwnedCondition,
@@ -529,17 +530,25 @@ export async function deleteFact(
     factId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        // The rewrite's lock first, as it takes it before the facts.
+        // Exclusive, as every deletion: it changes the chain around the
+        // fact, which merges, other deletions and confirmations (shared)
+        // change too, each in its own order.
+        await lockOrgPeople(tx);
+        const ownFact = and(
+            eq(knowledgeFacts.id, factId),
+            eq(knowledgeFacts.userId, actorUserId),
+        );
+        const [mine] = await tx
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(ownFact);
+        if (!mine) throw factNotFound();
+        // The rewrite's lock next, as it takes it before the facts.
         await lockRecordingsNaming(tx, { factIds: [factId] });
         const [own] = await tx
             .select({ id: knowledgeFacts.id })
             .from(knowledgeFacts)
-            .where(
-                and(
-                    eq(knowledgeFacts.id, factId),
-                    eq(knowledgeFacts.userId, actorUserId),
-                ),
-            )
+            .where(ownFact)
             .for("update");
         if (!own) throw factNotFound();
         await deleteFactsInTx(tx, [factId]);

@@ -93,7 +93,8 @@ import {
     deleteEntity,
     mergeEntities,
 } from "@/lib/knowledge/entities";
-import { confirmFactFromRecording } from "@/lib/knowledge/facts";
+import { confirmFactFromRecording, deleteFact } from "@/lib/knowledge/facts";
+import { lockOrgPeople, lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { deletePerson, mergePeople } from "@/lib/knowledge/people";
 import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
@@ -451,6 +452,70 @@ describeWithDatabase(
                 await waitsForRewrite(() => deleteEntity(ALICE, orion)),
             ).toBe(true);
             expect(await db().select().from(knowledgeFacts)).toEqual([]);
+        });
+
+        /** Whether `act` waits while another transaction holds the Organization-people lock. */
+        async function waitsForOrgPeople(
+            shared: boolean,
+            act: () => Promise<unknown>,
+        ) {
+            let release: () => void = () => {};
+            const released = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            let holding: () => void = () => {};
+            const held = new Promise<void>((resolve) => {
+                holding = resolve;
+            });
+            const holder = db().transaction(async (tx) => {
+                await (shared
+                    ? lockOrgPeopleShared(tx as never)
+                    : lockOrgPeople(tx as never));
+                holding();
+                await released;
+            });
+            await held;
+            let done = false;
+            const acting = act().finally(() => {
+                done = true;
+            });
+            const waited = await waitForLockWaiters(1, {
+                ms: 3_000,
+                stop: () => done,
+            });
+            const outcome = waited && !done;
+            release();
+            await holder;
+            await acting;
+            return outcome;
+        }
+
+        it("deleting a fact waits for a deletion, a merge or a confirmation in progress", async () => {
+            const jan = await person("Jan Novotný");
+            const fact = () =>
+                confirmFactFromRecording({
+                    subject: { personId: jan },
+                    relationKey: "leads",
+                    object: { entityId: orion },
+                    ownerUserId: ALICE,
+                    transcriptionId: transcriptId,
+                    revision: 0,
+                    actorUserId: ALICE,
+                    orgUserId,
+                    startMs: 0,
+                    endMs: 10_000,
+                });
+            // A person deletion or a merge holds the lock from its start, a
+            // confirmation holds it shared: a fact deletion racing either
+            // over a chain of replacements deadlocked (review of the fixes).
+            const first = await fact();
+            expect(
+                await waitsForOrgPeople(false, () => deleteFact(ALICE, first)),
+            ).toBe(true);
+            const second = await fact();
+            expect(
+                await waitsForOrgPeople(true, () => deleteFact(ALICE, second)),
+            ).toBe(true);
         });
 
         it("an alias lands on the surviving entity", async () => {
