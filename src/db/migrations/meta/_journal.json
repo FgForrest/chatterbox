@@ -484,6 +484,13 @@
       "when": 1790614774801,
       "tag": "0068_transcript_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790615806297,
+      "tag": "0069_knowledge_entities",
+      "breakpoints": true
     }
   ]
 }

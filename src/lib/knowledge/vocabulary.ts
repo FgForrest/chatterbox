@@ -17,6 +17,7 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
+    knowledgeEntities,
     knowledgeEntityTypes,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
@@ -527,23 +528,41 @@ export async function renameOwnType(
 }
 
 /**
- * How many facts use a type. Facts arrive with Task 2.6; until then none
- * can, and deleting asks to confirm zero.
+ * What goes with a type when its owner deletes it: their entities of an
+ * entity type (with everything naming them), or their facts of a relation
+ * type. Facts arrive with Task 2.6; until then a relation type has none.
+ *
+ * Only the owner's: another account's private entities of an Organization
+ * type keep its key, and are theirs to retype.
  */
-async function factsUsingType(
-    _tx: Tx,
-    _kind: TypeKind,
-    _ownerUserId: string,
-    _key: string,
+async function usesOfType(
+    tx: Tx,
+    kind: TypeKind,
+    ownerUserId: string,
+    key: string,
 ): Promise<number> {
-    return 0;
+    if (kind === "relation") return 0;
+    const [row] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(knowledgeEntities)
+        .where(
+            and(
+                eq(knowledgeEntities.userId, ownerUserId),
+                eq(knowledgeEntities.typeKey, key),
+            ),
+        );
+    return row?.count ?? 0;
 }
 
 /**
- * Delete one of the user's own types and, with it, the facts that use it.
- * `confirmCount` must be the number of those facts the person was shown;
- * any other number is refused (409, `details.count`), so nothing is deleted
- * that the person did not see counted.
+ * Delete one of the user's own types and what uses it (`usesOfType`).
+ * `confirmCount` must be the number the person was shown; any other number
+ * is refused (409, `details.count`), so nothing is deleted that the person
+ * did not see counted.
+ *
+ * The entities' corrections go by cascade, without the recording locks a
+ * transcript rewrite takes: a rare deadlock with a rewrite is aborted by
+ * Postgres and the delete can be retried.
  */
 export async function deleteOwnType(
     userId: string,
@@ -553,14 +572,24 @@ export async function deleteOwnType(
 ): Promise<void> {
     await db.transaction(async (tx) => {
         const { id } = await lockOwnType(tx, kind, userId, key);
-        const count = await factsUsingType(tx, kind, userId, key);
+        const count = await usesOfType(tx, kind, userId, key);
         if (count !== confirmCount) {
             throw new AppError(
                 ErrorCode.CONFLICT,
-                "The number of facts using this type has changed",
+                "The number of things using this type has changed",
                 409,
                 { count },
             );
+        }
+        if (kind === "entity" && count > 0) {
+            await tx
+                .delete(knowledgeEntities)
+                .where(
+                    and(
+                        eq(knowledgeEntities.userId, userId),
+                        eq(knowledgeEntities.typeKey, key),
+                    ),
+                );
         }
         const table = tableOf(kind);
         await tx.delete(table).where(eq(table.id, id));

@@ -192,7 +192,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
                 revision: await revision(),
                 anchor: anchorIn(FIRST, 0, "Novák"),
                 kind: "correct",
-                targetPersonId: jan,
+                target: { personId: jan },
                 replacement: "Novotný",
                 actorUserId: OWNER,
                 orgUserId,
@@ -283,6 +283,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
                 heard: "Novák",
                 kind: "correct",
                 targetPersonId: jan,
+                targetEntityId: null,
                 replacement: "Novotný",
                 preTicked: false,
             },
@@ -346,8 +347,12 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
     });
 
     it("answers another account's person as a missing one", async () => {
-        const missing = await refusal(correct({ targetPersonId: "no-such" }));
-        const foreign = await refusal(correct({ targetPersonId: bobsPerson }));
+        const missing = await refusal(
+            correct({ target: { personId: "no-such" } }),
+        );
+        const foreign = await refusal(
+            correct({ target: { personId: bobsPerson } }),
+        );
         expect(missing).toMatchObject({ statusCode: 404 });
         expect(foreign).toMatchObject({
             statusCode: missing?.statusCode,
@@ -365,7 +370,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
                 mergedIntoId: jan,
             })
             .returning({ id: people.id });
-        await correct({ targetPersonId: folded?.id ?? "" });
+        await correct({ target: { personId: folded?.id ?? "" } });
         const [row] = await listCorrections(OWNER, transcriptId);
         expect(row?.targetPersonId).toBe(jan);
     });
@@ -427,13 +432,13 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         await correct({
             anchor: anchorIn(FIRST, 1, "Honzo"),
             kind: "link",
-            targetPersonId: orgJan,
+            target: { personId: orgJan },
             actorUserId: orgUserId,
         });
 
         // The owner's correction names the owner's own person: theirs alone.
         const orgView = await listCorrections(OWNER, transcriptId, {
-            orgPeopleOnly: true,
+            orgOnly: true,
         });
         expect(orgView.map((c) => c.heard)).toEqual(["Honzo"]);
         expect(

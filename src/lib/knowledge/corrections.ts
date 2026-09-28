@@ -14,9 +14,10 @@
  * (`writer-rule.ts`). Rows belong to the transcript's owner either way.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    knowledgeEntities,
     people,
     recordings,
     transcriptCorrections,
@@ -24,6 +25,11 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    type KnowledgeTarget,
+    resolveTargetInTx,
+    teachHeardAsInTx,
+} from "@/lib/knowledge/aliases";
 import {
     type TranscriptVersion,
     transcriptChanged,
@@ -34,7 +40,7 @@ import {
     type CorrectionAnchor,
 } from "@/lib/knowledge/correction-anchors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
-import { orgOwnedCondition, peopleVisibleTo } from "@/lib/knowledge/people";
+import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -55,7 +61,9 @@ export interface Correction {
     charEnd: number;
     heard: string;
     kind: CorrectionKind;
-    targetPersonId: string;
+    /** One of the two is set. */
+    targetPersonId: string | null;
+    targetEntityId: string | null;
     /** Null on a link, which shows the target's current name. */
     replacement: string | null;
     preTicked: boolean;
@@ -74,7 +82,7 @@ interface Writer {
 export interface AcceptCorrectionArgs extends TranscriptVersion, Writer {
     anchor: CorrectionAnchor;
     kind: CorrectionKind;
-    targetPersonId: string;
+    target: KnowledgeTarget;
     /** Required for `correct`, ignored for `link`. */
     replacement?: string | null;
     /** Accepted by default in a review not yet finished (Phase 3). */
@@ -83,10 +91,6 @@ export interface AcceptCorrectionArgs extends TranscriptVersion, Writer {
 
 function correctionNotFound(): AppError {
     return new AppError(ErrorCode.NOT_FOUND, "Correction not found", 404);
-}
-
-function personNotFound(): AppError {
-    return new AppError(ErrorCode.NOT_FOUND, "Person not found", 404);
 }
 
 function invalid(message: string, field: string): AppError {
@@ -103,7 +107,12 @@ async function lockTranscriptForChange(
     tx: Tx,
     { userId, transcriptionId }: Omit<TranscriptVersion, "revision">,
     { actorUserId, orgUserId }: Writer,
-): Promise<{ revision: number; turns: TranscriptTurn[] | null }> {
+): Promise<{
+    revision: number;
+    turns: TranscriptTurn[] | null;
+    language: string | null;
+    provider: string | null;
+}> {
     const [recording] = await tx
         .select({ id: recordings.id })
         .from(recordings)
@@ -123,6 +132,8 @@ async function lockTranscriptForChange(
               .select({
                   revision: transcriptions.revision,
                   turns: transcriptions.turns,
+                  language: transcriptions.detectedLanguage,
+                  provider: transcriptions.provider,
               })
               .from(transcriptions)
               .where(
@@ -146,30 +157,9 @@ async function lockTranscriptForChange(
     return {
         revision: transcript.revision,
         turns: readTranscriptTurns(transcript),
+        language: transcript.language,
+        provider: transcript.provider,
     };
-}
-
-/**
- * The person a correction may target: one the actor may see, which on a
- * shared recording (the organization account acting) is an Organization
- * person. A merged-away id resolves to the person it was folded into.
- */
-async function resolveTarget(
-    tx: Tx,
-    actorUserId: string,
-    personId: string,
-): Promise<string> {
-    for (let id = personId, hops = 0; hops < 2; hops++) {
-        const [person] = await tx
-            .select({ id: people.id, mergedIntoId: people.mergedIntoId })
-            .from(people)
-            .where(and(eq(people.id, id), peopleVisibleTo(actorUserId)))
-            .limit(1);
-        if (!person) break;
-        if (!person.mergedIntoId) return person.id;
-        id = person.mergedIntoId;
-    }
-    throw personNotFound();
 }
 
 function cleanReplacement(
@@ -195,8 +185,13 @@ function cleanReplacement(
  * Accept one correction on the transcript revision the person was looking
  * at. Refused, with nothing written: a changed transcript (409), words not
  * at the anchor (400), words already carrying a correction (409), a person
- * the actor may not see (404), or an actor who may not change the
- * recording now. Returns the correction's id.
+ * or entity the actor may not see (404; the Organization's alone on a
+ * shared recording, which only the organization account changes), or an
+ * actor who may not change the recording now. A merged-away target
+ * resolves to its survivor.
+ *
+ * A `correct` a person confirmed (not pre-ticked) also teaches how the
+ * transcription heard the name (`teachHeardAsInTx`). Returns the id.
  */
 export async function acceptCorrection(
     args: AcceptCorrectionArgs,
@@ -204,11 +199,8 @@ export async function acceptCorrection(
     const { anchor, kind, actorUserId } = args;
     const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
     return db.transaction(async (tx) => {
-        const { revision, turns } = await lockTranscriptForChange(
-            tx,
-            args,
-            args,
-        );
+        const { revision, turns, language, provider } =
+            await lockTranscriptForChange(tx, args, args);
         if (revision !== args.revision) throw transcriptChanged();
         if (!anchorMatches(anchor, turns)) {
             throw invalid("Those words are not at that place", "anchor");
@@ -236,11 +228,7 @@ export async function acceptCorrection(
                 409,
             );
         }
-        const targetPersonId = await resolveTarget(
-            tx,
-            actorUserId,
-            args.targetPersonId,
-        );
+        const target = await resolveTargetInTx(tx, actorUserId, args.target);
         const [row] = await tx
             .insert(transcriptCorrections)
             .values({
@@ -253,13 +241,25 @@ export async function acceptCorrection(
                 heard: encryptText(anchor.heard),
                 heardHmac: domainLookupHash(HEARD_DOMAIN, anchor.heard),
                 kind,
-                targetPersonId,
+                targetPersonId: "personId" in target ? target.personId : null,
+                targetEntityId: "entityId" in target ? target.entityId : null,
                 replacement: replacement ? encryptText(replacement) : null,
                 preTicked: args.preTicked ?? false,
                 createdByUserId: actorUserId,
             })
             .returning({ id: transcriptCorrections.id });
-        return (row as { id: string }).id;
+        const id = (row as { id: string }).id;
+        if (kind === "correct" && !args.preTicked) {
+            await teachHeardAsInTx(tx, {
+                scopeUserId: actorUserId,
+                target,
+                heard: anchor.heard,
+                language,
+                provider,
+                correctionId: id,
+            });
+        }
+        return id;
     });
 }
 
@@ -292,13 +292,13 @@ export async function revertCorrection(
 
 /**
  * The corrections on one of `ownerUserId`'s transcripts, in reading order.
- * `orgPeopleOnly` on the Organization view: corrections targeting the
- * owner's private people are the owner's alone.
+ * `orgOnly` on the Organization view: corrections targeting the owner's
+ * private people or entities are the owner's alone.
  */
 export async function listCorrections(
     ownerUserId: string,
     transcriptionId: string,
-    { orgPeopleOnly = false }: { orgPeopleOnly?: boolean } = {},
+    { orgOnly = false }: { orgOnly?: boolean } = {},
 ): Promise<Correction[]> {
     const rows = await db
         .select({
@@ -310,16 +310,26 @@ export async function listCorrections(
             heard: transcriptCorrections.heard,
             kind: transcriptCorrections.kind,
             targetPersonId: transcriptCorrections.targetPersonId,
+            targetEntityId: transcriptCorrections.targetEntityId,
             replacement: transcriptCorrections.replacement,
             preTicked: transcriptCorrections.preTicked,
         })
         .from(transcriptCorrections)
-        .innerJoin(people, eq(people.id, transcriptCorrections.targetPersonId))
+        .leftJoin(people, eq(people.id, transcriptCorrections.targetPersonId))
+        .leftJoin(
+            knowledgeEntities,
+            eq(knowledgeEntities.id, transcriptCorrections.targetEntityId),
+        )
         .where(
             and(
                 eq(transcriptCorrections.userId, ownerUserId),
                 eq(transcriptCorrections.transcriptionId, transcriptionId),
-                orgPeopleOnly ? orgOwnedCondition(people.userId) : undefined,
+                orgOnly
+                    ? or(
+                          orgOwnedCondition(people.userId),
+                          orgOwnedCondition(knowledgeEntities.userId),
+                      )
+                    : undefined,
             ),
         )
         .orderBy(

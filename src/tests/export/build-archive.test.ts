@@ -69,9 +69,34 @@ vi.mock("@/db/schema", () => ({
         heard: "transcriptCorrections.heard",
         kind: "transcriptCorrections.kind",
         targetPersonId: "transcriptCorrections.targetPersonId",
+        targetEntityId: "transcriptCorrections.targetEntityId",
         replacement: "transcriptCorrections.replacement",
         preTicked: "transcriptCorrections.preTicked",
         createdAt: "transcriptCorrections.createdAt",
+    },
+    knowledgeEntities: {
+        id: "knowledgeEntities.id",
+        userId: "knowledgeEntities.userId",
+        typeKey: "knowledgeEntities.typeKey",
+        name: "knowledgeEntities.name",
+        description: "knowledgeEntities.description",
+        mergedIntoId: "knowledgeEntities.mergedIntoId",
+        createdAt: "knowledgeEntities.createdAt",
+    },
+    knowledgeAliases: {
+        userId: "knowledgeAliases.userId",
+        personId: "knowledgeAliases.personId",
+        entityId: "knowledgeAliases.entityId",
+        kind: "knowledgeAliases.kind",
+        text: "knowledgeAliases.text",
+        language: "knowledgeAliases.language",
+        provider: "knowledgeAliases.provider",
+        createdAt: "knowledgeAliases.createdAt",
+    },
+    knowledgeEntityNotes: {
+        entityId: "knowledgeEntityNotes.entityId",
+        userId: "knowledgeEntityNotes.userId",
+        notes: "knowledgeEntityNotes.notes",
     },
     knowledgeEntityTypes: {
         userId: "knowledgeEntityTypes.userId",
@@ -362,6 +387,7 @@ describe("buildAndUploadExportArchive", () => {
                     heard: "enc-Novák",
                     kind: "correct",
                     personId: "p-org",
+                    targetEntityId: null,
                     replacement: "enc-Novotný",
                     preTicked: false,
                     createdAt: new Date("2026-01-03T00:00:00Z"),
@@ -404,6 +430,7 @@ describe("buildAndUploadExportArchive", () => {
                 heard: "decrypted:enc-Novák",
                 kind: "correct",
                 targetPersonId: "p-org",
+                targetEntityId: null,
                 replacement: "decrypted:enc-Novotný",
                 preTicked: false,
                 createdAt: "2026-01-03T00:00:00.000Z",
@@ -567,6 +594,127 @@ describe("buildAndUploadExportArchive", () => {
             entityTypes: 1,
             relationTypes: 1,
             suggestedPhrases: 1,
+        });
+    });
+
+    it("carries entities, the names given them, and the Organization's they point at", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions,
+            // corrections, folders, assignments, entity types, relation
+            // types, suggested phrases
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            // own entities
+            [
+                {
+                    id: "e-own",
+                    typeKey: "project",
+                    name: "enc-Orion",
+                    description: "enc-CRM migration",
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // aliases
+            [
+                {
+                    personId: null,
+                    entityId: "e-org",
+                    kind: "heard_as",
+                    text: "enc-Senezi",
+                    language: "cs",
+                    provider: "openai",
+                    createdAt: new Date("2026-01-02T00:00:00Z"),
+                },
+                {
+                    personId: "p-org",
+                    entityId: null,
+                    kind: "alias",
+                    text: "enc-Honza",
+                    language: null,
+                    provider: null,
+                    createdAt: new Date("2026-01-03T00:00:00Z"),
+                },
+            ],
+            // notes on Organization entities
+            [{ entityId: "e-org", notes: "enc-our biggest client" }],
+            // entities the corrections target
+            [],
+            // the Organization entities referenced
+            [
+                {
+                    id: "e-org",
+                    typeKey: "organization",
+                    name: "enc-Tavesi",
+                    description: null,
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // the Organization people the aliases name
+            [
+                {
+                    id: "p-org",
+                    displayName: "enc-Jan Novotný",
+                    mergedIntoId: null,
+                },
+            ],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/entities.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const archived = JSON.parse(
+            entries.get("knowledge/entities.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(archived.entities).toEqual([
+            expect.objectContaining({
+                id: "e-own",
+                name: "decrypted:enc-Orion",
+                description: "decrypted:enc-CRM migration",
+                organization: false,
+            }),
+            expect.objectContaining({
+                id: "e-org",
+                name: "decrypted:enc-Tavesi",
+                organization: true,
+            }),
+        ]);
+        expect(archived.aliases.map((a: { text: string }) => a.text)).toEqual([
+            "decrypted:enc-Senezi",
+            "decrypted:enc-Honza",
+        ]);
+        expect(archived.notes).toEqual([
+            { entityId: "e-org", notes: "decrypted:enc-our biggest client" },
+        ]);
+        expect(archived.people).toEqual([
+            {
+                id: "p-org",
+                displayName: "decrypted:enc-Jan Novotný",
+                mergedIntoId: null,
+            },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.entities).toEqual({
+            entities: 2,
+            aliases: 2,
+            notes: 1,
         });
     });
 
@@ -880,6 +1028,7 @@ describe("buildAndUploadExportArchive", () => {
         const entries = await readZipEntries(storage.uploaded as Buffer);
         expect([...entries.keys()]).not.toContain("knowledge/people.json");
         expect([...entries.keys()]).not.toContain("knowledge/vocabulary.json");
+        expect([...entries.keys()]).not.toContain("knowledge/entities.json");
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );

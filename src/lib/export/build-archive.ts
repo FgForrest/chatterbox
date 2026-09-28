@@ -1,9 +1,12 @@
 import { PassThrough, type Readable } from "node:stream";
 import { ZipArchive } from "archiver";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    knowledgeAliases,
+    knowledgeEntities,
+    knowledgeEntityNotes,
     knowledgeEntityTypes,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
@@ -241,6 +244,7 @@ export async function buildAndUploadExportArchive(input: {
             relationTypes: number;
             suggestedPhrases: number;
         };
+        entities?: { entities: number; aliases: number; notes: number };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -560,6 +564,28 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
+    // Entities, every name the user gave or taught, and their notes on the
+    // Organization's entities; the Organization's entities and people those
+    // point at come along, as referenced people do in `people.json`.
+    const entities = await collectEntities(
+        userId,
+        new Set(knowledge.people.map((person) => person.id)),
+    );
+    if (
+        entities.entities.length > 0 ||
+        entities.aliases.length > 0 ||
+        entities.notes.length > 0
+    ) {
+        archive.append(Buffer.from(JSON.stringify(entities, null, 2)), {
+            name: "knowledge/entities.json",
+        });
+        manifest.entities = {
+            entities: entities.entities.length,
+            aliases: entities.aliases.length,
+            notes: entities.notes.length,
+        };
+    }
+
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {
         name: "manifest.json",
     });
@@ -671,7 +697,8 @@ interface ArchivedKnowledgeBase {
         charEnd: number;
         heard: string;
         kind: string;
-        targetPersonId: string;
+        targetPersonId: string | null;
+        targetEntityId: string | null;
         replacement: string | null;
         preTicked: boolean;
         createdAt: string;
@@ -735,6 +762,7 @@ async function collectKnowledgeBase(
                     heard: transcriptCorrections.heard,
                     kind: transcriptCorrections.kind,
                     personId: transcriptCorrections.targetPersonId,
+                    targetEntityId: transcriptCorrections.targetEntityId,
                     replacement: transcriptCorrections.replacement,
                     preTicked: transcriptCorrections.preTicked,
                     createdAt: transcriptCorrections.createdAt,
@@ -893,6 +921,148 @@ async function collectVocabulary(userId: string): Promise<ArchivedVocabulary> {
         suggestedPhrases: phraseRows.map((row) => ({
             phrase: decryptText(row.phrase),
             status: row.status,
+        })),
+    };
+}
+
+interface ArchivedEntities {
+    entities: {
+        id: string;
+        typeKey: string;
+        name: string;
+        description: string | null;
+        mergedIntoId: string | null;
+        /** An Organization entity the user's knowledge points at. */
+        organization: boolean;
+        createdAt: string;
+    }[];
+    aliases: {
+        personId: string | null;
+        entityId: string | null;
+        kind: string;
+        text: string;
+        language: string | null;
+        provider: string | null;
+        createdAt: string;
+    }[];
+    /** The user's private notes on Organization entities. */
+    notes: { entityId: string; notes: string }[];
+    /** Organization people the aliases name, when `people.json` has none. */
+    people: { id: string; displayName: string; mergedIntoId: string | null }[];
+}
+
+async function collectEntities(
+    userId: string,
+    archivedPeople: ReadonlySet<string>,
+): Promise<ArchivedEntities> {
+    const entityColumns = {
+        id: knowledgeEntities.id,
+        typeKey: knowledgeEntities.typeKey,
+        name: knowledgeEntities.name,
+        description: knowledgeEntities.description,
+        mergedIntoId: knowledgeEntities.mergedIntoId,
+        createdAt: knowledgeEntities.createdAt,
+    };
+    const [ownRows, aliasRows, noteRows, correctionRows] = await Promise.all([
+        db
+            .select(entityColumns)
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.userId, userId)),
+        db
+            .select({
+                personId: knowledgeAliases.personId,
+                entityId: knowledgeAliases.entityId,
+                kind: knowledgeAliases.kind,
+                text: knowledgeAliases.text,
+                language: knowledgeAliases.language,
+                provider: knowledgeAliases.provider,
+                createdAt: knowledgeAliases.createdAt,
+            })
+            .from(knowledgeAliases)
+            .where(eq(knowledgeAliases.userId, userId)),
+        db
+            .select({
+                entityId: knowledgeEntityNotes.entityId,
+                notes: knowledgeEntityNotes.notes,
+            })
+            .from(knowledgeEntityNotes)
+            .where(eq(knowledgeEntityNotes.userId, userId)),
+        db
+            .select({ entityId: transcriptCorrections.targetEntityId })
+            .from(transcriptCorrections)
+            .where(
+                and(
+                    eq(transcriptCorrections.userId, userId),
+                    isNotNull(transcriptCorrections.targetEntityId),
+                ),
+            ),
+    ]);
+
+    const own = new Set(ownRows.map((row) => row.id));
+    const referencedIds = [
+        ...new Set(
+            [...aliasRows, ...noteRows, ...correctionRows].flatMap((row) =>
+                row.entityId && !own.has(row.entityId) ? [row.entityId] : [],
+            ),
+        ),
+    ];
+    const referencedRows =
+        referencedIds.length > 0
+            ? await db
+                  .select(entityColumns)
+                  .from(knowledgeEntities)
+                  .where(inArray(knowledgeEntities.id, referencedIds))
+            : [];
+    const personIds = [
+        ...new Set(
+            aliasRows.flatMap((row) =>
+                row.personId && !archivedPeople.has(row.personId)
+                    ? [row.personId]
+                    : [],
+            ),
+        ),
+    ];
+    const personRows =
+        personIds.length > 0
+            ? await db
+                  .select({
+                      id: people.id,
+                      displayName: people.displayName,
+                      mergedIntoId: people.mergedIntoId,
+                  })
+                  .from(people)
+                  .where(inArray(people.id, personIds))
+            : [];
+
+    const archived = (
+        row: (typeof ownRows)[number],
+        organization: boolean,
+    ) => ({
+        id: row.id,
+        typeKey: row.typeKey,
+        name: decryptText(row.name),
+        description: row.description ? decryptText(row.description) : null,
+        mergedIntoId: row.mergedIntoId,
+        organization,
+        createdAt: row.createdAt.toISOString(),
+    });
+    return {
+        entities: [
+            ...ownRows.map((row) => archived(row, false)),
+            ...referencedRows.map((row) => archived(row, true)),
+        ],
+        aliases: aliasRows.map((row) => ({
+            ...row,
+            text: decryptText(row.text),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        notes: noteRows.map((row) => ({
+            entityId: row.entityId,
+            notes: decryptText(row.notes),
+        })),
+        people: personRows.map((row) => ({
+            ...row,
+            displayName: decryptText(row.displayName),
         })),
     };
 }

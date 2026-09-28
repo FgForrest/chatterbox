@@ -80,11 +80,21 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { addAlias, listAliases, removeAlias } from "@/lib/knowledge/aliases";
 import {
     acceptCorrection,
     listCorrections,
     revertCorrection,
 } from "@/lib/knowledge/corrections";
+import {
+    createEntity,
+    deleteEntity,
+    describeEntity,
+    getEntity,
+    listEntities,
+    mergeEntities,
+    renameEntity,
+} from "@/lib/knowledge/entities";
 import {
     createPrivateType,
     deleteOwnType,
@@ -292,7 +302,7 @@ describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
                 revision: seeded.revision,
                 anchor,
                 kind: "correct",
-                targetPersonId,
+                target: { personId: targetPersonId },
                 replacement: "Novotný",
                 actorUserId: userId,
                 orgUserId,
@@ -334,6 +344,79 @@ describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
             expectSameRefusal(
                 await refusal(accept(BOB, bob, alice.personId)),
                 await refusal(accept(BOB, bob, "no-such")),
+            );
+        });
+    });
+
+    describe("entities and aliases", () => {
+        it("lists none of another account's entities, nor their names", async () => {
+            const orion = await createEntity(ALICE, {
+                typeKey: "project",
+                name: "Orion",
+            });
+            await addAlias(ALICE, { entityId: orion.id }, "Orajon");
+            for (const viewer of [BOB, orgUserId]) {
+                expect(await listEntities(viewer)).toEqual([]);
+                expect(await getEntity(viewer, orion.id)).toBeNull();
+                expect(
+                    await listAliases(viewer, { entityId: orion.id }),
+                ).toEqual([]);
+            }
+        });
+
+        it("answers every change to another account's entity as to a missing one", async () => {
+            const orion = await createEntity(ALICE, {
+                typeKey: "project",
+                name: "Orion",
+            });
+            const bobs = await createEntity(BOB, {
+                typeKey: "project",
+                name: "Orion (Bob)",
+            });
+            const changes = (id: string) => [
+                () => renameEntity(BOB, id, "x"),
+                () => describeEntity(BOB, id, "x"),
+                () => deleteEntity(BOB, id),
+                () => mergeEntities(BOB, bobs.id, id),
+                () => mergeEntities(BOB, id, bobs.id),
+                () => addAlias(BOB, { entityId: id }, "x"),
+            ];
+            const missing = changes("no-such");
+            for (const [index, change] of changes(orion.id).entries()) {
+                expectSameRefusal(
+                    await refusal(change()),
+                    await refusal((missing[index] as () => Promise<unknown>)()),
+                );
+            }
+            expect((await getEntity(ALICE, orion.id))?.name).toBe("Orion");
+        });
+
+        it("never refuses an entity's name because another account uses it", async () => {
+            await createEntity(ALICE, { typeKey: "project", name: "Orion" });
+            await expect(
+                createEntity(BOB, { typeKey: "project", name: "Orion" }),
+            ).resolves.toMatchObject({ name: "Orion" });
+        });
+
+        it("answers an alias on another account's person, or their alias, as missing", async () => {
+            const [alicesJan] = await db()
+                .insert(people)
+                .values({ userId: ALICE, displayName: encryptText("Jan") })
+                .returning({ id: people.id });
+            const aliasId = await addAlias(
+                ALICE,
+                { personId: alicesJan?.id ?? "" },
+                "Honza",
+            );
+            expectSameRefusal(
+                await refusal(
+                    addAlias(BOB, { personId: alicesJan?.id ?? "" }, "Honza"),
+                ),
+                await refusal(addAlias(BOB, { personId: "no-such" }, "Honza")),
+            );
+            expectSameRefusal(
+                await refusal(removeAlias(BOB, aliasId)),
+                await refusal(removeAlias(BOB, "no-such")),
             );
         });
     });

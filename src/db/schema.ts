@@ -1197,6 +1197,143 @@ export const knowledgeVocabularyVersion = pgTable(
     },
 );
 
+// Organizations, teams, projects, products, terms, locations and documents
+// people talk about. A person is never one: people live in `people`.
+export const knowledgeEntities = pgTable(
+    "knowledge_entities",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The owner: a user, or the organization account for the
+        // Organization's.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // An entity type's key. Core keys are fixed and every other key is
+        // `u_` or `o_` plus a random id, so a key names one type; whether
+        // the owner may use it is checked on write.
+        typeKey: varchar("type_key", { length: 64 }).notNull(),
+        name: text("name").notNull(),
+        // `domainLookupHash("entity-name", name)`.
+        nameHmac: varchar("name_hmac", { length: 64 }).notNull(),
+        description: text("description"),
+        // Set on the losing side of a merge; no foreign key, as on people.
+        mergedIntoId: text("merged_into_id"),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        // One "Orion" project per scope; tombstones keep their name.
+        nameUnique: uniqueIndex("knowledge_entities_owner_type_name_unique")
+            .on(table.userId, table.typeKey, table.nameHmac)
+            .where(sql`${table.mergedIntoId} is null`),
+        mergedIntoIdx: index("knowledge_entities_merged_into_id_idx").on(
+            table.mergedIntoId,
+        ),
+        userIdIdx: index("knowledge_entities_user_id_idx").on(table.userId),
+    }),
+);
+
+// A user's private description of an Organization entity, as
+// `person_notes` is of an Organization person.
+export const knowledgeEntityNotes = pgTable(
+    "knowledge_entity_notes",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        entityId: text("entity_id")
+            .notNull()
+            .references(() => knowledgeEntities.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // Encrypted, like `knowledge_entities.description`.
+        notes: text("notes").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        entityUserUnique: unique(
+            "knowledge_entity_notes_entity_id_user_id_unique",
+        ).on(table.entityId, table.userId),
+        userIdIdx: index("knowledge_entity_notes_user_id_idx").on(table.userId),
+    }),
+);
+
+// Other names of a person or an entity. `alias` lasts; `heard_as` is how a
+// transcription provider renders the name in one language, taught by the
+// correction that put it right, and goes with it.
+export const knowledgeAliases = pgTable(
+    "knowledge_aliases",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The scope: a user's nickname for an Organization person is
+        // theirs alone.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        personId: text("person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        entityId: text("entity_id").references(() => knowledgeEntities.id, {
+            onDelete: "cascade",
+        }),
+        kind: varchar("kind", { length: 8 })
+            .$type<"alias" | "heard_as">()
+            .notNull(),
+        text: text("text").notNull(),
+        // `domainLookupHash("alias", text)`.
+        textHmac: varchar("text_hmac", { length: 64 }).notNull(),
+        language: varchar("language", { length: 16 }),
+        provider: varchar("provider", { length: 64 }),
+        correctionId: text("correction_id").references(
+            (): AnyPgColumn => transcriptCorrections.id,
+            { onDelete: "cascade" },
+        ),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        aliasUnique: unique("knowledge_aliases_unique")
+            .on(
+                table.userId,
+                table.personId,
+                table.entityId,
+                table.kind,
+                table.textHmac,
+                table.correctionId,
+            )
+            .nullsNotDistinct(),
+        personIdx: index("knowledge_aliases_person_id_idx").on(table.personId),
+        entityIdx: index("knowledge_aliases_entity_id_idx").on(table.entityId),
+        correctionIdx: index("knowledge_aliases_correction_id_idx").on(
+            table.correctionId,
+        ),
+        oneTarget: check(
+            "knowledge_aliases_one_target_check",
+            sql`num_nonnulls(${table.personId}, ${table.entityId}) = 1`,
+        ),
+        kindCheck: check(
+            "knowledge_aliases_kind_check",
+            sql`${table.kind} in ('alias', 'heard_as')`,
+        ),
+        taughtBy: check(
+            "knowledge_aliases_heard_as_check",
+            sql`(${table.kind} = 'heard_as') = (${table.correctionId} is not null)`,
+        ),
+    }),
+);
+
 // Corrections accepted on a transcript: an overlay, so the stored text
 // never changes and reverting deletes the row. Anchored to a turn and
 // character offsets of one revision; a rewrite of the transcript re-anchors
@@ -1227,10 +1364,15 @@ export const transcriptCorrections = pgTable(
         kind: varchar("kind", { length: 8 })
             .$type<"correct" | "link">()
             .notNull(),
-        // Erasing a person deletes the corrections targeting them.
-        targetPersonId: text("target_person_id")
-            .notNull()
-            .references(() => people.id, { onDelete: "cascade" }),
+        // A person or an entity (CHECK). Erasing either deletes the
+        // corrections targeting them.
+        targetPersonId: text("target_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        targetEntityId: text("target_entity_id").references(
+            (): AnyPgColumn => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
         // In the transcript's language. Null on a link, which shows the
         // target's current name.
         replacement: text("replacement"),
@@ -1250,6 +1392,13 @@ export const transcriptCorrections = pgTable(
         targetPersonIdx: index(
             "transcript_corrections_target_person_id_idx",
         ).on(table.targetPersonId),
+        targetEntityIdx: index(
+            "transcript_corrections_target_entity_id_idx",
+        ).on(table.targetEntityId),
+        oneTarget: check(
+            "transcript_corrections_one_target_check",
+            sql`num_nonnulls(${table.targetPersonId}, ${table.targetEntityId}) = 1`,
+        ),
         replacementForCorrect: check(
             "transcript_corrections_replacement_check",
             sql`(${table.kind} = 'correct') = (${table.replacement} is not null)`,
