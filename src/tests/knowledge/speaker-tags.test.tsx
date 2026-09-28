@@ -17,21 +17,35 @@ interface FetchScenario {
     initialSpeakers?: unknown[];
     savedSpeakers?: unknown[];
     people?: unknown[];
+    /** Answer every change with 409, as after a re-transcription. */
+    conflict?: boolean;
 }
 
-function response(body: unknown): Response {
-    return { ok: true, json: async () => body } as Response;
+function response(body: unknown, status = 200): Response {
+    return { ok: status < 400, status, json: async () => body } as Response;
 }
+
+/** The transcript version the route reports, and every change sends back. */
+const VERSION = { transcriptionId: "tx-1", revision: 3 };
 
 function stubFetch(scenario: FetchScenario) {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
         if (init?.method === "PUT") {
-            return response({ speakers: scenario.savedSpeakers ?? [] });
+            if (scenario.conflict) {
+                return response({ error: "The transcript changed" }, 409);
+            }
+            return response({
+                ...VERSION,
+                speakers: scenario.savedSpeakers ?? [],
+            });
         }
         if (url === "/api/people") {
             return response({ people: scenario.people ?? [] });
         }
-        return response({ speakers: scenario.initialSpeakers ?? [] });
+        return response({
+            ...VERSION,
+            speakers: scenario.initialSpeakers ?? [],
+        });
     });
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
@@ -124,6 +138,7 @@ describe("SpeakerTags", () => {
             ([, init]) => init?.method === "PUT",
         );
         expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+            ...VERSION,
             label: "speaker_0",
         });
     });
@@ -153,6 +168,7 @@ describe("SpeakerTags", () => {
         const puts = () =>
             fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
         expect(JSON.parse(String(puts()[0]?.[1]?.body))).toEqual({
+            ...VERSION,
             label: "speaker_0",
             unknown: true,
         });
@@ -164,8 +180,33 @@ describe("SpeakerTags", () => {
         );
         await waitFor(() => expect(puts()).toHaveLength(2));
         expect(JSON.parse(String(puts()[1]?.[1]?.body))).toEqual({
+            ...VERSION,
             label: "speaker_0",
         });
+    });
+
+    it("names the transcript version it saw, and reloads when it changed", async () => {
+        const fetchMock = stubFetch({ conflict: true });
+        renderTags();
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Speaker 0" }),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Unknown speaker" }),
+        );
+
+        await waitFor(() => {
+            const reads = fetchMock.mock.calls.filter(
+                ([url, init]) =>
+                    String(url).includes("/speakers") && !init?.method,
+            );
+            expect(reads).toHaveLength(2);
+        });
+        // The picker stays open: nothing was saved.
+        expect(
+            screen.getByRole("button", { name: "Unknown speaker" }),
+        ).toBeDefined();
     });
 
     it("selects an existing person through the modal", async () => {
@@ -201,6 +242,7 @@ describe("SpeakerTags", () => {
             ([, init]) => init?.method === "PUT",
         );
         expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+            ...VERSION,
             label: "speaker_0",
             personId: "person-2",
         });
@@ -238,6 +280,7 @@ describe("SpeakerTags", () => {
             ([, init]) => init?.method === "PUT",
         );
         expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+            ...VERSION,
             label: "speaker_0",
             displayName: "Nova",
         });

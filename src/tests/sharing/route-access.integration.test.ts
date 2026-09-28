@@ -162,6 +162,16 @@ function call(
     );
 }
 
+/** The transcript version a speakers view shows, as the panel reads it. */
+async function seenVersion(user: string, path: string) {
+    const response = await call(getSpeakers, user, path);
+    const body = (await response.json()) as {
+        transcriptionId?: string;
+        revision?: number;
+    };
+    return { transcriptionId: body.transcriptionId, revision: body.revision };
+}
+
 function json(body: unknown): RequestInit {
     return {
         headers: { "content-type": "application/json" },
@@ -429,6 +439,10 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                         {
                             method: "PUT",
                             ...json({
+                                ...(await seenVersion(
+                                    MEMBER,
+                                    `/api/recordings/${REC}/speakers?view=org`,
+                                )),
                                 label: "speaker_0",
                                 personId: privatePerson?.id,
                             }),
@@ -444,7 +458,14 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                         `/api/recordings/${REC}/speakers?view=org`,
                         {
                             method: "PUT",
-                            ...json({ label: "speaker_0", displayName: "Eva" }),
+                            ...json({
+                                ...(await seenVersion(
+                                    MEMBER,
+                                    `/api/recordings/${REC}/speakers?view=org`,
+                                )),
+                                label: "speaker_0",
+                                displayName: "Eva",
+                            }),
                         },
                     )
                 ).status,

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerEvent: vi.fn(),
+    captureServerException: vi.fn(),
+}));
+
 vi.mock("@/db", () => ({
     db: {
         select: vi.fn(),

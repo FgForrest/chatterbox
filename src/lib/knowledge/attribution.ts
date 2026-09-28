@@ -2,11 +2,13 @@ import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     people,
+    recordings,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { mapLabels, remapAttributionRows } from "@/lib/knowledge/label-mapping";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
@@ -46,6 +48,8 @@ export interface TranscriptSpeaker {
 export interface SetTranscriptSpeakerArgs {
     userId: string;
     transcriptionId: string;
+    /** The transcript revision the change was made on; see `lockForSpeakerChange`. */
+    revision: number;
     label: string;
     personId: string | null;
     source: AttributionSource;
@@ -56,10 +60,19 @@ export interface SetTranscriptSpeakerArgs {
     confirmedByUserId?: string | null;
 }
 
+/** One version of one user's transcript. */
+export interface TranscriptVersion {
+    userId: string;
+    transcriptionId: string;
+    revision: number;
+}
+
 /** One speaker label of one transcript. */
 export interface TranscriptLabelArgs {
     userId: string;
     transcriptionId: string;
+    /** The transcript revision the change was made on; see `lockForSpeakerChange`. */
+    revision: number;
     label: string;
 }
 
@@ -116,7 +129,7 @@ function orderedSpeakers(text: string): string[] {
 function remapCandidateRows(
     rows: readonly TransferableSpeakerRow[],
     nextSpeakers: readonly string[],
-): Omit<SetTranscriptSpeakerArgs, "userId" | "transcriptionId">[] {
+): Omit<SetTranscriptSpeakerArgs, "userId" | "transcriptionId" | "revision">[] {
     const previousSpeakers = orderedSpeakers(
         decryptText(rows[0]?.transcriptionText ?? ""),
     );
@@ -273,6 +286,63 @@ export async function getTranscriptSpeakers(
 }
 
 /**
+ * Hold the transcript still while a person changes one of its speakers, and
+ * refuse the change if the text is no longer the version they looked at.
+ *
+ * Locks the recording (shared) and then the transcript (exclusive), the
+ * same order a transcript write takes them, so a change and a
+ * re-transcription never interleave: the change either lands before the
+ * rewrite, which then moves it onto the new labels, or it sees the new
+ * revision and is refused instead of naming a label that now means
+ * someone else.
+ */
+async function lockForSpeakerChange(
+    tx: Tx,
+    { userId, transcriptionId, revision }: TranscriptVersion,
+): Promise<void> {
+    const [recording] = await tx
+        .select({ id: recordings.id })
+        .from(recordings)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.recordingId, recordings.id),
+        )
+        .where(
+            and(
+                eq(transcriptions.id, transcriptionId),
+                eq(transcriptions.userId, userId),
+            ),
+        )
+        .for("share", { of: recordings });
+    const [transcript] = recording
+        ? await tx
+              .select({ revision: transcriptions.revision })
+              .from(transcriptions)
+              .where(
+                  and(
+                      eq(transcriptions.id, transcriptionId),
+                      eq(transcriptions.userId, userId),
+                  ),
+              )
+              .for("update")
+        : [];
+    if (!transcript) {
+        throw new AppError(
+            ErrorCode.NOT_FOUND,
+            "No transcript to attribute",
+            404,
+        );
+    }
+    if (transcript.revision !== revision) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "The transcript changed; reload",
+            409,
+        );
+    }
+}
+
+/**
  * Record who a speaker label refers to, replacing any previous answer for
  * that label.
  *
@@ -294,6 +364,7 @@ async function setTranscriptSpeakerInTx(
     {
         userId,
         transcriptionId,
+        revision,
         label,
         personId,
         source,
@@ -304,6 +375,7 @@ async function setTranscriptSpeakerInTx(
         confirmedByUserId = null,
     }: SetTranscriptSpeakerArgs,
 ): Promise<void> {
+    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .insert(transcriptSpeakers)
         .values({
@@ -359,8 +431,9 @@ export async function clearTranscriptSpeaker(
 
 async function clearTranscriptSpeakerInTx(
     tx: Tx,
-    { userId, transcriptionId, label }: TranscriptLabelArgs,
+    { userId, transcriptionId, revision, label }: TranscriptLabelArgs,
 ): Promise<void> {
+    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .delete(transcriptSpeakers)
         .where(
@@ -388,10 +461,12 @@ async function rejectSuggestionInTx(
     {
         userId,
         transcriptionId,
+        revision,
         label,
         personId,
     }: TranscriptLabelArgs & { personId: string },
 ): Promise<void> {
+    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .insert(transcriptSpeakerRejections)
         .values({ userId, transcriptionId, label, personId })

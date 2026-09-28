@@ -102,7 +102,10 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 
-import { PUT as putSpeakerRoute } from "@/app/api/recordings/[id]/speakers/route";
+import {
+    GET as getSpeakersRoute,
+    PUT as putSpeakerRoute,
+} from "@/app/api/recordings/[id]/speakers/route";
 import { db as appDb } from "@/db";
 import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
@@ -114,6 +117,7 @@ import {
 } from "@/lib/knowledge/attribution";
 import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { upsertTranscription } from "@/lib/transcription/persist";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -128,15 +132,41 @@ type Handler = (
     context: { params: Promise<Record<string, string>> },
 ) => Promise<Response>;
 
-function put(user: string, body: unknown, query = "") {
-    return (putSpeakerRoute as unknown as Handler)(
-        new Request(`http://localhost/api/recordings/${REC}/speakers${query}`, {
-            method: "PUT",
+function request(user: string, query: string, init: RequestInit = {}) {
+    return new Request(
+        `http://localhost/api/recordings/${REC}/speakers${query}`,
+        {
+            ...init,
             headers: {
                 "content-type": "application/json",
                 "x-test-user": user,
             },
-            body: JSON.stringify(body),
+        },
+    );
+}
+
+/** The transcript version the view shows, as the panel reads it. */
+async function shownVersion(user: string, query = "") {
+    const response = await (getSpeakersRoute as unknown as Handler)(
+        request(user, query),
+        { params: Promise.resolve({ id: REC }) },
+    );
+    const body = (await response.json()) as {
+        transcriptionId?: string;
+        revision?: number;
+    };
+    return { transcriptionId: body.transcriptionId, revision: body.revision };
+}
+
+/** A change as the panel sends it: naming the version it just read. */
+async function put(user: string, body: object, query = "") {
+    return (putSpeakerRoute as unknown as Handler)(
+        request(user, query, {
+            method: "PUT",
+            body: JSON.stringify({
+                ...(await shownVersion(user, query)),
+                ...body,
+            }),
         }),
         { params: Promise.resolve({ id: REC }) },
     );
@@ -338,6 +368,105 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         });
     });
 
+    describe("every change names the version it was made on", () => {
+        it("refuses a change made before a re-transcription", async () => {
+            const seen = await shownVersion(ALICE);
+            await upsertTranscription({
+                userId: ALICE,
+                recordingId: REC,
+                text: "speaker_0: New.\nspeaker_1: Run.",
+                detectedLanguage: "en",
+                source: "riffado",
+                provider: "openai",
+                model: "gpt-4o-transcribe-diarize",
+            });
+            const response = await put(ALICE, {
+                ...seen,
+                label: "speaker_0",
+                unknown: true,
+            });
+            expect(response.status).toBe(409);
+            expect(await speakerRows()).toEqual([]);
+        });
+
+        it("refuses a change made on a transcript that was erased and written again", async () => {
+            const seen = await shownVersion(ALICE);
+            await db()
+                .delete(transcriptions)
+                .where(eq(transcriptions.id, transcriptId));
+            // The new transcript starts at revision 0 again.
+            await db()
+                .insert(transcriptions)
+                .values({
+                    recordingId: REC,
+                    userId: ALICE,
+                    text: encryptText(DIALOG),
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                    source: "riffado",
+                });
+            expect(seen.revision).toBe(0);
+            const response = await put(ALICE, {
+                ...seen,
+                label: "speaker_0",
+                unknown: true,
+            });
+            expect(response.status).toBe(409);
+        });
+
+        it("refuses another account's transcript", async () => {
+            await db()
+                .insert(recordings)
+                .values({
+                    id: "rec-bob",
+                    userId: BOB,
+                    deviceSn: "SN-2",
+                    plaudFileId: "plaud-2",
+                    filename: encryptText("Bob's"),
+                    duration: 60_000,
+                    startTime: new Date("2026-09-01T10:00:00Z"),
+                    endTime: new Date("2026-09-01T10:01:00Z"),
+                    filesize: 11,
+                    fileMd5: "1".repeat(32),
+                    storageType: "local",
+                    storagePath: `${BOB}/rec.mp3`,
+                    plaudVersion: "1",
+                });
+            const [bobs] = await db()
+                .insert(transcriptions)
+                .values({
+                    recordingId: "rec-bob",
+                    userId: BOB,
+                    text: encryptText(DIALOG),
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                    source: "riffado",
+                })
+                .returning({ id: transcriptions.id });
+            const response = await put(ALICE, {
+                transcriptionId: bobs?.id,
+                revision: 0,
+                label: "speaker_0",
+                unknown: true,
+            });
+            expect(response.status).toBe(409);
+            await expect(
+                setTranscriptSpeaker({
+                    userId: ALICE,
+                    transcriptionId: bobs?.id ?? "",
+                    revision: 0,
+                    label: "speaker_0",
+                    personId: null,
+                    source: "user",
+                    status: "confirmed",
+                    markedUnknown: true,
+                }),
+            ).rejects.toMatchObject({ statusCode: 404 });
+            const rows = await db().select().from(transcriptSpeakers);
+            expect(rows).toEqual([]);
+        });
+    });
+
     describe("suggestions", () => {
         it("never offers a rejected person again for that label", async () => {
             const jana = await person(ALICE, "Jana");
@@ -345,6 +474,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             await rejectSuggestion({
                 userId: ALICE,
                 transcriptionId: transcriptId,
+                revision: 0,
                 label: "speaker_0",
                 personId: jana,
             });
@@ -359,6 +489,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
                 rejectSuggestion({
                     userId: ALICE,
                     transcriptionId: transcriptId,
+                    revision: 0,
                     label: "speaker_0",
                     personId,
                 });
@@ -377,6 +508,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             await rejectSuggestion({
                 userId: ALICE,
                 transcriptionId: transcriptId,
+                revision: 0,
                 label: "speaker_0",
                 personId: jana,
             });
@@ -416,12 +548,14 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
             await rejectSuggestion({
                 userId: ALICE,
                 transcriptionId: transcriptId,
+                revision: 0,
                 label: "speaker_0",
                 personId: jana,
             });
             await setTranscriptSpeaker({
                 userId: ALICE,
                 transcriptionId: transcriptId,
+                revision: 0,
                 label: "speaker_0",
                 personId: jana,
                 source: "user",
@@ -438,6 +572,7 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         await rejectSuggestion({
             userId: ALICE,
             transcriptionId: transcriptId,
+            revision: 0,
             label: "speaker_0",
             personId: duplicate,
         });

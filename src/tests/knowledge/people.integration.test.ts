@@ -153,6 +153,20 @@ function call(
     );
 }
 
+/** The transcript version a speakers view shows, as the panel reads it. */
+async function seenVersion(
+    user: string,
+    path: string,
+    init: { params?: Record<string, string> } = {},
+) {
+    const response = await call(getSpeakersRoute, user, path, init);
+    const body = (await response.json()) as {
+        transcriptionId?: string;
+        revision?: number;
+    };
+    return { transcriptionId: body.transcriptionId, revision: body.revision };
+}
+
 function json(body: unknown): RequestInit {
     return {
         headers: { "content-type": "application/json" },
@@ -575,6 +589,11 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                             method: "PUT",
                             params: { id: REC },
                             ...json({
+                                ...(await seenVersion(
+                                    BOB,
+                                    `/api/recordings/${REC}/speakers?view=org`,
+                                    { params: { id: REC } },
+                                )),
                                 label: "speaker_1",
                                 personId: bobsPrivate,
                             }),
@@ -590,7 +609,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 {
                     method: "PUT",
                     params: { id: REC },
-                    ...json({ label: "speaker_1", displayName: "Petr" }),
+                    ...json({
+                        ...(await seenVersion(
+                            BOB,
+                            `/api/recordings/${REC}/speakers?view=org`,
+                            { params: { id: REC } },
+                        )),
+                        label: "speaker_1",
+                        displayName: "Petr",
+                    }),
                 },
             );
             expect(response.status).toBe(200);
@@ -650,7 +677,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 {
                     method: "PUT",
                     params: { id: REC },
-                    ...json({ label: "speaker_0", displayName: "Jana" }),
+                    ...json({
+                        ...(await seenVersion(
+                            BOB,
+                            `/api/recordings/${REC}/speakers?view=org`,
+                            { params: { id: REC } },
+                        )),
+                        label: "speaker_0",
+                        displayName: "Jana",
+                    }),
                 },
             );
             const secret = await person(ALICE, "Dr. Private");
@@ -661,7 +696,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 {
                     method: "PUT",
                     params: { id: REC },
-                    ...json({ label: "speaker_1", personId: secret }),
+                    ...json({
+                        ...(await seenVersion(
+                            ALICE,
+                            `/api/recordings/${REC}/speakers`,
+                            { params: { id: REC } },
+                        )),
+                        label: "speaker_1",
+                        personId: secret,
+                    }),
                 },
             );
             expect(response.status).toBe(200);
@@ -705,7 +748,15 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
                 {
                     method: "PUT",
                     params: { id: REC },
-                    ...json({ label: "speaker_0", displayName: "Jana" }),
+                    ...json({
+                        ...(await seenVersion(
+                            BOB,
+                            `/api/recordings/${REC}/speakers?view=org&source=plaud`,
+                            { params: { id: REC } },
+                        )),
+                        label: "speaker_0",
+                        displayName: "Jana",
+                    }),
                 },
             );
             const copies = await db()

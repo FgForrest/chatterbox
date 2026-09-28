@@ -62,6 +62,14 @@ export function unknownSpeakerLabels(
     );
 }
 
+/** What the speakers route answers, reads and writes alike. */
+interface SpeakersResponse {
+    /** The transcript shown, and its version; every change names both. */
+    transcriptionId?: string;
+    revision?: number;
+    speakers?: SpeakerResponseRow[];
+}
+
 /** What naming a speaker sends: a person, a new name, or "unknown". */
 type SpeakerChoice =
     | { personId: string }
@@ -102,51 +110,79 @@ export function SpeakerTags({
     const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
         () => new Set(),
     );
+    const [version, setVersion] = useState<{
+        transcriptionId: string;
+        revision: number;
+    } | null>(null);
 
-    const applySpeakers = useCallback(
-        (rows: SpeakerResponseRow[] | undefined) => {
-            onAttributionsChange(confirmedAttributions(rows));
-            setUnknownLabels(unknownSpeakerLabels(rows));
+    const applyResponse = useCallback(
+        (body: SpeakersResponse) => {
+            onAttributionsChange(confirmedAttributions(body.speakers));
+            setUnknownLabels(unknownSpeakerLabels(body.speakers));
+            if (
+                typeof body.transcriptionId === "string" &&
+                typeof body.revision === "number"
+            ) {
+                setVersion({
+                    transcriptionId: body.transcriptionId,
+                    revision: body.revision,
+                });
+            }
         },
         [onAttributionsChange],
+    );
+
+    const load = useCallback(
+        async (isCancelled: () => boolean = () => false) => {
+            const body = await fetch(speakersUrl)
+                .then(async (response) =>
+                    response.ok
+                        ? ((await response.json()) as SpeakersResponse)
+                        : null,
+                )
+                .catch(() => null);
+            if (body && !isCancelled()) applyResponse(body);
+        },
+        [applyResponse, speakersUrl],
     );
 
     useEffect(() => {
         let cancelled = false;
         setOpenLabel(null);
-
-        void fetch(speakersUrl)
-            .then(async (response) => {
-                if (!response.ok) return null;
-                return (await response.json()) as {
-                    speakers?: SpeakerResponseRow[];
-                };
-            })
-            .then((body) => {
-                if (!cancelled && body) applySpeakers(body.speakers);
-            })
-            .catch(() => {});
-
+        setVersion(null);
+        void load(() => cancelled);
         return () => {
             cancelled = true;
         };
-    }, [applySpeakers, speakersUrl]);
+    }, [load]);
 
     /** Save an answer for one label; `null` takes the answer back. */
     async function attribute(
         label: string,
         choice: SpeakerChoice | null,
     ): Promise<boolean> {
+        // Not loaded yet: there is no version to name.
+        if (!version) return false;
         setSavingLabel(label);
         const response = await fetch(speakersUrl, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label, ...(choice ?? {}) }),
+            body: JSON.stringify({ label, ...(choice ?? {}), ...version }),
         }).catch(() => null);
         setSavingLabel(null);
 
         if (!response) {
             toast.error(i18n("Could not reach the server"));
+            return false;
+        }
+        if (response.status === 409) {
+            // Re-transcribed meanwhile: the label may mean someone else now.
+            toast.error(
+                i18n(
+                    "This transcript changed meanwhile. Its speakers were reloaded; try again.",
+                ),
+            );
+            await load();
             return false;
         }
         if (!response.ok) {
@@ -159,10 +195,7 @@ export function SpeakerTags({
             return false;
         }
 
-        const body = (await response.json()) as {
-            speakers?: SpeakerResponseRow[];
-        };
-        applySpeakers(body.speakers);
+        applyResponse((await response.json()) as SpeakersResponse);
         return true;
     }
 

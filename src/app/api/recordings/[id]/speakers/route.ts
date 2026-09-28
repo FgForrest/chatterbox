@@ -54,6 +54,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         // suggestions included.
         return NextResponse.json({
             transcriptionId: transcript.id,
+            revision: transcript.revision,
             fallback: reader.fallback,
             speakers: reader.fallback
                 ? speakers.filter((speaker) => speaker.status === "confirmed")
@@ -66,6 +67,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
     return NextResponse.json({
         transcriptionId: transcript.id,
+        revision: transcript.revision,
         speakers: await getTranscriptSpeakers(session.user.id, transcript.id),
     });
 });
@@ -77,11 +79,69 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
  * - `clear`: take the answer back, and leave the label open;
  * - `reject`: it is not the suggested person, and never suggest them again.
  */
-type SpeakerChange =
-    | { kind: "name"; label: string; personId?: string; displayName?: string }
-    | { kind: "unknown"; label: string }
-    | { kind: "clear"; label: string }
-    | { kind: "reject"; label: string; personId: string };
+type SpeakerChange = SeenVersion &
+    (
+        | {
+              kind: "name";
+              label: string;
+              personId?: string;
+              displayName?: string;
+          }
+        | { kind: "unknown"; label: string }
+        | { kind: "clear"; label: string }
+        | { kind: "reject"; label: string; personId: string }
+    );
+
+/**
+ * The transcript version the person was looking at. Every change names it,
+ * so a change made on text that has since been replaced is refused rather
+ * than landing on a label that now means someone else.
+ */
+interface SeenVersion {
+    transcriptionId: string;
+    revision: number;
+}
+
+function readSeenVersion(value: {
+    transcriptionId?: unknown;
+    revision?: unknown;
+}): SeenVersion {
+    const { transcriptionId, revision } = value;
+    if (transcriptionId === undefined || revision === undefined) {
+        throw new AppError(
+            ErrorCode.MISSING_REQUIRED_FIELD,
+            "transcriptionId and revision are required",
+            400,
+            {
+                field:
+                    transcriptionId === undefined
+                        ? "transcriptionId"
+                        : "revision",
+            },
+        );
+    }
+    if (typeof transcriptionId !== "string" || !transcriptionId) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "transcriptionId must be a transcript id",
+            400,
+            { field: "transcriptionId" },
+        );
+    }
+    if (
+        typeof revision !== "number" ||
+        !Number.isSafeInteger(revision) ||
+        revision < 0
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "revision must be a non-negative integer",
+            400,
+            { field: "revision" },
+        );
+    }
+    return { transcriptionId, revision };
+}
 
 function readChange(body: unknown): SpeakerChange {
     const value = (body ?? {}) as {
@@ -90,7 +150,10 @@ function readChange(body: unknown): SpeakerChange {
         displayName?: unknown;
         unknown?: unknown;
         reject?: unknown;
+        transcriptionId?: unknown;
+        revision?: unknown;
     };
+    const seen = readSeenVersion(value);
     const rawLabel = value.label;
     if (typeof rawLabel !== "string" || !rawLabel.trim()) {
         throw new AppError(
@@ -117,10 +180,10 @@ function readChange(body: unknown): SpeakerChange {
                 { field: "personId" },
             );
         }
-        return { kind: "reject", label, personId };
+        return { ...seen, kind: "reject", label, personId };
     }
-    if (value.unknown === true) return { kind: "unknown", label };
-    if (personId) return { kind: "name", label, personId };
+    if (value.unknown === true) return { ...seen, kind: "unknown", label };
+    if (personId) return { ...seen, kind: "name", label, personId };
     if (typeof value.displayName === "string" && value.displayName.trim()) {
         const displayName = value.displayName.trim();
         if (displayName.length > MAX_DISPLAY_NAME_LENGTH) {
@@ -131,9 +194,31 @@ function readChange(body: unknown): SpeakerChange {
                 { field: "displayName" },
             );
         }
-        return { kind: "name", label, displayName };
+        return { ...seen, kind: "name", label, displayName };
     }
-    return { kind: "clear", label };
+    return { ...seen, kind: "clear", label };
+}
+
+/**
+ * Refuse a change made on another transcript than the one shown now: the
+ * one it was made on was erased and a new one written, which a revision
+ * number alone cannot tell apart. The revision itself is compared again
+ * under the transcript's lock, where the write happens.
+ */
+function assertSeenVersion(
+    change: SeenVersion,
+    shown: { id: string; revision: number },
+): void {
+    if (
+        change.transcriptionId !== shown.id ||
+        change.revision !== shown.revision
+    ) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "The transcript changed; reload",
+            409,
+        );
+    }
 }
 
 function personNotFound(): AppError {
@@ -183,6 +268,14 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             const person = await getPerson(session.user.id, change.personId);
             if (!person || person.scope !== "org") throw personNotFound();
         }
+        // What the view showed: the Organization's own transcript, or the
+        // owner's until the Organization has one. The first change copies
+        // the owner's, keeping its revision, so the check below still holds.
+        const reader = await effectiveViewReader(id, access, "transcript");
+        assertSeenVersion(
+            change,
+            await requireTranscript(reader.userId, id, request),
+        );
         const transcript = await ensureOrgTranscript(
             id,
             requestedSource(request),
@@ -206,6 +299,8 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         });
         await orgContentChanged(id);
         return NextResponse.json({
+            transcriptionId: transcript.id,
+            revision: transcript.revision,
             speakers: await getTranscriptSpeakers(orgUserId, transcript.id, {
                 orgPeopleOnly: true,
             }),
@@ -213,6 +308,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     }
 
     const transcript = await requireTranscript(session.user.id, id, request);
+    assertSeenVersion(change, transcript);
 
     let personId: string | null = null;
     if (change.kind === "name" && change.personId) {
@@ -284,7 +380,11 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         session.user.id,
         transcript.id,
     );
-    return NextResponse.json({ speakers });
+    return NextResponse.json({
+        transcriptionId: transcript.id,
+        revision: transcript.revision,
+        speakers,
+    });
 });
 
 /** Write one change to the transcript's speaker rows. */
@@ -302,6 +402,7 @@ async function applyChange(
     const where = {
         userId: target.userId,
         transcriptionId: target.transcriptionId,
+        revision: change.revision,
         label: change.label,
     };
     switch (change.kind) {
@@ -352,9 +453,9 @@ async function requireTranscript(
     userId: string,
     recordingId: string,
     request: Request,
-): Promise<{ id: string }> {
+): Promise<{ id: string; revision: number }> {
     const [transcript] = await db
-        .select({ id: transcriptions.id })
+        .select({ id: transcriptions.id, revision: transcriptions.revision })
         .from(transcriptions)
         .where(
             and(
