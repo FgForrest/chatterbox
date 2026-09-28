@@ -13,6 +13,8 @@ import {
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
     knowledgeVocabularyProposalVotes,
+    learnReviewItems,
+    learnRuns,
     people,
     personNotes,
     recordingFolderAssignments,
@@ -249,6 +251,7 @@ export async function buildAndUploadExportArchive(input: {
         };
         entities?: { entities: number; aliases: number; notes: number };
         facts?: { facts: number; evidence: number };
+        learn?: { runs: number; items: number };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -606,6 +609,20 @@ export async function buildAndUploadExportArchive(input: {
         manifest.facts = {
             facts: facts.facts.length,
             evidence: facts.evidence.length,
+        };
+    }
+
+    // The user's Learn runs and what they proposed, the decisions taken
+    // so far included. Dismissals are keyed hashes of this instance, which
+    // no restore could match, so they stay behind.
+    const learn = await collectLearn(userId);
+    if (learn.runs.length > 0) {
+        archive.append(Buffer.from(JSON.stringify(learn, null, 2)), {
+            name: "knowledge/learn.json",
+        });
+        manifest.learn = {
+            runs: learn.runs.length,
+            items: learn.items.length,
         };
     }
 
@@ -1099,6 +1116,86 @@ async function collectEntities(
         people: personRows.map((row) => ({
             ...row,
             displayName: decryptText(row.displayName),
+        })),
+    };
+}
+
+interface ArchivedLearn {
+    runs: {
+        id: string;
+        recordingId: string;
+        transcriptionId: string;
+        view: string;
+        trigger: string;
+        status: string;
+        path: string | null;
+        provider: string | null;
+        model: string | null;
+        transcriptRevision: number;
+        stats: Record<string, number> | null;
+        createdAt: string;
+        finishedAt: string | null;
+    }[];
+    items: {
+        runId: string;
+        kind: string;
+        preTicked: boolean;
+        decision: string | null;
+        dependsOnLabel: string | null;
+        payload: unknown;
+    }[];
+}
+
+// The runs proposing knowledge in the user's own scope: on their private
+// recordings. The Organization's runs on a recording they shared are the
+// Organization's, and go when it is withdrawn.
+async function collectLearn(userId: string): Promise<ArchivedLearn> {
+    const runs = await db
+        .select({
+            id: learnRuns.id,
+            recordingId: learnRuns.recordingId,
+            transcriptionId: learnRuns.transcriptionId,
+            view: learnRuns.view,
+            trigger: learnRuns.trigger,
+            status: learnRuns.status,
+            path: learnRuns.path,
+            provider: learnRuns.provider,
+            model: learnRuns.model,
+            transcriptRevision: learnRuns.transcriptRevision,
+            stats: learnRuns.stats,
+            createdAt: learnRuns.createdAt,
+            finishedAt: learnRuns.finishedAt,
+        })
+        .from(learnRuns)
+        .where(eq(learnRuns.scopeUserId, userId));
+    const items =
+        runs.length > 0
+            ? await db
+                  .select({
+                      runId: learnReviewItems.runId,
+                      kind: learnReviewItems.kind,
+                      preTicked: learnReviewItems.preTicked,
+                      decision: learnReviewItems.decision,
+                      dependsOnLabel: learnReviewItems.dependsOnLabel,
+                      payload: learnReviewItems.payload,
+                  })
+                  .from(learnReviewItems)
+                  .where(
+                      inArray(
+                          learnReviewItems.runId,
+                          runs.map((run) => run.id),
+                      ),
+                  )
+            : [];
+    return {
+        runs: runs.map((run) => ({
+            ...run,
+            createdAt: run.createdAt.toISOString(),
+            finishedAt: run.finishedAt?.toISOString() ?? null,
+        })),
+        items: items.map((item) => ({
+            ...item,
+            payload: decryptJsonField(item.payload),
         })),
     };
 }

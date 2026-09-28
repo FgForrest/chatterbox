@@ -7,7 +7,9 @@
  * create scratch databases on.
  */
 
+import type { Readable } from "node:stream";
 import { eq } from "drizzle-orm";
+import unzipper from "unzipper";
 import {
     afterAll,
     beforeAll,
@@ -122,12 +124,14 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { ensureOrgAccount } from "@/lib/org/account";
+import type { StorageProvider } from "@/lib/storage/types";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -597,4 +601,79 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             expect(createCompletion).not.toHaveBeenCalled();
         });
     });
+
+    it("goes into its owner's archive with what it proposed, and the Organization's runs do not", async () => {
+        const mine = await run("private", "ready");
+        await db()
+            .insert(learnReviewItems)
+            .values({
+                runId: mine,
+                userId: OWNER,
+                kind: "correction",
+                fingerprintHmac: "f",
+                payload: encryptJsonField({ heard: "Tavesy" }),
+                preTicked: true,
+            });
+        await run("org", "ready");
+
+        const storage = new ArchiveStorage();
+        await buildAndUploadExportArchive({
+            userId: OWNER,
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/owner.zip",
+        });
+        const directory = await unzipper.Open.buffer(storage.uploaded);
+        const file = directory.files.find(
+            (entry) => entry.path === "knowledge/learn.json",
+        );
+        const learnJson = JSON.parse(
+            (await file?.buffer())?.toString("utf-8") ?? "{}",
+        );
+        expect(learnJson.runs.map((row: { id: string }) => row.id)).toEqual([
+            mine,
+        ]);
+        expect(learnJson.items).toEqual([
+            {
+                runId: mine,
+                kind: "correction",
+                preTicked: true,
+                decision: null,
+                dependsOnLabel: null,
+                payload: { heard: "Tavesy" },
+            },
+        ]);
+    });
 });
+
+/** Captures the archive; the recording's audio is not there. */
+class ArchiveStorage implements StorageProvider {
+    uploaded = Buffer.alloc(0);
+    async uploadFile(key: string): Promise<string> {
+        return key;
+    }
+    async downloadFile(): Promise<Buffer> {
+        throw new Error("not found");
+    }
+    async downloadStream(): Promise<Readable> {
+        throw new Error("not found");
+    }
+    async uploadStream(key: string, stream: Readable): Promise<string> {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        this.uploaded = Buffer.concat(chunks);
+        return key;
+    }
+    async exists(): Promise<boolean> {
+        return false;
+    }
+    async getSignedUrl(): Promise<string> {
+        return "";
+    }
+    async deleteFile(): Promise<void> {}
+    async testConnection(): Promise<boolean> {
+        return true;
+    }
+}
