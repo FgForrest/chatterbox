@@ -77,6 +77,7 @@ const transcription = {
     turns: null,
     topics: null,
     producedByUserId: null,
+    revision: 0,
     createdAt: now,
 };
 

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiEnhancements, recordings, transcriptions } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
@@ -178,6 +178,7 @@ export async function upsertTranscription(
                         model,
                         source,
                         producedByUserId,
+                        revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
                         and(

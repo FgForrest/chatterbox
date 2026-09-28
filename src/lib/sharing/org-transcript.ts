@@ -103,6 +103,8 @@ export async function ensureOrgTranscript(
                     model: original.model,
                     source: original.source,
                     producedByUserId: actorUserId,
+                    // The same text, so the same version of it.
+                    revision: original.revision,
                 })
                 .onConflictDoNothing()
                 .returning({ id: transcriptions.id });

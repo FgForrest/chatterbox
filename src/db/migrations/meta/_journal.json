@@ -414,6 +414,13 @@
       "when": 1790591405483,
       "tag": "0058_transcript_speaker_answers",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790591870054,
+      "tag": "0059_transcript_revision",
+      "breakpoints": true
     }
   ]
 }

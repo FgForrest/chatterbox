@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
@@ -181,6 +181,7 @@ export async function storeBrowserTranscription(
                         source: "riffado",
                         turns: null,
                         topics: null,
+                        revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
                         and(

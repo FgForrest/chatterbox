@@ -812,6 +812,12 @@ export const transcriptions = pgTable(
             () => users.id,
             { onDelete: "set null" },
         ),
+        // Goes up by one on every write of `text` or `turns`, so anything
+        // made from one version of the transcript (a speaker change, a Learn
+        // run) can tell it is looking at the version it was made on. Topics
+        // are not the transcript and leave it alone. The Organization copy
+        // keeps the original's number: it is the same text.
+        revision: integer("revision").notNull().default(0),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
