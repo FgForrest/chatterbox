@@ -116,6 +116,7 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 
+import { GET as getPending } from "@/app/api/learn/pending/route";
 import {
     GET as getLearnRoute,
     POST as postLearnRoute,
@@ -135,6 +136,10 @@ import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
+import {
+    pendingReviewCount,
+    recordingsNeedingReview,
+} from "@/lib/learn/pending";
 import { ensureOrgAccount } from "@/lib/org/account";
 import type { StorageProvider } from "@/lib/storage/types";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -789,6 +794,25 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 );
             });
         });
+    });
+
+    it("counts the reviews waiting for each: the owner's own, the Organization's for its account", async () => {
+        await run("private", "ready");
+        await run("private", "finished");
+        await run("org", "ready");
+        expect(await pendingReviewCount(OWNER, false)).toBe(1);
+        expect([...(await recordingsNeedingReview(OWNER, false))]).toEqual([
+            REC,
+        ]);
+        expect(await pendingReviewCount(BOB, false)).toBe(0);
+        expect(await pendingReviewCount(orgUserId, true)).toBe(1);
+        const answer = await getPending(
+            new Request("http://localhost/api/learn/pending", {
+                headers: { "x-test-user": OWNER },
+            }),
+            { params: Promise.resolve({}) },
+        );
+        await expect(answer.json()).resolves.toEqual({ count: 1 });
     });
 
     it("goes into its owner's archive with what it proposed, and the Organization's runs do not", async () => {
