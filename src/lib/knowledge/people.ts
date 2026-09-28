@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
@@ -701,6 +702,11 @@ export async function deletePerson(
                 .set({ personId: null, updatedAt: new Date() })
                 .where(eq(transcriptSpeakers.personId, personId));
         }
+        // Before the cascade would: facts naming them as the value of a
+        // chain leave it whole.
+        await deleteFactsNamingInTx(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
         await tx
             .delete(people)
             .where(

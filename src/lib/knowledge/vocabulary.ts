@@ -27,6 +27,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
@@ -622,6 +623,10 @@ export async function deleteOwnType(
             })) {
                 scopes.add(scope);
             }
+            // Before the cascade would, keeping chains whole.
+            await deleteFactsNamingInTx(tx, {
+                entityIds: doomed.map((row) => row.id),
+            });
         }
         if (count > 0) {
             await tx

@@ -17,6 +17,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import { deleteFactsInTx } from "@/lib/knowledge/fact-chains";
 import {
     QUOTE_SIMILARITY_THRESHOLD,
     quoteFromTurns,
@@ -61,8 +62,8 @@ export async function knowledgeOnRecordingInTx(
 /**
  * Delete the facts among `factIds` that came from recordings and have no
  * evidence left: decay. Facts a person entered by hand stay. A fact one of
- * them replaced is current again (`replacedByFactId` goes null): the last
- * value still said somewhere.
+ * them replaced is current again when it was the newest: the last value
+ * still said somewhere (`deleteFactsInTx` keeps the chain whole).
  *
  * Evidence under review keeps its fact stored, so the review can move or
  * drop it; only facts with some `supported` evidence are shown and used.
@@ -72,8 +73,9 @@ export async function pruneUnsupportedFactsInTx(
     factIds: readonly string[],
 ): Promise<void> {
     if (factIds.length === 0) return;
-    await tx
-        .delete(knowledgeFacts)
+    const unsupported = await tx
+        .select({ id: knowledgeFacts.id })
+        .from(knowledgeFacts)
         .where(
             and(
                 inArray(knowledgeFacts.id, [...factIds]),
@@ -88,6 +90,10 @@ export async function pruneUnsupportedFactsInTx(
                 ),
             ),
         );
+    await deleteFactsInTx(
+        tx,
+        unsupported.map((row) => row.id),
+    );
 }
 
 /**

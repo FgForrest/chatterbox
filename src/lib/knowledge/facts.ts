@@ -29,6 +29,7 @@ import {
     type KnowledgeTarget,
     resolveTargetInTx,
 } from "@/lib/knowledge/aliases";
+import { deleteFactsInTx } from "@/lib/knowledge/fact-chains";
 import { pruneUnsupportedFactsInTx } from "@/lib/knowledge/fact-evidence";
 import {
     nodeKey,
@@ -257,6 +258,7 @@ export async function confirmFactInTx(
             .select({ id: knowledgeFacts.id })
             .from(knowledgeFacts)
             .where(and(sameKey, isNull(knowledgeFacts.replacedByFactId)))
+            .orderBy(desc(knowledgeFacts.updatedAt), knowledgeFacts.id)
             .limit(1);
         const isCurrent = existing && current?.id === existing.id;
         if (!isCurrent) {
@@ -392,7 +394,25 @@ export async function confirmFactFromRecording(
                 quote: encryptText(quote),
                 confirmedByUserId: args.actorUserId,
             })
-            .onConflictDoNothing();
+            // The same words confirmed again: whatever review they were
+            // under, a person has just said they support the fact.
+            .onConflictDoUpdate({
+                target: [
+                    knowledgeFactEvidence.factId,
+                    knowledgeFactEvidence.transcriptionId,
+                    knowledgeFactEvidence.startMs,
+                    knowledgeFactEvidence.endMs,
+                ],
+                set: {
+                    status: "supported",
+                    transcriptRevision: revision,
+                    speakerLabel,
+                    dependsOnSpeaker: speakerLabel !== null,
+                    quote: encryptText(quote),
+                    confirmedByUserId: args.actorUserId,
+                    confirmedAt: new Date(),
+                },
+            });
         await bumpScopeInTx(tx, [args.actorUserId]);
         return factId;
     });
@@ -507,16 +527,18 @@ export async function deleteFact(
     factId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        const deleted = await tx
-            .delete(knowledgeFacts)
+        const [own] = await tx
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
             .where(
                 and(
                     eq(knowledgeFacts.id, factId),
                     eq(knowledgeFacts.userId, actorUserId),
                 ),
             )
-            .returning({ id: knowledgeFacts.id });
-        if (deleted.length === 0) throw factNotFound();
+            .for("update");
+        if (!own) throw factNotFound();
+        await deleteFactsInTx(tx, [factId]);
         await bumpScopeInTx(tx, [actorUserId]);
     });
 }

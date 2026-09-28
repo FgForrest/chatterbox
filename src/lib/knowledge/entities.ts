@@ -26,6 +26,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeople, orgOwnedCondition } from "@/lib/knowledge/org-people";
@@ -682,6 +683,11 @@ export async function deleteEntity(
         // Read before the delete: it takes everyone's aliases, notes, facts
         // and corrections naming these.
         const scopes = await scopesNamingInTx(tx, {
+            entityIds: doomed.map((row) => row.id),
+        });
+        // Before the cascade would: facts naming them as the value of a
+        // chain leave it whole.
+        await deleteFactsNamingInTx(tx, {
             entityIds: doomed.map((row) => row.id),
         });
         await tx.delete(knowledgeEntities).where(
