@@ -380,6 +380,56 @@ describeWithDatabase("facts and evidence (PostgreSQL)", () => {
             expect((await evidence())[0]?.status).toBe("wording_changed");
         });
 
+        it("on a transcript without times, keeps evidence that depends on its speaker through an unchanged re-import", async () => {
+            const untimed = TURNS.map((turn) => ({
+                ...turn,
+                startMs: 0,
+                endMs: 0,
+            }));
+            await write(MARCH, untimed);
+            // The rewrite could not carry the answer without times; say it
+            // again, on the untimed transcript.
+            await db()
+                .delete(transcriptSpeakers)
+                .where(
+                    eq(
+                        transcriptSpeakers.transcriptionId,
+                        await transcriptOf(MARCH),
+                    ),
+                );
+            await db()
+                .insert(transcriptSpeakers)
+                .values({
+                    userId: ALICE,
+                    transcriptionId: await transcriptOf(MARCH),
+                    label: "speaker_1",
+                    personId: jan,
+                    source: "user",
+                    status: "confirmed",
+                    confirmedByUserId: ALICE,
+                });
+            await confirmFrom(MARCH, { startMs: 0, endMs: 0 });
+            await write(MARCH, untimed);
+            expect(await evidence()).toEqual([
+                expect.objectContaining({
+                    status: "supported",
+                    speakerLabel: "speaker_1",
+                }),
+            ]);
+            // The name stays confirmed, not a suggestion again.
+            expect(
+                await db()
+                    .select({
+                        label: transcriptSpeakers.label,
+                        personId: transcriptSpeakers.personId,
+                        status: transcriptSpeakers.status,
+                    })
+                    .from(transcriptSpeakers),
+            ).toEqual([
+                { label: "speaker_1", personId: jan, status: "confirmed" },
+            ]);
+        });
+
         it("goes to review when its speaker is renamed, and only then", async () => {
             await confirmFrom(MARCH);
             const rename = async (personId: string) =>

@@ -148,6 +148,32 @@ describe("mapLabels", () => {
         );
     });
 
+    it("carries every label of untimed turns spoken in the same order, as an unchanged Plaud re-import", () => {
+        const untimed = [
+            t("speaker_0", 0, 0),
+            t("speaker_1", 0, 0),
+            t("speaker_0", 0, 0),
+        ];
+        const m = mapLabels(untimed, [
+            ...untimed.slice(0, 2),
+            { ...(untimed[2] as TranscriptTurn), text: "reworded" },
+        ]);
+        expect(m.carried).toEqual(
+            new Map([
+                ["speaker_0", "speaker_0"],
+                ["speaker_1", "speaker_1"],
+            ]),
+        );
+        expect(m.uncertain.size).toBe(0);
+        // Another order is another diarization: suggestions only.
+        const reordered = mapLabels(untimed, [
+            t("speaker_1", 0, 0),
+            t("speaker_0", 0, 0),
+            t("speaker_1", 0, 0),
+        ]);
+        expect(reordered.carried.size).toBe(0);
+    });
+
     it("still pairs untimed labels when other labels are timed", () => {
         const m = mapLabels(
             [t("A", 0, 10_000), t("B", 20_000, 20_000)],

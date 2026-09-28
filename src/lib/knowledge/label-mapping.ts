@@ -38,6 +38,26 @@ interface Pair {
     shared: number;
 }
 
+/** Both untimed, and every turn spoken by the same label in the same order. */
+function sameUntimedSpeakers(
+    previous: readonly TranscriptTurn[],
+    next: readonly TranscriptTurn[],
+): boolean {
+    const untimed = (turns: readonly TranscriptTurn[]) =>
+        turns.every((turn) => turn.endMs <= turn.startMs);
+    return (
+        previous.length > 0 &&
+        previous.length === next.length &&
+        untimed(previous) &&
+        untimed(next) &&
+        previous.every(
+            (turn, index) =>
+                speakerKey(turn.speaker) ===
+                speakerKey(next[index]?.speaker ?? ""),
+        )
+    );
+}
+
 /**
  * Match two diarizations of the same audio.
  *
@@ -50,7 +70,9 @@ interface Pair {
  * Anything weaker becomes a suggestion, assigned one-to-one by shared time.
  * Labels without usable timings pair up by speaking order, as suggestions
  * only, and only when both sides have as many of them. Labels are compared
- * as keys.
+ * as keys. Two untimed transcripts whose turns are spoken by the same
+ * labels in the same order (an unchanged Plaud re-import, or one with
+ * words edited) are the same diarization: every label carries.
  */
 export function mapLabels(
     previous: readonly TranscriptTurn[] | null,
@@ -58,6 +80,15 @@ export function mapLabels(
     options: LabelMappingOptions = {},
 ): LabelMapping {
     const mapping: LabelMapping = { carried: new Map(), uncertain: new Map() };
+    if (previous && next && sameUntimedSpeakers(previous, next)) {
+        for (const turn of previous) {
+            const label = speakerKey(turn.speaker);
+            if (!isPlaceholderSpeakerLabel(label)) {
+                mapping.carried.set(label, label);
+            }
+        }
+        return mapping;
+    }
     const previousSpeech = previous
         ? speechByLabel(previous)
         : new Map<string, Interval[]>();
