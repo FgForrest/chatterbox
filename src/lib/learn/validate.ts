@@ -28,7 +28,7 @@ import {
     anchorMatches,
     anchorsOverlap,
 } from "@/lib/knowledge/correction-anchors";
-import { nodeKey } from "@/lib/knowledge/fact-rules";
+import { nodeKey, relationFits } from "@/lib/knowledge/fact-rules";
 import type {
     LearnCorrection,
     LearnFact,
@@ -43,7 +43,7 @@ export const MAX_NEW_FACTS = 10;
 
 export interface VisibleRelation {
     subjectTypes: readonly string[];
-    /** Empty: any type; a literal relation has none. */
+    /** The types an entity object may have; a literal relation has none. */
     objectTypes: readonly string[];
     objectKind: "entity" | "literal";
 }
@@ -547,17 +547,16 @@ export function validateLearnOutput(
     return { superseded: false, items, dropped };
 }
 
+/** The same rule a person's confirmation applies (`relationFits`). */
 function fits(
     relation: VisibleRelation,
     subjectType: string,
     objectType: string | null,
 ): boolean {
-    if (!relation.subjectTypes.includes(subjectType)) return false;
-    if (relation.objectKind === "literal") return objectType === null;
-    if (objectType === null) return false;
-    return (
-        relation.objectTypes.length === 0 ||
-        relation.objectTypes.includes(objectType)
+    return relationFits(
+        relation,
+        subjectType,
+        objectType === null ? { literal: true } : { type: objectType },
     );
 }
 
