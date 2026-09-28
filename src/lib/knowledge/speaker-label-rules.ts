@@ -11,6 +11,7 @@ import {
     mayBeDiarized,
     parseSpeakerTurns,
 } from "@/lib/transcription/diarization";
+import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /** Longest stored label; matches `transcript_speakers.label`. */
 export const MAX_SPEAKER_LABEL_LENGTH = 64;
@@ -77,4 +78,23 @@ export function speakerLabelsForTranscript({
     if (!mayBeDiarized({ source, model })) return [];
     const parsed = parseSpeakerTurns(text);
     return parsed ? labelsFromTurns(parsed) : [];
+}
+
+/** One version of a transcript, as far as its speakers go. */
+export interface SpeakerVersion {
+    /** Decrypted timed turns, or null for a transcript without timings. */
+    turns: readonly TranscriptTurn[] | null;
+    /** Its speaker labels as keys, first speaker first. */
+    labels: readonly string[];
+}
+
+/** The speaker side of a decrypted transcript version. */
+export function speakerVersionOf(input: {
+    source?: string | null;
+    model?: string | null;
+    text: string;
+    turns?: readonly TranscriptTurn[] | null;
+}): SpeakerVersion {
+    const turns = input.turns?.length ? input.turns : null;
+    return { turns, labels: speakerLabelsForTranscript({ ...input, turns }) };
 }

@@ -7,9 +7,11 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import { mapLabels, remapAttributionRows } from "@/lib/knowledge/label-mapping";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
     labelsFromTurns,
+    type SpeakerVersion,
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
 import { speakerAnchorId } from "@/lib/knowledge/speaker-references";
@@ -466,6 +468,115 @@ export async function insertSuggestionsInTx(
         .onConflictDoNothing()
         .returning({ id: transcriptSpeakers.id });
     return inserted.length;
+}
+
+/**
+ * Move a transcript's speaker rows and rejections onto its new version.
+ *
+ * Called by every writer of transcript text or turns, in the transaction
+ * that writes them, right after the write: the rows described labels of
+ * the old text, and the new text may number the same voices differently.
+ * Labels are matched by speech overlap (`mapLabels`). A clean match keeps
+ * its row as it was; an uncertain one keeps only a name, as a suggestion.
+ * A rejection moves only with a clean match: on an uncertain one it would
+ * be about a voice nobody is sure of. Everything else is dropped.
+ *
+ * Rarely this can deadlock with a share that is promoting the same people,
+ * since both touch rows naming them. Postgres aborts one side: a job
+ * retries on its own, and sharing retries once.
+ */
+export async function remapTranscriptAttributionsInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        previous,
+        next,
+    }: {
+        userId: string;
+        transcriptionId: string;
+        previous: SpeakerVersion;
+        next: SpeakerVersion;
+    },
+): Promise<void> {
+    const mapping = mapLabels(previous.turns, next.turns, {
+        previousLabels: previous.labels,
+        nextLabels: next.labels,
+    });
+
+    const rows = await tx
+        .select({
+            label: transcriptSpeakers.label,
+            personId: transcriptSpeakers.personId,
+            status: transcriptSpeakers.status,
+            source: transcriptSpeakers.source,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+            confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+            confidence: transcriptSpeakers.confidence,
+            evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+        })
+        .from(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+            ),
+        );
+    const rejections = await tx
+        .select({
+            userId: transcriptSpeakerRejections.userId,
+            label: transcriptSpeakerRejections.label,
+            personId: transcriptSpeakerRejections.personId,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(
+            eq(transcriptSpeakerRejections.transcriptionId, transcriptionId),
+        );
+
+    const movedRejections = rejections.flatMap((rejection) => {
+        const label = mapping.carried.get(rejection.label);
+        return label ? [{ ...rejection, label, transcriptionId }] : [];
+    });
+    const rejected = new Set(
+        movedRejections.map((row) => pairKey(row.label, row.personId)),
+    );
+    const remapped = remapAttributionRows(rows, mapping).filter(
+        (row) =>
+            row.status !== "suggested" ||
+            !row.personId ||
+            !rejected.has(pairKey(row.label, row.personId)),
+    );
+
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+            ),
+        );
+    if (remapped.length > 0) {
+        await tx.insert(transcriptSpeakers).values(
+            remapped.map((row) => ({
+                ...row,
+                userId,
+                transcriptionId,
+            })),
+        );
+    }
+    if (rejections.length > 0) {
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(
+                eq(
+                    transcriptSpeakerRejections.transcriptionId,
+                    transcriptionId,
+                ),
+            );
+    }
+    if (movedRejections.length > 0) {
+        await tx.insert(transcriptSpeakerRejections).values(movedRejections);
+    }
 }
 
 function pairKey(label: string, personId: string): string {

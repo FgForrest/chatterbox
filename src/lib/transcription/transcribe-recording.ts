@@ -7,7 +7,6 @@ import {
     plaudConnections,
     recordings,
     transcriptions,
-    transcriptSpeakers,
     userSettings,
 } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
@@ -28,7 +27,12 @@ import {
     isMynahConfigured,
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
-import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
+import {
+    copyMatchingSpeakerAttributions,
+    remapTranscriptAttributionsInTx,
+} from "@/lib/knowledge/attribution";
+import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
+import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     captureServerEvent,
@@ -37,10 +41,6 @@ import {
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
-import {
-    applyCarriedSpeakerNames,
-    captureSpeakerNames,
-} from "@/lib/sharing/org-transcript";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
@@ -48,10 +48,6 @@ import { queueAutoTopics } from "@/lib/topics/topics-job";
 import { buildAudioFile } from "@/lib/transcription/audio-file";
 import { chatTranscribe } from "@/lib/transcription/chat-transcribe";
 import { maybeCompressForWhisper } from "@/lib/transcription/compress-audio";
-import {
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
 import { elevenLabsTranscribe } from "@/lib/transcription/elevenlabs-transcribe";
 import {
     buildTranscriptionParams,
@@ -157,7 +153,13 @@ export async function storeBrowserTranscription(
             }
 
             const [existing] = await tx
-                .select({ id: transcriptions.id })
+                .select({
+                    id: transcriptions.id,
+                    text: transcriptions.text,
+                    turns: transcriptions.turns,
+                    source: transcriptions.source,
+                    model: transcriptions.model,
+                })
                 .from(transcriptions)
                 .where(
                     and(
@@ -189,6 +191,18 @@ export async function storeBrowserTranscription(
                             eq(transcriptions.userId, userId),
                         ),
                     );
+                // The speakers were named on the text just replaced.
+                await remapTranscriptAttributionsInTx(tx, {
+                    userId,
+                    transcriptionId: existing.id,
+                    previous: storedSpeakerVersion(existing),
+                    next: speakerVersionOf({
+                        source: "riffado",
+                        model,
+                        text,
+                        turns: null,
+                    }),
+                });
             } else {
                 await tx.insert(transcriptions).values({
                     recordingId,
@@ -286,11 +300,6 @@ export interface TranscribeResult {
     text?: string;
     /** Present on success when the provider returned a language. */
     detectedLanguage?: string | null;
-}
-
-function recognizedSpeakerCount(text: string): number {
-    const parsed = parseSpeakerTurns(text);
-    return parsed ? speakerOrder(parsed).length : 0;
 }
 
 // Per-recording in-flight dedup within one process. Force and non-force
@@ -671,12 +680,6 @@ async function transcribeRecordingInner(
             persistModel = result.model;
         }
 
-        // The names the Organization view showed, read before this run
-        // replaces the transcript they were confirmed against.
-        const carriedNames = orgView
-            ? await captureSpeakerNames(recordingId, ctx)
-            : null;
-
         // Persist the user's own ('riffado') transcript via the shared,
         // tombstone-aware, source-scoped upsert. The persisted model is the
         // *actual* model used (may differ from the provider default when the
@@ -703,50 +706,13 @@ async function transcribeRecordingInner(
             };
         }
 
-        const previousSpeakerCount = existingTranscription?.text
-            ? recognizedSpeakerCount(decryptText(existingTranscription.text))
-            : 0;
-        const nextSpeakerCount = recognizedSpeakerCount(transcriptionText);
-        const canPreserveSpeakerAttributions =
-            previousSpeakerCount > 0 &&
-            previousSpeakerCount === nextSpeakerCount;
-        if (orgView) {
-            const [orgTranscript] = await db
-                .select({ id: transcriptions.id })
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, recordingId),
-                        eq(transcriptions.userId, userId),
-                        eq(transcriptions.source, "riffado"),
-                    ),
-                )
-                .limit(1);
-            if (orgTranscript) {
-                await applyCarriedSpeakerNames(
-                    carriedNames,
-                    orgTranscript.id,
-                    userId,
-                );
-            }
-        } else if (
-            existingTranscription?.text &&
-            opts.force &&
-            !canPreserveSpeakerAttributions
-        ) {
-            await db
-                .delete(transcriptSpeakers)
-                .where(
-                    and(
-                        eq(transcriptSpeakers.userId, userId),
-                        eq(
-                            transcriptSpeakers.transcriptionId,
-                            existingTranscription.id,
-                        ),
-                    ),
-                );
-        }
-
+        // The upsert moved the speaker names onto the new labels itself.
+        const nextSpeakerCount = speakerVersionOf({
+            source: "riffado",
+            model: persistModel,
+            text: transcriptionText,
+            turns,
+        }).labels.length;
         if (
             !orgView &&
             !existingTranscription &&

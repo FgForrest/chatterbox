@@ -2,6 +2,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aiEnhancements, recordings, transcriptions } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
+import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
+import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -148,7 +151,13 @@ export async function upsertTranscription(
             }
 
             const [current] = await tx
-                .select({ id: transcriptions.id })
+                .select({
+                    id: transcriptions.id,
+                    text: transcriptions.text,
+                    turns: transcriptions.turns,
+                    source: transcriptions.source,
+                    model: transcriptions.model,
+                })
                 .from(transcriptions)
                 .where(
                     and(
@@ -186,6 +195,13 @@ export async function upsertTranscription(
                             eq(transcriptions.userId, userId),
                         ),
                     );
+                // The speakers were named on the text just replaced.
+                await remapTranscriptAttributionsInTx(tx, {
+                    userId,
+                    transcriptionId: current.id,
+                    previous: storedSpeakerVersion(current),
+                    next: speakerVersionOf({ source, model, text, turns }),
+                });
             } else {
                 await tx.insert(transcriptions).values({
                     recordingId,

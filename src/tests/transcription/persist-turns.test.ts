@@ -16,7 +16,17 @@ vi.mock("@/lib/encryption/fields", () => ({
 
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
 
+// Moving the speaker rows is tested against a real database
+// (`attribution-remap.integration.test.ts`); here only that it happens.
+vi.mock("@/lib/knowledge/attribution", () => ({
+    remapTranscriptAttributionsInTx: vi.fn(),
+}));
+vi.mock("@/lib/knowledge/speaker-labels", () => ({
+    storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
+}));
+
 import { db } from "@/db";
+import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -122,6 +132,24 @@ describe("upsertTranscription and turns", () => {
         await upsert();
 
         expect(harness.updated[0]).toHaveProperty("turns", null);
+    });
+
+    it("moves the speaker rows onto the new text, and only on an overwrite", async () => {
+        stubTransaction(null);
+        await upsert(TURNS);
+        expect(remapTranscriptAttributionsInTx).not.toHaveBeenCalled();
+
+        stubTransaction({ id: "tr-1" });
+        await upsert(TURNS);
+        expect(remapTranscriptAttributionsInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                userId: "user-1",
+                transcriptionId: "tr-1",
+                previous: { turns: null, labels: ["speaker_0"] },
+                next: { turns: TURNS, labels: ["speaker_0"] },
+            },
+        );
     });
 
     it("treats an empty turn list as no turns at all", async () => {

@@ -12,7 +12,7 @@
  * create scratch databases on.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -123,10 +123,7 @@ import {
     mergePeople,
 } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
-import {
-    applyCarriedSpeakerNames,
-    captureSpeakerNames,
-} from "@/lib/sharing/org-transcript";
+import { upsertTranscription } from "@/lib/transcription/persist";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -721,46 +718,56 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             ]);
         });
 
-        it("carries names over to a re-transcription as suggestions", async () => {
-            const [orgTranscript] = await db()
-                .insert(transcriptions)
-                .values({
-                    recordingId: REC,
+        it("carries names through an Organization re-transcription by speech overlap", async () => {
+            const turns = (first: string, second: string) => [
+                { speaker: first, startMs: 0, endMs: 10_000, text: "Hello." },
+                {
+                    speaker: second,
+                    startMs: 10_000,
+                    endMs: 20_000,
+                    text: "Hi there.",
+                },
+            ];
+            const orgRun = (speakers: [string, string]) =>
+                upsertTranscription({
                     userId: orgUserId,
-                    text: encryptText(DIALOG),
+                    recordingId: REC,
+                    text: DIALOG,
+                    detectedLanguage: "en",
+                    source: "riffado",
                     provider: "openai",
                     model: "gpt-4o-transcribe-diarize",
-                    source: "riffado",
-                })
-                .returning({ id: transcriptions.id });
+                    turns: turns(...speakers),
+                    recordingOwnerId: ALICE,
+                    producedByUserId: orgUserId,
+                });
+            expect((await orgRun(["speaker_0", "speaker_1"])).committed).toBe(
+                true,
+            );
+            const [orgTranscript] = await db()
+                .select({ id: transcriptions.id })
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, orgUserId));
             const jana = (await listPeople(orgUserId))[0]?.id ?? "";
             await name(orgTranscript?.id ?? "", orgUserId, "speaker_0", jana);
 
-            const carried = await captureSpeakerNames(REC, {
-                ownerUserId: ALICE,
-                contentUserId: orgUserId,
-            });
-            await applyCarriedSpeakerNames(
-                carried,
-                orgTranscript?.id ?? "",
-                orgUserId,
-            );
+            // The provider numbers the same two voices the other way round.
+            await orgRun(["speaker_1", "speaker_0"]);
+
             const rows = await db()
                 .select()
                 .from(transcriptSpeakers)
                 .where(
-                    and(
-                        eq(
-                            transcriptSpeakers.transcriptionId,
-                            orgTranscript?.id ?? "",
-                        ),
-                        eq(transcriptSpeakers.personId, jana),
+                    eq(
+                        transcriptSpeakers.transcriptionId,
+                        orgTranscript?.id ?? "",
                     ),
                 );
             expect(rows).toEqual([
                 expect.objectContaining({
-                    label: "speaker_0",
-                    status: "suggested",
+                    label: "speaker_1",
+                    personId: jana,
+                    status: "confirmed",
                 }),
             ]);
         });

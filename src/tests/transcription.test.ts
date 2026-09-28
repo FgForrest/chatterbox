@@ -69,11 +69,22 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Moving the speaker rows is tested against a real database
+// (`attribution-remap.integration.test.ts`); here only that it happens.
+vi.mock("@/lib/knowledge/attribution", () => ({
+    copyMatchingSpeakerAttributions: vi.fn().mockResolvedValue(false),
+    remapTranscriptAttributionsInTx: vi.fn(),
+}));
+vi.mock("@/lib/knowledge/speaker-labels", () => ({
+    storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
+}));
+
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import { recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import {
     storeBrowserTranscription,
     transcribeRecording,
@@ -633,6 +644,17 @@ describe("Transcription", () => {
             expect(updated.provider).toBe("browser");
             expect(updated.model).toBe("whisper-small");
             expect(updated.detectedLanguage).toBeNull();
+            // A browser transcript has no speakers, so the old ones'
+            // names have nowhere to go.
+            expect(remapTranscriptAttributionsInTx).toHaveBeenCalledWith(
+                expect.anything(),
+                {
+                    userId: mockUserId,
+                    transcriptionId: "trans-existing",
+                    previous: { turns: null, labels: ["speaker_0"] },
+                    next: { turns: null, labels: [] },
+                },
+            );
             expect(emitEvent).toHaveBeenCalledWith(
                 "transcription.completed",
                 mockUserId,
