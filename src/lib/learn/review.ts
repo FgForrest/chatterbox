@@ -43,6 +43,7 @@ import {
     proposePhraseInTx,
     vocabularyVisibleTo,
 } from "@/lib/knowledge/vocabulary";
+import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { RecordingViewContext } from "@/lib/sharing/access";
@@ -127,6 +128,8 @@ function idsIn(value: unknown, into: Set<string>): void {
 export async function loadReview(
     access: RecordingViewContext,
 ): Promise<ReviewView> {
+    // A run whose job died reads as failed, not as learning forever.
+    await settleDeadLearnRuns(access.recordingId);
     const run = await latestRun(access);
     if (!run) {
         return { run: null, items: [], names: {}, types: {}, relations: {} };

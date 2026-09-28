@@ -14,6 +14,10 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// Which recordings a Learn review waits on is not what is tested here.
+vi.mock("@/lib/learn/pending", () => ({
+    recordingsNeedingReview: vi.fn(async () => new Set<string>()),
+}));
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
     isOrgScopeEnabled: () => false,

@@ -249,6 +249,30 @@ export async function eraseLocalArtifact(
                 ["transcription", "summary", "topics", "learn.run"],
                 now,
             );
+            // A Learn run on the Organization view reads the same
+            // transcript, whoever started it.
+            await tx
+                .update(asyncJobs)
+                .set({
+                    status: "failed",
+                    completedAt: now,
+                    updatedAt: now,
+                    heartbeatAt: null,
+                    claimToken: null,
+                    errorCode: ErrorCode.RECORDING_DATA_REAPED,
+                    lastError:
+                        "Cancelled because the recording artifact was erased",
+                })
+                .where(
+                    and(
+                        eq(
+                            asyncJobs.subjectId,
+                            recordingJobSubject(recordingId, "org"),
+                        ),
+                        eq(asyncJobs.kind, "learn.run"),
+                        inArray(asyncJobs.status, ["pending", "processing"]),
+                    ),
+                );
             // Facts said only here go with the transcript.
             const knowledge = await knowledgeOnRecordingInTx(tx, recordingId);
             await tx

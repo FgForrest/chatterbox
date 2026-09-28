@@ -428,9 +428,6 @@ export async function withdrawKnowledgeInTx(
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
 ): Promise<Set<string>> {
     const scopes = new Set([ownerUserId, orgUserId]);
-    const transcriptIds = await transcriptIdsOf(tx, recordingId);
-    if (transcriptIds.length === 0) return scopes;
-
     // The Organization's Learn runs there, and what they proposed and
     // were told no to: its view of the recording is gone.
     await tx
@@ -449,6 +446,9 @@ export async function withdrawKnowledgeInTx(
                 eq(learnDismissals.userId, orgUserId),
             ),
         );
+
+    const transcriptIds = await transcriptIdsOf(tx, recordingId);
+    if (transcriptIds.length === 0) return scopes;
 
     const removed = await tx
         .delete(knowledgeFactEvidence)

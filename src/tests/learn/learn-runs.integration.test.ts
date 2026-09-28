@@ -282,6 +282,28 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         expect(await statusOf(finished)).toBe("finished");
     });
 
+    it("takes the Organization's dismissals with the recording even when no transcript is left", async () => {
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: REC,
+            folderId: root?.id ?? "",
+        });
+        await db().insert(learnDismissals).values({
+            userId: orgUserId,
+            recordingId: REC,
+            fingerprintHmac: "f",
+        });
+        await db().delete(transcriptions);
+
+        await unshareRecording(OWNER, REC);
+
+        expect(await db().select().from(learnDismissals)).toEqual([]);
+    });
+
     it("takes the Organization's runs, and what they proposed, with the recording when it leaves", async () => {
         const [root] = await db()
             .select({ id: recordingFolders.id })
@@ -416,6 +438,72 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             .where(eq(transcriptions.id, transcriptId));
         expect((await learn(OWNER)).status).toBe(400);
         expect((await learn(OWNER, { source: "plaud" })).status).toBe(400);
+    });
+
+    it("treats a run whose job is gone as dead: it blocks neither a new run nor sharing", async () => {
+        await provider(OWNER);
+        const first = (await (await learn(OWNER)).json()) as {
+            runId: string;
+        };
+        // What a buried job leaves: the job failed, the run still running.
+        await db()
+            .update(learnRuns)
+            .set({ status: "running" })
+            .where(eq(learnRuns.id, first.runId));
+        await db()
+            .update(asyncJobs)
+            .set({ status: "failed", completedAt: new Date() });
+
+        const again = (await (await learn(OWNER)).json()) as {
+            runId: string;
+            created: boolean;
+        };
+        expect(again.created).toBe(true);
+        expect(again.runId).not.toBe(first.runId);
+        const [dead] = await db()
+            .select({ status: learnRuns.status })
+            .from(learnRuns)
+            .where(eq(learnRuns.id, first.runId));
+        expect(dead?.status).toBe("failed");
+
+        // Its job gone too, the new one no longer holds the share either.
+        await db()
+            .update(asyncJobs)
+            .set({ status: "failed", completedAt: new Date() });
+        await expect(share()).resolves.toBeUndefined();
+    });
+
+    it("starts afresh after a rewrite superseded a run whose job still held the slot", async () => {
+        await provider(OWNER);
+        const first = (await (await learn(OWNER)).json()) as {
+            runId: string;
+        };
+        await upsertTranscription({
+            userId: OWNER,
+            recordingId: REC,
+            text: "Dobrý den všem.",
+            detectedLanguage: "cs",
+            source: "riffado",
+            provider: "openai",
+            model: "gpt-4o-transcribe-diarize",
+            turns: [
+                { ...(TURNS[0] as TranscriptTurn), text: "Dobrý den všem." },
+            ],
+        });
+        const again = (await (await learn(OWNER)).json()) as {
+            runId: string;
+            created: boolean;
+        };
+        expect(again).toMatchObject({ created: true });
+        expect(again.runId).not.toBe(first.runId);
+        const jobs = await db()
+            .select({ status: asyncJobs.status, payload: asyncJobs.payload })
+            .from(asyncJobs);
+        expect(
+            jobs
+                .filter((job) => job.status === "pending")
+                .map((job) => job.payload),
+        ).toEqual([{ runId: again.runId }]);
     });
 
     it("keeps an owner's unfinished run from sharing, and lets only the organization account run it while shared", async () => {
