@@ -1,3 +1,7 @@
+import type {
+    AttributionSource,
+    AttributionStatus,
+} from "@/lib/knowledge/attribution";
 import {
     isPlaceholderSpeakerLabel,
     labelsFromTurns,
@@ -96,6 +100,55 @@ export function mapLabels(
         }
     }
     return mapping;
+}
+
+/** The parts of a speaker row that move with its label. */
+export interface RemappableAttribution {
+    label: string;
+    personId: string | null;
+    status: AttributionStatus;
+    source: AttributionSource;
+    markedUnknown: boolean;
+    confirmedByUserId: string | null;
+    confidence: number | null;
+    evidenceStartMs: number | null;
+}
+
+/**
+ * Carry a replaced transcript's speaker rows onto the new labels.
+ *
+ * A clean pair keeps its row as it was: a name, an "unknown", or a
+ * suggestion. An uncertain pair keeps only a name, as a suggestion nobody
+ * confirmed. The evidence time pointed into the old text, so it never
+ * survives. Rows with nothing to place are dropped. The mapping is
+ * one-to-one, so two rows never land on one label.
+ */
+export function remapAttributionRows(
+    rows: readonly RemappableAttribution[],
+    mapping: LabelMapping,
+): RemappableAttribution[] {
+    const result: RemappableAttribution[] = [];
+    for (const row of rows) {
+        if (row.status === "rejected") continue;
+        const carried = mapping.carried.get(row.label);
+        if (carried) {
+            result.push({ ...row, label: carried, evidenceStartMs: null });
+            continue;
+        }
+        const uncertain = mapping.uncertain.get(row.label);
+        if (uncertain && row.personId) {
+            result.push({
+                ...row,
+                label: uncertain,
+                status: "suggested",
+                source: "heuristic",
+                markedUnknown: false,
+                confirmedByUserId: null,
+                evidenceStartMs: null,
+            });
+        }
+    }
+    return result;
 }
 
 function speechByLabel(
