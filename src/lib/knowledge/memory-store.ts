@@ -21,6 +21,7 @@
 
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
 import { type NameCandidate, NameIndex } from "@/lib/knowledge/name-match";
+import type { VectorMatrix } from "@/lib/knowledge/vector-search";
 
 export interface KnownItem {
     id: string;
@@ -57,6 +58,8 @@ export interface LoadedScope {
     notes: Map<string, string>;
     /** Its current facts, shown and used. */
     facts: KnownFact[];
+    /** Its vectors of the generation searched; null without any. */
+    vectors?: VectorMatrix | null;
 }
 
 export interface ScopeKnowledge extends LoadedScope {
@@ -130,6 +133,7 @@ export function estimateBytes(loaded: LoadedScope): number {
     for (const [id, notes] of loaded.notes) {
         bytes += ITEM_OVERHEAD + textBytes(id) + textBytes(notes);
     }
+    bytes += loaded.vectors?.data.byteLength ?? 0;
     for (const fact of loaded.facts) {
         bytes +=
             ITEM_OVERHEAD * 2 +

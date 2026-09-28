@@ -1585,6 +1585,64 @@ export const knowledgeScopeGenerations = pgTable(
     },
 );
 
+// Meaning, as numbers: one vector per entity (its name, type and
+// description) or current fact ("subject relation object"), in its scope,
+// for one vector generation (the model and how the text was rendered).
+// Encrypted, and gone with what it was made from.
+export const knowledgeVectors = pgTable(
+    "knowledge_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        entityId: text("entity_id").references(() => knowledgeEntities.id, {
+            onDelete: "cascade",
+        }),
+        factId: text("fact_id").references(() => knowledgeFacts.id, {
+            onDelete: "cascade",
+        }),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        dim: integer("dim").notNull(),
+        // `encodeVector`, then encrypted.
+        vector: text("vector").notNull(),
+        // `domainLookupHash("vector-input", rendered text)`: an unchanged
+        // item is not embedded again.
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        itemUnique: unique("knowledge_vectors_item_unique")
+            .on(table.entityId, table.factId, table.vectorGeneration)
+            .nullsNotDistinct(),
+        userIdIdx: index("knowledge_vectors_user_id_idx").on(table.userId),
+        factIdx: index("knowledge_vectors_fact_id_idx").on(table.factId),
+        oneItem: check(
+            "knowledge_vectors_one_item_check",
+            sql`num_nonnulls(${table.entityId}, ${table.factId}) = 1`,
+        ),
+    }),
+);
+
+// Per scope: which vector generation is searched, and how far its vectors
+// are up to date (the scope generation they were last brought up to).
+export const knowledgeVectorState = pgTable("knowledge_vector_state", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => users.id, { onDelete: "cascade" }),
+    activeGeneration: varchar("active_generation", { length: 160 }),
+    embeddedAt: bigint("embedded_at", { mode: "number" }),
+    // Moved whenever the vectors change, so a process holding the scope in
+    // memory reloads them. Apart from the scope generation, which an
+    // embedding run must not move: that would queue the run again.
+    vectorVersion: integer("vector_version").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // AI Enhancements
 export const aiEnhancements = pgTable(
     "ai_enhancements",

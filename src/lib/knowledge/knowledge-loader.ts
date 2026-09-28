@@ -5,7 +5,7 @@
  * reader gets, merged from the scopes it may read.
  */
 
-import { and, eq, exists, isNull, or } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or } from "drizzle-orm";
 import { db, sqlClient } from "@/db";
 import {
     knowledgeAliases,
@@ -13,12 +13,18 @@ import {
     knowledgeEntityNotes,
     knowledgeFactEvidence,
     knowledgeFacts,
+    knowledgeVectorState,
+    knowledgeVectors,
     people,
     personNotes,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
+import {
+    EmbeddingUnavailable,
+    embeddingClient,
+} from "@/lib/knowledge/embeddings";
 import {
     KnowledgeMemoryStore,
     type KnownFact,
@@ -32,6 +38,13 @@ import {
     KNOWLEDGE_CHANNEL,
     readScopeGenerations,
 } from "@/lib/knowledge/scope-generation";
+import {
+    buildMatrix,
+    decodeVector,
+    topK,
+    type VectorHit,
+    type VectorMatrix,
+} from "@/lib/knowledge/vector-search";
 import { getOrgUserId } from "@/lib/org/config";
 
 function nodeOf(
@@ -177,7 +190,66 @@ export async function loadScopeKnowledge(scope: string): Promise<LoadedScope> {
             : nodeOf(row.objectPersonId, row.objectEntityId),
         origin: row.origin,
     }));
-    return { items, names, notes, facts };
+    return { items, names, notes, facts, vectors: await loadVectors(scope) };
+}
+
+/** The scope's vectors of the generation it searches, as one matrix. */
+async function loadVectors(scope: string): Promise<VectorMatrix | null> {
+    const [state] = await db
+        .select({ activeGeneration: knowledgeVectorState.activeGeneration })
+        .from(knowledgeVectorState)
+        .where(eq(knowledgeVectorState.userId, scope))
+        .limit(1);
+    if (!state?.activeGeneration) return null;
+    const rows = await db
+        .select({
+            entityId: knowledgeVectors.entityId,
+            factId: knowledgeVectors.factId,
+            vector: knowledgeVectors.vector,
+        })
+        .from(knowledgeVectors)
+        .where(
+            and(
+                eq(knowledgeVectors.userId, scope),
+                eq(knowledgeVectors.vectorGeneration, state.activeGeneration),
+            ),
+        );
+    if (rows.length === 0) return null;
+    return buildMatrix(
+        scope,
+        rows.map((row) => ({
+            id: row.entityId ?? row.factId ?? "",
+            kind: row.entityId ? ("entity" as const) : ("fact" as const),
+            vector: decodeVector(decryptText(row.vector)),
+        })),
+    );
+}
+
+/**
+ * How fresh a scope is, as one number: its generation, and the version of
+ * its vectors, which an embedding run moves without moving the generation.
+ * Zero when neither exists (the account is gone, or never knew anything).
+ */
+async function readFreshness(
+    scopes: readonly string[],
+): Promise<Map<string, number>> {
+    const generations = await readScopeGenerations(db, scopes);
+    if (scopes.length === 0) return generations;
+    const versions = await db
+        .select({
+            userId: knowledgeVectorState.userId,
+            vectorVersion: knowledgeVectorState.vectorVersion,
+        })
+        .from(knowledgeVectorState)
+        .where(inArray(knowledgeVectorState.userId, [...scopes]));
+    for (const row of versions) {
+        const generation = generations.get(row.userId) ?? 0;
+        generations.set(
+            row.userId,
+            generation * 2 ** 20 + (row.vectorVersion % 2 ** 20) + 1,
+        );
+    }
+    return generations;
 }
 
 let store: KnowledgeMemoryStore | null = null;
@@ -187,7 +259,7 @@ let orgScope: string | null = null;
 export function knowledgeStore(): KnowledgeMemoryStore {
     store ??= new KnowledgeMemoryStore({
         load: loadScopeKnowledge,
-        readGenerations: (scopes) => readScopeGenerations(db, scopes),
+        readGenerations: readFreshness,
         maxBytes: env.KNOWLEDGE_MEMORY_MB * 1024 * 1024,
         pinnedScope: () => orgScope,
         log: (message) => console.log(message),
@@ -245,6 +317,8 @@ export interface KnowledgeView {
     facts: (KnownFact & { scope: "personal" | "org" })[];
     /** The name indexes of the scopes read, for `findByName`. */
     indexes: NameIndex[];
+    /** Their vectors, for `searchByMeaning`. */
+    vectors: VectorMatrix[];
 }
 
 /**
@@ -288,7 +362,33 @@ export async function knowledgeView(
             held.facts.map((fact) => ({ ...fact, scope: scopeOf(held.scope) })),
         ),
         indexes: loaded.map((held) => held.index),
+        vectors: loaded.flatMap((held) => (held.vectors ? [held.vectors] : [])),
     };
+}
+
+/**
+ * The entities and facts in a view most like `text` in meaning, best
+ * first. The text is embedded now and never stored. `available` is false
+ * when there is no embedding service, or it is failing: the caller then
+ * matches by words only (`findByName`), and says so.
+ */
+export async function searchByMeaning(
+    view: KnowledgeView,
+    text: string,
+    k = 10,
+): Promise<{ available: boolean; hits: VectorHit[] }> {
+    const client = embeddingClient();
+    if (!client?.available) return { available: false, hits: [] };
+    try {
+        const [query] = await client.embed([text]);
+        if (!query) return { available: true, hits: [] };
+        return { available: true, hits: topK(query, view.vectors, k) };
+    } catch (error) {
+        if (error instanceof EmbeddingUnavailable) {
+            return { available: false, hits: [] };
+        }
+        throw error;
+    }
 }
 
 /** The people and entities in a view a name may mean, best first, with why. */

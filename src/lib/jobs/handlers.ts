@@ -12,6 +12,7 @@ import {
     exportPlanJobHandler,
     exportReconcileJobHandler,
 } from "@/lib/folder-exports/job-handlers";
+import { knowledgeEmbedJobHandler } from "@/lib/knowledge/knowledge-embed";
 import {
     storageReconciliationJobHandler,
     storageReconciliationScanJobHandler,
@@ -33,4 +34,5 @@ export function registerJobHandlers(): void {
     registerJobHandler(exportPlanJobHandler);
     registerJobHandler(exportMaterializeJobHandler);
     registerJobHandler(exportReconcileJobHandler);
+    registerJobHandler(knowledgeEmbedJobHandler);
 }

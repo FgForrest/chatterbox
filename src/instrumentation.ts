@@ -46,6 +46,10 @@ type KnowledgeLoaderModule = {
     startKnowledgeListener: () => void;
 };
 
+type KnowledgeEmbedModule = {
+    startKnowledgeEmbedSeeder: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -150,6 +154,11 @@ export async function register() {
     const { startKnowledgeListener } =
         require("./lib/knowledge/knowledge-loader") as KnowledgeLoaderModule;
     startKnowledgeListener();
+
+    // Keeps vectors up to date where an embedding service is configured.
+    const { startKnowledgeEmbedSeeder } =
+        require("./lib/knowledge/knowledge-embed") as KnowledgeEmbedModule;
+    startKnowledgeEmbedSeeder();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever
