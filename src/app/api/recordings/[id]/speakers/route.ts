@@ -6,9 +6,7 @@ import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import {
-    changeTranscriptSpeaker,
     getTranscriptSpeakers,
-    type SpeakerAnswer,
     type TranscriptSpeaker,
     transcriptChanged,
 } from "@/lib/knowledge/attribution";
@@ -17,6 +15,10 @@ import {
     MAX_DISPLAY_NAME_LENGTH,
     promotePerson,
 } from "@/lib/knowledge/people";
+import {
+    changeTranscriptSpeaker,
+    type SpeakerAnswer,
+} from "@/lib/knowledge/speaker-changes";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import { assertOrgScopeWritable, isOrgScopeEnabled } from "@/lib/org/config";
 import {

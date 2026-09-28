@@ -2,12 +2,12 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { transcriptChanged } from "@/lib/knowledge/attribution";
+import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
 import {
     changeTranscriptSpeakerInTx,
     type SpeakerAnswer,
-    transcriptChanged,
-} from "@/lib/knowledge/attribution";
-import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
+} from "@/lib/knowledge/speaker-changes";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
 type TranscriptionRow = typeof transcriptions.$inferSelect;
