@@ -15,6 +15,11 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeople } from "@/lib/knowledge/people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import {
+    publishKnowledgeInTx,
+    withdrawKnowledgeInTx,
+} from "@/lib/knowledge/share-knowledge";
 import {
     assertOrgScopeWritable,
     getOrgUserId,
@@ -930,11 +935,18 @@ export async function addRecordingToFolder(input: {
                     { problems },
                 );
             }
-            await publishSpeakerNamesInTx(tx, {
+            const names = await publishSpeakerNamesInTx(tx, {
                 recordingId: input.recordingId,
                 ownerUserId: input.userId,
                 orgUserId: target.ownerId,
             });
+            // The knowledge on it: corrections, heard-as forms and facts.
+            const knowledge = await publishKnowledgeInTx(tx, {
+                recordingId: input.recordingId,
+                ownerUserId: input.userId,
+                orgUserId: target.ownerId,
+            });
+            await bumpScopeInTx(tx, [...names.scopes, ...knowledge.scopes]);
         }),
     );
     if (target.scope === "org") {
@@ -1013,7 +1025,10 @@ export async function removeRecordingFromFolder(input: {
                 409,
             );
         }
-        await endSharingIfUnfiled(tx, target.ownerId, input.recordingId);
+        await bumpScopeInTx(
+            tx,
+            await endSharingIfUnfiled(tx, target.ownerId, input.recordingId),
+        );
     });
     await orgTreeChanged();
 }
@@ -1029,7 +1044,10 @@ export async function unshareRecording(
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, recordingId);
-        await withdrawRecordingInTx(tx, orgUserId, recordingId);
+        await bumpScopeInTx(
+            tx,
+            await withdrawRecordingInTx(tx, orgUserId, recordingId),
+        );
     });
     await orgTreeChanged();
 }
@@ -1044,7 +1062,7 @@ export async function withdrawRecordingInTx(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
-): Promise<void> {
+): Promise<Set<string>> {
     const orgFolderIds = (
         await tx
             .select({ id: recordingFolders.id })
@@ -1061,7 +1079,7 @@ export async function withdrawRecordingInTx(
                 ),
             );
     }
-    await endSharingIfUnfiled(tx, orgUserId, recordingId);
+    return endSharingIfUnfiled(tx, orgUserId, recordingId);
 }
 
 async function requireRecordingOwnerForSharing(
@@ -1095,15 +1113,19 @@ async function requireRecordingOwnerForSharing(
  * End the sharing of a recording that has left the last Organization folder.
  *
  * A shared recording is one recording, and its owner gets it back as the
- * Organization left it: every transcript, name and summary stays. What the
- * organization account queued on it is cancelled, as it may change the
- * recording no longer.
+ * Organization left it: every transcript, name and summary stays, and so
+ * do the corrections, now the owner's (`withdrawKnowledgeInTx`); the
+ * Organization's evidence goes. What the organization account queued on
+ * it is cancelled, as it may change the recording no longer.
+ *
+ * Returns the knowledge scopes the withdrawal reached, for the caller to
+ * bump at its end; none when the recording is still filed.
  */
 async function endSharingIfUnfiled(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
-): Promise<void> {
+): Promise<Set<string>> {
     const remaining = await tx
         .select({ folderId: recordingFolderAssignments.folderId })
         .from(recordingFolderAssignments)
@@ -1118,7 +1140,7 @@ async function endSharingIfUnfiled(
             ),
         )
         .limit(1);
-    if (remaining.length > 0) return;
+    if (remaining.length > 0) return new Set();
 
     const now = new Date();
     await tx
@@ -1141,6 +1163,18 @@ async function endSharingIfUnfiled(
                 inArray(asyncJobs.status, ["pending", "processing"]),
             ),
         );
+
+    const [owner] = await tx
+        .select({ userId: recordings.userId })
+        .from(recordings)
+        .where(eq(recordings.id, recordingId))
+        .limit(1);
+    if (!owner) return new Set();
+    return withdrawKnowledgeInTx(tx, {
+        recordingId,
+        ownerUserId: owner.userId,
+        orgUserId,
+    });
 }
 
 /**

@@ -3,10 +3,7 @@ import type { db } from "@/db";
 import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { promotePersonInTx } from "@/lib/knowledge/people";
-import {
-    bumpScopeInTx,
-    scopesNamingInTx,
-} from "@/lib/knowledge/scope-generation";
+import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -25,7 +22,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  *
  * The caller holds the Organization-people lock and then the recording
  * lock, in that order: a promotion may merge people, which locks the
- * recordings naming them. Returns how many people were promoted.
+ * recordings naming them. Returns how many people were promoted, and the
+ * knowledge scopes the change reached, for the caller to bump at its end.
  */
 export async function publishSpeakerNamesInTx(
     tx: Tx,
@@ -34,7 +32,7 @@ export async function publishSpeakerNamesInTx(
         ownerUserId,
         orgUserId,
     }: { recordingId: string; ownerUserId: string; orgUserId: string },
-): Promise<number> {
+): Promise<{ promoted: number; scopes: Set<string> }> {
     const transcripts = await tx
         .select({
             id: transcriptions.id,
@@ -50,7 +48,7 @@ export async function publishSpeakerNamesInTx(
                 eq(transcriptions.userId, ownerUserId),
             ),
         );
-    if (transcripts.length === 0) return 0;
+    if (transcripts.length === 0) return { promoted: 0, scopes: new Set() };
     // The labels each text has now, as the gate reads them.
     const current = new Map(
         transcripts.map((transcript) => [
@@ -102,8 +100,6 @@ export async function publishSpeakerNamesInTx(
     for (const personId of toPromote) {
         if (await promotePersonInTx(tx, personId, orgUserId)) promoted += 1;
     }
-    if (promoted > 0 || dropped.length > 0) {
-        await bumpScopeInTx(tx, [...scopes, orgUserId]);
-    }
-    return promoted;
+    scopes.add(orgUserId);
+    return { promoted, scopes };
 }

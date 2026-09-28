@@ -158,6 +158,9 @@ export async function eraseLocalArtifact(
     let withdrew = false;
     await db.transaction(async (tx) => {
         const now = new Date();
+        // The knowledge scopes the withdrawal and the erasure reach, moved
+        // once at the end.
+        const scopes = new Set<string>();
         // Before the recording lock, as withdrawing takes them.
         if (orgUserId && options.withdraw) await lockOrgTree(tx);
         const [locked] = await tx
@@ -183,7 +186,13 @@ export async function eraseLocalArtifact(
             (await isRecordingShared(recordingId, orgUserId, tx))
         ) {
             if (!options.withdraw) throw recordingShared();
-            await withdrawRecordingInTx(tx, orgUserId, recordingId);
+            for (const scope of await withdrawRecordingInTx(
+                tx,
+                orgUserId,
+                recordingId,
+            )) {
+                scopes.add(scope);
+            }
             withdrew = true;
         }
 
@@ -260,7 +269,7 @@ export async function eraseLocalArtifact(
                         eq(recordings.userId, userId),
                     ),
                 );
-            await bumpScopeInTx(tx, knowledge.scopes);
+            for (const scope of knowledge.scopes) scopes.add(scope);
         } else {
             await cancelArtifactJobs(tx, userId, recordingId, ["summary"], now);
             await tx
@@ -281,6 +290,7 @@ export async function eraseLocalArtifact(
                     ),
                 );
         }
+        await bumpScopeInTx(tx, scopes);
     });
 
     if (withdrew) await orgTreeChanged();

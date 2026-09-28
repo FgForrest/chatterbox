@@ -413,6 +413,30 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         expect(await listCorrections(OWNER, transcriptId)).toEqual([]);
     });
 
+    /**
+     * A correction left in the owner's scope on a shared transcript, as a
+     * share leaves one it cannot publish (naming an entity of a private
+     * type the Organization has not adopted).
+     */
+    async function ownersPrivateCorrection(heard: string, turnIndex = 0) {
+        const anchor = anchorIn(FIRST, turnIndex, heard);
+        await db()
+            .insert(transcriptCorrections)
+            .values({
+                userId: OWNER,
+                transcriptionId: transcriptId,
+                transcriptRevision: await revision(),
+                turnIndex: anchor.turnIndex,
+                charStart: anchor.charStart,
+                charEnd: anchor.charEnd,
+                heard: encryptText(heard),
+                heardHmac: "h",
+                kind: "correct",
+                targetPersonId: jan,
+                replacement: encryptText("Novotný"),
+            });
+    }
+
     it("lets only the organization account change them while shared, with Organization people", async () => {
         await correct();
         await share();
@@ -420,11 +444,16 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         expect(
             await refusal(correct({ anchor: anchorIn(FIRST, 1, "Tavesi") })),
         ).toMatchObject({ statusCode: 409, code: "RECORDING_SHARED" });
+        const [unknown] = await db()
+            .insert(people)
+            .values({ userId: OWNER, displayName: encryptText("Tajný") })
+            .returning({ id: people.id });
         expect(
             await refusal(
                 correct({
                     anchor: anchorIn(FIRST, 1, "Honzo"),
                     kind: "link",
+                    target: { personId: unknown?.id ?? "" },
                     actorUserId: orgUserId,
                 }),
             ),
@@ -436,19 +465,21 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
             actorUserId: orgUserId,
         });
 
-        // The owner's correction names the owner's own person: theirs alone.
+        // Sharing published the owner's correction (and made Jan the
+        // Organization's); one it could not publish stays the owner's.
+        await ownersPrivateCorrection("Orionu");
         const orgView = await listCorrections(OWNER, transcriptId, {
             orgOnly: true,
         });
-        expect(orgView.map((c) => c.heard)).toEqual(["Honzo"]);
+        expect(orgView.map((c) => c.heard)).toEqual(["Novák", "Honzo"]);
         expect(
             (await listCorrections(OWNER, transcriptId)).map((c) => c.heard),
-        ).toEqual(["Novák", "Honzo"]);
+        ).toEqual(["Novák", "Orionu", "Honzo"]);
     });
 
     it("keeps each scope's corrections in its scope, and rechecks them all", async () => {
-        await correct();
         await share();
+        await ownersPrivateCorrection("Novák");
         await correct({
             anchor: anchorIn(FIRST, 1, "Tavesi"),
             replacement: "Tavesy",
