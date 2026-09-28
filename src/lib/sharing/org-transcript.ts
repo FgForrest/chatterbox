@@ -6,6 +6,7 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { transcriptChanged } from "@/lib/knowledge/attribution";
 import { lockOrgPeople, promotePersonInTx } from "@/lib/knowledge/people";
@@ -63,29 +64,32 @@ export async function changeOrgTranscriptSpeaker({
     revision: number;
     personId: string | null;
 }> {
-    return db.transaction(async (tx) => {
-        const target = await orgTranscriptForChangeInTx(tx, {
-            recordingId,
-            source,
-            owners,
-            actorUserId,
-            seenId: seen.transcriptionId,
-            seenRevision: seen.revision,
-        });
-        const personId = await changeTranscriptSpeakerInTx(tx, {
-            userId: owners.contentUserId,
-            transcriptionId: target.id,
-            revision: seen.revision,
-            label,
-            answer,
-            actorUserId,
-        });
-        return {
-            transcriptionId: target.id,
-            revision: target.revision,
-            personId,
-        };
-    });
+    // The snapshot a first change may take promotes, and so may merge,
+    // people: the one deadlock that can meet, retried like the share's.
+    return retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const target = await orgTranscriptForChangeInTx(tx, {
+                recordingId,
+                source,
+                owners,
+                seenId: seen.transcriptionId,
+                seenRevision: seen.revision,
+            });
+            const personId = await changeTranscriptSpeakerInTx(tx, {
+                userId: owners.contentUserId,
+                transcriptionId: target.id,
+                revision: seen.revision,
+                label,
+                answer,
+                actorUserId,
+            });
+            return {
+                transcriptionId: target.id,
+                revision: target.revision,
+                personId,
+            };
+        }),
+    );
 }
 
 /**
@@ -105,14 +109,12 @@ async function orgTranscriptForChangeInTx(
         recordingId,
         source,
         owners,
-        actorUserId,
         seenId,
         seenRevision,
     }: {
         recordingId: string;
         source: string;
         owners: OrgTranscriptOwners;
-        actorUserId: string;
         seenId: string;
         seenRevision: number;
     },
@@ -151,24 +153,32 @@ async function orgTranscriptForChangeInTx(
     // Made while this request waited for the lock: not what was seen.
     if (await findOwn()) throw transcriptChanged();
 
+    // The owner's content, copied: the owner produced it, as when sharing.
     const copies = await snapshotRecordingForOrgInTx(
         tx,
         recordingId,
         owners,
-        actorUserId,
+        owners.ownerUserId,
     );
-    const target = copies.get(seenId);
-    if (target) {
-        if (target.source !== source || target.revision !== seenRevision) {
-            throw transcriptChanged();
-        }
-        return target;
-    }
-    // Copies were taken, but not of the text the change was made on.
-    if (copies.size > 0) throw transcriptChanged();
     // The snapshot was taken before, and this transcript is not in it:
     // the Organization's copy was removed, and it is never taken again.
-    throw new AppError(ErrorCode.NOT_FOUND, "No transcript to attribute", 404);
+    if (!copies) {
+        throw new AppError(
+            ErrorCode.NOT_FOUND,
+            "No transcript to attribute",
+            404,
+        );
+    }
+    const target = copies.get(seenId);
+    // Copies were taken, but not of the text the change was made on.
+    if (
+        !target ||
+        target.source !== source ||
+        target.revision !== seenRevision
+    ) {
+        throw transcriptChanged();
+    }
+    return target;
 }
 
 /**
@@ -215,20 +225,21 @@ async function lockSharedRecording(
  * reaches the Organization ungated, and rows Organization retention removed
  * are never copied back. Existing Organization rows are left alone.
  *
- * The caller holds the Organization-people lock and then the recording
- * lock. Does nothing unless the recording is, under that lock, shared, not
- * deleted, and not yet snapshotted. Returns the copies made, by the id of
- * the owner's transcript each one copies.
+ * The caller holds the Organization-people lock; the recording lock is
+ * taken here. Does nothing, and returns null, unless the recording is,
+ * under that lock, shared, not deleted, and not yet snapshotted. Otherwise
+ * returns the copies made, by the id of the owner's transcript each one
+ * copies, possibly none.
  */
 export async function snapshotRecordingForOrgInTx(
     tx: Tx,
     recordingId: string,
     owners: OrgTranscriptOwners,
     actorUserId: string,
-): Promise<Map<string, TranscriptionRow>> {
-    const copies = new Map<string, TranscriptionRow>();
+): Promise<Map<string, TranscriptionRow> | null> {
     const recording = await lockSharedRecording(tx, recordingId, owners);
-    if (!recording || recording.orgSnapshotAt) return copies;
+    if (!recording || recording.orgSnapshotAt) return null;
+    const copies = new Map<string, TranscriptionRow>();
 
     const originals = await tx
         .select()
@@ -313,6 +324,35 @@ export async function snapshotRecordingForOrgInTx(
         .set({ orgSnapshotAt: new Date() })
         .where(eq(recordings.id, recordingId));
     return copies;
+}
+
+/**
+ * Take the Organization's snapshot of a shared recording in a transaction
+ * of its own, if it has none yet; the owner, who shared it, is recorded as
+ * producing the copies. Returns whether it took one.
+ *
+ * For recordings shared before snapshots existed: the backfill, and an
+ * Organization transcription, which must find the owner's names copied
+ * before it writes, or its new transcript starts without them.
+ */
+export async function takeOrgSnapshot(
+    recordingId: string,
+    owners: OrgTranscriptOwners,
+): Promise<boolean> {
+    return retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            // Before the recording lock the snapshot takes: it promotes
+            // people, which may merge them.
+            await lockOrgPeople(tx);
+            const copies = await snapshotRecordingForOrgInTx(
+                tx,
+                recordingId,
+                owners,
+                owners.ownerUserId,
+            );
+            return copies !== null;
+        }),
+    );
 }
 
 /**

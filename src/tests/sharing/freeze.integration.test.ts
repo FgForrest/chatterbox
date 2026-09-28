@@ -23,9 +23,12 @@ import {
 } from "vitest";
 import {
     apiCredentials,
+    people,
+    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -61,12 +64,23 @@ const { dbProxy, dbRef, mockEnv, provider } = vi.hoisted(() => {
             calls: 0,
             // Run once, while the provider is transcribing.
             during: null as null | (() => Promise<void>),
+            // What it answers, when not the default text.
+            result: null as null | {
+                text: string;
+                detectedLanguage: string;
+                turns?: {
+                    speaker: string;
+                    startMs: number;
+                    endMs: number;
+                    text: string;
+                }[];
+            },
         },
         mockEnv: {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared",
-            ORG_ACCOUNT_EMAIL: "org@example.test",
-            ORG_ACCOUNT_PASSWORD: "organization-password",
+            ORG_ACCOUNT_EMAIL: "org@example.test" as string | undefined,
+            ORG_ACCOUNT_PASSWORD: "organization-password" as string | undefined,
             ENCRYPTION_KEY:
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
@@ -105,7 +119,12 @@ vi.mock("@/lib/transcription/elevenlabs-transcribe", () => ({
         const run = provider.during;
         provider.during = null;
         await run?.();
-        return { text: "A new transcript.", detectedLanguage: "en" };
+        return (
+            provider.result ?? {
+                text: "A new transcript.",
+                detectedLanguage: "en",
+            }
+        );
     }),
 }));
 vi.mock("@/lib/auth-server", async () => {
@@ -128,7 +147,11 @@ vi.mock("@/lib/auth-server", async () => {
 
 import { POST as postBrowserTranscript } from "@/app/api/recordings/[id]/transcription/from-browser/route";
 import { encrypt } from "@/lib/encryption";
-import { decryptText, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -172,6 +195,9 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
     beforeEach(async () => {
         provider.calls = 0;
         provider.during = null;
+        provider.result = null;
+        mockEnv.ORG_ACCOUNT_EMAIL = "org@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "organization-password";
         await db().delete(users);
         await db()
             .insert(users)
@@ -209,7 +235,7 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
                 model: "whisper-1",
                 source: "riffado",
             });
-        for (const userId of [OWNER, BOB]) {
+        for (const userId of [OWNER, BOB, orgUserId]) {
             await db()
                 .insert(apiCredentials)
                 .values({
@@ -221,7 +247,9 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
                 });
             await db()
                 .insert(userSettings)
-                .values({ userId, autoGenerateTitle: false });
+                .values({ userId, autoGenerateTitle: false })
+                // The organization account has its settings already.
+                .onConflictDoNothing();
         }
     });
 
@@ -254,16 +282,29 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
     function runJob(
         userId: string,
         view: "private" | "org",
+        trigger: "manual" | "sync" = "sync",
     ): ReturnType<typeof transcriptionJobHandler.run> {
         return transcriptionJobHandler.run({
             payload: {
                 recordingId: REC,
-                trigger: "manual",
+                trigger,
                 force: true,
                 view,
             },
             userId,
         } as Parameters<typeof transcriptionJobHandler.run>[0]);
+    }
+
+    async function refusal(promise: Promise<unknown>) {
+        const error = await promise.then(
+            () => null,
+            (caught: unknown) => caught,
+        );
+        expect(error).toMatchObject({
+            statusCode: 409,
+            code: "RECORDING_SHARED",
+        });
+        return error as Error;
     }
 
     it("lets a provider run that began before the share write nothing after it, and skips its job", async () => {
@@ -283,12 +324,125 @@ describeWithDatabase("a shared recording is frozen (PostgreSQL)", () => {
         expect(provider.calls).toBe(0);
     });
 
+    it("tells whoever asked for the run why it was refused", async () => {
+        await share();
+
+        const error = await refusal(runJob(OWNER, "private", "manual"));
+        expect(error.message).toContain("shared with the Organization");
+        expect(provider.calls).toBe(0);
+    });
+
     it("refuses a member's Organization run where it executes", async () => {
         await share();
 
-        expect(await runJob(BOB, "org")).toEqual({ skipped: "shared" });
+        await refusal(runJob(BOB, "org", "manual"));
         expect(provider.calls).toBe(0);
         expect(await textOf(orgUserId)).toBe(SHARED_TEXT);
+    });
+
+    it("refuses the organization account's run while the Organization is read-only", async () => {
+        await share();
+        mockEnv.ORG_ACCOUNT_EMAIL = undefined;
+        mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
+
+        const error = await refusal(runJob(orgUserId, "org", "manual"));
+        expect(error.message).toContain("read-only");
+        expect(provider.calls).toBe(0);
+        expect(await textOf(orgUserId)).toBe(SHARED_TEXT);
+    });
+
+    it("copies the owner's names before the organization account's first run on a recording shared before snapshots", async () => {
+        // A diarized transcript the owner named, shared before snapshots
+        // existed: the Organization has no copy of it yet.
+        const turns = [
+            { speaker: "speaker_0", startMs: 0, endMs: 10_000, text: "Hi." },
+            {
+                speaker: "speaker_1",
+                startMs: 10_000,
+                endMs: 20_000,
+                text: "Yo.",
+            },
+        ];
+        const [owned] = await db()
+            .update(transcriptions)
+            .set({
+                text: encryptText("speaker_0: Hi.\nspeaker_1: Yo."),
+                turns: encryptJsonField(turns),
+                model: "scribe_v1",
+                provider: "ElevenLabs",
+            })
+            .where(eq(transcriptions.userId, OWNER))
+            .returning({ id: transcriptions.id });
+        const [jana] = await db()
+            .insert(people)
+            .values({ userId: OWNER, displayName: encryptText("Jana") })
+            .returning({ id: people.id });
+        await db()
+            .insert(transcriptSpeakers)
+            .values({
+                userId: OWNER,
+                transcriptionId: owned?.id ?? "",
+                label: "speaker_0",
+                personId: jana?.id,
+                source: "user",
+                status: "confirmed",
+                confirmedByUserId: OWNER,
+            });
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: OWNER,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
+        // The provider hears the same two voices, numbered the other way.
+        provider.result = {
+            text: "speaker_1: Hi.\nspeaker_0: Yo.",
+            detectedLanguage: "en",
+            turns: [
+                {
+                    speaker: "speaker_1",
+                    startMs: 0,
+                    endMs: 10_000,
+                    text: "Hi.",
+                },
+                {
+                    speaker: "speaker_0",
+                    startMs: 10_000,
+                    endMs: 20_000,
+                    text: "Yo.",
+                },
+            ],
+        };
+
+        expect(await runJob(orgUserId, "org", "manual")).toEqual({
+            transcribed: true,
+        });
+
+        const [copy] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.userId, orgUserId));
+        const names = await db()
+            .select({
+                label: transcriptSpeakers.label,
+                personId: transcriptSpeakers.personId,
+                status: transcriptSpeakers.status,
+            })
+            .from(transcriptSpeakers)
+            .where(eq(transcriptSpeakers.transcriptionId, copy?.id ?? ""));
+        expect(names).toEqual([
+            { label: "speaker_1", personId: jana?.id, status: "confirmed" },
+        ]);
+        const [marked] = await db()
+            .select({ orgSnapshotAt: recordings.orgSnapshotAt })
+            .from(recordings)
+            .where(eq(recordings.id, REC));
+        expect(marked?.orgSnapshotAt).not.toBeNull();
     });
 
     it("refuses a transcript made in the browser once the recording is shared", async () => {

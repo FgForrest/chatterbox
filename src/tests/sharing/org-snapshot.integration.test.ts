@@ -293,7 +293,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
         await summary(OWNER, "plaud", null);
         await share();
 
-        const copies = await snapshot();
+        const copies = (await snapshot()) ?? new Map();
 
         expect([...copies.keys()].sort()).toEqual([plaud, riffado].sort());
         const copied = await orgTranscripts();
@@ -361,14 +361,14 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
     it("is taken once: rows removed afterwards are not copied back", async () => {
         await transcript(OWNER, "riffado");
         await share();
-        expect((await snapshot()).size).toBe(1);
+        expect((await snapshot())?.size).toBe(1);
 
         // Organization retention removes its copy.
         await db()
             .delete(transcriptions)
             .where(eq(transcriptions.userId, orgUserId));
 
-        expect((await snapshot()).size).toBe(0);
+        expect(await snapshot()).toBeNull();
         expect(await orgTranscripts()).toEqual([]);
     });
 
@@ -379,7 +379,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
         await summary(OWNER, "riffado", ownerRiffado);
         await share();
 
-        const copies = await snapshot();
+        const copies = (await snapshot()) ?? new Map();
 
         expect([...copies.values()].map((row) => row.source)).toEqual([
             "plaud",
@@ -395,7 +395,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
     it("does nothing for a recording that is not shared, or deleted", async () => {
         await transcript(OWNER, "riffado");
 
-        expect((await snapshot()).size).toBe(0);
+        expect(await snapshot()).toBeNull();
         expect(await marker()).toBeNull();
 
         await share();
@@ -403,7 +403,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
             .update(recordings)
             .set({ deletedAt: new Date() })
             .where(eq(recordings.id, REC));
-        expect((await snapshot()).size).toBe(0);
+        expect(await snapshot()).toBeNull();
         expect(await orgTranscripts()).toEqual([]);
     });
 
@@ -417,7 +417,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
         expect(await orgTranscripts()).toEqual([]);
 
         await share();
-        expect((await snapshot()).size).toBe(1);
+        expect((await snapshot())?.size).toBe(1);
         expect(await orgTranscripts()).toHaveLength(1);
     });
 
@@ -498,7 +498,7 @@ describeWithDatabase("the Organization snapshot (PostgreSQL)", () => {
         it("summarizes the Organization's own copy of any source before the owner's", async () => {
             await transcript(OWNER, "plaud");
             await share();
-            const copies = await snapshot();
+            const copies = (await snapshot()) ?? new Map();
             const plaudCopy = [...copies.values()][0];
 
             expect((await findOrgSummarySource(REC, owners()))?.id).toBe(

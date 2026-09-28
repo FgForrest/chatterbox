@@ -85,13 +85,13 @@ vi.mock("@/lib/sharing/org-transcript", async () => {
     >("@/lib/sharing/org-transcript");
     return {
         ...actual,
-        snapshotRecordingForOrgInTx: async (
-            ...args: Parameters<typeof actual.snapshotRecordingForOrgInTx>
+        takeOrgSnapshot: async (
+            ...args: Parameters<typeof actual.takeOrgSnapshot>
         ) => {
             const run = hooks.beforeSnapshot;
             hooks.beforeSnapshot = null;
             await run?.();
-            return actual.snapshotRecordingForOrgInTx(...args);
+            return actual.takeOrgSnapshot(...args);
         },
     };
 });

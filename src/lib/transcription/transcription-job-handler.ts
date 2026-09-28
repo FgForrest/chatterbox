@@ -18,6 +18,7 @@ class CompletedTranscriptionFailure extends AppError {}
 
 function failedResultError(
     code: TranscribeErrorCode | undefined,
+    message?: string,
 ): CompletedTranscriptionFailure {
     switch (code) {
         case "RECORDING_NOT_FOUND":
@@ -48,7 +49,7 @@ function failedResultError(
         case "RECORDING_SHARED":
             return new CompletedTranscriptionFailure(
                 ErrorCode.RECORDING_SHARED,
-                "The recording is shared with the Organization",
+                message ?? "The recording is shared with the Organization",
                 409,
             );
         case "MYNAH_BUDGET_EXHAUSTED":
@@ -101,12 +102,19 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             force: payload.force,
             view: payload.view,
         });
-        // Shared since it was queued, or queued on the Organization view by
-        // someone other than its account: nothing to do, and nothing failed.
-        if (result.errorCode === "RECORDING_SHARED") {
+        // Shared since it was queued, queued on the Organization view by
+        // someone other than its account, or the Organization is read-only:
+        // an automatic run has nothing to do, and nothing failed. A person
+        // who asked is told why, once (not retryable).
+        if (
+            result.errorCode === "RECORDING_SHARED" &&
+            payload.trigger !== "manual"
+        ) {
             return { skipped: "shared" };
         }
-        if (!result.success) throw failedResultError(result.errorCode);
+        if (!result.success) {
+            throw failedResultError(result.errorCode, result.error);
+        }
         return { transcribed: true };
     },
 };

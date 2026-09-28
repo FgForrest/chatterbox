@@ -10,6 +10,7 @@ import {
     transcriptions,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -944,30 +945,6 @@ export async function addRecordingToFolder(input: {
     } else {
         await scheduleExportProjection(input.userId);
     }
-}
-
-/**
- * Run a transaction again, once, when PostgreSQL broke a deadlock by
- * aborting it. Anything else, a refusal included, is thrown as it is.
- */
-async function retryOnDeadlock<T>(run: () => Promise<T>): Promise<T> {
-    try {
-        return await run();
-    } catch (error) {
-        if (!isDeadlock(error)) throw error;
-        return run();
-    }
-}
-
-function isDeadlock(error: unknown): boolean {
-    for (
-        let current: unknown = error;
-        current && typeof current === "object";
-        current = (current as { cause?: unknown }).cause
-    ) {
-        if ((current as { code?: unknown }).code === "40P01") return true;
-    }
-    return false;
 }
 
 /**

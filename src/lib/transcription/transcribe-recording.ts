@@ -33,6 +33,7 @@ import {
 } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import { isOrgScopeEnabled } from "@/lib/org/config";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     captureServerEvent,
@@ -46,6 +47,7 @@ import {
 import type { RecordingView } from "@/lib/sharing/access";
 import { isPrivateCopyFrozen } from "@/lib/sharing/frozen";
 import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
+import { takeOrgSnapshot } from "@/lib/sharing/org-transcript";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
@@ -364,17 +366,33 @@ async function transcribeRecordingInner(
     // private view that is also the actor and the recording's owner.
     const userId = ctx.contentUserId;
     // A shared recording is the organization account's to transcribe, on
-    // the Organization view; its private copy stays as it was shared.
-    // Checked where the run starts, whoever queued it, so no provider is
-    // paid for a transcript that would be refused. The write checks again.
-    if (
-        orgView
-            ? ctx.actorUserId !== ctx.contentUserId
-            : await isPrivateCopyFrozen(recordingId)
-    ) {
+    // the Organization view, while the Organization accepts changes; its
+    // private copy stays as it was shared. Checked where the run starts,
+    // whoever queued it and whenever, so no provider is paid for a
+    // transcript that would be refused. The write checks again.
+    if (orgView) {
+        if (!isOrgScopeEnabled()) {
+            return recordingSharedResult(
+                "The Organization is read-only on this instance",
+            );
+        }
+        if (ctx.actorUserId !== ctx.contentUserId) {
+            return recordingSharedResult();
+        }
+    } else if (await isPrivateCopyFrozen(recordingId)) {
         return recordingSharedResult();
     }
     try {
+        // Shared before snapshots existed: the owner's transcripts, with
+        // their names, become the Organization's first, so this run's
+        // rewrite carries the names instead of starting without them.
+        if (orgView) {
+            await takeOrgSnapshot(recordingId, {
+                ownerUserId: ctx.ownerUserId,
+                contentUserId: ctx.contentUserId,
+            });
+        }
+
         // Hosted lockout: a lapsed account is read-only. No-op on
         // self-host (isHostedLockedOut always false there).
         if (await isHostedLockedOut(ctx.actorUserId)) {
@@ -1008,12 +1026,10 @@ async function transcribeRecordingInner(
     }
 }
 
-function recordingSharedResult(): TranscribeResult {
-    return {
-        success: false,
-        error: "This recording is shared with the Organization; only its account transcribes it",
-        errorCode: "RECORDING_SHARED",
-    };
+function recordingSharedResult(
+    error = "This recording is shared with the Organization; only its account transcribes it",
+): TranscribeResult {
+    return { success: false, error, errorCode: "RECORDING_SHARED" };
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {

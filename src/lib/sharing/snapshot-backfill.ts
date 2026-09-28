@@ -1,9 +1,8 @@
 import { and, asc, gt, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings } from "@/db/schema";
-import { lockOrgPeople } from "@/lib/knowledge/people";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
-import { snapshotRecordingForOrgInTx } from "@/lib/sharing/org-transcript";
+import { takeOrgSnapshot } from "@/lib/sharing/org-transcript";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
 const PAGE_SIZE = 50;
@@ -21,14 +20,16 @@ const PAGE_SIZE = 50;
  * Pages by id, 50 at a time; each recording is its own transaction, which
  * re-checks under its locks that it is still shared, not deleted and not
  * yet snapshotted. An error is logged and the recording left for the next
- * start. Safe to run in several processes at once.
+ * start, or for its first Organization transcription or speaker change,
+ * which take the snapshot themselves. Safe to run in several processes at
+ * once. Returns how many snapshots it took.
  */
 export async function backfillOrgSnapshots(): Promise<number> {
     if (!isOrgScopeEnabled()) return 0;
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return 0;
 
-    let visited = 0;
+    let taken = 0;
     let after = "";
     for (;;) {
         const page = await db
@@ -46,21 +47,11 @@ export async function backfillOrgSnapshots(): Promise<number> {
             .limit(PAGE_SIZE);
         for (const recording of page) {
             try {
-                await db.transaction(async (tx) => {
-                    // Before the recording lock the snapshot takes: it
-                    // promotes people, which may merge them.
-                    await lockOrgPeople(tx);
-                    await snapshotRecordingForOrgInTx(
-                        tx,
-                        recording.id,
-                        {
-                            ownerUserId: recording.ownerUserId,
-                            contentUserId: orgUserId,
-                        },
-                        recording.ownerUserId,
-                    );
+                const took = await takeOrgSnapshot(recording.id, {
+                    ownerUserId: recording.ownerUserId,
+                    contentUserId: orgUserId,
                 });
-                visited += 1;
+                if (took) taken += 1;
             } catch (error) {
                 console.error(
                     `[org-snapshot] could not snapshot recording ${recording.id}:`,
@@ -69,7 +60,7 @@ export async function backfillOrgSnapshots(): Promise<number> {
             }
         }
         const last = page.at(-1);
-        if (!last || page.length < PAGE_SIZE) return visited;
+        if (!last || page.length < PAGE_SIZE) return taken;
         after = last.id;
     }
 }
@@ -81,10 +72,10 @@ export function startOrgSnapshotBackfill(): void {
     if (backfillStarted) return;
     backfillStarted = true;
     void backfillOrgSnapshots()
-        .then((visited) => {
-            if (visited > 0) {
+        .then((taken) => {
+            if (taken > 0) {
                 console.log(
-                    `[org-snapshot] snapshotted ${visited} shared recording(s)`,
+                    `[org-snapshot] snapshotted ${taken} shared recording(s)`,
                 );
             }
         })
