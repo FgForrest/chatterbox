@@ -11,10 +11,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo, useState } from "react";
+import { KnownFacts, OtherNames } from "@/components/people/known-facts";
 import { PersonActions } from "@/components/people/person-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/format-date";
+import type { PageRelation } from "@/lib/knowledge/fact-page";
 import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import { initials } from "@/lib/utils";
 
@@ -42,12 +44,18 @@ export interface PersonDetailProps {
     appearances: PersonAppearance[];
     /** Whether the viewer may rename, merge or erase this person. */
     canManage?: boolean;
+    /** What is known about them that the viewer may read (`factsForPage`). */
+    facts?: PageRelation[];
+    /** Their other names the viewer may see. */
+    otherNames?: { text: string; kind: "alias" | "heard_as" }[];
 }
 
 export function PersonDetail({
     person,
     appearances,
     canManage = true,
+    facts,
+    otherNames = [],
 }: PersonDetailProps) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -151,6 +159,8 @@ export function PersonDetail({
                 </p>
             )}
 
+            <OtherNames names={otherNames} />
+
             {person.notes && (
                 <section className="space-y-2">
                     <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -159,6 +169,15 @@ export function PersonDetail({
                     <p className="whitespace-pre-wrap text-sm">
                         {person.notes}
                     </p>
+                </section>
+            )}
+
+            {facts && (
+                <section className="space-y-3">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        {i18n("What is known")}
+                    </h2>
+                    <KnownFacts name={person.displayName} relations={facts} />
                 </section>
             )}
 

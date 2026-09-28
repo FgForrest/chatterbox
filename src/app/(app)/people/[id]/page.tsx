@@ -8,6 +8,8 @@ import { db } from "@/db";
 import { recordings, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { decryptText } from "@/lib/encryption/fields";
+import { listAliases } from "@/lib/knowledge/aliases";
+import { factsForPage } from "@/lib/knowledge/fact-page";
 import { getPerson } from "@/lib/knowledge/people";
 import { getOrgUserId } from "@/lib/org/config";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
@@ -29,9 +31,17 @@ export default async function PersonPage({ params }: Params) {
     if (!person) {
         notFound();
     }
+    // A merged-away id lands on the person it was folded into.
+    if (person.mergedIntoId) {
+        redirect(`/people/${person.mergedIntoId}`);
+    }
     // The viewer's own recordings, and the shared ones, which everyone may
     // open; nobody else's private transcripts are read.
     const orgUserId = await getOrgUserId();
+    const [facts, otherNames] = await Promise.all([
+        factsForPage(userId, orgUserId, { personId: id }),
+        listAliases(userId, { personId: id }),
+    ]);
 
     // Where this person has been heard. Joined through the transcript rather
     // than the recording, because an attribution belongs to one transcript
@@ -87,6 +97,11 @@ export default async function PersonPage({ params }: Params) {
                     canManage={
                         person.scope === "personal" || userId === orgUserId
                     }
+                    facts={facts}
+                    otherNames={otherNames.map((name) => ({
+                        text: name.text,
+                        kind: name.kind,
+                    }))}
                     appearances={appearances
                         .map((row) => ({
                             recordingId: row.recordingId,
