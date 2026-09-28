@@ -134,7 +134,12 @@ export async function copyMatchingSpeakerAttributions({
         await tx
             .select({ id: recordings.id })
             .from(recordings)
-            .where(eq(recordings.id, recordingId))
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
             .for("share");
         const rows = await tx
             .select({
@@ -517,6 +522,9 @@ export async function insertSuggestionsInTx(
  * its row as it was; an uncertain one keeps only a name, as a suggestion.
  * A rejection moves only with a clean match: on an uncertain one it would
  * be about a voice nobody is sure of. Everything else is dropped.
+ *
+ * Speaker rows and rejections are selected by transcript: a transcript has
+ * one owner, and the calling writer has already locked and checked it.
  *
  * Rarely this can deadlock with a share that is promoting the same people,
  * since both touch rows naming them. Postgres aborts one side: a job
