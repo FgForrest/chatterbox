@@ -9,6 +9,7 @@ import {
     MAX_RECORDING_TITLE_LENGTH,
     normalizeRecordingTitle,
 } from "@/lib/recordings/filename";
+import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import { cn } from "@/lib/utils";
 
 export function RecordingTitle({
@@ -17,6 +18,7 @@ export function RecordingTitle({
     onRenamed,
     className,
     readOnly = false,
+    view,
 }: {
     recordingId: string;
     filename: string;
@@ -24,6 +26,8 @@ export function RecordingTitle({
     className?: string;
     /** Someone else's recording: shown, never renamed. */
     readOnly?: boolean;
+    /** The view it is renamed in: the curator renames on the Organization's. */
+    view?: RecordingView;
 }) {
     const i18n = useExtracted();
     const [editing, setEditing] = useState(false);
@@ -68,11 +72,14 @@ export function RecordingTitle({
 
         setSaving(true);
         try {
-            const response = await fetch(`/api/recordings/${recordingId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ filename: next }),
-            });
+            const response = await fetch(
+                withRecordingView(`/api/recordings/${recordingId}`, view),
+                {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ filename: next }),
+                },
+            );
             if (!response.ok) {
                 toast.error(
                     await getApiErrorMessage(

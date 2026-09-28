@@ -61,6 +61,23 @@ vi.mock("@/lib/encryption/fields", () => ({
     encryptText: vi.fn((value: string) => `encrypted:${value}`),
 }));
 
+// Who may rename is the view's rule (tested in the sharing suite); here the
+// caller is the owner on the private view, and no Organization exists.
+vi.mock("@/lib/sharing/access", () => ({
+    requestedRecordingView: () => "private",
+    requireRecordingView: vi.fn(
+        async (userId: string, recordingId: string) => ({
+            recordingId,
+            ownerUserId: userId,
+            role: "owner",
+            shared: false,
+            orgUserId: null,
+            view: "private",
+            contentUserId: userId,
+        }),
+    ),
+}));
+
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));

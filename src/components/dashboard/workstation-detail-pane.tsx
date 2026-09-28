@@ -156,6 +156,10 @@ export function WorkstationDetailPane({
                         recording={currentRecording}
                         onRenamed={onRenamed}
                         shared={recordingShared}
+                        // The title follows the transcript's rule: the
+                        // organization account renames it on the
+                        // Organization view, the owner on their own.
+                        titleReadOnly={transcriptReadOnly}
                         action={
                             // Erasing and deleting are the owner's, on their
                             // own view; a shared recording leaves the

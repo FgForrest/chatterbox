@@ -125,9 +125,10 @@ import {
     POST as postSummaryRoute,
 } from "@/app/api/recordings/[id]/summary/route";
 import { POST as postTopicsRoute } from "@/app/api/recordings/[id]/topics/route";
-import { encryptText } from "@/lib/encryption/fields";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 import { upsertEnhancement } from "@/lib/transcription/persist";
@@ -363,6 +364,43 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             body: { filename: "Renamed" },
         });
         expect(renamed.status).toBe(200);
+    });
+
+    it("lets the organization account rename it while shared, in the owner's storage, and the owner keeps the title", async () => {
+        await share();
+        const rename = (user: string, filename: string, view?: "org") =>
+            call(patchRecordingRoute, user, {
+                method: "PATCH",
+                path: "",
+                view,
+                body: { filename },
+            });
+
+        expect((await rename(BOB, "Bob's", "org")).status).toBe(403);
+        expect((await rename(OWNER, "Owner's", "org")).status).toBe(403);
+        const curated = await rename(orgUserId, "Curated", "org");
+        expect(curated.status).toBe(200);
+        await expect(curated.json()).resolves.toEqual({ filename: "Curated" });
+        expect(vi.mocked(reconcileRecordingStorage)).toHaveBeenLastCalledWith(
+            expect.objectContaining({ userId: OWNER, title: "Curated" }),
+        );
+        // The private view is still the owner's alone.
+        expect((await rename(orgUserId, "Private", undefined)).status).toBe(
+            404,
+        );
+
+        await unshareRecording(OWNER, REC);
+        const [row] = await db()
+            .select({
+                filename: recordings.filename,
+                titleEditedAt: recordings.titleEditedAt,
+            })
+            .from(recordings)
+            .where(eq(recordings.id, REC));
+        expect(decryptText(row?.filename ?? "")).toBe("Curated");
+        expect(row?.titleEditedAt).not.toBeNull();
+        // Withdrawn, the curator's view of it is gone.
+        expect((await rename(orgUserId, "Again", "org")).status).toBe(404);
     });
 
     it("erases a shared recording only by taking it out of the Organization first", async () => {

@@ -29,9 +29,14 @@ import {
 } from "@/lib/recordings/filename";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
+import {
+    requestedRecordingView,
+    requireRecordingView,
+} from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import {
+    assertMayChange,
     contentWriterRefusal,
     sharingOrgUserId,
     writerRefusalError,
@@ -134,7 +139,18 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const userId = session.user.id;
+    // The owner renames it on the private view; while it is shared, the
+    // organization account on the Organization view. Either way the files
+    // are the owner's and follow the title in the owner's storage; nothing
+    // is pushed to the owner's Plaud account.
+    const actorUserId = session.user.id;
+    const access = await requireRecordingView(
+        actorUserId,
+        id,
+        requestedRecordingView(request),
+    );
+    assertMayChange(access, actorUserId);
+    const userId = access.ownerUserId;
     const [recording] = await db
         .select({
             id: recordings.id,
@@ -158,14 +174,13 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             404,
         );
     }
-    // Shared, the title is the organization account's to change, like the
-    // rest of the recording: refused before any file is renamed, and again
-    // under the lock where the title is written.
+    // Refused before any file is renamed, and again under the lock where
+    // the title is written.
     const orgUserId = await sharingOrgUserId();
     const refusal = await contentWriterRefusal(undefined, {
         recordingId: id,
         ownerUserId: userId,
-        actorUserId: userId,
+        actorUserId,
         orgUserId,
     });
     if (refusal) throw writerRefusalError(refusal);
@@ -203,7 +218,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         const shared = await contentWriterRefusal(tx, {
             recordingId: id,
             ownerUserId: userId,
-            actorUserId: userId,
+            actorUserId,
             orgUserId,
         });
         if (shared) {

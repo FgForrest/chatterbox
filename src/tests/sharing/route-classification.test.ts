@@ -26,7 +26,9 @@ type Rule = "owner" | "access" | "view" | "folders" | "job" | "people";
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/route.ts": {
         GET: "owner",
-        PATCH: "owner",
+        // The title: the owner on the private view, the organization
+        // account on the Organization view while shared.
+        PATCH: "view",
         DELETE: "owner",
     },
     "recordings/[id]/audio/route.ts": { GET: "access" },
