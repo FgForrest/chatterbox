@@ -22,6 +22,7 @@ import {
 } from "vitest";
 import {
     asyncJobs,
+    knowledgeEntities,
     knowledgeFacts,
     knowledgeVectorState,
     knowledgeVectors,
@@ -420,5 +421,26 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
         await db().delete(asyncJobs);
         await failed(31);
         expect(await seedKnowledgeEmbedJobs()).toBe(1);
+    });
+
+    it("gives a promoted entity its own vector in the Organization's scope", async () => {
+        const orion = await aliceKnows();
+        await embedScope(ALICE, client());
+        const [org] = await db()
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.role, "org"));
+        const orgUserId = org?.id ?? "";
+        // What a share does to it, reduced to the row.
+        await db()
+            .update(knowledgeEntities)
+            .set({ userId: orgUserId })
+            .where(eq(knowledgeEntities.id, orion));
+
+        await embedScope(orgUserId, client());
+
+        expect(await vectorsOf(orgUserId)).toEqual([
+            expect.objectContaining({ entityId: orion }),
+        ]);
     });
 });

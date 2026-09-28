@@ -512,6 +512,13 @@
       "when": 1790619953401,
       "tag": "0072_knowledge_vectors",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790633238632,
+      "tag": "0073_knowledge_keys_and_indexes",
+      "breakpoints": true
     }
   ]
 }

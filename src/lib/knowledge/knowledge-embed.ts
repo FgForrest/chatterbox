@@ -280,6 +280,7 @@ async function writeChunk(
                 })
                 .onConflictDoUpdate({
                     target: [
+                        knowledgeVectors.userId,
                         knowledgeVectors.entityId,
                         knowledgeVectors.factId,
                         knowledgeVectors.vectorGeneration,

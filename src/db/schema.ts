@@ -1083,6 +1083,12 @@ export const knowledgeEntityTypes = pgTable(
         ownerLabelUnique: unique("knowledge_entity_types_owner_label_unique")
             .on(table.userId, table.labelHmac)
             .nullsNotDistinct(),
+        createdByIdx: index("knowledge_entity_types_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        adoptedAsIdx: index("knowledge_entity_types_adopted_as_key_idx").on(
+            table.adoptedAsKey,
+        ),
     }),
 );
 
@@ -1131,6 +1137,12 @@ export const knowledgeRelationTypes = pgTable(
         ownerLabelUnique: unique("knowledge_relation_types_owner_label_unique")
             .on(table.userId, table.labelHmac)
             .nullsNotDistinct(),
+        createdByIdx: index(
+            "knowledge_relation_types_created_by_user_id_idx",
+        ).on(table.createdByUserId),
+        adoptedAsIdx: index("knowledge_relation_types_adopted_as_key_idx").on(
+            table.adoptedAsKey,
+        ),
     }),
 );
 
@@ -1235,6 +1247,10 @@ export const knowledgeEntities = pgTable(
             table.mergedIntoId,
         ),
         userIdIdx: index("knowledge_entities_user_id_idx").on(table.userId),
+        createdByIdx: index("knowledge_entities_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        typeKeyIdx: index("knowledge_entities_type_key_idx").on(table.typeKey),
     }),
 );
 
@@ -1331,6 +1347,9 @@ export const knowledgeAliases = pgTable(
             "knowledge_aliases_heard_as_check",
             sql`(${table.kind} = 'heard_as') = (${table.correctionId} is not null)`,
         ),
+        createdByIdx: index("knowledge_aliases_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
     }),
 );
 
@@ -1411,6 +1430,9 @@ export const transcriptCorrections = pgTable(
         spanCheck: check(
             "transcript_corrections_span_check",
             sql`${table.charStart} >= 0 and ${table.charStart} < ${table.charEnd}`,
+        ),
+        createdByIdx: index("transcript_corrections_created_by_user_id_idx").on(
+            table.createdByUserId,
         ),
     }),
 );
@@ -1498,6 +1520,15 @@ export const knowledgeFacts = pgTable(
             "knowledge_facts_origin_check",
             sql`${table.origin} in ('recording', 'manual')`,
         ),
+        createdByIdx: index("knowledge_facts_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        relationKeyIdx: index("knowledge_facts_relation_key_idx").on(
+            table.relationKey,
+        ),
+        objectKeyIdx: index("knowledge_facts_object_key_idx").on(
+            table.objectKey,
+        ),
     }),
 );
 
@@ -1566,6 +1597,9 @@ export const knowledgeFactEvidence = pgTable(
             "knowledge_fact_evidence_range_check",
             sql`${table.startMs} >= 0 and ${table.startMs} <= ${table.endMs}`,
         ),
+        confirmedByIdx: index(
+            "knowledge_fact_evidence_confirmed_by_user_id_idx",
+        ).on(table.confirmedByUserId),
     }),
 );
 
@@ -1616,9 +1650,17 @@ export const knowledgeVectors = pgTable(
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
+        // With its scope: after a promotion the Organization's vector of an
+        // entity is a row of its own beside the former owner's.
         itemUnique: unique("knowledge_vectors_item_unique")
-            .on(table.entityId, table.factId, table.vectorGeneration)
+            .on(
+                table.userId,
+                table.entityId,
+                table.factId,
+                table.vectorGeneration,
+            )
             .nullsNotDistinct(),
+        entityIdx: index("knowledge_vectors_entity_id_idx").on(table.entityId),
         userIdIdx: index("knowledge_vectors_user_id_idx").on(table.userId),
         factIdx: index("knowledge_vectors_fact_id_idx").on(table.factId),
         oneItem: check(
