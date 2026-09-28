@@ -67,6 +67,12 @@ export interface Transcription {
 export interface TranscriptOption {
     source: string;
     text: string;
+    /**
+     * Which stored transcript this text is, and its revision. A speaker
+     * change names it, so it is refused if the text on screen is no longer
+     * the stored one.
+     */
+    version?: { transcriptionId: string; revision: number };
     language?: string;
     provider?: string;
     model?: string;
@@ -87,6 +93,11 @@ interface TranscriptionPanelProps {
     onTranscribe: (attributionSource?: string) => void;
     /** Refresh handler called after a browser-side transcription completes. */
     onTranscribeComplete?: () => void;
+    /**
+     * Reload the page's transcripts: the one on screen was replaced, e.g.
+     * re-transcribed in another tab.
+     */
+    onTranscriptStale?: () => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
@@ -200,6 +211,7 @@ export function TranscriptionPanel({
     isTranscribing,
     onTranscribe,
     onTranscribeComplete,
+    onTranscriptStale,
     onSeekToTurn,
     getPlaybackMs,
 }: TranscriptionPanelProps) {
@@ -226,8 +238,13 @@ export function TranscriptionPanel({
         () => transcriptSpeakerTags(activeTranscript),
         [activeTranscript],
     );
-    const activeFingerprint = useMemo(
-        () => transcriptFingerprint(activeTranscript),
+    // Which transcript text is on screen: its stored version when the page
+    // loaded one, else a hash of the text.
+    const activeTranscriptKey = useMemo(
+        () =>
+            activeTranscript?.version
+                ? `${activeTranscript.version.transcriptionId}@${activeTranscript.version.revision}`
+                : transcriptFingerprint(activeTranscript),
         [activeTranscript],
     );
     // Topics are anchored to timed turns and written onto the viewer's own
@@ -551,7 +568,7 @@ export function TranscriptionPanel({
                             // another transcript to name: mount afresh, so
                             // nothing of the last one's state, or its late
                             // answers, reaches this one.
-                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeFingerprint}`}
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
                             recordingId={recording.id}
                             source={activeTranscript.source}
                             speakers={speakerTags}
@@ -559,6 +576,8 @@ export function TranscriptionPanel({
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
                             onSeek={onSeekToTurn}
+                            shownVersion={activeTranscript.version}
+                            onStale={onTranscriptStale}
                         />
                     )}
                 </CardHeader>

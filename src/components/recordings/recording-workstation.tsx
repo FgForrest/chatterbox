@@ -222,6 +222,7 @@ export function RecordingWorkstation({
                             isTranscribing={isTranscribing}
                             onTranscribe={handleTranscribe}
                             onTranscribeComplete={refresh}
+                            onTranscriptStale={refresh}
                             onSeekToTurn={
                                 recording.audioReaped
                                     ? undefined

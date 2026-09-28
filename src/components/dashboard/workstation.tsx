@@ -1039,6 +1039,7 @@ export function Workstation({
                                     }
                                     onTranscribe={handleTranscribe}
                                     onTranscribeComplete={refresh}
+                                    onTranscriptStale={refresh}
                                     onSelectRecording={setCurrentRecording}
                                     onRenamed={handleRenamed}
                                     onDelete={handleDelete}

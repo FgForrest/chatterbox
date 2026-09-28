@@ -25,6 +25,8 @@ interface FetchScenario {
     conflict?: boolean;
     /** Fail the first read of the speakers. */
     failFirstRead?: boolean;
+    /** The version reads report, when not `VERSION`. */
+    readVersion?: { transcriptionId: string; revision: number };
 }
 
 function response(body: unknown, status = 200): Response {
@@ -54,7 +56,7 @@ function stubFetch(scenario: FetchScenario) {
             return response({ error: "Unavailable" }, 503);
         }
         return response({
-            ...VERSION,
+            ...(scenario.readVersion ?? VERSION),
             speakers: scenario.initialSpeakers ?? [],
         });
     });
@@ -65,9 +67,13 @@ function stubFetch(scenario: FetchScenario) {
 function SpeakerTagsHarness({
     onAttributionsChange,
     onSeek,
+    shownVersion,
+    onStale,
 }: {
     onAttributionsChange: (attributions: SpeakerAttributions) => void;
     onSeek?: (ms: number) => void;
+    shownVersion?: { transcriptionId: string; revision: number };
+    onStale?: () => void;
 }) {
     const [attributions, setAttributions] = useState<SpeakerAttributions>({});
     const handleAttributionsChange = useCallback(
@@ -86,6 +92,8 @@ function SpeakerTagsHarness({
             attributions={attributions}
             onAttributionsChange={handleAttributionsChange}
             onSeek={onSeek}
+            shownVersion={shownVersion}
+            onStale={onStale}
         />
     );
 }
@@ -93,11 +101,17 @@ function SpeakerTagsHarness({
 function renderTags(
     onAttributionsChange = vi.fn(),
     onSeek?: (ms: number) => void,
+    page: {
+        shownVersion?: { transcriptionId: string; revision: number };
+        onStale?: () => void;
+    } = {},
 ) {
     return render(
         <SpeakerTagsHarness
             onAttributionsChange={onAttributionsChange}
             onSeek={onSeek}
+            shownVersion={page.shownVersion}
+            onStale={page.onStale}
         />,
     );
 }
@@ -254,6 +268,70 @@ describe("SpeakerTags", () => {
                         String(url).includes("/speakers") && !init?.method,
                 ),
             ).toHaveLength(2);
+        });
+    });
+
+    describe("the transcript on screen", () => {
+        it("is the version a change names", async () => {
+            const fetchMock = stubFetch({});
+            renderTags(vi.fn(), undefined, { shownVersion: VERSION });
+
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Speaker 0" }),
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Unknown speaker" }),
+            );
+
+            await waitFor(() => {
+                const put = fetchMock.mock.calls.find(
+                    ([, init]) => init?.method === "PUT",
+                );
+                expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+                    ...VERSION,
+                    label: "speaker_0",
+                    unknown: true,
+                });
+            });
+        });
+
+        it("gets no names from a newer transcript, and is reloaded instead", async () => {
+            stubFetch({
+                readVersion: { ...VERSION, revision: VERSION.revision + 1 },
+                initialSpeakers: [
+                    {
+                        label: "speaker_0",
+                        personId: "person-1",
+                        personName: "Jan",
+                        status: "confirmed",
+                    },
+                ],
+            });
+            const onStale = vi.fn();
+            const onAttributionsChange = vi.fn();
+            renderTags(onAttributionsChange, undefined, {
+                shownVersion: VERSION,
+                onStale,
+            });
+
+            await waitFor(() => expect(onStale).toHaveBeenCalled());
+            expect(onAttributionsChange).not.toHaveBeenCalled();
+            expect(screen.queryByRole("link", { name: "Jan" })).toBeNull();
+        });
+
+        it("is reloaded when a change finds it replaced", async () => {
+            stubFetch({ conflict: true });
+            const onStale = vi.fn();
+            renderTags(vi.fn(), undefined, { shownVersion: VERSION, onStale });
+
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Speaker 0" }),
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Unknown speaker" }),
+            );
+
+            await waitFor(() => expect(onStale).toHaveBeenCalled());
         });
     });
 

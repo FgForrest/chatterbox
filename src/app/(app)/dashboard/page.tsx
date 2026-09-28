@@ -28,6 +28,8 @@ import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { serializeRecording } from "@/types/recording";
 
 type TranscriptRow = {
+    id: string;
+    revision: number;
     recordingId: string;
     text: string;
     detectedLanguage: string | null;
@@ -41,6 +43,7 @@ type TranscriptRow = {
 type TranscriptVariant = {
     source: string;
     text: string;
+    version: { transcriptionId: string; revision: number };
     language?: string;
     provider?: string;
     model?: string;
@@ -58,6 +61,10 @@ function buildTranscriptVariants(
         const variant = {
             source: transcript.source,
             text: decryptText(transcript.text),
+            version: {
+                transcriptionId: transcript.id,
+                revision: transcript.revision,
+            },
             language: transcript.detectedLanguage || undefined,
             provider: transcript.provider ?? undefined,
             model: transcript.model ?? undefined,
@@ -193,6 +200,10 @@ export default async function DashboardPage() {
             .orderBy(desc(recordings.startTime)),
         db
             .select({
+                // Which stored transcript each text is: speaker changes
+                // name it.
+                id: transcriptions.id,
+                revision: transcriptions.revision,
                 recordingId: transcriptions.recordingId,
                 text: transcriptions.text,
                 detectedLanguage: transcriptions.detectedLanguage,

@@ -40,6 +40,19 @@ interface SpeakerTagsProps {
     view?: RecordingView;
     /** Play the recording from a moment, to hear a suggestion's evidence. */
     onSeek?: (ms: number) => void;
+    /**
+     * The version of the transcript on screen, from the page's data. Every
+     * change names it; without it, the version the speakers were read at.
+     */
+    shownVersion?: TranscriptVersionRef;
+    /** The transcript on screen was replaced: reload the page's transcripts. */
+    onStale?: () => void;
+}
+
+/** One stored transcript, at one revision. */
+interface TranscriptVersionRef {
+    transcriptionId: string;
+    revision: number;
 }
 
 export interface SpeakerResponseRow {
@@ -131,6 +144,8 @@ export function SpeakerTags({
     onAttributionsChange,
     view,
     onSeek,
+    shownVersion,
+    onStale,
 }: SpeakerTagsProps) {
     const i18n = useExtracted();
     const speakersUrl = withRecordingView(
@@ -145,10 +160,13 @@ export function SpeakerTags({
     const [suggestions, setSuggestions] = useState<
         Readonly<Record<string, SpeakerSuggestion>>
     >({});
-    const [version, setVersion] = useState<{
-        transcriptionId: string;
-        revision: number;
-    } | null>(null);
+    const [version, setVersion] = useState<TranscriptVersionRef | null>(null);
+    const shownId = shownVersion?.transcriptionId;
+    const shownRevision = shownVersion?.revision;
+    // Latest callback without re-reading the speakers when its identity
+    // changes on a re-render.
+    const onStaleRef = useRef(onStale);
+    onStaleRef.current = onStale;
 
     // The panel mounts a new instance for another transcript; an answer
     // arriving after that belongs to the one it replaced.
@@ -163,20 +181,31 @@ export function SpeakerTags({
     const applyResponse = useCallback(
         (body: SpeakersResponse) => {
             if (!mounted.current) return;
+            const read =
+                typeof body.transcriptionId === "string" &&
+                typeof body.revision === "number"
+                    ? {
+                          transcriptionId: body.transcriptionId,
+                          revision: body.revision,
+                      }
+                    : null;
+            // Speakers of a newer transcript than the text on screen would
+            // put names on the wrong lines: fetch the text instead.
+            if (
+                read &&
+                shownId !== undefined &&
+                (read.transcriptionId !== shownId ||
+                    read.revision !== shownRevision)
+            ) {
+                onStaleRef.current?.();
+                return;
+            }
             onAttributionsChange(confirmedAttributions(body.speakers));
             setUnknownLabels(unknownSpeakerLabels(body.speakers));
             setSuggestions(suggestedSpeakers(body.speakers));
-            if (
-                typeof body.transcriptionId === "string" &&
-                typeof body.revision === "number"
-            ) {
-                setVersion({
-                    transcriptionId: body.transcriptionId,
-                    revision: body.revision,
-                });
-            }
+            if (read) setVersion(read);
         },
-        [onAttributionsChange],
+        [onAttributionsChange, shownId, shownRevision],
     );
 
     const load = useCallback(
@@ -208,8 +237,13 @@ export function SpeakerTags({
         label: string,
         choice: SpeakerChoice | null,
     ): Promise<boolean> {
-        // Not loaded, or the load failed: there is no version to name.
-        if (!version) {
+        // The text on screen, else what the speakers were read at; neither
+        // before the first read, or when it failed.
+        const seen =
+            shownId !== undefined && shownRevision !== undefined
+                ? { transcriptionId: shownId, revision: shownRevision }
+                : version;
+        if (!seen) {
             toast.error(
                 i18n("The speakers are still loading. Try again in a moment."),
             );
@@ -220,7 +254,7 @@ export function SpeakerTags({
         const response = await fetch(speakersUrl, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label, ...(choice ?? {}), ...version }),
+            body: JSON.stringify({ label, ...(choice ?? {}), ...seen }),
         }).catch(() => null);
         setSavingLabel(null);
 
@@ -235,6 +269,7 @@ export function SpeakerTags({
                     "This transcript changed meanwhile. Its speakers were reloaded; try again.",
                 ),
             );
+            onStaleRef.current?.();
             await load();
             return false;
         }
