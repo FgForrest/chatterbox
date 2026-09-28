@@ -14,6 +14,7 @@ import { requireApiSession } from "@/lib/auth-server";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import { lockOrgTree } from "@/lib/folders/folders";
 import { getOrgUserId } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
 import { deleteRecordingStorageArtifacts } from "@/lib/recordings/erase";
@@ -22,6 +23,7 @@ import {
     normalizeRecordingTitle,
 } from "@/lib/recordings/filename";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
+import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import {
@@ -184,10 +186,10 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
+    let refused: ReturnType<typeof writerRefusalError> | null = null;
     const updated = await db.transaction(async (tx) => {
         // The lock sharing takes, so a share that committed meanwhile is
-        // seen below. The files keep the name they were given; the next
-        // rename, by whoever may, reconciles them.
+        // seen below.
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -199,7 +201,10 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             actorUserId: userId,
             orgUserId,
         });
-        if (shared) throw writerRefusalError(shared);
+        if (shared) {
+            refused = writerRefusalError(shared);
+            return undefined;
+        }
         const [row] = await tx
             .update(recordings)
             .set({
@@ -224,6 +229,14 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         return row;
     });
 
+    if (refused) {
+        // Shared while the files were being renamed for the refused title:
+        // they follow the title the recording kept instead.
+        if (reconciled.changed) {
+            await enqueueStorageReconciliationJob({ userId, recordingId: id });
+        }
+        throw refused;
+    }
     if (!updated) {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,
@@ -312,8 +325,15 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     // 2. Atomic DB writes: child rows, webhook delivery payload redaction,
     //    and tombstone in one transaction.
     let wasShared = false;
+    // Before the transaction, which must not take a second pooled
+    // connection while it holds the recording lock.
+    const orgUserId = await getOrgUserId();
     const didTombstone = await db.transaction(async (tx) => {
         const now = new Date();
+        // Withdrawing takes the Organization tree lock before the
+        // recording's, as every change to the tree does, so no folder move
+        // can file the recording again beside this delete.
+        if (orgUserId) await lockOrgTree(tx);
 
         // Lock the parent recording row up front. Without this, a
         // concurrent transcribe/summary writer (which also re-checks
@@ -372,7 +392,6 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             .delete(aiEnhancements)
             .where(eq(aiEnhancements.recordingId, id));
 
-        const orgUserId = await getOrgUserId();
         if (orgUserId) {
             const orgFolderIds = tx
                 .select({ id: recordingFolders.id })
