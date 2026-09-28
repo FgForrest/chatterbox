@@ -473,28 +473,44 @@ async function lockGovernedInTx(
 }
 
 /**
- * Whether the governor governs the recording right now, outside a
- * transaction: for the audio file, whose deletion is not one.
+ * Delete a recording's audio file with `removeFile`, and mark it reaped, if
+ * the governor still governs the recording: under its lock, which sharing
+ * and withdrawing wait for, so neither lands between the check and the
+ * deletion. Returns whether the audio was reaped.
  */
-export async function recordingGovernedBy(
+export async function reapAudioForRecording(
     recordingId: string,
+    ownerUserId: string,
     governor: RetentionGovernor,
+    at: Date,
+    removeFile: () => Promise<void>,
 ): Promise<boolean> {
-    if (!governor.orgUserId) return !governor.isOrg;
-    return (
-        (await isRecordingShared(recordingId, governor.orgUserId)) ===
-        governor.isOrg
-    );
+    return db.transaction(async (tx) => {
+        if (!(await lockGovernedInTx(tx, recordingId, governor))) return false;
+        await removeFile();
+        await tx
+            .update(recordings)
+            .set({ audioReapedAt: at, updatedAt: at })
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, ownerUserId),
+                ),
+            );
+        return true;
+    });
 }
 
 /**
- * Delete a recording's transcripts, which its owner holds, if the governor
- * still governs it. Returns how many went.
+ * Delete a recording's transcripts, which its owner holds, and mark them
+ * reaped, if the governor still governs it: one transaction, so nothing
+ * regenerated meanwhile is marked as gone. Returns how many went.
  */
 export async function deleteTranscriptsForRecording(
     recordingId: string,
     ownerUserId: string,
     governor: RetentionGovernor,
+    at: Date,
 ): Promise<number> {
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
@@ -507,18 +523,32 @@ export async function deleteTranscriptsForRecording(
                 ),
             )
             .returning({ id: transcriptions.id });
+        // Stamping a recording that had no transcript would be a lie, and
+        // would suppress auto-transcription of it for good.
+        if (rows.length > 0) {
+            await tx
+                .update(recordings)
+                .set({ transcriptReapedAt: at, updatedAt: at })
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, ownerUserId),
+                    ),
+                );
+        }
         return rows.length;
     });
 }
 
 /**
- * Delete a recording's summaries, which its owner holds, if the governor
- * still governs it. Returns how many went.
+ * Delete a recording's summaries, which its owner holds, and mark them
+ * reaped, if the governor still governs it. Returns how many went.
  */
 export async function deleteSummaryForRecording(
     recordingId: string,
     ownerUserId: string,
     governor: RetentionGovernor,
+    at: Date,
 ): Promise<number> {
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
@@ -531,34 +561,19 @@ export async function deleteSummaryForRecording(
                 ),
             )
             .returning({ id: aiEnhancements.id });
+        if (rows.length > 0) {
+            await tx
+                .update(recordings)
+                .set({ summaryReapedAt: at, updatedAt: at })
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, ownerUserId),
+                    ),
+                );
+        }
         return rows.length;
     });
-}
-
-/**
- * Stamp the reaped-at markers for the kinds that were actually removed.
- * `updatedAt` moves too, so the incremental `/api/v1/recordings` feed
- * reports the change rather than silently serving a stale shape.
- */
-export async function markKindsReaped(
-    recordingId: string,
-    userId: string,
-    kinds: readonly RetentionKind[],
-    at: Date,
-): Promise<void> {
-    if (kinds.length === 0) return;
-
-    await db
-        .update(recordings)
-        .set({
-            ...(kinds.includes("audio") ? { audioReapedAt: at } : {}),
-            ...(kinds.includes("transcript") ? { transcriptReapedAt: at } : {}),
-            ...(kinds.includes("summary") ? { summaryReapedAt: at } : {}),
-            updatedAt: at,
-        })
-        .where(
-            and(eq(recordings.id, recordingId), eq(recordings.userId, userId)),
-        );
 }
 
 /**

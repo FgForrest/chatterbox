@@ -3,12 +3,11 @@ import {
     clearReapedMarkers,
     deleteSummaryForRecording,
     deleteTranscriptsForRecording,
-    markKindsReaped,
     type ReapCandidate,
     type RetentionGovernor,
     type RetentionKind,
     type RetentionPolicy,
-    recordingGovernedBy,
+    reapAudioForRecording,
     releaseRemoteOriginalReapClaim,
 } from "@/db/queries/retention";
 import { movePlaudRecordingToTrash } from "@/lib/recordings/erase";
@@ -110,19 +109,30 @@ export async function reapRecording(
 
     if (
         isDue(recording.startTime, policy.audioDays, now) &&
-        recording.audioReapedAt === null &&
-        (await recordingGovernedBy(recording.id, governor))
+        recording.audioReapedAt === null
     ) {
-        // `deleteFile` throws on a key that isn't there, and "already
-        // gone" is a perfectly ordinary state here (a failed stamp on an
-        // earlier tick, a manual cleanup). Check first so a missing blob
-        // settles the marker instead of retrying forever, and a genuine
-        // storage failure still surfaces as a failure.
-        const present = await hasLocalAudio();
-        if (present) {
-            await storage.deleteFile(recording.storagePath);
+        const audioReaped = await reapAudioForRecording(
+            recording.id,
+            recording.userId,
+            governor,
+            now,
+            async () => {
+                // `deleteFile` throws on a key that isn't there, and
+                // "already gone" is a perfectly ordinary state here (a
+                // failed stamp on an earlier tick, a manual cleanup). Check
+                // first so a missing blob settles the marker instead of
+                // retrying forever, and a genuine storage failure still
+                // surfaces as a failure.
+                if (await hasLocalAudio()) {
+                    await storage.deleteFile(recording.storagePath);
+                }
+            },
+        );
+        if (audioReaped) {
+            reaped.push("audio");
+        } else {
+            skipped.audio = "no longer governed by this policy";
         }
-        reaped.push("audio");
     }
 
     if (
@@ -133,6 +143,7 @@ export async function reapRecording(
             recording.id,
             recording.userId,
             governor,
+            now,
         );
         if (removed > 0) {
             reaped.push("transcript");
@@ -149,6 +160,7 @@ export async function reapRecording(
             recording.id,
             recording.userId,
             governor,
+            now,
         );
         if (removed > 0) {
             reaped.push("summary");
@@ -157,10 +169,8 @@ export async function reapRecording(
         }
     }
 
-    // The markers describe the recording, whichever policy reaped it.
-    const localKinds = reaped.filter((kind) => kind !== "remoteOriginal");
-    await markKindsReaped(recording.id, recording.userId, localKinds, now);
-
+    // Each kind's marker was stamped with its deletion, whichever policy
+    // reaped it: the markers describe the recording.
     return { reaped, skipped, failed };
 }
 
