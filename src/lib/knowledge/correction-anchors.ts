@@ -8,6 +8,11 @@
  * word keeps the offsets; otherwise the heard text itself, where it now
  * stands nearest the old anchor's moment. Nothing else is guessed: an
  * anchor that is not found exactly is dropped, and so the correction.
+ *
+ * A transcript without times (a Plaud import whose turns all stand at 0)
+ * has no timeline to search over: there a correction stays only where the
+ * same turn, said by the same speaker, still has its words at the same
+ * place, as through an unchanged re-import.
  */
 
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -44,6 +49,32 @@ export function anchorsOverlap(a: AnchorPosition, b: AnchorPosition): boolean {
         a.charStart < b.charEnd &&
         b.charStart < a.charEnd
     );
+}
+
+/** Whether no turn has a duration: the times are missing, not zero. */
+export function isUntimed(turns: readonly TranscriptTurn[]): boolean {
+    return turns.every((turn) => turn.endMs <= turn.startMs);
+}
+
+/** Where the anchor stands in `nextTurns` without times; see above. */
+function keptInPlace(
+    anchor: CorrectionAnchor,
+    previousTurns: readonly TranscriptTurn[],
+    nextTurns: readonly TranscriptTurn[],
+): AnchorPosition | null {
+    if (!anchorMatches(anchor, previousTurns)) return null;
+    if (
+        !anchorMatches(anchor, nextTurns) ||
+        nextTurns[anchor.turnIndex]?.speaker !==
+            previousTurns[anchor.turnIndex]?.speaker
+    ) {
+        return null;
+    }
+    return {
+        turnIndex: anchor.turnIndex,
+        charStart: anchor.charStart,
+        charEnd: anchor.charEnd,
+    };
 }
 
 /** How long two turns speak at the same time; -1 when never. */
@@ -129,9 +160,13 @@ export function remapCorrectionAnchors(
     if (!previousTurns?.length || !nextTurns?.length) {
         return anchors.map(() => null);
     }
+    const remap =
+        isUntimed(previousTurns) || isUntimed(nextTurns)
+            ? keptInPlace
+            : remapOne;
     const kept: AnchorPosition[] = [];
     return anchors.map((anchor) => {
-        const position = remapOne(anchor, previousTurns, nextTurns);
+        const position = remap(anchor, previousTurns, nextTurns);
         if (
             !position ||
             kept.some((other) => anchorsOverlap(other, position))

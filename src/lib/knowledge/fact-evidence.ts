@@ -17,6 +17,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { deleteFactsInTx } from "@/lib/knowledge/fact-chains";
 import {
     QUOTE_SIMILARITY_THRESHOLD,
@@ -169,6 +170,11 @@ export async function recheckEvidenceInTx(
         nextLabels: next.labels,
     });
 
+    // Without times a quote is cut from every turn, so "alike" says nothing
+    // about the fact's own words: only the same words keep it supported.
+    const untimed = [previous.turns, next.turns].some(
+        (turns) => turns !== null && isUntimed(turns),
+    );
     for (const row of rows) {
         const carried = row.speakerLabel
             ? mapping.carried.get(row.speakerLabel)
@@ -176,10 +182,12 @@ export async function recheckEvidenceInTx(
         let status = row.status;
         if (status === "supported") {
             const cut = quoteFromTurns(next.turns, row.startMs, row.endMs);
+            const quote = decryptText(row.quote);
             if (
                 !cut ||
-                quoteSimilarity(decryptText(row.quote), cut) <
-                    QUOTE_SIMILARITY_THRESHOLD
+                (untimed
+                    ? cut !== quote
+                    : quoteSimilarity(quote, cut) < QUOTE_SIMILARITY_THRESHOLD)
             ) {
                 status = "wording_changed";
             } else if (row.dependsOnSpeaker && !carried) {

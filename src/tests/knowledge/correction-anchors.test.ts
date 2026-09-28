@@ -150,14 +150,86 @@ describe("remapCorrectionAnchors", () => {
     });
 
     it("places a zero-length turn by its instant", () => {
-        const previous = [turn(3000, 3000, "Novák.")];
+        const previous = [
+            turn(0, 3000, "Dobrý den."),
+            turn(3000, 3000, "Novák."),
+        ];
         const next = [turn(0, 4000, "Tady Novák."), turn(4000, 8000, "Novák.")];
         expect(
             remapCorrectionAnchors(
-                [{ turnIndex: 0, charStart: 0, charEnd: 5, heard: "Novák" }],
+                [{ turnIndex: 1, charStart: 0, charEnd: 5, heard: "Novák" }],
                 previous,
                 next,
             ),
         ).toEqual([{ turnIndex: 0, charStart: 5, charEnd: 10 }]);
+    });
+
+    describe("on untimed turns (a Plaud transcript without times)", () => {
+        const untimed = [
+            turn(0, 0, "Tady Novák, vedu Orion.", "speaker_1"),
+            turn(0, 0, "Pan Novák volal včera.", "speaker_2"),
+        ];
+        const anchor = anchorOf(untimed, 1, "Novák");
+
+        it("keeps every anchor through an unchanged re-import", () => {
+            expect(remapCorrectionAnchors([anchor], untimed, untimed)).toEqual([
+                { turnIndex: 1, charStart: 4, charEnd: 9 },
+            ]);
+        });
+
+        it("keeps an anchor where the same turn still has the words at the same place", () => {
+            const next = [
+                untimed[0] as TranscriptTurn,
+                turn(0, 0, "Pan Novák volal v pondělí.", "speaker_2"),
+            ];
+            expect(remapCorrectionAnchors([anchor], untimed, next)).toEqual([
+                { turnIndex: 1, charStart: 4, charEnd: 9 },
+            ]);
+        });
+
+        it("never moves an anchor onto another turn's words", () => {
+            const moved = [
+                untimed[0] as TranscriptTurn,
+                turn(0, 0, "Včera pan Novák volal.", "speaker_2"),
+            ];
+            expect(remapCorrectionAnchors([anchor], untimed, moved)).toEqual([
+                null,
+            ]);
+        });
+
+        it("drops an anchor whose turn another speaker now says", () => {
+            const relabelled = [
+                untimed[0] as TranscriptTurn,
+                turn(0, 0, "Pan Novák volal včera.", "speaker_1"),
+            ];
+            expect(
+                remapCorrectionAnchors([anchor], untimed, relabelled),
+            ).toEqual([null]);
+        });
+
+        it("holds a timed transcript replaced by an untimed one to the same rule", () => {
+            const timed = [
+                turn(0, 4000, "Tady Novák, vedu Orion.", "speaker_1"),
+                turn(4000, 9000, "Pan Novák volal včera.", "speaker_2"),
+            ];
+            const reworded = [
+                untimed[0] as TranscriptTurn,
+                turn(0, 0, "Včera pan Novák volal.", "speaker_2"),
+            ];
+            expect(
+                remapCorrectionAnchors(
+                    [anchorOf(timed, 1, "Novák")],
+                    timed,
+                    reworded,
+                ),
+            ).toEqual([null]);
+            expect(
+                remapCorrectionAnchors(
+                    [anchorOf(timed, 1, "Novák")],
+                    timed,
+                    untimed,
+                ),
+            ).toEqual([{ turnIndex: 1, charStart: 4, charEnd: 9 }]);
+        });
     });
 });

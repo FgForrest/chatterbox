@@ -354,6 +354,32 @@ describeWithDatabase("facts and evidence (PostgreSQL)", () => {
             expect(await db().select().from(knowledgeFacts)).toHaveLength(1);
         });
 
+        it("on a transcript without times, stays through an unchanged re-import and goes to review on any change", async () => {
+            const untimed = TURNS.map((turn) => ({
+                ...turn,
+                startMs: 0,
+                endMs: 0,
+            }));
+            await write(MARCH, untimed);
+            await confirmFrom(MARCH, {
+                startMs: 0,
+                endMs: 0,
+                speakerLabel: null,
+            });
+            await write(MARCH, untimed);
+            expect((await evidence())[0]?.status).toBe("supported");
+            // One word elsewhere: the quote, the whole transcript, is still
+            // alike, but nothing says the fact's own words stayed.
+            await write(MARCH, [
+                {
+                    ...(untimed[0] as TranscriptTurn),
+                    text: "Dobrý den, začneme hned.",
+                },
+                untimed[1] as TranscriptTurn,
+            ]);
+            expect((await evidence())[0]?.status).toBe("wording_changed");
+        });
+
         it("goes to review when its speaker is renamed, and only then", async () => {
             await confirmFrom(MARCH);
             const rename = async (personId: string) =>
