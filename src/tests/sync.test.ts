@@ -63,6 +63,7 @@ vi.mock("@/lib/posthog-server", () => ({
 
 import { db } from "@/db";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
+import { decryptText } from "@/lib/encryption/fields";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { captureServerException } from "@/lib/posthog-server";
 import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
@@ -478,8 +479,8 @@ describe("Sync", () => {
                 expect.objectContaining({ waveformPeaks: [0.25, 1] }),
             );
             // A machine's title follows Plaud's filename.
-            expect(set.mock.calls[0]?.[0].filename).not.toBe(
-                "stored:Renamed by a person",
+            expect(decryptText(set.mock.calls[0]?.[0].filename)).toBe(
+                "Recording 1.mp3",
             );
         });
 

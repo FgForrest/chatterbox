@@ -15,9 +15,6 @@ vi.mock("@/lib/encryption/fields", () => ({
 const { transcriptSpeakerTags } = await import(
     "@/components/dashboard/transcription-panel"
 );
-const { speakerLabelsForTranscript } = await import(
-    "@/lib/knowledge/speaker-label-rules"
-);
 const { transcriptSpeakerLabels } = await import(
     "@/lib/knowledge/speaker-labels"
 );
@@ -25,6 +22,7 @@ const { transcriptSpeakerLabels } = await import(
 const cases = [
     {
         name: "timed turns with padded, repeated and placeholder labels",
+        labels: ["speaker_1", "speaker_0"],
         source: "riffado",
         model: "scribe_v2+diarize",
         text: "ignored",
@@ -38,6 +36,7 @@ const cases = [
     },
     {
         name: "an overlong label",
+        labels: ["x".repeat(64)],
         source: "plaud",
         model: "plaud",
         text: "ignored",
@@ -45,6 +44,7 @@ const cases = [
     },
     {
         name: "a diarized text transcript",
+        labels: ["Jana", "Petr"],
         source: "plaud",
         model: "plaud",
         text: "Jana: Hello\nPetr: Hi\nJana: Bye",
@@ -52,6 +52,7 @@ const cases = [
     },
     {
         name: "a prompt-based transcript with Name: lines",
+        labels: [],
         source: "riffado",
         model: "gemini-2.0-flash",
         text: "Jana: Hello\nPetr: Hi",
@@ -60,11 +61,12 @@ const cases = [
 ];
 
 describe("speaker label parity", () => {
-    for (const input of cases) {
+    for (const { labels, ...input } of cases) {
         it(`agrees for ${input.name}`, () => {
-            const tags = transcriptSpeakerTags(input).map((tag) => tag.speaker);
-            expect(tags).toEqual(speakerLabelsForTranscript(input));
-            expect(tags).toEqual(transcriptSpeakerLabels(input));
+            expect(
+                transcriptSpeakerTags(input).map((tag) => tag.speaker),
+            ).toEqual(labels);
+            expect(transcriptSpeakerLabels(input)).toEqual(labels);
         });
     }
 });
