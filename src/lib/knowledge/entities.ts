@@ -29,6 +29,10 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { lockOrgPeople } from "@/lib/knowledge/people";
+import {
+    bumpScopeInTx,
+    scopesNamingInTx,
+} from "@/lib/knowledge/scope-generation";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = Pick<typeof db, "select">;
@@ -286,6 +290,7 @@ export async function createEntity(
                 createdByUserId: actorUserId,
             })
             .returning({ id: knowledgeEntities.id });
+        await bumpScopeInTx(tx, [actorUserId]);
         return (created as { id: string }).id;
     });
     const entity = await getEntity(actorUserId, id);
@@ -360,6 +365,11 @@ export async function renameEntity(
             .update(knowledgeEntities)
             .set({ name: encryptText(clean), nameHmac, updatedAt: new Date() })
             .where(eq(knowledgeEntities.id, entityId));
+        // A new name reads differently everywhere the entity is named.
+        await bumpScopeInTx(
+            tx,
+            await scopesNamingInTx(tx, { entityIds: [entityId] }),
+        );
     });
 }
 
@@ -393,6 +403,7 @@ export async function describeEntity(
                     updatedAt: new Date(),
                 })
                 .where(eq(knowledgeEntities.id, entityId));
+            await bumpScopeInTx(tx, [actorUserId]);
             return;
         }
         if (!clean) {
@@ -404,6 +415,7 @@ export async function describeEntity(
                         eq(knowledgeEntityNotes.userId, actorUserId),
                     ),
                 );
+            await bumpScopeInTx(tx, [actorUserId]);
             return;
         }
         await tx
@@ -420,6 +432,7 @@ export async function describeEntity(
                 ],
                 set: { notes: encryptText(clean), updatedAt: new Date() },
             });
+        await bumpScopeInTx(tx, [actorUserId]);
     });
 }
 
@@ -602,32 +615,41 @@ export async function mergeEntities(
                 { field: "typeKey" },
             );
         }
+        const scopes = await scopesNamingInTx(tx, {
+            entityIds: [winnerId, loserId],
+        });
         await mergeEntitiesInTx(tx, winnerId, loserId);
-        if (!loser.description) return;
-        if (keep.userId === loser.userId) {
-            const [winner] = await tx
-                .select({ description: knowledgeEntities.description })
-                .from(knowledgeEntities)
-                .where(eq(knowledgeEntities.id, winnerId));
-            const combined = [winner?.description, loser.description]
-                .flatMap((text) => (text ? [decryptText(text)] : []))
-                .join("\n\n");
-            await tx
-                .update(knowledgeEntities)
-                .set({
-                    description: encryptText(combined),
-                    updatedAt: new Date(),
-                })
-                .where(eq(knowledgeEntities.id, winnerId));
-        } else {
-            await appendEntityNotes(
-                tx,
-                winnerId,
-                loser.userId,
-                loser.description,
-            );
-        }
+        await mergeDescriptionInTx(tx, keep, loser, winnerId);
+        await bumpScopeInTx(tx, scopes);
     });
+}
+
+/** Where a merged-away entity's description goes; see `mergeEntities`. */
+async function mergeDescriptionInTx(
+    tx: Tx,
+    keep: EntityRow,
+    loser: EntityRow,
+    winnerId: string,
+): Promise<void> {
+    if (!loser.description) return;
+    if (keep.userId === loser.userId) {
+        const [winner] = await tx
+            .select({ description: knowledgeEntities.description })
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.id, winnerId));
+        const combined = [winner?.description, loser.description]
+            .flatMap((text) => (text ? [decryptText(text)] : []))
+            .join("\n\n");
+        await tx
+            .update(knowledgeEntities)
+            .set({
+                description: encryptText(combined),
+                updatedAt: new Date(),
+            })
+            .where(eq(knowledgeEntities.id, winnerId));
+    } else {
+        await appendEntityNotes(tx, winnerId, loser.userId, loser.description);
+    }
 }
 
 /**
@@ -655,19 +677,26 @@ export async function deleteEntity(
             tx,
             doomed.map((row) => row.id),
         );
+        // Read before the delete: it takes everyone's aliases, notes, facts
+        // and corrections naming these.
+        const scopes = await scopesNamingInTx(tx, {
+            entityIds: doomed.map((row) => row.id),
+        });
         await tx.delete(knowledgeEntities).where(
             inArray(
                 knowledgeEntities.id,
                 doomed.map((row) => row.id),
             ),
         );
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
 /**
  * Make a private entity the Organization's, as sharing a recording that
  * names it does (`promotePersonInTx` for people). The caller holds the
- * Organization-people lock.
+ * Organization-people lock, and bumps the scopes naming the entity
+ * (`scopesNamingInTx`, read first) and the Organization's at its end.
  *
  * A private type goes to the Organization type it was adopted as; one not
  * adopted refuses (409, `details.reason: "entityTypePrivate"`), as the

@@ -14,6 +14,10 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    bumpScopeInTx,
+    scopesNamingInTx,
+} from "@/lib/knowledge/scope-generation";
 
 /** The bound on `people.displayName`, shared by every route that writes it. */
 export const MAX_DISPLAY_NAME_LENGTH = 200;
@@ -144,10 +148,17 @@ async function viewerNotesFor(
  * only some people will ever have one.
  */
 export async function createPerson(args: CreatePersonArgs): Promise<Person> {
-    return createPersonInTx(db, args);
+    return db.transaction(async (tx) => {
+        const person = await createPersonInTx(tx, args);
+        await bumpScopeInTx(tx, [args.userId]);
+        return person;
+    });
 }
 
-/** `createPerson` inside a caller's transaction, e.g. with the change naming them. */
+/**
+ * `createPerson` inside a caller's transaction, e.g. with the change naming
+ * them. The caller bumps `userId`'s scope generation at its end.
+ */
 export async function createPersonInTx(
     executor: Pick<typeof db, "select" | "insert">,
     {
@@ -293,6 +304,11 @@ export async function updatePerson(
         // against the Organization's people and must not race an edit of it.
         await lockOrgPeople(tx);
         await updatePersonInTx(tx, actorId, personId, changes);
+        // A new name reads differently everywhere the person is named.
+        await bumpScopeInTx(
+            tx,
+            await scopesNamingInTx(tx, { personIds: [personId] }),
+        );
     });
     const updated = await getPerson(actorId, personId);
     if (!updated) throw personNotFound();
@@ -586,10 +602,14 @@ export async function mergePeople(
         // is never more than one hop deep and following it cannot loop.
         const winnerId = keep.mergedIntoId ?? keepId;
         if (winnerId === loserId) return;
+        const scopes = await scopesNamingInTx(tx, {
+            personIds: [winnerId, loserId],
+        });
         await mergeInTx(tx, winnerId, loserId);
         if (loser.ownerRole !== "org" && keep.ownerRole === "org") {
             await moveNotesToOverlay(tx, loser, winnerId);
         }
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
@@ -618,6 +638,17 @@ export async function deletePerson(
         // the time it is deleted.
         await lockOrgPeople(tx);
         const row = await requireManageable(tx, actorId, personId);
+        // Read before the delete: it takes everyone's aliases, notes, facts
+        // and corrections naming this person or their tombstones.
+        const doomed = await tx
+            .select({ id: people.id })
+            .from(people)
+            .where(
+                or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
+            );
+        const scopes = await scopesNamingInTx(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
         if (row.ownerRole === "org") {
             await tx
                 .update(transcriptSpeakers)
@@ -629,6 +660,7 @@ export async function deletePerson(
             .where(
                 or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
             );
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
@@ -687,9 +719,10 @@ export async function addPersonNotes(
 ): Promise<void> {
     const trimmed = notes.trim();
     if (!trimmed) return;
-    await db.transaction((tx) =>
-        appendOverlayNotes(tx, personId, userId, encryptText(trimmed)),
-    );
+    await db.transaction(async (tx) => {
+        await appendOverlayNotes(tx, personId, userId, encryptText(trimmed));
+        await bumpScopeInTx(tx, [userId]);
+    });
 }
 
 /**

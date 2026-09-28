@@ -13,6 +13,7 @@ import type { db } from "@/db";
 import {
     knowledgeFactEvidence,
     knowledgeFacts,
+    transcriptCorrections,
     transcriptions,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
@@ -26,16 +27,35 @@ import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-/** The facts with evidence on a recording's transcripts, read before they go. */
-export async function factsEvidencedOnInTx(
+/**
+ * What knowledge sits on a recording's transcripts, read before they go:
+ * the facts with evidence there, and every scope whose evidence,
+ * corrections or heard-as forms (which go with their corrections) the
+ * delete takes.
+ */
+export async function knowledgeOnRecordingInTx(
     tx: Tx,
     recordingId: string,
-): Promise<string[]> {
-    const rows = await tx
-        .selectDistinct({ factId: knowledgeFactEvidence.factId })
+): Promise<{ factIds: string[]; scopes: Set<string> }> {
+    const evidence = await tx
+        .selectDistinct({
+            factId: knowledgeFactEvidence.factId,
+            userId: knowledgeFactEvidence.userId,
+        })
         .from(knowledgeFactEvidence)
         .where(eq(knowledgeFactEvidence.recordingId, recordingId));
-    return rows.map((row) => row.factId);
+    const corrections = await tx
+        .selectDistinct({ userId: transcriptCorrections.userId })
+        .from(transcriptCorrections)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.id, transcriptCorrections.transcriptionId),
+        )
+        .where(eq(transcriptions.recordingId, recordingId));
+    return {
+        factIds: [...new Set(evidence.map((row) => row.factId))],
+        scopes: new Set([...evidence, ...corrections].map((row) => row.userId)),
+    };
 }
 
 /**
@@ -79,8 +99,8 @@ export async function pruneUnsupportedFactsInTx(
 export async function markSpeakerDependentEvidenceInTx(
     tx: Tx,
     { transcriptionId, label }: { transcriptionId: string; label: string },
-): Promise<void> {
-    await tx
+): Promise<Set<string>> {
+    const marked = await tx
         .update(knowledgeFactEvidence)
         .set({ status: "speaker_changed" })
         .where(
@@ -90,7 +110,9 @@ export async function markSpeakerDependentEvidenceInTx(
                 eq(knowledgeFactEvidence.dependsOnSpeaker, true),
                 eq(knowledgeFactEvidence.status, "supported"),
             ),
-        );
+        )
+        .returning({ userId: knowledgeFactEvidence.userId });
+    return new Set(marked.map((row) => row.userId));
 }
 
 /**
@@ -102,6 +124,7 @@ export async function markSpeakerDependentEvidenceInTx(
  * speaker's label carries cleanly (`mapLabels`); otherwise it goes to
  * review as `wording_changed` or `speaker_changed`. Evidence already under
  * review keeps its status, its label following the voice where it can.
+ * Returns the scopes it touched.
  */
 export async function recheckEvidenceInTx(
     tx: Tx,
@@ -114,10 +137,11 @@ export async function recheckEvidenceInTx(
         previous: SpeakerVersion;
         next: SpeakerVersion;
     },
-): Promise<void> {
+): Promise<Set<string>> {
     const rows = await tx
         .select({
             id: knowledgeFactEvidence.id,
+            userId: knowledgeFactEvidence.userId,
             status: knowledgeFactEvidence.status,
             startMs: knowledgeFactEvidence.startMs,
             endMs: knowledgeFactEvidence.endMs,
@@ -127,7 +151,7 @@ export async function recheckEvidenceInTx(
         })
         .from(knowledgeFactEvidence)
         .where(eq(knowledgeFactEvidence.transcriptionId, transcriptionId));
-    if (rows.length === 0) return;
+    if (rows.length === 0) return new Set();
 
     const [transcript] = await tx
         .select({ revision: transcriptions.revision })
@@ -165,4 +189,5 @@ export async function recheckEvidenceInTx(
             })
             .where(eq(knowledgeFactEvidence.id, row.id));
     }
+    return new Set(rows.map((row) => row.userId));
 }

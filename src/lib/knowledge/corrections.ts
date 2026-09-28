@@ -37,6 +37,7 @@ import {
 } from "@/lib/knowledge/correction-anchors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 
 const HEARD_DOMAIN = "correction-heard";
@@ -189,6 +190,7 @@ export async function acceptCorrection(
                 correctionId: id,
             });
         }
+        await bumpScopeInTx(tx, [actorUserId]);
         return id;
     });
 }
@@ -219,6 +221,7 @@ export async function revertCorrection(
             )
             .returning({ id: transcriptCorrections.id });
         if (deleted.length === 0) throw correctionNotFound();
+        await bumpScopeInTx(tx, [args.actorUserId]);
     });
 }
 

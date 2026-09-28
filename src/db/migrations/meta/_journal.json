@@ -498,6 +498,13 @@
       "when": 1790616541829,
       "tag": "0070_knowledge_facts",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790617516674,
+      "tag": "0071_knowledge_scope_generations",
+      "breakpoints": true
     }
   ]
 }

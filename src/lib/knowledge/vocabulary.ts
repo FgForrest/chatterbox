@@ -30,6 +30,11 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
+    bumpScopeInTx,
+    scopesNamingInTx,
+    scopesUsingTypeInTx,
+} from "@/lib/knowledge/scope-generation";
+import {
     CORE_ENTITY_TYPES,
     CORE_RELATIONS,
     deniedTopicOf,
@@ -460,9 +465,11 @@ export async function createPrivateType(
 ): Promise<string> {
     // The organization account's types are the Organization's.
     if (await isOrgAccount(userId)) throw organizationOnly();
-    return db.transaction((tx) =>
-        insertTypeInTx(tx, userId, userId, "u", spec),
-    );
+    return db.transaction(async (tx) => {
+        const key = await insertTypeInTx(tx, userId, userId, "u", spec);
+        await bumpScopeInTx(tx, [userId]);
+        return key;
+    });
 }
 
 /** Create an Organization type. The organization account only. */
@@ -471,9 +478,17 @@ export async function createOrgType(
     spec: NewTypeSpec,
 ): Promise<string> {
     if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
-    return db.transaction((tx) =>
-        insertTypeInTx(tx, actorUserId, actorUserId, "o", spec),
-    );
+    return db.transaction(async (tx) => {
+        const key = await insertTypeInTx(
+            tx,
+            actorUserId,
+            actorUserId,
+            "o",
+            spec,
+        );
+        await bumpScopeInTx(tx, [actorUserId]);
+        return key;
+    });
 }
 
 /**
@@ -525,6 +540,11 @@ export async function renameOwnType(
             })
             .where(eq(table.id, id));
         await bumpVocabularyVersionInTx(tx);
+        // Everyone whose entities or facts read with the old name.
+        await bumpScopeInTx(tx, [
+            userId,
+            ...(await scopesUsingTypeInTx(tx, kind, key)),
+        ]);
     });
 }
 
@@ -588,6 +608,21 @@ export async function deleteOwnType(
                 { count },
             );
         }
+        // Read before the delete: the owner's entities of the type take
+        // everyone's aliases, notes, facts and corrections naming them.
+        const scopes = await scopesUsingTypeInTx(tx, kind, key);
+        scopes.add(userId);
+        if (kind === "entity" && count > 0) {
+            const doomed = await tx
+                .select({ id: knowledgeEntities.id })
+                .from(knowledgeEntities)
+                .where(usesOfTypeCondition(kind, userId, key));
+            for (const scope of await scopesNamingInTx(tx, {
+                entityIds: doomed.map((row) => row.id),
+            })) {
+                scopes.add(scope);
+            }
+        }
         if (count > 0) {
             await tx
                 .delete(kind === "entity" ? knowledgeEntities : knowledgeFacts)
@@ -596,6 +631,7 @@ export async function deleteOwnType(
         const table = tableOf(kind);
         await tx.delete(table).where(eq(table.id, id));
         await bumpVocabularyVersionInTx(tx);
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
@@ -718,7 +754,7 @@ export async function adoptPhrase(
             LABEL_DOMAIN.relation,
             cleanLabel(label),
         );
-        await tx
+        const adopters = await tx
             .update(knowledgeRelationTypes)
             .set({ adoptedAsKey: key, updatedAt: new Date() })
             .where(
@@ -727,7 +763,12 @@ export async function adoptPhrase(
                     sql`${knowledgeRelationTypes.userId} is not null`,
                     sql`not ${orgOwnedCondition(knowledgeRelationTypes.userId)}`,
                 ),
-            );
+            )
+            .returning({ userId: knowledgeRelationTypes.userId });
+        await bumpScopeInTx(tx, [
+            actorUserId,
+            ...adopters.map((row) => row.userId),
+        ]);
         return key;
     });
 }

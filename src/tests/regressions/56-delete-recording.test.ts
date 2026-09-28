@@ -98,8 +98,13 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
 // Pruning facts with their transcripts is tested against a real database
 // (`facts.integration.test.ts`).
 vi.mock("@/lib/knowledge/fact-evidence", () => ({
-    factsEvidencedOnInTx: vi.fn().mockResolvedValue([]),
+    knowledgeOnRecordingInTx: vi
+        .fn()
+        .mockResolvedValue({ factIds: [], scopes: new Set() }),
     pruneUnsupportedFactsInTx: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/knowledge/scope-generation", () => ({
+    bumpScopeInTx: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),

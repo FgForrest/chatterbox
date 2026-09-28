@@ -37,6 +37,7 @@ import {
 } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 
@@ -375,6 +376,7 @@ export async function confirmFactFromRecording(
                 confirmedByUserId: args.actorUserId,
             })
             .onConflictDoNothing();
+        await bumpScopeInTx(tx, [args.actorUserId]);
         return factId;
     });
 }
@@ -426,14 +428,16 @@ export async function confirmManualFact(
     actorUserId: string,
     args: FactArgs,
 ): Promise<string> {
-    return db.transaction((tx) =>
-        confirmFactInTx(tx, {
+    return db.transaction(async (tx) => {
+        const factId = await confirmFactInTx(tx, {
             ...args,
             scopeUserId: actorUserId,
             actorUserId,
             origin: "manual",
-        }),
-    );
+        });
+        await bumpScopeInTx(tx, [actorUserId]);
+        return factId;
+    });
 }
 
 /**
@@ -472,6 +476,7 @@ export async function withdrawEvidence(args: {
             throw new AppError(ErrorCode.NOT_FOUND, "Evidence not found", 404);
         }
         await pruneUnsupportedFactsInTx(tx, [removed.factId]);
+        await bumpScopeInTx(tx, [args.actorUserId]);
     });
 }
 
@@ -483,16 +488,19 @@ export async function deleteFact(
     actorUserId: string,
     factId: string,
 ): Promise<void> {
-    const deleted = await db
-        .delete(knowledgeFacts)
-        .where(
-            and(
-                eq(knowledgeFacts.id, factId),
-                eq(knowledgeFacts.userId, actorUserId),
-            ),
-        )
-        .returning({ id: knowledgeFacts.id });
-    if (deleted.length === 0) throw factNotFound();
+    await db.transaction(async (tx) => {
+        const deleted = await tx
+            .delete(knowledgeFacts)
+            .where(
+                and(
+                    eq(knowledgeFacts.id, factId),
+                    eq(knowledgeFacts.userId, actorUserId),
+                ),
+            )
+            .returning({ id: knowledgeFacts.id });
+        if (deleted.length === 0) throw factNotFound();
+        await bumpScopeInTx(tx, [actorUserId]);
+    });
 }
 
 function nodeOf(

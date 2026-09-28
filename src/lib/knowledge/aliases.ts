@@ -25,6 +25,7 @@ import { entitiesVisibleTo } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = Pick<typeof db, "select">;
@@ -179,6 +180,7 @@ export async function addAlias(
                 { field: "text" },
             );
         }
+        await bumpScopeInTx(tx, [actorUserId]);
         return row.id;
     });
 }
@@ -191,17 +193,20 @@ export async function removeAlias(
     actorUserId: string,
     aliasId: string,
 ): Promise<void> {
-    const deleted = await db
-        .delete(knowledgeAliases)
-        .where(
-            and(
-                eq(knowledgeAliases.id, aliasId),
-                eq(knowledgeAliases.userId, actorUserId),
-                eq(knowledgeAliases.kind, "alias"),
-            ),
-        )
-        .returning({ id: knowledgeAliases.id });
-    if (deleted.length === 0) throw aliasNotFound();
+    await db.transaction(async (tx) => {
+        const deleted = await tx
+            .delete(knowledgeAliases)
+            .where(
+                and(
+                    eq(knowledgeAliases.id, aliasId),
+                    eq(knowledgeAliases.userId, actorUserId),
+                    eq(knowledgeAliases.kind, "alias"),
+                ),
+            )
+            .returning({ id: knowledgeAliases.id });
+        if (deleted.length === 0) throw aliasNotFound();
+        await bumpScopeInTx(tx, [actorUserId]);
+    });
 }
 
 /** The other names of a person or entity that `viewerUserId` may see. */
@@ -236,7 +241,7 @@ export async function listAliases(
  * the scope the correction was made in (`scopeUserId`: the owner on a
  * private recording, the organization account on a shared one). The next
  * run may then pre-tick the same correction. Only a person's confirmation
- * teaches: callers skip pre-ticked corrections.
+ * teaches: callers skip pre-ticked corrections, and bump `scopeUserId`.
  */
 export async function teachHeardAsInTx(
     tx: Tx,

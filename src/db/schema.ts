@@ -1569,6 +1569,22 @@ export const knowledgeFactEvidence = pgTable(
     }),
 );
 
+// One counter per knowledge scope (a user, or the organization account),
+// moved by every transaction that changes what the scope knows: a process
+// holding the scope in memory reloads it when the counter moved.
+export const knowledgeScopeGenerations = pgTable(
+    "knowledge_scope_generations",
+    {
+        userId: text("user_id")
+            .primaryKey()
+            .references(() => users.id, { onDelete: "cascade" }),
+        generation: bigint("generation", { mode: "number" })
+            .notNull()
+            .default(0),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+);
+
 // AI Enhancements
 export const aiEnhancements = pgTable(
     "ai_enhancements",

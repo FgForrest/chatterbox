@@ -18,6 +18,7 @@ import {
 } from "@/lib/knowledge/attribution";
 import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence";
 import { createPersonInTx } from "@/lib/knowledge/people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -76,7 +77,20 @@ export async function changeTranscriptSpeaker(
  */
 export async function changeTranscriptSpeakerInTx(
     tx: Tx,
+    args: SpeakerChangeArgs,
+): Promise<string | null> {
+    // The knowledge a change touched: a person it created, evidence it put
+    // to review. Their scopes move once, last.
+    const scopes = new Set<string>();
+    const named = await answerSpeakerInTx(tx, args, scopes);
+    await bumpScopeInTx(tx, scopes);
+    return named;
+}
+
+async function answerSpeakerInTx(
+    tx: Tx,
     { answer, actorUserId, orgUserId, ...version }: SpeakerChangeArgs,
+    scopes: Set<string>,
 ): Promise<string | null> {
     const { recordingId } = await lockForSpeakerChange(tx, version);
     const refusal = await contentWriterRefusal(tx, {
@@ -115,24 +129,28 @@ export async function changeTranscriptSpeakerInTx(
             : null;
     const speakerChanged = async (now: string | null) => {
         if (answered !== null && answered !== now) {
-            await markSpeakerDependentEvidenceInTx(tx, {
+            const marked = await markSpeakerDependentEvidenceInTx(tx, {
                 transcriptionId: version.transcriptionId,
                 label: version.label,
             });
+            for (const scope of marked) scopes.add(scope);
         }
     };
     switch (answer.kind) {
         case "name": {
-            const personId =
-                "personId" in answer
-                    ? answer.personId
-                    : (
-                          await createPersonInTx(tx, {
-                              userId: actorUserId,
-                              displayName: answer.displayName,
-                              createdByUserId: null,
-                          })
-                      ).id;
+            let personId: string;
+            if ("personId" in answer) {
+                personId = answer.personId;
+            } else {
+                personId = (
+                    await createPersonInTx(tx, {
+                        userId: actorUserId,
+                        displayName: answer.displayName,
+                        createdByUserId: null,
+                    })
+                ).id;
+                scopes.add(actorUserId);
+            }
             await writeSpeakerInTx(tx, {
                 ...where,
                 personId,

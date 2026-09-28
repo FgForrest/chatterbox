@@ -20,9 +20,10 @@ import {
     users,
 } from "@/db/schema";
 import {
-    factsEvidencedOnInTx,
+    knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
 } from "@/lib/knowledge/fact-evidence";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { isRecordingShared } from "@/lib/sharing/shared";
 
 /** One kind of data a retention policy can remove. */
@@ -523,7 +524,7 @@ export async function deleteTranscriptsForRecording(
     return db.transaction(async (tx) => {
         if (!(await lockGovernedInTx(tx, recordingId, governor))) return 0;
         // Facts said only here decay with the transcript.
-        const factIds = await factsEvidencedOnInTx(tx, recordingId);
+        const knowledge = await knowledgeOnRecordingInTx(tx, recordingId);
         const rows = await tx
             .delete(transcriptions)
             .where(
@@ -533,7 +534,7 @@ export async function deleteTranscriptsForRecording(
                 ),
             )
             .returning({ id: transcriptions.id });
-        await pruneUnsupportedFactsInTx(tx, factIds);
+        await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
         // Stamping a recording that had no transcript would be a lie, and
         // would suppress auto-transcription of it for good.
         if (rows.length > 0) {
@@ -547,6 +548,7 @@ export async function deleteTranscriptsForRecording(
                     ),
                 );
         }
+        await bumpScopeInTx(tx, knowledge.scopes);
         return rows.length;
     });
 }

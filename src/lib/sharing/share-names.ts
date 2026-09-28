@@ -3,6 +3,10 @@ import type { db } from "@/db";
 import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { promotePersonInTx } from "@/lib/knowledge/people";
+import {
+    bumpScopeInTx,
+    scopesNamingInTx,
+} from "@/lib/knowledge/scope-generation";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -91,9 +95,15 @@ export async function publishSpeakerNamesInTx(
             .delete(transcriptSpeakers)
             .where(inArray(transcriptSpeakers.id, dropped));
     }
+    // Read before promoting: the people move from the owner's scope to the
+    // Organization's, and their notes to overlays.
+    const scopes = await scopesNamingInTx(tx, { personIds: [...toPromote] });
     let promoted = 0;
     for (const personId of toPromote) {
         if (await promotePersonInTx(tx, personId, orgUserId)) promoted += 1;
+    }
+    if (promoted > 0 || dropped.length > 0) {
+        await bumpScopeInTx(tx, [...scopes, orgUserId]);
     }
     return promoted;
 }

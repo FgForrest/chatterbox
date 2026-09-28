@@ -26,7 +26,7 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * transcript. Pre-ticked rows go: the review that ticked them was about the
  * text just replaced. The rest are re-anchored (`remapCorrectionAnchors`)
  * and moved to the new revision, or deleted where their words are not
- * found exactly.
+ * found exactly. Returns the scopes it touched.
  */
 export async function recheckCorrectionsInTx(
     tx: Tx,
@@ -39,17 +39,19 @@ export async function recheckCorrectionsInTx(
         previousTurns: readonly TranscriptTurn[] | null;
         nextTurns: readonly TranscriptTurn[] | null;
     },
-): Promise<void> {
+): Promise<Set<string>> {
     const ofTranscript = eq(
         transcriptCorrections.transcriptionId,
         transcriptionId,
     );
-    await tx
+    const preTicked = await tx
         .delete(transcriptCorrections)
-        .where(and(ofTranscript, eq(transcriptCorrections.preTicked, true)));
+        .where(and(ofTranscript, eq(transcriptCorrections.preTicked, true)))
+        .returning({ userId: transcriptCorrections.userId });
     const rows = await tx
         .select({
             id: transcriptCorrections.id,
+            userId: transcriptCorrections.userId,
             turnIndex: transcriptCorrections.turnIndex,
             charStart: transcriptCorrections.charStart,
             charEnd: transcriptCorrections.charEnd,
@@ -62,7 +64,8 @@ export async function recheckCorrectionsInTx(
             asc(transcriptCorrections.charStart),
             asc(transcriptCorrections.createdAt),
         );
-    if (rows.length === 0) return;
+    const scopes = new Set([...preTicked, ...rows].map((row) => row.userId));
+    if (rows.length === 0) return scopes;
 
     const positions = remapCorrectionAnchors(
         rows.map((row) => ({ ...row, heard: decryptText(row.heard) })),
@@ -78,7 +81,7 @@ export async function recheckCorrectionsInTx(
             ),
         );
     }
-    if (lost.length === rows.length) return;
+    if (lost.length === rows.length) return scopes;
 
     const [transcript] = await tx
         .select({ revision: transcriptions.revision })
@@ -97,4 +100,5 @@ export async function recheckCorrectionsInTx(
             })
             .where(eq(transcriptCorrections.id, row.id));
     }
+    return scopes;
 }

@@ -17,6 +17,7 @@ import type { db } from "@/db";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
 import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -31,14 +32,16 @@ export async function transcriptRewrittenInTx(
     },
 ): Promise<void> {
     await remapTranscriptAttributionsInTx(tx, args);
-    await recheckCorrectionsInTx(tx, {
+    const corrected = await recheckCorrectionsInTx(tx, {
         transcriptionId: args.transcriptionId,
         previousTurns: args.previous.turns,
         nextTurns: args.next.turns,
     });
-    await recheckEvidenceInTx(tx, {
+    const evidenced = await recheckEvidenceInTx(tx, {
         transcriptionId: args.transcriptionId,
         previous: args.previous,
         next: args.next,
     });
+    // Once, after both: the knowledge of every scope the rewrite touched.
+    await bumpScopeInTx(tx, [...corrected, ...evidenced]);
 }
