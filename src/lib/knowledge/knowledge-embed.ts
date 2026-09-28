@@ -221,7 +221,10 @@ const CHUNK_SIZE = 64;
  * in one transaction. Their rows are held (FOR KEY SHARE) while it
  * writes, so what is written cannot lose its item before it commits; an
  * item gone since the texts were rendered is skipped, and the scope
- * generation it moved queues the next run. Returns how many were written.
+ * generation it moved queues the next run. An item a deletion holds is
+ * skipped too, never waited on: the embedder would otherwise lock entities
+ * before facts, a deletion facts before entities, and one would be
+ * aborted. Returns how many were written.
  */
 async function writeChunk(
     scope: string,
@@ -247,7 +250,7 @@ async function writeChunk(
                         eq(knowledgeEntities.userId, scope),
                     ),
                 )
-                .for("key share");
+                .for("key share", { skipLocked: true });
             for (const row of rows) present.add(row.id);
         }
         if (factIds.length > 0) {
@@ -260,7 +263,7 @@ async function writeChunk(
                         eq(knowledgeFacts.userId, scope),
                     ),
                 )
-                .for("key share");
+                .for("key share", { skipLocked: true });
             for (const row of rows) present.add(row.id);
         }
         let written = 0;
@@ -357,6 +360,9 @@ export async function embedScope(
     }
     signal?.throwIfAborted();
 
+    // An item skipped (gone, or held by a deletion that may yet roll back)
+    // leaves the scope marked behind, so the seeder runs it again.
+    const caughtUp = embedded === stale.length ? scopeGeneration : null;
     let removed = 0;
     await db.transaction(async (tx) => {
         // What no longer renders (gone, replaced, its description cleared).
@@ -407,14 +413,14 @@ export async function embedScope(
             .values({
                 userId: scope,
                 activeGeneration: generation,
-                embeddedAt: scopeGeneration,
+                embeddedAt: caughtUp,
                 vectorVersion: 1,
             })
             .onConflictDoUpdate({
                 target: knowledgeVectorState.userId,
                 set: {
                     activeGeneration: generation,
-                    embeddedAt: scopeGeneration,
+                    embeddedAt: caughtUp,
                     vectorVersion: sql`${knowledgeVectorState.vectorVersion} + 1`,
                     updatedAt: new Date(),
                 },

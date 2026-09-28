@@ -443,4 +443,45 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
             expect.objectContaining({ entityId: orion }),
         ]);
     });
+
+    it("skips an item a deletion holds instead of waiting on it", async () => {
+        const orion = await aliceKnows();
+        let release: () => void = () => {};
+        const released = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let holding: () => void = () => {};
+        const held = new Promise<void>((resolve) => {
+            holding = resolve;
+        });
+        // As deleteEntity does after deleting the facts naming it.
+        const deleter = db().transaction(async (tx) => {
+            await tx
+                .select({ id: knowledgeEntities.id })
+                .from(knowledgeEntities)
+                .where(eq(knowledgeEntities.id, orion))
+                .for("update");
+            holding();
+            await released;
+        });
+        await held;
+        let done = false;
+        const embedding = embedScope(ALICE, client()).finally(() => {
+            done = true;
+        });
+        const deadline = Date.now() + 3_000;
+        while (!done && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        const finishedWhileHeld = done;
+        release();
+        await deleter;
+        await embedding;
+        expect(finishedWhileHeld).toBe(true);
+        expect(
+            (await vectorsOf(ALICE)).some((row) => row.entityId === orion),
+        ).toBe(false);
+        // Behind, so the next run embeds it if it is still there.
+        expect((await stateOf(ALICE))?.embeddedAt).toBeNull();
+    });
 });
