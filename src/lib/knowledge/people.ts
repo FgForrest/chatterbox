@@ -1,9 +1,12 @@
 import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
+    knowledgeAliases,
     people,
     personNotes,
     recordings,
+    transcriptCorrections,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -11,6 +14,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
@@ -439,6 +443,39 @@ async function mergeInTx(
         await tx.delete(personNotes).where(eq(personNotes.personId, loserId));
     }
 
+    // The knowledge naming the loser follows: corrections (two never cover
+    // the same words, so nothing collides), aliases (the survivor's own copy
+    // of a name wins), and facts (combined where they then say the same).
+    await tx
+        .update(transcriptCorrections)
+        .set({ targetPersonId: winnerId, updatedAt: new Date() })
+        .where(eq(transcriptCorrections.targetPersonId, loserId));
+    const other = alias(knowledgeAliases, "other");
+    await tx
+        .update(knowledgeAliases)
+        .set({ personId: winnerId, updatedAt: new Date() })
+        .where(
+            and(
+                eq(knowledgeAliases.personId, loserId),
+                sql`not exists (${tx
+                    .select({ id: other.id })
+                    .from(other)
+                    .where(
+                        and(
+                            eq(other.personId, winnerId),
+                            eq(other.userId, knowledgeAliases.userId),
+                            eq(other.kind, knowledgeAliases.kind),
+                            eq(other.textHmac, knowledgeAliases.textHmac),
+                            sql`${other.correctionId} is not distinct from ${knowledgeAliases.correctionId}`,
+                        ),
+                    )})`,
+            ),
+        );
+    await tx
+        .delete(knowledgeAliases)
+        .where(eq(knowledgeAliases.personId, loserId));
+    await moveFactsInTx(tx, { personId: loserId }, { personId: winnerId });
+
     // Chains collapse to the final winner rather than forming a linked
     // list nobody walks: anything already pointing at the loser is
     // repointed in the same transaction.
@@ -478,6 +515,10 @@ async function lockRecordingsNaming(
         .select({ id: transcriptSpeakerRejections.transcriptionId })
         .from(transcriptSpeakerRejections)
         .where(inArray(transcriptSpeakerRejections.personId, personIds));
+    const corrected = tx
+        .select({ id: transcriptCorrections.transcriptionId })
+        .from(transcriptCorrections)
+        .where(inArray(transcriptCorrections.targetPersonId, personIds));
     const touched = await tx
         .selectDistinct({ recordingId: transcriptions.recordingId })
         .from(transcriptions)
@@ -485,6 +526,7 @@ async function lockRecordingsNaming(
             or(
                 inArray(transcriptions.id, named),
                 inArray(transcriptions.id, rejected),
+                inArray(transcriptions.id, corrected),
             ),
         );
     if (touched.length === 0) return;

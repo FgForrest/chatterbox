@@ -26,6 +26,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { lockOrgPeople } from "@/lib/knowledge/people";
@@ -549,6 +550,8 @@ async function mergeEntitiesInTx(
     await tx
         .delete(knowledgeAliases)
         .where(eq(knowledgeAliases.entityId, loserId));
+    // Facts naming the loser, combined where they then say the same.
+    await moveFactsInTx(tx, { entityId: loserId }, { entityId: winnerId });
 
     // Everyone's private notes on the loser follow it.
     const loserNotes = await tx
