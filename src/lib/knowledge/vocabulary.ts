@@ -124,7 +124,9 @@ export async function vocabularyVersion(
  */
 export async function seedCoreVocabulary(): Promise<void> {
     await db.transaction(async (tx) => {
-        let changed = false;
+        // What changed, so the scopes using it re-render its label (their
+        // vectors are made from it).
+        const changed: { kind: TypeKind; key: string }[] = [];
         for (const type of CORE_ENTITY_TYPES) {
             const [row] = await tx
                 .insert(knowledgeEntityTypes)
@@ -153,7 +155,7 @@ export async function seedCoreVocabulary(): Promise<void> {
                     setWhere: sql`${knowledgeEntityTypes.labelHmac} is distinct from excluded.label_hmac or ${knowledgeEntityTypes.status} <> 'active'`,
                 })
                 .returning({ key: knowledgeEntityTypes.key });
-            if (row) changed = true;
+            if (row) changed.push({ kind: "entity", key: row.key });
         }
         for (const relation of CORE_RELATIONS) {
             const values = {
@@ -179,9 +181,17 @@ export async function seedCoreVocabulary(): Promise<void> {
                     setWhere: sql`(${knowledgeRelationTypes.labelHmac}, ${knowledgeRelationTypes.subjectTypes}, ${knowledgeRelationTypes.objectTypes}, ${knowledgeRelationTypes.objectKind}, ${knowledgeRelationTypes.cardinality}, ${knowledgeRelationTypes.status}) is distinct from (excluded.label_hmac, excluded.subject_types, excluded.object_types, excluded.object_kind, excluded.cardinality, 'active')`,
                 })
                 .returning({ key: knowledgeRelationTypes.key });
-            if (row) changed = true;
+            if (row) changed.push({ kind: "relation", key: row.key });
         }
-        if (changed) await bumpVocabularyVersionInTx(tx);
+        if (changed.length === 0) return;
+        await bumpVocabularyVersionInTx(tx);
+        const scopes = new Set<string>();
+        for (const { kind, key } of changed) {
+            for (const scope of await scopesUsingTypeInTx(tx, kind, key)) {
+                scopes.add(scope);
+            }
+        }
+        await bumpScopeInTx(tx, scopes);
     });
 }
 

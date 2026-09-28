@@ -77,6 +77,7 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 
 import { encryptText } from "@/lib/encryption/fields";
 import { confirmManualFact } from "@/lib/knowledge/facts";
+import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
 import {
     adoptPhrase,
     createOrgType,
@@ -184,6 +185,34 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
                 (r) => r.key === "leads",
             ),
         ).toMatchObject({ cardinality: "many" });
+    });
+
+    it("tells the scopes using a core label the code changed", async () => {
+        const [jan, pavel] = await db()
+            .insert(people)
+            .values([
+                { userId: ALICE, displayName: encryptText("Jan") },
+                { userId: ALICE, displayName: encryptText("Pavel") },
+            ])
+            .returning({ id: people.id });
+        await confirmManualFact(ALICE, {
+            subject: { personId: jan?.id ?? "" },
+            relationKey: "reports_to",
+            object: { personId: pavel?.id ?? "" },
+        });
+        const generation = async () =>
+            (await readScopeGenerations(db(), [ALICE, BOB])).get(ALICE) ?? 0;
+        const before = await generation();
+        await seedCoreVocabulary();
+        expect(await generation()).toBe(before);
+
+        // As a code update renaming it would leave the stored row.
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ labelHmac: "old-label" })
+            .where(eq(knowledgeRelationTypes.key, "reports_to"));
+        await seedCoreVocabulary();
+        expect(await generation()).toBe(before + 1);
     });
 
     it("keeps a private type to its owner, and out of shared runs", async () => {
