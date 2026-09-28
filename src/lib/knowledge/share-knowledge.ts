@@ -37,6 +37,8 @@ import {
     knowledgeFactEvidence,
     knowledgeFacts,
     knowledgeRelationTypes,
+    learnDismissals,
+    learnRuns,
     transcriptCorrections,
     transcriptions,
 } from "@/db/schema";
@@ -428,6 +430,25 @@ export async function withdrawKnowledgeInTx(
     const scopes = new Set([ownerUserId, orgUserId]);
     const transcriptIds = await transcriptIdsOf(tx, recordingId);
     if (transcriptIds.length === 0) return scopes;
+
+    // The Organization's Learn runs there, and what they proposed and
+    // were told no to: its view of the recording is gone.
+    await tx
+        .delete(learnRuns)
+        .where(
+            and(
+                eq(learnRuns.recordingId, recordingId),
+                eq(learnRuns.scopeUserId, orgUserId),
+            ),
+        );
+    await tx
+        .delete(learnDismissals)
+        .where(
+            and(
+                eq(learnDismissals.recordingId, recordingId),
+                eq(learnDismissals.userId, orgUserId),
+            ),
+        );
 
     const removed = await tx
         .delete(knowledgeFactEvidence)

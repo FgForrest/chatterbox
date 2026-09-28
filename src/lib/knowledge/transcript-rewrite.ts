@@ -10,10 +10,13 @@
  * - fact evidence, by the words at its time and the voice it depends on
  *   (`recheckEvidenceInTx`).
  *
- * Pending Learn runs join it with them.
+ * - Learn runs not yet finished read the old text: superseded, so their
+ *   review cannot be finished and offers a rerun.
  */
 
+import { and, eq, inArray } from "drizzle-orm";
 import type { db } from "@/db";
+import { learnRuns } from "@/db/schema";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
 import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
@@ -42,6 +45,15 @@ export async function transcriptRewrittenInTx(
         previous: args.previous,
         next: args.next,
     });
+    await tx
+        .update(learnRuns)
+        .set({ status: "superseded", updatedAt: new Date() })
+        .where(
+            and(
+                eq(learnRuns.transcriptionId, args.transcriptionId),
+                inArray(learnRuns.status, ["queued", "running", "ready"]),
+            ),
+        );
     // Once, after both: the knowledge of every scope the rewrite touched.
     await bumpScopeInTx(tx, [...corrected, ...evidenced]);
 }

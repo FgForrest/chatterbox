@@ -397,6 +397,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                         "transcription",
                         "summary",
                         "topics",
+                        "learn.run",
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),

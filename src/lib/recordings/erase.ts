@@ -246,7 +246,7 @@ export async function eraseLocalArtifact(
                 tx,
                 userId,
                 recordingId,
-                ["transcription", "summary", "topics"],
+                ["transcription", "summary", "topics", "learn.run"],
                 now,
             );
             // Facts said only here go with the transcript.

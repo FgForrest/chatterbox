@@ -1688,6 +1688,166 @@ export const knowledgeVectorState = pgTable("knowledge_vector_state", {
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// One Learn pass over one transcript (Phase 3). `userId` is the recording's
+// owner, whose rows it reads; `scopeUserId` the scope it proposes knowledge
+// in: the owner's on a private recording, the Organization's on a shared
+// one. Only counts and provenance here: what it found is in its review
+// items, encrypted.
+export const learnRuns = pgTable(
+    "learn_runs",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        scopeUserId: text("scope_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 16 })
+            .$type<"private" | "org">()
+            .notNull(),
+        // Who asked: the owner, or the organization account.
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        trigger: varchar("trigger", { length: 16 })
+            .$type<"manual" | "auto">()
+            .notNull(),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        vocabularyVersion: integer("vocabulary_version").notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<
+                | "queued"
+                | "running"
+                | "ready"
+                | "finished"
+                | "failed"
+                | "superseded"
+                | "cancelled"
+            >()
+            .notNull()
+            .default("queued"),
+        // How it ran: the bridge with tools, or the no-tools fallback.
+        path: varchar("path", { length: 16 }).$type<"bridge" | "fallback">(),
+        provider: varchar("provider", { length: 100 }),
+        model: varchar("model", { length: 100 }),
+        jobId: text("job_id"),
+        // Counts only (items kept per kind, drops per reason, tool calls).
+        stats: jsonb("stats").$type<Record<string, number>>(),
+        errorCode: varchar("error_code", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        startedAt: timestamp("started_at"),
+        finishedAt: timestamp("finished_at"),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        recordingIdx: index("learn_runs_recording_id_idx").on(
+            table.recordingId,
+        ),
+        transcriptionIdx: index("learn_runs_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        userIdx: index("learn_runs_user_id_idx").on(table.userId),
+        scopeIdx: index("learn_runs_scope_user_id_idx").on(table.scopeUserId),
+        actorIdx: index("learn_runs_actor_user_id_idx").on(table.actorUserId),
+        statusCheck: check(
+            "learn_runs_status_check",
+            sql`${table.status} in ('queued', 'running', 'ready', 'finished', 'failed', 'superseded', 'cancelled')`,
+        ),
+        viewCheck: check(
+            "learn_runs_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+    }),
+);
+
+// What a run proposes, for a person to decide on. The payload (names,
+// heard words, quotes) is encrypted; the fingerprint is a keyed HMAC, so a
+// dismissal can be matched without storing what was dismissed.
+export const learnReviewItems = pgTable(
+    "learn_review_items",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        runId: text("run_id")
+            .notNull()
+            .references(() => learnRuns.id, { onDelete: "cascade" }),
+        // The run's scope.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 32 })
+            .$type<
+                | "speaker"
+                | "correction"
+                | "known_fact"
+                | "fact"
+                | "relation_phrase"
+            >()
+            .notNull(),
+        fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        payload: jsonb("payload").notNull(),
+        // The default the review opens with: yes unless the person says no.
+        preTicked: boolean("pre_ticked").notNull().default(false),
+        // The person's draft decision; null until they touch it.
+        decision: varchar("decision", { length: 16 }).$type<
+            "accepted" | "rejected"
+        >(),
+        version: integer("version").notNull().default(0),
+        dependsOnLabel: varchar("depends_on_label", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        runIdx: index("learn_review_items_run_id_idx").on(table.runId),
+        userIdx: index("learn_review_items_user_id_idx").on(table.userId),
+        kindCheck: check(
+            "learn_review_items_kind_check",
+            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase')`,
+        ),
+    }),
+);
+
+// What a person said no to on a recording, so the next run there does not
+// propose it again (a manual run still may). A keyed HMAC of the item's
+// fingerprint, nothing readable.
+export const learnDismissals = pgTable(
+    "learn_dismissals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The scope the item was proposed in.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        unique: unique("learn_dismissals_unique").on(
+            table.userId,
+            table.recordingId,
+            table.fingerprintHmac,
+        ),
+        recordingIdx: index("learn_dismissals_recording_id_idx").on(
+            table.recordingId,
+        ),
+    }),
+);
+
 // AI Enhancements
 export const aiEnhancements = pgTable(
     "ai_enhancements",
