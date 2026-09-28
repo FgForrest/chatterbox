@@ -446,6 +446,71 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         ).toEqual(["Novák", "Honzo"]);
     });
 
+    it("keeps each scope's corrections in its scope, and rechecks them all", async () => {
+        await correct();
+        await share();
+        await correct({
+            anchor: anchorIn(FIRST, 1, "Tavesi"),
+            replacement: "Tavesy",
+            target: { personId: orgJan },
+            actorUserId: orgUserId,
+        });
+        const scopes = async () =>
+            (
+                await db()
+                    .select({
+                        userId: transcriptCorrections.userId,
+                        heard: transcriptCorrections.heard,
+                        charStart: transcriptCorrections.charStart,
+                        transcriptRevision:
+                            transcriptCorrections.transcriptRevision,
+                    })
+                    .from(transcriptCorrections)
+                    .orderBy(transcriptCorrections.turnIndex)
+            ).map(({ heard: _heard, ...row }) => row);
+        expect((await scopes()).map((row) => row.userId)).toEqual([
+            OWNER,
+            orgUserId,
+        ]);
+
+        // The curator re-transcribes; the Organization's correction moves.
+        const reworded: TranscriptTurn[] = [
+            FIRST[0] as TranscriptTurn,
+            {
+                speaker: "speaker_1",
+                startMs: 4_000,
+                endMs: 9_000,
+                text: "Ahoj Honzo, jak jde projekt Tavesi?",
+            },
+        ];
+        await write(reworded, orgUserId);
+        expect(await scopes()).toEqual([
+            {
+                userId: OWNER,
+                charStart: 16,
+                transcriptRevision: await revision(),
+            },
+            {
+                userId: orgUserId,
+                charStart: 28,
+                transcriptRevision: await revision(),
+            },
+        ]);
+        // The curator takes back only the Organization's.
+        const [owners] = await listCorrections(OWNER, transcriptId);
+        expect(
+            await refusal(
+                revertCorrection({
+                    userId: OWNER,
+                    transcriptionId: transcriptId,
+                    actorUserId: orgUserId,
+                    orgUserId,
+                    correctionId: owners?.id ?? "",
+                }),
+            ),
+        ).toMatchObject({ statusCode: 404 });
+    });
+
     it("carries corrections onto a new transcript, dropping those whose words are gone", async () => {
         await correct();
         await correct({

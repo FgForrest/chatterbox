@@ -22,27 +22,27 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Carry a transcript's corrections onto its new version, in the
  * transaction that wrote it (`transcriptRewrittenInTx`).
  *
- * Pre-ticked rows go: the review that ticked them was about the text just
- * replaced. The rest are re-anchored (`remapCorrectionAnchors`) and moved
- * to the new revision, or deleted where their words are not found exactly.
+ * Every scope's: the owner's and the Organization's can sit on one
+ * transcript. Pre-ticked rows go: the review that ticked them was about the
+ * text just replaced. The rest are re-anchored (`remapCorrectionAnchors`)
+ * and moved to the new revision, or deleted where their words are not
+ * found exactly.
  */
 export async function recheckCorrectionsInTx(
     tx: Tx,
     {
-        userId,
         transcriptionId,
         previousTurns,
         nextTurns,
     }: {
-        userId: string;
         transcriptionId: string;
         previousTurns: readonly TranscriptTurn[] | null;
         nextTurns: readonly TranscriptTurn[] | null;
     },
 ): Promise<void> {
-    const ofTranscript = and(
-        eq(transcriptCorrections.userId, userId),
-        eq(transcriptCorrections.transcriptionId, transcriptionId),
+    const ofTranscript = eq(
+        transcriptCorrections.transcriptionId,
+        transcriptionId,
     );
     await tx
         .delete(transcriptCorrections)

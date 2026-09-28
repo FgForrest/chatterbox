@@ -11,18 +11,14 @@
  *
  * Corrections are the recording's content: while it is shared only the
  * organization account changes them, otherwise only its owner
- * (`writer-rule.ts`). Rows belong to the transcript's owner either way.
+ * (`writer-rule.ts`). A row lives in the scope that made it: the owner's
+ * on a private recording, the Organization's on a shared one. One
+ * transcript can so carry both, and each view reads its scopes.
  */
 
 import { and, asc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    knowledgeEntities,
-    people,
-    recordings,
-    transcriptCorrections,
-    transcriptions,
-} from "@/db/schema";
+import { recordings, transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -232,7 +228,10 @@ export async function acceptCorrection(
         const [row] = await tx
             .insert(transcriptCorrections)
             .values({
-                userId: args.userId,
+                // The writer rule made the actor the owner on a private
+                // recording and the organization account on a shared one:
+                // the scope.
+                userId: actorUserId,
                 transcriptionId: args.transcriptionId,
                 transcriptRevision: revision,
                 turnIndex: anchor.turnIndex,
@@ -265,7 +264,9 @@ export async function acceptCorrection(
 
 /**
  * Take a correction back: the row goes, and the transcript reads as it was
- * heard. 404 alike for a missing correction and another account's.
+ * heard. Only the actor's scope: 404 alike for a missing correction,
+ * another account's, and one the owner made before sharing (until sharing
+ * publishes it).
  */
 export async function revertCorrection(
     args: Omit<TranscriptVersion, "revision"> &
@@ -278,7 +279,7 @@ export async function revertCorrection(
             .where(
                 and(
                     eq(transcriptCorrections.id, args.correctionId),
-                    eq(transcriptCorrections.userId, args.userId),
+                    eq(transcriptCorrections.userId, args.actorUserId),
                     eq(
                         transcriptCorrections.transcriptionId,
                         args.transcriptionId,
@@ -291,9 +292,11 @@ export async function revertCorrection(
 }
 
 /**
- * The corrections on one of `ownerUserId`'s transcripts, in reading order.
- * `orgOnly` on the Organization view: corrections targeting the owner's
- * private people or entities are the owner's alone.
+ * The corrections on one of `ownerUserId`'s transcripts, in reading order:
+ * the owner's scope and the Organization's, or with `orgOnly` (the
+ * Organization view) the Organization's alone. An Organization-scope
+ * correction targets only the Organization's people and entities, as the
+ * organization account sees no others.
  */
 export async function listCorrections(
     ownerUserId: string,
@@ -315,21 +318,20 @@ export async function listCorrections(
             preTicked: transcriptCorrections.preTicked,
         })
         .from(transcriptCorrections)
-        .leftJoin(people, eq(people.id, transcriptCorrections.targetPersonId))
-        .leftJoin(
-            knowledgeEntities,
-            eq(knowledgeEntities.id, transcriptCorrections.targetEntityId),
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.id, transcriptCorrections.transcriptionId),
         )
         .where(
             and(
-                eq(transcriptCorrections.userId, ownerUserId),
+                eq(transcriptions.userId, ownerUserId),
                 eq(transcriptCorrections.transcriptionId, transcriptionId),
                 orgOnly
-                    ? or(
-                          orgOwnedCondition(people.userId),
-                          orgOwnedCondition(knowledgeEntities.userId),
-                      )
-                    : undefined,
+                    ? orgOwnedCondition(transcriptCorrections.userId)
+                    : or(
+                          eq(transcriptCorrections.userId, ownerUserId),
+                          orgOwnedCondition(transcriptCorrections.userId),
+                      ),
             ),
         )
         .orderBy(

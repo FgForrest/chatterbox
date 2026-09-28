@@ -29,7 +29,6 @@ export async function transcriptRewrittenInTx(
 ): Promise<void> {
     await remapTranscriptAttributionsInTx(tx, args);
     await recheckCorrectionsInTx(tx, {
-        userId: args.userId,
         transcriptionId: args.transcriptionId,
         previousTurns: args.previous.turns,
         nextTurns: args.next.turns,

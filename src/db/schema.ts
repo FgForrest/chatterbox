@@ -1344,7 +1344,8 @@ export const transcriptCorrections = pgTable(
         id: text("id")
             .primaryKey()
             .$defaultFn(() => nanoid()),
-        // The transcript's owner, the scope, as on speaker rows.
+        // The scope that made it: the transcript's owner on a private
+        // recording, the organization account on a shared one.
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
