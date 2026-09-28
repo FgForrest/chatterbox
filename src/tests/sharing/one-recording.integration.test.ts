@@ -154,6 +154,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
+import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
@@ -578,6 +579,30 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             200,
         );
         expect(await resolveRecordingAccess(orgUserId, REC)).toBeNull();
+    });
+
+    it("answers the organization account's withdrawal of a recording that is not shared as a missing one, changing nothing", async () => {
+        const generation = async () =>
+            (await readScopeGenerations(db(), [OWNER])).get(OWNER) ?? 0;
+        const before = await generation();
+        const remove = (user: string) =>
+            call(deleteFolderRoute, user, {
+                method: "DELETE",
+                path: "folders",
+                body: { organization: true },
+            });
+
+        expect((await remove(orgUserId)).status).toBe(404);
+        // Withdrawn once, then again.
+        await share();
+        expect((await remove(orgUserId)).status).toBe(200);
+        const afterWithdrawal = await generation();
+        expect((await remove(orgUserId)).status).toBe(404);
+        expect(await generation()).toBe(afterWithdrawal);
+        // The owner's own no-op changes nothing either.
+        expect((await remove(OWNER)).status).toBe(200);
+        expect(await generation()).toBe(afterWithdrawal);
+        expect(afterWithdrawal).toBeGreaterThan(before);
     });
 
     it("erases a shared recording only by taking it out of the Organization first", async () => {

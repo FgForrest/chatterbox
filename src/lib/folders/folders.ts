@@ -1003,6 +1003,12 @@ export async function removeRecordingFromFolder(input: {
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, input.recordingId);
+        // Not shared (any more): nothing to take out, and nothing withdrawn.
+        // To the organization account it is then a recording it cannot see.
+        if (!(await isRecordingShared(input.recordingId, target.ownerId, tx))) {
+            if (input.userId === orgUserId) throw notSharedForCurator();
+            return;
+        }
         await tx
             .delete(recordingFolderAssignments)
             .where(
@@ -1047,15 +1053,21 @@ export async function unshareRecording(
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
     await requireMayWithdraw(userId, recordingId, orgUserId);
-    await db.transaction(async (tx) => {
+    const withdrew = await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, recordingId);
+        // Not shared (any more): nothing to withdraw.
+        if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
+            if (userId === orgUserId) throw notSharedForCurator();
+            return false;
+        }
         await bumpScopeInTx(
             tx,
             await withdrawRecordingInTx(tx, orgUserId, recordingId),
         );
+        return true;
     });
-    await orgTreeChanged();
+    if (withdrew) await orgTreeChanged();
 }
 
 /**
@@ -1099,6 +1111,8 @@ async function requireMayWithdraw(
     orgUserId: string | null,
 ): Promise<void> {
     if (orgUserId !== null && userId === orgUserId) {
+        // Only a recording it can see: one that is shared now. Checked again
+        // under the locks.
         const [recording] = await db
             .select({ id: recordings.id })
             .from(recordings)
@@ -1109,16 +1123,21 @@ async function requireMayWithdraw(
                 ),
             )
             .limit(1);
-        if (!recording) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Recording or folder not found",
-                404,
-            );
+        if (!recording || !(await isRecordingShared(recordingId, orgUserId))) {
+            throw notSharedForCurator();
         }
         return;
     }
     await requireRecordingOwnerForSharing(userId, recordingId);
+}
+
+/** A recording that is not shared, as the organization account sees it. */
+function notSharedForCurator(): AppError {
+    return new AppError(
+        ErrorCode.NOT_FOUND,
+        "Recording or folder not found",
+        404,
+    );
 }
 
 async function requireRecordingOwnerForSharing(
