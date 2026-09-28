@@ -244,4 +244,49 @@ describe("independent transcript and summary pipelines", () => {
             screen.getByRole("group", { name: "Summary source" }),
         ).toBeTruthy();
     });
+    it("offers no transcription or summary of a recording the viewer may not change", () => {
+        const recording = {
+            id: "rec-1",
+            filename: "Meeting.ogg",
+            duration: 60_000,
+            filesize: 1024,
+            startTime: new Date(0).toISOString(),
+            deviceSn: "SN-1",
+        };
+        const transcripts = [
+            {
+                source: "riffado",
+                text: "Custom text",
+                provider: "openai",
+                model: "whisper-1",
+            },
+        ];
+        const { rerender } = render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={transcripts}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(screen.getByRole("button", { name: /Summarize/ })).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: /Re-transcribe/ }),
+        ).toBeTruthy();
+
+        // Shared: the organization account's to change.
+        rerender(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={transcripts}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                readOnly
+            />,
+        );
+        expect(screen.queryByRole("button", { name: /Summarize/ })).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: /Re-transcribe/ }),
+        ).toBeNull();
+    });
 });

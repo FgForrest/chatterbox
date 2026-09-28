@@ -103,10 +103,10 @@ interface TranscriptionPanelProps {
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
     /**
-     * The transcript is not the viewer's to change: a shared recording's
-     * private copy is frozen, and on the Organization view only its account
-     * changes it. Speakers are shown read-only and no transcription is
-     * offered.
+     * The recording is not the viewer's to change: while it is shared only
+     * the organization account changes it, on the Organization view.
+     * Speakers are shown read-only, and no transcription, summary or topic
+     * detection is offered.
      */
     readOnly?: boolean;
 }
@@ -226,8 +226,8 @@ export function TranscriptionPanel({
     const i18n = useExtracted();
     const summaryPresetCopy = useSummaryPresetCopy();
     const transcriptList = toTranscriptList(transcripts, transcription);
-    // The Organization view of a shared recording: its own transcript and
-    // summary, made with the organization's templates, never the owner's.
+    // The Organization view of a shared recording: the one recording, its
+    // summaries made with the Organization's templates.
     const view = recording.view;
     const orgView = view === "org";
 
@@ -255,10 +255,11 @@ export function TranscriptionPanel({
                 : transcriptFingerprint(activeTranscript),
         [activeTranscript],
     );
-    // Topics are anchored to timed turns and written onto the viewer's own
-    // transcript row, so they are offered only there.
+    // Topics are anchored to timed turns and written onto the transcript
+    // row, by its owner on the private view.
     const canDetectTopics =
         !orgView &&
+        !readOnly &&
         (activeTranscript?.source === "plaud" ||
             activeTranscript?.source === "riffado") &&
         (activeTranscript.turns?.length ?? 0) > 0;
@@ -746,6 +747,7 @@ export function TranscriptionPanel({
                                 )}
                                 {summarySource === "riffado" &&
                                     !orgView &&
+                                    !readOnly &&
                                     !isSummarizing && (
                                         <Select
                                             value={summaryPreset}
@@ -772,7 +774,7 @@ export function TranscriptionPanel({
                                             </SelectContent>
                                         </Select>
                                     )}
-                                {summarySource === "riffado" && (
+                                {summarySource === "riffado" && !readOnly && (
                                     <Button
                                         onClick={handleSummarize}
                                         size="sm"

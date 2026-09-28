@@ -154,6 +154,7 @@ export function WorkstationDetailPane({
                     <RecordingPlayerHeader
                         recording={currentRecording}
                         onRenamed={onRenamed}
+                        shared={recordingShared}
                         action={
                             // Erasing and deleting are the owner's, on their
                             // own view; a shared recording leaves the

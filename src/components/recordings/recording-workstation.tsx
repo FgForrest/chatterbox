@@ -193,6 +193,9 @@ export function RecordingWorkstation({
                     <RecordingPlayerHeader
                         recording={displayRecording}
                         onRenamed={handleRenamed}
+                        shared={sharedRecordingIds(folderOrganization).has(
+                            recording.id,
+                        )}
                         action={
                             <EraseRecordingMenu
                                 recording={displayRecording}

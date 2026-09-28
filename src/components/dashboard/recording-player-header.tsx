@@ -13,6 +13,8 @@ interface RecordingPlayerHeaderProps {
     recording: Recording;
     action?: ReactNode;
     onRenamed?: (filename: string) => void;
+    /** Shared: its title is the organization account's to change, too. */
+    shared?: boolean;
 }
 
 interface RecordingWaveformStatusProps {
@@ -29,6 +31,7 @@ export function RecordingPlayerHeader({
     recording,
     action,
     onRenamed,
+    shared = false,
 }: RecordingPlayerHeaderProps) {
     const locale = useLocale();
     const i18n = useExtracted();
@@ -55,7 +58,7 @@ export function RecordingPlayerHeader({
                         recordingId={recording.id}
                         filename={recording.filename}
                         onRenamed={onRenamed}
-                        readOnly={recording.isOwn === false}
+                        readOnly={recording.isOwn === false || shared}
                         className="text-xl font-semibold tracking-tight sm:text-2xl"
                     />
                 </h1>
