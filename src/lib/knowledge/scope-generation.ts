@@ -8,7 +8,8 @@
  * in sorted order after every other lock, so two transactions touching the
  * same scopes never wait on each other the wrong way round.
  *
- * Env-free: the transcript writers load it through the rewrite hook.
+ * Imports nothing beyond the schema and drizzle: the transcript writers
+ * load it through the rewrite hook.
  */
 
 import { eq, inArray, or, sql } from "drizzle-orm";

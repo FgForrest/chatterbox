@@ -3,7 +3,8 @@
  * (`transcript-rewrite.ts`).
  *
  * Apart from `corrections.ts` because the transcript writers load it, and
- * the summary path loads them: nothing here may validate the environment.
+ * the summary path loads them: it imports nothing beyond the schema,
+ * drizzle, `encryption/fields` and modules that import no more.
  */
 
 import { and, asc, desc, eq, inArray } from "drizzle-orm";

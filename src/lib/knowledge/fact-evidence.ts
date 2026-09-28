@@ -4,8 +4,8 @@
  * facts left with none.
  *
  * Apart from `facts.ts` because the transcript writers, retention, erase
- * and the recording DELETE load it: nothing here may validate the
- * environment.
+ * and the recording DELETE load it: it imports nothing beyond the schema,
+ * drizzle, `encryption/fields` and modules that import no more.
  */
 
 import { and, eq, inArray, notExists } from "drizzle-orm";
