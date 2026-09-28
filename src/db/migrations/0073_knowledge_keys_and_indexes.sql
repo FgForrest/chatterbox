@@ -7,6 +7,7 @@ CREATE INDEX "knowledge_entity_types_adopted_as_key_idx" ON "knowledge_entity_ty
 CREATE INDEX "knowledge_fact_evidence_confirmed_by_user_id_idx" ON "knowledge_fact_evidence" USING btree ("confirmed_by_user_id");--> statement-breakpoint
 CREATE INDEX "knowledge_facts_created_by_user_id_idx" ON "knowledge_facts" USING btree ("created_by_user_id");--> statement-breakpoint
 CREATE INDEX "knowledge_facts_relation_key_idx" ON "knowledge_facts" USING btree ("relation_key");--> statement-breakpoint
+CREATE INDEX "knowledge_facts_subject_key_idx" ON "knowledge_facts" USING btree ("subject_key");--> statement-breakpoint
 CREATE INDEX "knowledge_facts_object_key_idx" ON "knowledge_facts" USING btree ("object_key");--> statement-breakpoint
 CREATE INDEX "knowledge_relation_types_created_by_user_id_idx" ON "knowledge_relation_types" USING btree ("created_by_user_id");--> statement-breakpoint
 CREATE INDEX "knowledge_relation_types_adopted_as_key_idx" ON "knowledge_relation_types" USING btree ("adopted_as_key");--> statement-breakpoint

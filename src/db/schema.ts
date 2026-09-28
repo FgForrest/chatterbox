@@ -1526,6 +1526,9 @@ export const knowledgeFacts = pgTable(
         relationKeyIdx: index("knowledge_facts_relation_key_idx").on(
             table.relationKey,
         ),
+        subjectKeyIdx: index("knowledge_facts_subject_key_idx").on(
+            table.subjectKey,
+        ),
         objectKeyIdx: index("knowledge_facts_object_key_idx").on(
             table.objectKey,
         ),

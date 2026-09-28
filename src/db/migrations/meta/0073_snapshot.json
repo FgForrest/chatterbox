@@ -1,5 +1,5 @@
 {
-  "id": "b17aa232-4258-470d-a395-3d5eb78ccd2c",
+  "id": "e8b2d5dd-9447-4d20-9236-2e3b118e0e29",
   "prevId": "bfcb89b3-ba86-4fc6-a673-5cc06089252d",
   "version": "7",
   "dialect": "postgresql",
@@ -4110,6 +4110,21 @@
           "columns": [
             {
               "expression": "relation_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "knowledge_facts_subject_key_idx": {
+          "name": "knowledge_facts_subject_key_idx",
+          "columns": [
+            {
+              "expression": "subject_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
