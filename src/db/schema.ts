@@ -967,6 +967,15 @@ export const transcriptSpeakers = pgTable(
         // would put it outside the encrypted text and outlive the retention
         // sweep that deletes the transcript.
         evidenceStartMs: integer("evidence_start_ms"),
+        // A person looked and could not say who this is. Confirmed with no
+        // person, which is an answer; a row with neither is still open.
+        markedUnknown: boolean("marked_unknown").notNull().default(false),
+        // The human who confirmed this row. Null on machine rows, and on
+        // confirmed rows written before this column existed.
+        confirmedByUserId: text("confirmed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -978,6 +987,45 @@ export const transcriptSpeakers = pgTable(
             table.personId,
         ),
         userIdIdx: index("transcript_speakers_user_id_idx").on(table.userId),
+    }),
+);
+
+// "This speaker is not that person", said by a human about one suggestion.
+//
+// Kept apart from `transcript_speakers` because a label holds one row: once
+// the next suggestion replaced the rejected one, the rejection would be
+// forgotten and the same wrong name could come back. Suggestions are
+// filtered against this table before they are written.
+export const transcriptSpeakerRejections = pgTable(
+    "transcript_speaker_rejections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        label: varchar("label", { length: 64 }).notNull(),
+        personId: text("person_id")
+            .notNull()
+            .references(() => people.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pairUnique: unique("transcript_speaker_rejections_pair_unique").on(
+            table.transcriptionId,
+            table.label,
+            table.personId,
+        ),
+        personIdx: index("transcript_speaker_rejections_person_id_idx").on(
+            table.personId,
+        ),
+        userIdIdx: index("transcript_speaker_rejections_user_id_idx").on(
+            table.userId,
+        ),
     }),
 );
 

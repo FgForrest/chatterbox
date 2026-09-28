@@ -128,6 +128,46 @@ describe("SpeakerTags", () => {
         });
     });
 
+    it("marks a speaker unknown from the picker and clears it again", async () => {
+        const fetchMock = stubFetch({
+            savedSpeakers: [
+                {
+                    label: "speaker_0",
+                    personId: null,
+                    personName: null,
+                    status: "confirmed",
+                    markedUnknown: true,
+                },
+            ],
+        });
+        renderTags();
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Speaker 0" }),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Unknown speaker" }),
+        );
+
+        await screen.findByText("Speaker 0: unknown");
+        const puts = () =>
+            fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
+        expect(JSON.parse(String(puts()[0]?.[1]?.body))).toEqual({
+            label: "speaker_0",
+            unknown: true,
+        });
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Clear the answer for Speaker 0",
+            }),
+        );
+        await waitFor(() => expect(puts()).toHaveLength(2));
+        expect(JSON.parse(String(puts()[1]?.[1]?.body))).toEqual({
+            label: "speaker_0",
+        });
+    });
+
     it("selects an existing person through the modal", async () => {
         const fetchMock = stubFetch({
             people: [

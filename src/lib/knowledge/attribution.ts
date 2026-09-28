@@ -1,6 +1,11 @@
 import { and, eq, or } from "drizzle-orm";
 import { db } from "@/db";
-import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
+import {
+    people,
+    transcriptions,
+    transcriptSpeakerRejections,
+    transcriptSpeakers,
+} from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
@@ -30,6 +35,10 @@ export interface TranscriptSpeaker {
     status: AttributionStatus;
     confidence: number | null;
     evidenceStartMs: number | null;
+    /** A person looked and said nobody known: an answer, not an open label. */
+    markedUnknown: boolean;
+    /** The human who confirmed the row; null on machine rows. */
+    confirmedByUserId: string | null;
 }
 
 export interface SetTranscriptSpeakerArgs {
@@ -41,7 +50,27 @@ export interface SetTranscriptSpeakerArgs {
     status: AttributionStatus;
     confidence?: number | null;
     evidenceStartMs?: number | null;
+    markedUnknown?: boolean;
+    confirmedByUserId?: string | null;
 }
+
+/** One speaker label of one transcript. */
+export interface TranscriptLabelArgs {
+    userId: string;
+    transcriptionId: string;
+    label: string;
+}
+
+/** A suggestion a machine made, before it is filtered and written. */
+export interface SuggestedSpeaker {
+    label: string;
+    personId: string | null;
+    source: AttributionSource;
+    confidence?: number | null;
+    evidenceStartMs?: number | null;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export interface NameScopeOptions {
     /**
@@ -217,6 +246,8 @@ export async function getTranscriptSpeakers(
             status: transcriptSpeakers.status,
             confidence: transcriptSpeakers.confidence,
             evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+            confirmedByUserId: transcriptSpeakers.confirmedByUserId,
         })
         .from(transcriptSpeakers)
         .leftJoin(
@@ -246,18 +277,32 @@ export async function getTranscriptSpeakers(
  * A correction is an ordinary update with nothing downstream to repair,
  * which is the whole benefit of attributing by name rather than by
  * voiceprint: there is no profile to poison, only a label to change.
+ *
+ * Naming a person a human once rejected for this label takes the rejection
+ * back: the latest answer is the one that counts.
  */
-export async function setTranscriptSpeaker({
-    userId,
-    transcriptionId,
-    label,
-    personId,
-    source,
-    status,
-    confidence = null,
-    evidenceStartMs = null,
-}: SetTranscriptSpeakerArgs): Promise<void> {
-    await db
+export async function setTranscriptSpeaker(
+    args: SetTranscriptSpeakerArgs,
+): Promise<void> {
+    await db.transaction((tx) => setTranscriptSpeakerInTx(tx, args));
+}
+
+async function setTranscriptSpeakerInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        label,
+        personId,
+        source,
+        status,
+        confidence = null,
+        evidenceStartMs = null,
+        markedUnknown = false,
+        confirmedByUserId = null,
+    }: SetTranscriptSpeakerArgs,
+): Promise<void> {
+    await tx
         .insert(transcriptSpeakers)
         .values({
             userId,
@@ -268,6 +313,8 @@ export async function setTranscriptSpeaker({
             status,
             confidence,
             evidenceStartMs,
+            markedUnknown,
+            confirmedByUserId,
         })
         .onConflictDoUpdate({
             target: [
@@ -280,9 +327,149 @@ export async function setTranscriptSpeaker({
                 status,
                 confidence,
                 evidenceStartMs,
+                markedUnknown,
+                confirmedByUserId,
                 updatedAt: new Date(),
             },
         });
+    if (personId && status === "confirmed") {
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(
+                and(
+                    eq(
+                        transcriptSpeakerRejections.transcriptionId,
+                        transcriptionId,
+                    ),
+                    eq(transcriptSpeakerRejections.label, label),
+                    eq(transcriptSpeakerRejections.personId, personId),
+                ),
+            );
+    }
+}
+
+/** Return a label to open: no name, no suggestion, no "unknown". */
+export async function clearTranscriptSpeaker(
+    args: TranscriptLabelArgs,
+): Promise<void> {
+    await db.transaction((tx) => clearTranscriptSpeakerInTx(tx, args));
+}
+
+async function clearTranscriptSpeakerInTx(
+    tx: Tx,
+    { userId, transcriptionId, label }: TranscriptLabelArgs,
+): Promise<void> {
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+                eq(transcriptSpeakers.label, label),
+            ),
+        );
+}
+
+/**
+ * Say a suggested person is not this speaker. The pair is remembered, so
+ * the same suggestion is never offered again for this label, even after
+ * other suggestions came and went.
+ */
+export async function rejectSuggestion(
+    args: TranscriptLabelArgs & { personId: string },
+): Promise<void> {
+    await db.transaction((tx) => rejectSuggestionInTx(tx, args));
+}
+
+async function rejectSuggestionInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        label,
+        personId,
+    }: TranscriptLabelArgs & { personId: string },
+): Promise<void> {
+    await tx
+        .insert(transcriptSpeakerRejections)
+        .values({ userId, transcriptionId, label, personId })
+        .onConflictDoNothing();
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+                eq(transcriptSpeakers.label, label),
+                eq(transcriptSpeakers.personId, personId),
+                eq(transcriptSpeakers.status, "suggested"),
+            ),
+        );
+}
+
+/**
+ * Write machine suggestions for one transcript.
+ *
+ * A suggestion never overwrites anything: a label that already has a row,
+ * whether a human's answer or an earlier suggestion, keeps it. A suggestion
+ * without a person has nothing to offer, and a pair a human rejected stays
+ * rejected. Returns how many were written.
+ */
+export async function insertSuggestionsInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        rows,
+    }: {
+        userId: string;
+        transcriptionId: string;
+        rows: readonly SuggestedSpeaker[];
+    },
+): Promise<number> {
+    const named = rows.flatMap((row) =>
+        row.personId
+            ? [{ ...row, label: speakerKey(row.label), personId: row.personId }]
+            : [],
+    );
+    if (named.length === 0) return 0;
+    const rejected = await tx
+        .select({
+            label: transcriptSpeakerRejections.label,
+            personId: transcriptSpeakerRejections.personId,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(
+            eq(transcriptSpeakerRejections.transcriptionId, transcriptionId),
+        );
+    const rejectedPairs = new Set(
+        rejected.map((row) => pairKey(row.label, row.personId)),
+    );
+    const allowed = named.filter(
+        (row) => !rejectedPairs.has(pairKey(row.label, row.personId)),
+    );
+    if (allowed.length === 0) return 0;
+    const inserted = await tx
+        .insert(transcriptSpeakers)
+        .values(
+            allowed.map((row) => ({
+                userId,
+                transcriptionId,
+                label: row.label,
+                personId: row.personId,
+                source: row.source,
+                status: "suggested" as const,
+                confidence: row.confidence ?? null,
+                evidenceStartMs: row.evidenceStartMs ?? null,
+            })),
+        )
+        .onConflictDoNothing()
+        .returning({ id: transcriptSpeakers.id });
+    return inserted.length;
+}
+
+function pairKey(label: string, personId: string): string {
+    return `${label}\u0000${personId}`;
 }
 
 /**

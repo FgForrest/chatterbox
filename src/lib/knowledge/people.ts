@@ -4,6 +4,7 @@ import {
     people,
     personNotes,
     transcriptions,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
     users,
 } from "@/db/schema";
@@ -370,6 +371,27 @@ async function mergeInTx(
             .update(transcriptSpeakers)
             .set({ personId: winnerId, updatedAt: new Date() })
             .where(inArray(transcriptSpeakers.id, plan.repointLoserIds));
+    }
+
+    // "Not this person" said about the loser is said about the same human.
+    const loserRejections = await tx
+        .select({
+            userId: transcriptSpeakerRejections.userId,
+            transcriptionId: transcriptSpeakerRejections.transcriptionId,
+            label: transcriptSpeakerRejections.label,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(eq(transcriptSpeakerRejections.personId, loserId));
+    if (loserRejections.length > 0) {
+        await tx
+            .insert(transcriptSpeakerRejections)
+            .values(
+                loserRejections.map((row) => ({ ...row, personId: winnerId })),
+            )
+            .onConflictDoNothing();
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(eq(transcriptSpeakerRejections.personId, loserId));
     }
 
     // Everyone's private notes about the loser follow the attributions.

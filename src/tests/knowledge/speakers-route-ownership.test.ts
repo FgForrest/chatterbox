@@ -20,6 +20,7 @@ vi.mock("@/db", () => ({
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
+        transaction: vi.fn(),
     },
 }));
 
@@ -108,6 +109,11 @@ describe("speakers route and ownership", () => {
         (db.update as Mock).mockReturnValue({
             set: vi.fn().mockReturnValue({ where: vi.fn() }),
         });
+        (db.delete as Mock).mockReturnValue({ where: vi.fn() });
+        // The writes run in a transaction; here it is the same mock.
+        (db.transaction as Mock).mockImplementation(
+            async (work: (tx: typeof db) => unknown) => work(db),
+        );
     });
 
     it("scopes the transcript lookup by userId and 404s on somebody else's", async () => {
@@ -194,6 +200,7 @@ describe("speakers route and ownership", () => {
                 personId: "person-1",
                 source: "user",
                 status: "confirmed",
+                confirmedByUserId: "user-1",
             }),
         );
         expect(refreshExistingRecordingSidecars).toHaveBeenCalledWith(

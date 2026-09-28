@@ -10,7 +10,7 @@ vi.mock("@/db/schema", () => ({
     recordings: "recordings",
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",
-    // The knowledge-base reads project individual columns, so these two
+    // The knowledge-base reads project individual columns, so these
     // need a shape rather than a placeholder string.
     people: {
         id: "people.id",
@@ -30,6 +30,15 @@ vi.mock("@/db/schema", () => ({
         status: "transcriptSpeakers.status",
         confidence: "transcriptSpeakers.confidence",
         evidenceStartMs: "transcriptSpeakers.evidenceStartMs",
+        markedUnknown: "transcriptSpeakers.markedUnknown",
+        confirmedByUserId: "transcriptSpeakers.confirmedByUserId",
+    },
+    transcriptSpeakerRejections: {
+        userId: "transcriptSpeakerRejections.userId",
+        transcriptionId: "transcriptSpeakerRejections.transcriptionId",
+        label: "transcriptSpeakerRejections.label",
+        personId: "transcriptSpeakerRejections.personId",
+        createdAt: "transcriptSpeakerRejections.createdAt",
     },
     recordingFolders: {
         id: "recordingFolders.id",
@@ -198,6 +207,28 @@ describe("buildAndUploadExportArchive", () => {
                     status: "confirmed",
                     confidence: null,
                     evidenceStartMs: 14_320,
+                    markedUnknown: false,
+                    confirmedByUserId: "user-1",
+                },
+                {
+                    transcriptionId: "tr-1",
+                    label: "speaker_1",
+                    personId: null,
+                    source: "user",
+                    status: "confirmed",
+                    confidence: null,
+                    evidenceStartMs: null,
+                    markedUnknown: true,
+                    confirmedByUserId: "user-1",
+                },
+            ],
+            // rejected suggestions
+            [
+                {
+                    transcriptionId: "tr-1",
+                    label: "speaker_1",
+                    personId: "p-1",
+                    createdAt: new Date("2026-01-02T00:00:00Z"),
                 },
             ],
         ]);
@@ -232,13 +263,38 @@ describe("buildAndUploadExportArchive", () => {
                 status: "confirmed",
                 confidence: null,
                 evidenceStartMs: 14_320,
+                markedUnknown: false,
+                confirmedByUserId: "user-1",
+            },
+            {
+                transcriptionId: "tr-1",
+                label: "speaker_1",
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                confidence: null,
+                evidenceStartMs: null,
+                markedUnknown: true,
+                confirmedByUserId: "user-1",
+            },
+        ]);
+        expect(knowledge.rejections).toEqual([
+            {
+                transcriptionId: "tr-1",
+                label: "speaker_1",
+                personId: "p-1",
+                createdAt: "2026-01-02T00:00:00.000Z",
             },
         ]);
 
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );
-        expect(manifest.knowledge).toEqual({ people: 1, attributions: 1 });
+        expect(manifest.knowledge).toEqual({
+            people: 1,
+            attributions: 2,
+            rejections: 1,
+        });
     });
 
     it("carries folder organization and recording assignments", async () => {
@@ -259,6 +315,8 @@ describe("buildAndUploadExportArchive", () => {
             [],
             [],
             [],
+            [],
+            // rejected suggestions
             [],
             [
                 {

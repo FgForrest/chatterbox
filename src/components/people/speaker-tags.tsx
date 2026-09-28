@@ -45,7 +45,28 @@ export interface SpeakerResponseRow {
     personId: string | null;
     personName: string | null;
     status: string;
+    markedUnknown?: boolean;
 }
+
+/** Labels a person answered "nobody known" for. */
+export function unknownSpeakerLabels(
+    speakers: SpeakerResponseRow[] | undefined,
+): ReadonlySet<string> {
+    return new Set(
+        (speakers ?? [])
+            .filter(
+                (speaker) =>
+                    speaker.status === "confirmed" && speaker.markedUnknown,
+            )
+            .map((speaker) => speaker.label),
+    );
+}
+
+/** What naming a speaker sends: a person, a new name, or "unknown". */
+type SpeakerChoice =
+    | { personId: string }
+    | { displayName: string }
+    | { unknown: true };
 
 export function confirmedAttributions(
     speakers: SpeakerResponseRow[] | undefined,
@@ -78,10 +99,14 @@ export function SpeakerTags({
     );
     const [openLabel, setOpenLabel] = useState<string | null>(null);
     const [savingLabel, setSavingLabel] = useState<string | null>(null);
+    const [unknownLabels, setUnknownLabels] = useState<ReadonlySet<string>>(
+        () => new Set(),
+    );
 
-    const applyAttributions = useCallback(
-        (next: SpeakerAttributions) => {
-            onAttributionsChange(next);
+    const applySpeakers = useCallback(
+        (rows: SpeakerResponseRow[] | undefined) => {
+            onAttributionsChange(confirmedAttributions(rows));
+            setUnknownLabels(unknownSpeakerLabels(rows));
         },
         [onAttributionsChange],
     );
@@ -98,20 +123,19 @@ export function SpeakerTags({
                 };
             })
             .then((body) => {
-                if (!cancelled && body) {
-                    applyAttributions(confirmedAttributions(body.speakers));
-                }
+                if (!cancelled && body) applySpeakers(body.speakers);
             })
             .catch(() => {});
 
         return () => {
             cancelled = true;
         };
-    }, [applyAttributions, speakersUrl]);
+    }, [applySpeakers, speakersUrl]);
 
+    /** Save an answer for one label; `null` takes the answer back. */
     async function attribute(
         label: string,
-        choice: { personId?: string; displayName?: string } | null,
+        choice: SpeakerChoice | null,
     ): Promise<boolean> {
         setSavingLabel(label);
         const response = await fetch(speakersUrl, {
@@ -138,7 +162,7 @@ export function SpeakerTags({
         const body = (await response.json()) as {
             speakers?: SpeakerResponseRow[];
         };
-        applyAttributions(confirmedAttributions(body.speakers));
+        applySpeakers(body.speakers);
         return true;
     }
 
@@ -157,6 +181,44 @@ export function SpeakerTags({
                 const attribution = attributions[speaker.speaker];
                 const saving = savingLabel === speaker.speaker;
                 const accent = SPEAKER_ACCENTS[index % SPEAKER_ACCENTS.length];
+
+                if (!attribution && unknownLabels.has(speaker.speaker)) {
+                    return (
+                        <span
+                            key={speaker.speaker}
+                            id={speakerAnchorId(speaker.speaker)}
+                            className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed bg-muted/30 text-xs font-medium text-muted-foreground"
+                        >
+                            <span className="inline-flex h-full items-center gap-2 pl-3 pr-2">
+                                <span
+                                    className={`size-1.5 rounded-full opacity-50 ${accent}`}
+                                />
+                                {i18n("{speaker}: unknown", {
+                                    speaker: speaker.label,
+                                })}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    void attribute(speaker.speaker, null)
+                                }
+                                disabled={saving}
+                                aria-label={i18n(
+                                    "Clear the answer for {speaker}",
+                                    { speaker: speaker.label },
+                                )}
+                                title={i18n("Clear")}
+                                className="flex h-full items-center border-l px-2 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-60"
+                            >
+                                {saving ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                    <X className="size-3" />
+                                )}
+                            </button>
+                        </span>
+                    );
+                }
 
                 if (!attribution) {
                     return (
@@ -224,6 +286,9 @@ export function SpeakerTags({
                     label={openSpeaker.label}
                     organizationOnly={view === "org"}
                     onPick={(choice) => attribute(openSpeaker.speaker, choice)}
+                    onMarkUnknown={() =>
+                        attribute(openSpeaker.speaker, { unknown: true })
+                    }
                     onClose={() => setOpenLabel(null)}
                 />
             )}

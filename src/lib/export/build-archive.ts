@@ -10,6 +10,7 @@ import {
     recordingFolders,
     recordings,
     transcriptions,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
@@ -223,7 +224,11 @@ export async function buildAndUploadExportArchive(input: {
         createdAt: string;
         userId: string;
         recordings: ManifestRecording[];
-        knowledge?: { people: number; attributions: number };
+        knowledge?: {
+            people: number;
+            attributions: number;
+            rejections: number;
+        };
         organization?: { folders: number; assignments: number };
     } = {
         version: "2.0",
@@ -495,13 +500,18 @@ export async function buildAndUploadExportArchive(input: {
     // backup that restores recordings but loses who was speaking in them is
     // not a backup of this feature at all.
     const knowledge = await collectKnowledgeBase(userId);
-    if (knowledge.people.length > 0 || knowledge.attributions.length > 0) {
+    if (
+        knowledge.people.length > 0 ||
+        knowledge.attributions.length > 0 ||
+        knowledge.rejections.length > 0
+    ) {
         archive.append(Buffer.from(JSON.stringify(knowledge, null, 2)), {
             name: "knowledge/people.json",
         });
         manifest.knowledge = {
             people: knowledge.people.length,
             attributions: knowledge.attributions.length,
+            rejections: knowledge.rejections.length,
         };
     }
 
@@ -611,6 +621,15 @@ interface ArchivedKnowledgeBase {
         status: string;
         confidence: number | null;
         evidenceStartMs: number | null;
+        markedUnknown: boolean;
+        confirmedByUserId: string | null;
+    }[];
+    /** "This speaker is not that person", as said by a human. */
+    rejections: {
+        transcriptionId: string;
+        label: string;
+        personId: string;
+        createdAt: string;
     }[];
 }
 
@@ -630,7 +649,7 @@ async function collectKnowledgeBase(
         mergedIntoId: people.mergedIntoId,
         createdAt: people.createdAt,
     };
-    const [peopleRows, attributionRows] = await Promise.all([
+    const [peopleRows, attributionRows, rejectionRows] = await Promise.all([
         db.select(personColumns).from(people).where(eq(people.userId, userId)),
         db
             .select({
@@ -641,9 +660,20 @@ async function collectKnowledgeBase(
                 status: transcriptSpeakers.status,
                 confidence: transcriptSpeakers.confidence,
                 evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+                markedUnknown: transcriptSpeakers.markedUnknown,
+                confirmedByUserId: transcriptSpeakers.confirmedByUserId,
             })
             .from(transcriptSpeakers)
             .where(eq(transcriptSpeakers.userId, userId)),
+        db
+            .select({
+                transcriptionId: transcriptSpeakerRejections.transcriptionId,
+                label: transcriptSpeakerRejections.label,
+                personId: transcriptSpeakerRejections.personId,
+                createdAt: transcriptSpeakerRejections.createdAt,
+            })
+            .from(transcriptSpeakerRejections)
+            .where(eq(transcriptSpeakerRejections.userId, userId)),
     ]);
 
     // Organization people the user's own transcripts name: a restore must
@@ -651,7 +681,7 @@ async function collectKnowledgeBase(
     const own = new Set(peopleRows.map((row) => row.id));
     const sharedIds = [
         ...new Set(
-            attributionRows.flatMap((row) =>
+            [...attributionRows, ...rejectionRows].flatMap((row) =>
                 row.personId && !own.has(row.personId) ? [row.personId] : [],
             ),
         ),
@@ -704,5 +734,9 @@ async function collectKnowledgeBase(
             createdAt: row.createdAt.toISOString(),
         })),
         attributions: attributionRows,
+        rejections: rejectionRows.map((row) => ({
+            ...row,
+            createdAt: row.createdAt.toISOString(),
+        })),
     };
 }

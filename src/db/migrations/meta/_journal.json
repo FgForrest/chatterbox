@@ -407,6 +407,13 @@
       "when": 1790194729475,
       "tag": "0057_google_drive_export",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1790591405483,
+      "tag": "0058_transcript_speaker_answers",
+      "breakpoints": true
     }
   ]
 }

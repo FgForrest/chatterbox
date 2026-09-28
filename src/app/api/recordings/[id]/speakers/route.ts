@@ -6,7 +6,9 @@ import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import {
+    clearTranscriptSpeaker,
     getTranscriptSpeakers,
+    rejectSuggestion,
     setTranscriptSpeaker,
     type TranscriptSpeaker,
 } from "@/lib/knowledge/attribution";
@@ -68,20 +70,29 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     });
 });
 
-interface SpeakerChange {
-    label: string;
-    personId?: string;
-    displayName?: string;
-}
+/**
+ * What a person said about one speaker label:
+ * - `name`: it is this person (an existing one, or a new name);
+ * - `unknown`: nobody anyone knows, which is an answer;
+ * - `clear`: take the answer back, and leave the label open;
+ * - `reject`: it is not the suggested person, and never suggest them again.
+ */
+type SpeakerChange =
+    | { kind: "name"; label: string; personId?: string; displayName?: string }
+    | { kind: "unknown"; label: string }
+    | { kind: "clear"; label: string }
+    | { kind: "reject"; label: string; personId: string };
 
 function readChange(body: unknown): SpeakerChange {
     const value = (body ?? {}) as {
         label?: unknown;
         personId?: unknown;
         displayName?: unknown;
+        unknown?: unknown;
+        reject?: unknown;
     };
-    const label = value.label;
-    if (typeof label !== "string" || !label.trim()) {
+    const rawLabel = value.label;
+    if (typeof rawLabel !== "string" || !rawLabel.trim()) {
         throw new AppError(
             ErrorCode.MISSING_REQUIRED_FIELD,
             "label is required",
@@ -91,13 +102,26 @@ function readChange(body: unknown): SpeakerChange {
     }
     // Stored and compared as the key, so an overlong provider label is the
     // same speaker here as in the transcript it came from.
-    const change: SpeakerChange = { label: speakerKey(label) };
-    if (typeof value.personId === "string" && value.personId) {
-        change.personId = value.personId;
-    } else if (
-        typeof value.displayName === "string" &&
-        value.displayName.trim()
-    ) {
+    const label = speakerKey(rawLabel);
+    const personId =
+        typeof value.personId === "string" && value.personId
+            ? value.personId
+            : undefined;
+
+    if (value.reject === true) {
+        if (!personId) {
+            throw new AppError(
+                ErrorCode.MISSING_REQUIRED_FIELD,
+                "personId is required to reject a suggestion",
+                400,
+                { field: "personId" },
+            );
+        }
+        return { kind: "reject", label, personId };
+    }
+    if (value.unknown === true) return { kind: "unknown", label };
+    if (personId) return { kind: "name", label, personId };
+    if (typeof value.displayName === "string" && value.displayName.trim()) {
         const displayName = value.displayName.trim();
         if (displayName.length > MAX_DISPLAY_NAME_LENGTH) {
             throw new AppError(
@@ -107,23 +131,30 @@ function readChange(body: unknown): SpeakerChange {
                 { field: "displayName" },
             );
         }
-        change.displayName = displayName;
+        return { kind: "name", label, displayName };
     }
-    return change;
+    return { kind: "clear", label };
+}
+
+function personNotFound(): AppError {
+    return new AppError(ErrorCode.NOT_FOUND, "Person not found", 404);
 }
 
 /**
- * Name a speaker, or clear the name.
+ * Name a speaker, mark them unknown, reject a suggestion, or clear the
+ * answer.
  *
- * Accepts either an existing `personId` or a `displayName` to create one,
- * because the common case is naming somebody the knowledge base has never
- * heard of and making the user create them first would be a needless step.
+ * Naming accepts either an existing `personId` or a `displayName` to create
+ * one, because the common case is naming somebody the knowledge base has
+ * never heard of and making the user create them first would be a needless
+ * step.
  *
- * Anything set here is `confirmed` with source `user`: it came from a person
- * looking at the transcript, which is the only evidence this feature treats
- * as strong enough to reach a summary or an export.
+ * A name or an "unknown" set here is `confirmed` with source `user` and the
+ * person who said it: it came from a human looking at the transcript, which
+ * is the only evidence this feature treats as strong enough to reach a
+ * summary or an export.
  *
- * `?view=org` names a speaker of the Organization view, for everyone: only
+ * `?view=org` changes a speaker of the Organization view, for everyone: only
  * Organization people may be picked, a new name becomes an Organization
  * person, and the owner's own transcript is never touched.
  */
@@ -140,19 +171,17 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
 
         // Checked before anything is copied, so a bad request leaves no trace.
         let personId: string | null = null;
-        if (change.personId) {
+        if (change.kind === "name" && change.personId) {
             const person = await currentPerson(
                 session.user.id,
                 change.personId,
             );
-            if (!person || person.scope !== "org") {
-                throw new AppError(
-                    ErrorCode.NOT_FOUND,
-                    "Person not found",
-                    404,
-                );
-            }
+            if (!person || person.scope !== "org") throw personNotFound();
             personId = person.id;
+        }
+        if (change.kind === "reject") {
+            const person = await getPerson(session.user.id, change.personId);
+            if (!person || person.scope !== "org") throw personNotFound();
         }
         const transcript = await ensureOrgTranscript(
             id,
@@ -160,7 +189,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             access,
             session.user.id,
         );
-        if (!personId && change.displayName) {
+        if (change.kind === "name" && !personId && change.displayName) {
             const created = await createPerson({
                 userId: orgUserId,
                 displayName: change.displayName,
@@ -169,13 +198,11 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             personId = created.id;
         }
 
-        await setTranscriptSpeaker({
+        await applyChange(change, {
             userId: orgUserId,
             transcriptionId: transcript.id,
-            label: change.label,
             personId,
-            source: "user",
-            status: "confirmed",
+            actorUserId: session.user.id,
         });
         await orgContentChanged(id);
         return NextResponse.json({
@@ -187,62 +214,71 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
 
     const transcript = await requireTranscript(session.user.id, id, request);
 
-    // A null personId is meaningful: it clears the attribution and returns
-    // the label to unresolved, which is always an acceptable answer.
     let personId: string | null = null;
-
-    if (change.personId) {
+    if (change.kind === "name" && change.personId) {
         const person = await currentPerson(session.user.id, change.personId);
-        if (!person) {
-            throw new AppError(ErrorCode.NOT_FOUND, "Person not found", 404);
-        }
+        if (!person) throw personNotFound();
         personId = person.id;
-    } else if (change.displayName) {
+    } else if (change.kind === "name" && change.displayName) {
         const created = await createPerson({
             userId: session.user.id,
             displayName: change.displayName,
         });
         personId = created.id;
-    }
-
-    await setTranscriptSpeaker({
-        userId: session.user.id,
-        transcriptionId: transcript.id,
-        label: change.label,
-        personId,
-        source: "user",
-        status: "confirmed",
-    });
-
-    // While the Organization view still shows this transcript, a name
-    // confirmed on it is a name everyone reads, so its person joins the
-    // Organization's knowledge base.
-    if (personId && access.shared && access.orgUserId && isOrgScopeEnabled()) {
-        const reader = await effectiveViewReader(
-            id,
-            {
-                ownerUserId: access.ownerUserId,
-                contentUserId: access.orgUserId,
-            },
-            "transcript",
-        );
-        if (reader.fallback) {
-            await promotePerson(personId, access.orgUserId);
-            await orgContentChanged(id);
+    } else if (change.kind === "reject") {
+        if (!(await getPerson(session.user.id, change.personId))) {
+            throw personNotFound();
         }
     }
 
-    // A rename changes what every downstream reader of this recording sees,
-    // and `GET /api/v1/recordings` pages on `updatedAt`, so a client syncing
-    // incrementally would otherwise never learn about it.
-    await db
-        .update(recordings)
-        .set({ updatedAt: new Date() })
-        .where(
-            and(eq(recordings.id, id), eq(recordings.userId, session.user.id)),
-        );
+    await applyChange(change, {
+        userId: session.user.id,
+        transcriptionId: transcript.id,
+        personId,
+        actorUserId: session.user.id,
+    });
 
-    await refreshExistingRecordingSidecars(session.user.id, id);
+    // A suggestion is never shown outside this panel, so taking one back
+    // changes nothing anyone else reads.
+    if (change.kind !== "reject") {
+        // While the Organization view still shows this transcript, a name
+        // confirmed on it is a name everyone reads, so its person joins the
+        // Organization's knowledge base.
+        if (
+            personId &&
+            access.shared &&
+            access.orgUserId &&
+            isOrgScopeEnabled()
+        ) {
+            const reader = await effectiveViewReader(
+                id,
+                {
+                    ownerUserId: access.ownerUserId,
+                    contentUserId: access.orgUserId,
+                },
+                "transcript",
+            );
+            if (reader.fallback) {
+                await promotePerson(personId, access.orgUserId);
+                await orgContentChanged(id);
+            }
+        }
+
+        // A rename changes what every downstream reader of this recording
+        // sees, and `GET /api/v1/recordings` pages on `updatedAt`, so a client
+        // syncing incrementally would otherwise never learn about it.
+        await db
+            .update(recordings)
+            .set({ updatedAt: new Date() })
+            .where(
+                and(
+                    eq(recordings.id, id),
+                    eq(recordings.userId, session.user.id),
+                ),
+            );
+
+        await refreshExistingRecordingSidecars(session.user.id, id);
+    }
 
     const speakers: TranscriptSpeaker[] = await getTranscriptSpeakers(
         session.user.id,
@@ -250,6 +286,52 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     );
     return NextResponse.json({ speakers });
 });
+
+/** Write one change to the transcript's speaker rows. */
+async function applyChange(
+    change: SpeakerChange,
+    target: {
+        userId: string;
+        transcriptionId: string;
+        /** The resolved person for a `name` change. */
+        personId: string | null;
+        /** The human making the change, recorded on what they confirm. */
+        actorUserId: string;
+    },
+): Promise<void> {
+    const where = {
+        userId: target.userId,
+        transcriptionId: target.transcriptionId,
+        label: change.label,
+    };
+    switch (change.kind) {
+        case "name":
+            await setTranscriptSpeaker({
+                ...where,
+                personId: target.personId,
+                source: "user",
+                status: "confirmed",
+                confirmedByUserId: target.actorUserId,
+            });
+            return;
+        case "unknown":
+            await setTranscriptSpeaker({
+                ...where,
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                markedUnknown: true,
+                confirmedByUserId: target.actorUserId,
+            });
+            return;
+        case "clear":
+            await clearTranscriptSpeaker(where);
+            return;
+        case "reject":
+            await rejectSuggestion({ ...where, personId: change.personId });
+            return;
+    }
+}
 
 /**
  * The person an id refers to now: a merged-away id resolves to the person

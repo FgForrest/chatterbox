@@ -148,6 +148,8 @@ export async function ensureOrgTranscript(
                 status: attribution.status,
                 confidence: attribution.confidence,
                 evidenceStartMs: attribution.evidenceStartMs,
+                markedUnknown: attribution.markedUnknown,
+                confirmedByUserId: attribution.confirmedByUserId,
             });
         }
         if (rows.length > 0) {
