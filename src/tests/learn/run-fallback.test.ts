@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { LearnToolBudgetExhausted } from "@/lib/learn/errors";
 import {
+    anchorCorrections,
     type LearnChatMessage,
     renderLearnTranscript,
     runFallbackPass,
@@ -111,17 +113,12 @@ describe("runFallbackPass", () => {
         expect(adjudication).toContain("e-tavesi");
         expect(adjudication).toContain("leads");
         expect(adjudication).toContain("speaker_1");
-        // Both places the words stand, anchored exactly.
+        // The place nearest the offset the model gave, anchored exactly.
         expect(result.output.corrections).toEqual([
             expect.objectContaining({
                 turnIndex: 0,
                 charStart: 21,
                 charEnd: 27,
-            }),
-            expect.objectContaining({
-                turnIndex: 0,
-                charStart: 30,
-                charEnd: 36,
             }),
         ]);
         expect(result).toMatchObject({ windows: 1, repairs: 0 });
@@ -213,5 +210,140 @@ describe("runFallbackPass", () => {
             "phrase 0",
             "phrase 3",
         ]);
+    });
+
+    describe("found in review", () => {
+        const empty = JSON.stringify({
+            speakers: [],
+            corrections: [],
+            facts: [],
+            relationPhrases: [],
+        });
+
+        it("looks up only mentions that stand in the turn they name", async () => {
+            const lookup = {
+                findEntities: vi.fn(async (_query: { text: string }) => ({
+                    byMeaning: false,
+                    entities: [],
+                })),
+            };
+            const { chat } = fakeChat([
+                JSON.stringify({
+                    mentions: [
+                        { text: "Tavesy", turn: 0 },
+                        { text: "PRIVATE-CODENAME", turn: 0 },
+                        { text: "Orion", turn: 7 },
+                        { text: "Orion", turn: 0 },
+                    ],
+                }),
+                empty,
+            ]);
+            await runFallbackPass({
+                chat,
+                lookup,
+                turns: TURNS,
+                language: "cs",
+                relations,
+                unnamedLabels: [],
+            });
+            expect(
+                lookup.findEntities.mock.calls.map((call) => call[0]),
+            ).toEqual([{ text: "Tavesy" }]);
+        });
+
+        it("anchors a correction at the one occurrence nearest the model's offset, as a whole word", () => {
+            const turns = [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 5_000,
+                    text: "Díky Janete, Jan to ví a Jan taky.",
+                },
+            ];
+            const at = (charStart: number) =>
+                anchorCorrections(
+                    [
+                        {
+                            turnIndex: 0,
+                            charStart,
+                            charEnd: charStart + 3,
+                            heard: "Jan",
+                            kind: "link",
+                            target: { personId: "p-jan" },
+                            replacement: null,
+                        },
+                    ],
+                    turns,
+                ).map((correction) => correction.charStart);
+            // Offset 5 is "Jan" inside "Janete": the nearest whole word wins.
+            expect(at(5)).toEqual([13]);
+            expect(at(22)).toEqual([25]);
+        });
+
+        it("goes on with what it found once the run's lookups are spent", async () => {
+            let left = 1;
+            const lookup = {
+                findEntities: vi.fn(async ({ text }: { text: string }) => {
+                    if (left-- <= 0) throw new LearnToolBudgetExhausted();
+                    return {
+                        byMeaning: false,
+                        entities: text === "Tavesy" ? [tavesi] : [],
+                    };
+                }),
+            };
+            const { chat, calls } = fakeChat([
+                JSON.stringify({
+                    mentions: [
+                        { text: "Tavesy", turn: 0 },
+                        { text: "Orion", turn: 1 },
+                    ],
+                }),
+                empty,
+            ]);
+            const result = await runFallbackPass({
+                chat,
+                lookup,
+                turns: TURNS,
+                language: "cs",
+                relations,
+                unnamedLabels: [],
+            });
+            expect(result.lookups).toBe(1);
+            expect(JSON.stringify(calls[1])).toContain("e-tavesi");
+        });
+
+        it("keeps the windows that answered when one did not", async () => {
+            const long: TranscriptTurn[] = Array.from(
+                { length: 6 },
+                (_, i) => ({
+                    speaker: `speaker_${i % 2}`,
+                    startMs: i * 10_000,
+                    endMs: (i + 1) * 10_000,
+                    text: `Turn ${i} ${"x".repeat(40)}`,
+                }),
+            );
+            const { chat } = fakeChat([
+                '{"mentions":[]}',
+                "nope",
+                "still nope",
+                '{"mentions":[]}',
+                empty,
+            ]);
+            const result = await runFallbackPass({
+                chat,
+                lookup: {
+                    findEntities: vi.fn(async () => ({
+                        byMeaning: false,
+                        entities: [],
+                    })),
+                },
+                turns: long,
+                language: "en",
+                relations,
+                unnamedLabels: [],
+                windowChars: 230,
+            });
+            expect(result).toMatchObject({ windows: 2, failedWindows: 1 });
+        });
     });
 });

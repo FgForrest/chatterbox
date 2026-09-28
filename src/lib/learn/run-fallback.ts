@@ -19,6 +19,10 @@
 import { z } from "zod";
 import { anchorMatches } from "@/lib/knowledge/correction-anchors";
 import {
+    LearnOutputUnusable,
+    LearnToolBudgetExhausted,
+} from "@/lib/learn/errors";
+import {
     LEARN_LIMITS,
     type LearnCorrection,
     type LearnOutput,
@@ -72,14 +76,11 @@ export interface FallbackResult {
     lookups: number;
     windows: number;
     repairs: number;
+    /** Windows whose answer was not the shape even after a repair. */
+    failedWindows: number;
 }
 
-export class LearnOutputUnusable extends Error {
-    constructor(detail: string) {
-        super(`The model's answer is not the shape Learn needs: ${detail}`);
-        this.name = "LearnOutputUnusable";
-    }
-}
+export { LearnOutputUnusable } from "@/lib/learn/errors";
 
 const WINDOW_CHARS = 30_000;
 const MAX_MENTIONS = 40;
@@ -164,9 +165,33 @@ function windowsOf(
     return windows;
 }
 
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/** Where `heard` stands in `text` as a whole word (not inside another). */
+function wholeWordsAt(text: string, heard: string): number[] {
+    const found: number[] = [];
+    if (!heard) return found;
+    for (
+        let at = text.indexOf(heard);
+        at >= 0;
+        at = text.indexOf(heard, at + 1)
+    ) {
+        const before = text[at - 1];
+        const after = text[at + heard.length];
+        if (
+            (before === undefined || !WORD_CHAR.test(before)) &&
+            (after === undefined || !WORD_CHAR.test(after))
+        ) {
+            found.push(at);
+        }
+    }
+    return found;
+}
+
 /**
- * Anchor each correction where its heard words actually stand in its turn:
- * as given when they do, else at every place in that turn they occur.
+ * Anchor each correction where its heard words stand in its turn: as given
+ * when they do, else at the one whole-word occurrence nearest the offset
+ * the model gave (the model meant one place, not every one).
  */
 export function anchorCorrections(
     corrections: readonly LearnCorrection[],
@@ -174,33 +199,33 @@ export function anchorCorrections(
 ): LearnCorrection[] {
     const anchored: LearnCorrection[] = [];
     const seen = new Set<string>();
-    const add = (correction: LearnCorrection) => {
-        const key = `${correction.turnIndex}:${correction.charStart}:${correction.charEnd}`;
-        if (seen.has(key)) return;
-        seen.add(key);
-        anchored.push(correction);
-    };
     for (const correction of corrections) {
-        if (anchorMatches(correction, turns)) {
-            add(correction);
-            continue;
-        }
+        let placed = correction;
         const text = turns[correction.turnIndex]?.text ?? "";
-        let found = false;
-        for (
-            let at = text.indexOf(correction.heard);
-            at >= 0 && correction.heard.length > 0;
-            at = text.indexOf(correction.heard, at + correction.heard.length)
+        const wholeWord = (at: number) =>
+            wholeWordsAt(text, correction.heard).includes(at);
+        if (
+            !anchorMatches(correction, turns) ||
+            !wholeWord(correction.charStart)
         ) {
-            found = true;
-            add({
-                ...correction,
-                charStart: at,
-                charEnd: at + correction.heard.length,
-            });
+            const nearest = wholeWordsAt(text, correction.heard).sort(
+                (a, b) =>
+                    Math.abs(a - correction.charStart) -
+                    Math.abs(b - correction.charStart),
+            )[0];
+            // Not there at all: left for the validation to drop, and count.
+            if (nearest !== undefined) {
+                placed = {
+                    ...correction,
+                    charStart: nearest,
+                    charEnd: nearest + correction.heard.length,
+                };
+            }
         }
-        // Not there at all: left for the validation to drop, and count.
-        if (!found) add(correction);
+        const key = `${placed.turnIndex}:${placed.charStart}:${placed.charEnd}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        anchored.push(placed);
     }
     return anchored;
 }
@@ -219,7 +244,10 @@ export async function runFallbackPass(
         lookups: 0,
         windows: 0,
         repairs: 0,
+        failedWindows: 0,
     };
+    let lookupsSpent = false;
+    let lastError = "";
     const found = new Map<string, FoundEntity>();
     const lookedUp = new Map<string, FoundEntity[]>();
 
@@ -241,8 +269,23 @@ export async function runFallbackPass(
         );
         const parsed = mentionsSchema.safeParse(jsonObject(mentionsReply));
         const mentions = parsed.success ? parsed.data.mentions : [];
+        // Only words that stand in the turn named, within this window: an
+        // invented mention would look up, and show the model, knowledge
+        // this transcript never touches.
+        const inWindow = (turn: number) =>
+            turn >= window.first && turn < window.first + window.turns.length;
         const texts = [
-            ...new Set(mentions.map((mention) => mention.text)),
+            ...new Set(
+                mentions
+                    .filter(
+                        (mention) =>
+                            inWindow(mention.turn) &&
+                            (input.turns[mention.turn]?.text ?? "").includes(
+                                mention.text,
+                            ),
+                    )
+                    .map((mention) => mention.text),
+            ),
         ].slice(0, MAX_MENTIONS);
 
         const candidates = new Map<string, FoundEntity>();
@@ -250,8 +293,19 @@ export async function runFallbackPass(
             input.signal?.throwIfAborted();
             let entities = lookedUp.get(text);
             if (!entities) {
+                // Spent: the rest is adjudicated with what was found.
+                if (lookupsSpent) break;
+                try {
+                    entities = (await input.lookup.findEntities({ text }))
+                        .entities;
+                } catch (error) {
+                    if (!(error instanceof LearnToolBudgetExhausted)) {
+                        throw error;
+                    }
+                    lookupsSpent = true;
+                    break;
+                }
                 result.lookups++;
-                entities = (await input.lookup.findEntities({ text })).entities;
                 lookedUp.set(text, entities);
             }
             for (const entity of entities) {
@@ -310,7 +364,12 @@ export async function runFallbackPass(
                 ANSWER_MAX_TOKENS,
             );
             answer = parseLearnOutput(reply);
-            if (!answer.ok) throw new LearnOutputUnusable(answer.error);
+            if (!answer.ok) {
+                // This window is lost; the others stand.
+                result.failedWindows++;
+                lastError = answer.error;
+                continue;
+            }
         }
         const output = answer.output;
         result.output.speakers.push(...output.speakers);
@@ -319,6 +378,9 @@ export async function runFallbackPass(
         );
         result.output.facts.push(...output.facts);
         result.output.relationPhrases.push(...output.relationPhrases);
+    }
+    if (result.windows > 0 && result.failedWindows === result.windows) {
+        throw new LearnOutputUnusable(lastError);
     }
     return result;
 }

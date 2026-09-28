@@ -41,6 +41,7 @@ import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { isFinalLearnError } from "@/lib/learn/errors";
 import {
     LEARN_JOB_KIND,
     LEARN_MAX_ATTEMPTS,
@@ -83,6 +84,11 @@ type Outcome =
     | "failed"
     | "queued";
 
+/**
+ * Leave the run this attempt claimed: only while it is still `running`, so
+ * a status someone else set meanwhile (superseded by a rewrite, cancelled,
+ * or claimed again by a later attempt) is never overwritten.
+ */
 async function setStatus(
     runId: string,
     status: Outcome,
@@ -91,7 +97,7 @@ async function setStatus(
     await db
         .update(learnRuns)
         .set({ status, updatedAt: new Date(), ...extra })
-        .where(eq(learnRuns.id, runId));
+        .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")));
 }
 
 /** The actor's chat provider, as the Learn pass talks to it. */
@@ -485,7 +491,15 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
                 return { status, items: validated.items.length };
             });
             return { status: outcome.status, items: outcome.items };
-        } catch (error) {
+        } catch (caught) {
+            // Final for Learn (lookups spent, no usable answer): no retry.
+            const error = isFinalLearnError(caught)
+                ? new AppError(
+                      ErrorCode.AI_PROVIDER_API_ERROR,
+                      caught instanceof Error ? caught.message : "Learn failed",
+                      502,
+                  )
+                : caught;
             // Retried by the queue when worth it: the run waits for it.
             const retrying = attempt < maxAttempts && isRetryableError(error);
             await setStatus(

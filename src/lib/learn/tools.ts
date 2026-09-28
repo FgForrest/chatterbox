@@ -23,13 +23,9 @@ import {
     searchByMeaning,
 } from "@/lib/knowledge/knowledge-loader";
 import type { ReadContext } from "@/lib/knowledge/scope";
+import { LearnToolBudgetExhausted } from "@/lib/learn/errors";
 
-export class LearnToolBudgetExhausted extends Error {
-    constructor() {
-        super("This run has used all its knowledge lookups");
-        this.name = "LearnToolBudgetExhausted";
-    }
-}
+export { LearnToolBudgetExhausted } from "@/lib/learn/errors";
 
 export interface LearnToolContext {
     read: Extract<ReadContext, { kind: "recording" }>;

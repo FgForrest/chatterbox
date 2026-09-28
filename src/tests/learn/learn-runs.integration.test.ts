@@ -558,6 +558,22 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             ).toEqual([{ turnIndex: 0, charStart: 19, charEnd: 25 }]);
         });
 
+        it("keeps the status a rewrite set while a provider call was out, when that call then fails", async () => {
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            createCompletion.mockImplementationOnce(async () => {
+                // What the rewrite hook does, meanwhile.
+                await db()
+                    .update(learnRuns)
+                    .set({ status: "superseded" })
+                    .where(eq(learnRuns.id, runId));
+                throw Object.assign(new Error("bad request"), { status: 400 });
+            });
+            await expect(runJob(runId)).rejects.toThrow();
+            expect((await statusAndStats(runId))?.status).toBe("superseded");
+        });
+
         it("finishes a run that found nothing new", async () => {
             const { runId } = (await (await learn(OWNER)).json()) as {
                 runId: string;
