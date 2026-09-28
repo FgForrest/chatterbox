@@ -130,6 +130,7 @@ import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
+import { upsertEnhancement } from "@/lib/transcription/persist";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -391,5 +392,42 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
                 .from(transcriptions)
                 .where(eq(transcriptions.recordingId, REC)),
         ).toEqual([]);
+    });
+    it("lets only the writer of the moment store a summary", async () => {
+        const [transcript] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, REC));
+        const store = (actorUserId: string) =>
+            upsertEnhancement({
+                userId: OWNER,
+                actorUserId,
+                recordingId: REC,
+                transcriptionId: transcript?.id ?? "",
+                summary: `by ${actorUserId}`,
+                keyPoints: [],
+                actionItems: [],
+                source: "riffado",
+                provider: "openai",
+                model: "gpt",
+            });
+        await share();
+
+        expect(await store(OWNER)).toEqual({
+            committed: false,
+            reason: "shared",
+        });
+        expect(await store(BOB)).toEqual({
+            committed: false,
+            reason: "shared",
+        });
+        expect(await store(orgUserId)).toEqual({ committed: true });
+
+        await unshareRecording(OWNER, REC);
+        expect(await store(orgUserId)).toEqual({
+            committed: false,
+            reason: "withdrawn",
+        });
+        expect(await store(OWNER)).toEqual({ committed: true });
     });
 });

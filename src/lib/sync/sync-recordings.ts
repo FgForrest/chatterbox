@@ -102,9 +102,10 @@ interface SyncContext {
     barkPushUrl: string | null;
     /**
      * The organization account, or null without an Organization. A
-     * recording shared with it takes no Plaud transcript and no automatic
-     * transcription: its private copy is frozen until it is withdrawn, and
-     * the next sync after that fills the gap.
+     * recording shared with it takes no Plaud transcript, no new Plaud
+     * version and no automatic transcription: only the organization account
+     * changes it until it is withdrawn, and the next sync after that fills
+     * the gap.
      */
     orgUserId: string | null;
 }
@@ -248,8 +249,8 @@ async function loadPlaudContentGaps(
         if (!existing) needsSummary = true;
     }
 
-    // Shared, the owner's copy is frozen: Plaud's transcript would be
-    // refused, and its summary is imported only beside that transcript.
+    // Shared, the recording is not the owner's to change: Plaud's transcript
+    // would be refused, and its summary is imported only beside it.
     // Neither is a gap, so nothing is fetched from Plaud for them; the
     // first sync after an unshare finds both again.
     if (
@@ -285,7 +286,7 @@ async function hasUnseenPlaudContentGaps(
             and(isNull(aiEnhancements.id), isNull(recordings.summaryReapedAt)),
         ),
     ];
-    // Frozen while shared: no gap this sync would fill.
+    // Shared: no gap this sync may fill.
     if (orgUserId) conditions.push(not(sharedRecordingCondition(orgUserId)));
     if (seenRecordingIds.size > 0) {
         conditions.push(notInArray(recordings.id, [...seenRecordingIds]));

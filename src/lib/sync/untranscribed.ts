@@ -22,8 +22,8 @@ export type AutoTranscribeRetryOptions = {
     onlyIds?: readonly string[];
     limit?: number;
     /**
-     * The organization account: recordings shared with it are left out,
-     * their private copy being frozen until they are withdrawn.
+     * The organization account: recordings shared with it are left out, as
+     * only the organization account changes them until they are withdrawn.
      */
     excludeSharedWith?: string | null;
 };

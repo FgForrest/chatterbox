@@ -17,7 +17,9 @@ type Executor = Parameters<typeof isRecordingShared>[2];
  *
  * Not content: caches derived from the audio (waveform peaks, which only
  * fill a missing value), storage housekeeping (file names following the
- * title), and the Plaud original in its owner's Plaud account.
+ * title), and the Plaud original in its owner's Plaud account. Nor are
+ * operations on a person (rename, merge, delete): they act on the person,
+ * and reach every recording naming them, shared or not.
  *
  * The rule follows the Organization this instance shows. Switched to
  * `local` mode there is none, and the owner changes their recording again;

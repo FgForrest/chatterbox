@@ -1,11 +1,9 @@
 /**
  * Retention and the Organization, against a real PostgreSQL.
  *
- * Sharing copies nothing, so a shared recording's audio is the owner's file
- * and everyone's at once. These pin the rules that keep one policy from
- * deleting what another relies on: the longer audio period wins while
- * shared, an unshare is followed by a grace period, and the organization's
- * policy touches only the Organization view's own rows.
+ * A shared recording is one recording: while shared the Organization's
+ * policy governs it (audio, transcripts, summaries) and its owner's none of
+ * it but the Plaud original; after a withdrawal the owner's applies at once.
  *
  * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
  * create scratch databases on.

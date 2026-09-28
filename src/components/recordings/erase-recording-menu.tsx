@@ -200,7 +200,14 @@ export function EraseRecordingMenu({
     const requiresTitle = operation === "everywhere";
     // Everything but the Plaud original is the recording itself.
     const withdraws = shared && operation !== null && operation !== "plaud";
-    const preview = useWithdrawPreview(withdraws ? recording.id : null);
+    // What the owner's retention will delete matters only for a recording
+    // that stays: not one deleted outright.
+    const keepsRecording =
+        withdraws &&
+        (operation === "audio" ||
+            operation === "transcript" ||
+            operation === "summary");
+    const preview = useWithdrawPreview(keepsRecording ? recording.id : null);
     const confirmed = !requiresTitle || confirmText === recording.filename;
 
     return (
@@ -308,7 +315,7 @@ export function EraseRecordingMenu({
                                     )}
                                 </p>
                             )}
-                            {withdraws && (
+                            {keepsRecording && (
                                 <WithdrawRetentionWarning preview={preview} />
                             )}
                             {requiresTitle && (
@@ -344,7 +351,7 @@ export function EraseRecordingMenu({
                                     disabled={
                                         working ||
                                         !confirmed ||
-                                        (withdraws &&
+                                        (keepsRecording &&
                                             preview.status === "loading")
                                     }
                                 >

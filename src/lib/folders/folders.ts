@@ -847,10 +847,11 @@ async function pruneRedundantAssignments(
  *
  * Filing in the Organization tree is sharing, so only the owner may do it.
  * The first Organization folder shares the recording, in one transaction:
- * the assignment, the Organization's snapshot, and the share gate run on
- * that snapshot, so what gets published is exactly what passed. A refused
- * share leaves no assignment and no Organization rows. Filing an already
- * shared recording into another Organization folder is not gated.
+ * the assignment, the share gate on the owner's rows (which are what the
+ * Organization reads: a shared recording is one recording), and the
+ * publishing of its speaker names, so what gets published is exactly what
+ * passed. A refused share leaves nothing behind. Filing an already shared
+ * recording into another Organization folder is not gated.
  */
 export async function addRecordingToFolder(input: {
     userId: string;
@@ -947,8 +948,8 @@ export async function addRecordingToFolder(input: {
  * Take a recording out of one folder.
  *
  * In the Organization tree only the owner may do this. When it was the last
- * Organization folder, the recording is unshared: its Organization view is
- * deleted for everyone.
+ * Organization folder, the recording is withdrawn, which `withdraw` must
+ * confirm: it is the owner's again, as the Organization left it.
  */
 export async function removeRecordingFromFolder(input: {
     userId: string;

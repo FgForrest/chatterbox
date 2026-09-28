@@ -810,12 +810,10 @@ export const transcriptions = pgTable(
         // `StoredTopics`, see lib/topics/stored-topics.ts. Anchored to the
         // times in `turns`, so every write of the transcript rewrites it,
         // as NULL: topics never outlive the transcript they were read from.
-        // The Organization copy is the one writer that carries them, because
-        // it copies the transcript unchanged.
         topics: jsonb("topics"),
-        // Who ran the provider. Differs from `userId` on the Organization
-        // view of a shared recording, whose rows belong to the org account
-        // but are produced (and paid for) by whichever member clicked.
+        // Who ran the provider. Differs from `userId` when the organization
+        // account changes a shared recording: the rows stay the owner's, and
+        // the organization account produced (and paid for) them.
         producedByUserId: text("produced_by_user_id").references(
             () => users.id,
             { onDelete: "set null" },
@@ -823,8 +821,7 @@ export const transcriptions = pgTable(
         // Goes up by one on every write of `text` or `turns`, so anything
         // made from one version of the transcript (a speaker change, a Learn
         // run) can tell it is looking at the version it was made on. Topics
-        // are not the transcript and leave it alone. The Organization copy
-        // keeps the original's number: it is the same text.
+        // are not the transcript and leave it alone.
         revision: integer("revision").notNull().default(0),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
