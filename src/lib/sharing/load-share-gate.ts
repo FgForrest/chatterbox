@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import { transcriptions, transcriptSpeakers } from "@/db/schema";
+import { learnRuns, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
+import { UNFINISHED_LEARN_STATUSES } from "@/lib/learn/learn-statuses";
 import {
     evaluateShareGate,
     type ShareGateProblem,
@@ -53,6 +54,18 @@ export async function loadShareGate(
                       ),
                   )
             : [];
+    // The owner's Learn runs not yet finished (queued, running, or ready
+    // for review): what they propose is private until reviewed.
+    const [unfinished] = await executor
+        .select({ count: sql<number>`count(*)::int` })
+        .from(learnRuns)
+        .where(
+            and(
+                eq(learnRuns.recordingId, recordingId),
+                eq(learnRuns.view, "private"),
+                inArray(learnRuns.status, [...UNFINISHED_LEARN_STATUSES]),
+            ),
+        );
     return evaluateShareGate({
         transcripts: transcripts.map((transcript) => ({
             id: transcript.id,
@@ -60,7 +73,6 @@ export async function loadShareGate(
             labels: transcriptSpeakerLabels(transcript),
         })),
         attributions,
-        // Learn runs arrive with Phase 3.
-        unfinishedLearnRuns: 0,
+        unfinishedLearnRuns: unfinished?.count ?? 0,
     });
 }
