@@ -3,11 +3,12 @@ import { db } from "@/db";
 import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { speakerAnchorId } from "@/lib/knowledge/speaker-references";
 import {
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
+    labelsFromTurns,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
+import { speakerAnchorId } from "@/lib/knowledge/speaker-references";
+import { parseSpeakerTurns } from "@/lib/transcription/diarization";
 import type { SpeakerNameResolver } from "@/lib/transcription/turns";
 
 export type AttributionSource =
@@ -78,8 +79,7 @@ interface CopyMatchingSpeakerAttributionsArgs {
 }
 
 function orderedSpeakers(text: string): string[] {
-    const turns = parseSpeakerTurns(text);
-    return turns ? speakerOrder(turns) : [];
+    return labelsFromTurns(parseSpeakerTurns(text) ?? []);
 }
 
 function remapCandidateRows(
@@ -339,9 +339,12 @@ export function namesFromRows(
     rows: readonly { label: string; displayName: string }[],
 ): SpeakerNameResolver {
     const names = new Map(
-        rows.map((row) => [row.label, decryptText(row.displayName)]),
+        rows.map((row) => [
+            speakerKey(row.label),
+            decryptText(row.displayName),
+        ]),
     );
-    return (speaker: string) => names.get(speaker) ?? null;
+    return (speaker: string) => names.get(speakerKey(speaker)) ?? null;
 }
 
 /** A resolver that names nobody, for transcripts with no attributions. */

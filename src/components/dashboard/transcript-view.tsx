@@ -2,6 +2,7 @@
 
 import { useExtracted } from "next-intl";
 import { Fragment, useMemo } from "react";
+import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import {
     containingTurnIndex,
@@ -148,7 +149,8 @@ export function TranscriptView({
                         (position === -1 ? 0 : position) % SPEAKER_STYLES.length
                     ];
                 const displayName =
-                    speakerAttributions[turn.speaker]?.name ?? turn.label;
+                    speakerAttributions[speakerKey(turn.speaker)]?.name ??
+                    turn.label;
                 const canSeek =
                     onSeekToTurn !== undefined &&
                     turn.startMs !== undefined &&

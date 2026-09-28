@@ -38,6 +38,7 @@ import {
     type SummarySource,
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
+import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import {
     inferSummarySpeakerNumberOffset,
     type SpeakerAttributions,
@@ -46,12 +47,7 @@ import { withRecordingView } from "@/lib/sharing/view";
 import { describeMultiPass } from "@/lib/summary/multi-pass";
 import { formatElapsed } from "@/lib/summary/progress-stream";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
-import {
-    formatSpeakerLabel,
-    mayBeDiarized,
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
+import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
@@ -169,17 +165,7 @@ export function transcriptSpeakerTags(
     transcript: TranscriptOption | undefined,
 ): TranscriptSpeakerTag[] {
     if (!transcript) return [];
-    const turns = transcript.turns?.length
-        ? transcript.turns.map((turn) => ({
-              speaker: turn.speaker,
-              label: formatSpeakerLabel(turn.speaker),
-              text: turn.text,
-          }))
-        : mayBeDiarized(transcript)
-          ? parseSpeakerTurns(transcript.text)
-          : null;
-    if (!turns) return [];
-    return speakerOrder(turns).map((speaker) => ({
+    return speakerLabelsForTranscript(transcript).map((speaker) => ({
         speaker,
         label: formatSpeakerLabel(speaker),
     }));

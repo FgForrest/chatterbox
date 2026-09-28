@@ -6,17 +6,12 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
-import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { promotePerson } from "@/lib/knowledge/people";
+import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 import { speakerAnchorId } from "@/lib/knowledge/speaker-references";
 import { isRecordingShared } from "@/lib/sharing/shared";
-import {
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
-import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 type TranscriptionRow = typeof transcriptions.$inferSelect;
 
@@ -24,15 +19,6 @@ export interface OrgTranscriptOwners {
     ownerUserId: string;
     /** The organization account, owner of the Organization view's rows. */
     contentUserId: string;
-}
-
-function orderedSpeakers(row: Pick<TranscriptionRow, "text" | "turns">) {
-    const turns = readTranscriptTurns(row);
-    if (turns) {
-        return [...new Set(turns.map((turn) => turn.speaker).filter(Boolean))];
-    }
-    const parsed = parseSpeakerTurns(decryptText(row.text));
-    return parsed ? speakerOrder(parsed) : [];
 }
 
 /**
@@ -246,7 +232,7 @@ export async function captureSpeakerNames(
             ),
         );
     return {
-        speakers: orderedSpeakers(previous),
+        speakers: transcriptSpeakerLabels(previous),
         names: names.flatMap((row) =>
             row.personId
                 ? [
@@ -286,7 +272,7 @@ export async function applyCarriedSpeakerNames(
         .where(eq(transcriptions.id, transcriptionId))
         .limit(1);
     if (!target) return;
-    const next = orderedSpeakers(target);
+    const next = transcriptSpeakerLabels(target);
     if (next.length === 0 || next.length !== carried.speakers.length) return;
 
     const rows = carried.names.flatMap((name) => {

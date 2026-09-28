@@ -16,6 +16,7 @@ import {
     MAX_DISPLAY_NAME_LENGTH,
     promotePerson,
 } from "@/lib/knowledge/people";
+import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import { assertOrgScopeWritable, isOrgScopeEnabled } from "@/lib/org/config";
 import {
     requestedRecordingView,
@@ -26,8 +27,6 @@ import { ensureOrgTranscript } from "@/lib/sharing/org-transcript";
 import { effectiveViewReader } from "@/lib/sharing/view-content";
 
 type IdContext = { params: Promise<{ id: string }> };
-
-const MAX_LABEL_LENGTH = 64;
 
 function requestedSource(request: Request): string {
     return new URL(request.url).searchParams.get("source") ?? "riffado";
@@ -90,12 +89,9 @@ function readChange(body: unknown): SpeakerChange {
             { field: "label" },
         );
     }
-    if (label.length > MAX_LABEL_LENGTH) {
-        throw new AppError(ErrorCode.INVALID_INPUT, "label is too long", 400, {
-            field: "label",
-        });
-    }
-    const change: SpeakerChange = { label: label.trim() };
+    // Stored and compared as the key, so an overlong provider label is the
+    // same speaker here as in the transcript it came from.
+    const change: SpeakerChange = { label: speakerKey(label) };
     if (typeof value.personId === "string" && value.personId) {
         change.personId = value.personId;
     } else if (
