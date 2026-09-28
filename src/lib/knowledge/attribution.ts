@@ -11,6 +11,7 @@ import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { mapLabels, remapAttributionRows } from "@/lib/knowledge/label-mapping";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import { createPersonInTx } from "@/lib/knowledge/people";
 import {
     type SpeakerVersion,
     speakerKey,
@@ -163,6 +164,13 @@ export async function copyMatchingSpeakerAttributions({
         const from = rows.find((row) => row.source === sourceSource);
         const to = rows.find((row) => row.source === targetSource);
         if (!from || !to || from.id === to.id) return 0;
+        // Held like a speaker change holds it, so a rejection made meanwhile
+        // is either seen below or made after these suggestions exist.
+        await tx
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.id, to.id))
+            .for("update");
 
         const previous = storedSpeakerVersion(from);
         const next = storedSpeakerVersion(to);
@@ -263,7 +271,7 @@ export async function getTranscriptSpeakers(
  * revision and is refused instead of naming a label that now means
  * someone else.
  */
-async function lockForSpeakerChange(
+export async function lockForSpeakerChange(
     tx: Tx,
     { userId, transcriptionId, revision }: TranscriptVersion,
 ): Promise<void> {
@@ -300,12 +308,110 @@ async function lockForSpeakerChange(
             404,
         );
     }
-    if (transcript.revision !== revision) {
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            "The transcript changed; reload",
-            409,
-        );
+    if (transcript.revision !== revision) throw transcriptChanged();
+}
+
+/** A change was made on a transcript version that is no longer the one shown. */
+export function transcriptChanged(): AppError {
+    return new AppError(
+        ErrorCode.CONFLICT,
+        "The transcript changed; reload",
+        409,
+    );
+}
+
+/**
+ * What a person said about one speaker label:
+ * - `name`: it is this person, an existing one or a new name;
+ * - `unknown`: nobody anyone knows, which is an answer;
+ * - `clear`: take the answer back, and leave the label open;
+ * - `reject`: it is not the suggested person, and never suggest them again.
+ */
+export type SpeakerAnswer =
+    | { kind: "name"; personId: string }
+    | { kind: "name"; displayName: string }
+    | { kind: "unknown" }
+    | { kind: "clear" }
+    | { kind: "reject"; personId: string };
+
+export interface SpeakerChangeArgs extends TranscriptVersion {
+    label: string;
+    answer: SpeakerAnswer;
+    /** The human answering, recorded on what they confirm. */
+    actorUserId: string;
+}
+
+/**
+ * Write one person's answer about one speaker label, as one transaction:
+ * the transcript is locked and its revision checked before a new person is
+ * created, so a refused change leaves nothing behind. Returns the person
+ * named, if any.
+ *
+ * An answer is `confirmed` with source `user` and the person who gave it:
+ * it came from a human looking at the transcript, the only evidence strong
+ * enough to reach a summary or an export.
+ */
+export async function changeTranscriptSpeaker(
+    args: SpeakerChangeArgs,
+): Promise<string | null> {
+    return db.transaction((tx) => changeTranscriptSpeakerInTx(tx, args));
+}
+
+/**
+ * `changeTranscriptSpeaker` inside a caller's transaction. A new person
+ * belongs to the transcript's owner, as their knowledge base names the
+ * speakers of their transcripts.
+ */
+export async function changeTranscriptSpeakerInTx(
+    tx: Tx,
+    { answer, actorUserId, ...version }: SpeakerChangeArgs,
+): Promise<string | null> {
+    await lockForSpeakerChange(tx, version);
+    const where = {
+        userId: version.userId,
+        transcriptionId: version.transcriptionId,
+        label: version.label,
+    };
+    switch (answer.kind) {
+        case "name": {
+            const personId =
+                "personId" in answer
+                    ? answer.personId
+                    : (
+                          await createPersonInTx(tx, {
+                              userId: version.userId,
+                              displayName: answer.displayName,
+                              createdByUserId:
+                                  actorUserId === version.userId
+                                      ? null
+                                      : actorUserId,
+                          })
+                      ).id;
+            await writeSpeakerInTx(tx, {
+                ...where,
+                personId,
+                source: "user",
+                status: "confirmed",
+                confirmedByUserId: actorUserId,
+            });
+            return personId;
+        }
+        case "unknown":
+            await writeSpeakerInTx(tx, {
+                ...where,
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                markedUnknown: true,
+                confirmedByUserId: actorUserId,
+            });
+            return null;
+        case "clear":
+            await deleteSpeakerInTx(tx, where);
+            return null;
+        case "reject":
+            await rejectInTx(tx, { ...where, personId: answer.personId });
+            return null;
     }
 }
 
@@ -323,15 +429,18 @@ async function lockForSpeakerChange(
 export async function setTranscriptSpeaker(
     args: SetTranscriptSpeakerArgs,
 ): Promise<void> {
-    await db.transaction((tx) => setTranscriptSpeakerInTx(tx, args));
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await writeSpeakerInTx(tx, args);
+    });
 }
 
-async function setTranscriptSpeakerInTx(
+/** The row write of `setTranscriptSpeaker`; the caller holds the lock. */
+async function writeSpeakerInTx(
     tx: Tx,
     {
         userId,
         transcriptionId,
-        revision,
         label,
         personId,
         source,
@@ -340,9 +449,8 @@ async function setTranscriptSpeakerInTx(
         evidenceStartMs = null,
         markedUnknown = false,
         confirmedByUserId = null,
-    }: SetTranscriptSpeakerArgs,
+    }: Omit<SetTranscriptSpeakerArgs, "revision">,
 ): Promise<void> {
-    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .insert(transcriptSpeakers)
         .values({
@@ -393,14 +501,16 @@ async function setTranscriptSpeakerInTx(
 export async function clearTranscriptSpeaker(
     args: TranscriptLabelArgs,
 ): Promise<void> {
-    await db.transaction((tx) => clearTranscriptSpeakerInTx(tx, args));
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await deleteSpeakerInTx(tx, args);
+    });
 }
 
-async function clearTranscriptSpeakerInTx(
+async function deleteSpeakerInTx(
     tx: Tx,
-    { userId, transcriptionId, revision, label }: TranscriptLabelArgs,
+    { userId, transcriptionId, label }: Omit<TranscriptLabelArgs, "revision">,
 ): Promise<void> {
-    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .delete(transcriptSpeakers)
         .where(
@@ -420,20 +530,21 @@ async function clearTranscriptSpeakerInTx(
 export async function rejectSuggestion(
     args: TranscriptLabelArgs & { personId: string },
 ): Promise<void> {
-    await db.transaction((tx) => rejectSuggestionInTx(tx, args));
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await rejectInTx(tx, args);
+    });
 }
 
-async function rejectSuggestionInTx(
+async function rejectInTx(
     tx: Tx,
     {
         userId,
         transcriptionId,
-        revision,
         label,
         personId,
-    }: TranscriptLabelArgs & { personId: string },
+    }: Omit<TranscriptLabelArgs, "revision"> & { personId: string },
 ): Promise<void> {
-    await lockForSpeakerChange(tx, { userId, transcriptionId, revision });
     await tx
         .insert(transcriptSpeakerRejections)
         .values({ userId, transcriptionId, label, personId })
@@ -458,6 +569,10 @@ async function rejectSuggestionInTx(
  * whether a human's answer or an earlier suggestion, keeps it. A suggestion
  * without a person has nothing to offer, and a pair a human rejected stays
  * rejected. Returns how many were written.
+ *
+ * The caller holds the transcript `FOR UPDATE` (after its recording), as a
+ * speaker change does, so a rejection cannot land between the read of the
+ * rejections here and the insert.
  */
 export async function insertSuggestionsInTx(
     tx: Tx,
@@ -578,20 +693,6 @@ export async function remapTranscriptAttributionsInTx(
             eq(transcriptSpeakerRejections.transcriptionId, transcriptionId),
         );
 
-    const movedRejections = rejections.flatMap((rejection) => {
-        const label = mapping.carried.get(rejection.label);
-        return label ? [{ ...rejection, label, transcriptionId }] : [];
-    });
-    const rejected = new Set(
-        movedRejections.map((row) => pairKey(row.label, row.personId)),
-    );
-    const remapped = remapAttributionRows(rows, mapping).filter(
-        (row) =>
-            row.status !== "suggested" ||
-            !row.personId ||
-            !rejected.has(pairKey(row.label, row.personId)),
-    );
-
     await tx
         .delete(transcriptSpeakers)
         .where(
@@ -600,15 +701,6 @@ export async function remapTranscriptAttributionsInTx(
                 eq(transcriptSpeakers.transcriptionId, transcriptionId),
             ),
         );
-    if (remapped.length > 0) {
-        await tx.insert(transcriptSpeakers).values(
-            remapped.map((row) => ({
-                ...row,
-                userId,
-                transcriptionId,
-            })),
-        );
-    }
     if (rejections.length > 0) {
         await tx
             .delete(transcriptSpeakerRejections)
@@ -619,9 +711,66 @@ export async function remapTranscriptAttributionsInTx(
                 ),
             );
     }
-    if (movedRejections.length > 0) {
-        await tx.insert(transcriptSpeakerRejections).values(movedRejections);
+
+    // Read after the deletes, which waited for any merge or deletion of
+    // these people that had already touched the rows: a person merged away
+    // meanwhile is written as the person kept, a deleted one not at all.
+    const current = await currentPersonIds(tx, [
+        ...rows.flatMap((row) => (row.personId ? [row.personId] : [])),
+        ...rejections.map((rejection) => rejection.personId),
+    ]);
+    const movedRejections = rejections.flatMap((rejection) => {
+        const label = mapping.carried.get(rejection.label);
+        const personId = current.get(rejection.personId);
+        return label && personId
+            ? [{ ...rejection, label, personId, transcriptionId }]
+            : [];
+    });
+    const rejected = new Set(
+        movedRejections.map((row) => pairKey(row.label, row.personId)),
+    );
+    const remapped = remapAttributionRows(rows, mapping).flatMap((row) => {
+        if (!row.personId) return [row];
+        const personId = current.get(row.personId);
+        if (!personId) return [];
+        const ruledOut =
+            row.status === "suggested" &&
+            rejected.has(pairKey(row.label, personId));
+        return ruledOut ? [] : [{ ...row, personId }];
+    });
+
+    if (remapped.length > 0) {
+        await tx.insert(transcriptSpeakers).values(
+            remapped.map((row) => ({
+                ...row,
+                userId,
+                transcriptionId,
+            })),
+        );
     }
+    if (movedRejections.length > 0) {
+        // Two rejections on one label can now name the same person.
+        await tx
+            .insert(transcriptSpeakerRejections)
+            .values(movedRejections)
+            .onConflictDoNothing();
+    }
+}
+
+/**
+ * Where each person id points now: a merged-away id to the person it was
+ * folded into (merges keep redirects one hop deep), a deleted one nowhere.
+ */
+async function currentPersonIds(
+    tx: Tx,
+    personIds: string[],
+): Promise<Map<string, string>> {
+    if (personIds.length === 0) return new Map();
+    const rows = await tx
+        .select({ id: people.id, mergedIntoId: people.mergedIntoId })
+        .from(people)
+        .where(inArray(people.id, [...new Set(personIds)]));
+    return new Map(rows.map((row) => [row.id, row.mergedIntoId ?? row.id]));
 }
 
 function pairKey(label: string, personId: string): string {

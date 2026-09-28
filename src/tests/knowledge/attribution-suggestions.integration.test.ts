@@ -12,7 +12,7 @@
  * create scratch databases on.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -110,7 +110,9 @@ import { db as appDb } from "@/db";
 import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
 import {
+    copyMatchingSpeakerAttributions,
     insertSuggestionsInTx,
+    lockForSpeakerChange,
     rejectSuggestion,
     type SuggestedSpeaker,
     setTranscriptSpeaker,
@@ -143,6 +145,48 @@ function request(user: string, query: string, init: RequestInit = {}) {
             },
         },
     );
+}
+
+type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+
+/**
+ * Run `work` in a transaction that stays open, holding its locks, until
+ * `commit` is called: another writer caught in the middle of its work.
+ */
+async function holdTransaction(work: (tx: Tx) => Promise<void>) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let ready = () => {};
+    const worked = new Promise<void>((resolve) => {
+        ready = resolve;
+    });
+    const done = appDb.transaction(async (tx) => {
+        await work(tx);
+        ready();
+        await released;
+    });
+    await Promise.race([worked, done]);
+    return {
+        commit: async () => {
+            release();
+            await done;
+        },
+    };
+}
+
+/** Whether `promise` is still pending after a moment: waiting on a lock. */
+async function stillWaiting(promise: Promise<unknown>): Promise<boolean> {
+    const pending = Symbol("pending");
+    const first = await Promise.race([
+        promise.then(
+            () => null,
+            () => null,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(pending), 300)),
+    ]);
+    return first === pending;
 }
 
 /** The transcript version the view shows, as the panel reads it. */
@@ -711,6 +755,267 @@ describeWithDatabase("speaker answers and suggestions (PostgreSQL)", () => {
         expect(named).toMatchObject({
             userId: orgUserId,
             confirmedByUserId: BOB,
+        });
+    });
+    describe("serialized with transcript rewrites", () => {
+        /** Lock the recording as a transcript rewrite does. */
+        async function lockAsRewrite(tx: Tx) {
+            await tx
+                .select({ id: recordings.id })
+                .from(recordings)
+                .where(eq(recordings.id, REC))
+                .for("update");
+        }
+
+        it("waits for a rewrite in progress, then refuses a change made before it", async () => {
+            const rewrite = await holdTransaction(async (tx) => {
+                await lockAsRewrite(tx);
+                await tx
+                    .update(transcriptions)
+                    .set({ revision: sql`${transcriptions.revision} + 1` })
+                    .where(eq(transcriptions.id, transcriptId));
+            });
+            const outcome = setTranscriptSpeaker({
+                userId: ALICE,
+                transcriptionId: transcriptId,
+                revision: 0,
+                label: "speaker_0",
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                markedUnknown: true,
+            }).then(
+                () => "written",
+                (error: { statusCode?: number }) => error.statusCode,
+            );
+            expect(await stillWaiting(outcome)).toBe(true);
+            await rewrite.commit();
+            expect(await outcome).toBe(409);
+            expect(await speakerRows()).toEqual([]);
+        });
+
+        it("merges the rows a rewrite in progress writes, once it commits", async () => {
+            const jana = await person(ALICE, "Jana");
+            const duplicate = await person(ALICE, "J. Nováková");
+            await put(ALICE, { label: "speaker_0", personId: duplicate });
+            // The rewrite replaces the rows, as the hook does.
+            const rewrite = await holdTransaction(async (tx) => {
+                await lockAsRewrite(tx);
+                const rows = await tx
+                    .select()
+                    .from(transcriptSpeakers)
+                    .where(
+                        eq(transcriptSpeakers.transcriptionId, transcriptId),
+                    );
+                await tx
+                    .delete(transcriptSpeakers)
+                    .where(
+                        eq(transcriptSpeakers.transcriptionId, transcriptId),
+                    );
+                await tx
+                    .insert(transcriptSpeakers)
+                    .values(rows.map(({ id: _id, ...row }) => row));
+            });
+            const merge = mergePeople(ALICE, jana, duplicate);
+            expect(await stillWaiting(merge)).toBe(true);
+            await rewrite.commit();
+            await merge;
+            expect((await speakerRows()).map((row) => row.personId)).toEqual([
+                jana,
+            ]);
+        });
+
+        it("writes a row still naming a merged-away person as the person kept", async () => {
+            const jana = await person(ALICE, "Jana");
+            const duplicate = await person(ALICE, "J. Nováková");
+            await put(ALICE, { label: "speaker_0", personId: duplicate });
+            // What a merge committing under a rewrite's read would leave.
+            await db()
+                .update(people)
+                .set({ mergedIntoId: jana })
+                .where(eq(people.id, duplicate));
+            await upsertTranscription({
+                userId: ALICE,
+                recordingId: REC,
+                text: DIALOG,
+                detectedLanguage: "en",
+                source: "riffado",
+                provider: "openai",
+                model: "gpt-4o-transcribe-diarize",
+            });
+            expect((await speakerRows()).map((row) => row.personId)).toEqual([
+                jana,
+            ]);
+        });
+
+        it("offers no suggestion rejected while it was being copied", async () => {
+            const jana = await person(ALICE, "Jana");
+            const [plaud] = await db()
+                .insert(transcriptions)
+                .values({
+                    recordingId: REC,
+                    userId: ALICE,
+                    text: encryptText(
+                        "Speaker 1: Hello.\nSpeaker 2: Hi there.",
+                    ),
+                    provider: "plaud",
+                    model: "plaud",
+                    source: "plaud",
+                })
+                .returning({ id: transcriptions.id });
+            await db()
+                .insert(transcriptSpeakers)
+                .values({
+                    userId: ALICE,
+                    transcriptionId: plaud?.id ?? "",
+                    label: "Speaker 1",
+                    personId: jana,
+                    source: "user",
+                    status: "confirmed",
+                    confirmedByUserId: ALICE,
+                });
+            // A person rejects Jana for speaker_0 as the copy starts.
+            const change = await holdTransaction(async (tx) => {
+                await lockForSpeakerChange(tx, {
+                    userId: ALICE,
+                    transcriptionId: transcriptId,
+                    revision: 0,
+                });
+                await tx.insert(transcriptSpeakerRejections).values({
+                    userId: ALICE,
+                    transcriptionId: transcriptId,
+                    label: "speaker_0",
+                    personId: jana,
+                });
+            });
+            const copied = copyMatchingSpeakerAttributions({
+                userId: ALICE,
+                recordingId: REC,
+                sourceSource: "plaud",
+                targetSource: "riffado",
+            });
+            expect(await stillWaiting(copied)).toBe(true);
+            await change.commit();
+            expect(await copied).toBe(0);
+            expect(await speakerRows()).toEqual([]);
+        });
+    });
+
+    describe("a merge meeting two answers about one label", () => {
+        it("keeps the confirmation and drops the rejection", async () => {
+            const jana = await person(ALICE, "Jana");
+            const duplicate = await person(ALICE, "J. Nováková");
+            await put(ALICE, { label: "speaker_0", personId: jana });
+            await rejectSuggestion({
+                userId: ALICE,
+                transcriptionId: transcriptId,
+                revision: 0,
+                label: "speaker_0",
+                personId: duplicate,
+            });
+            await mergePeople(ALICE, jana, duplicate);
+            expect(await rejections()).toEqual([]);
+            expect(
+                (await speakerRows()).map((row) => [row.personId, row.status]),
+            ).toEqual([[jana, "confirmed"]]);
+        });
+
+        it("drops a suggestion the moved rejection rules out", async () => {
+            const jana = await person(ALICE, "Jana");
+            const duplicate = await person(ALICE, "J. Nováková");
+            await suggest([suggestion("speaker_0", jana)]);
+            await rejectSuggestion({
+                userId: ALICE,
+                transcriptionId: transcriptId,
+                revision: 0,
+                label: "speaker_0",
+                personId: duplicate,
+            });
+            await mergePeople(ALICE, jana, duplicate);
+            expect(await speakerRows()).toEqual([]);
+            expect(await rejections()).toEqual([
+                { label: "speaker_0", personId: jana },
+            ]);
+        });
+    });
+
+    describe("the Organization view", () => {
+        async function share(): Promise<string> {
+            const orgUserId = (await ensureOrgAccount()) ?? "";
+            const [root] = await db()
+                .select({ id: recordingFolders.id })
+                .from(recordingFolders)
+                .where(eq(recordingFolders.userId, orgUserId));
+            await addRecordingToFolder({
+                userId: ALICE,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
+            return orgUserId;
+        }
+
+        it("lets only the organization account refuse a suggestion", async () => {
+            const orgUserId = await share();
+            await put(
+                orgUserId,
+                { label: "speaker_1", unknown: true },
+                "?view=org",
+            );
+            const [copy] = await db()
+                .select({ id: transcriptions.id })
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, orgUserId));
+            const orgJana = await person(orgUserId, "Jana N.");
+            await appDb.transaction((tx) =>
+                insertSuggestionsInTx(tx, {
+                    userId: orgUserId,
+                    transcriptionId: copy?.id ?? "",
+                    rows: [suggestion("speaker_0", orgJana)],
+                }),
+            );
+            const reject = {
+                label: "speaker_0",
+                personId: orgJana,
+                reject: true,
+            };
+
+            expect((await put(BOB, reject, "?view=org")).status).toBe(403);
+            const refused = await db()
+                .select()
+                .from(transcriptSpeakerRejections)
+                .where(eq(transcriptSpeakerRejections.userId, orgUserId));
+            expect(refused).toEqual([]);
+
+            expect((await put(orgUserId, reject, "?view=org")).status).toBe(
+                200,
+            );
+            const kept = await db()
+                .select({ label: transcriptSpeakerRejections.label })
+                .from(transcriptSpeakerRejections)
+                .where(eq(transcriptSpeakerRejections.userId, orgUserId));
+            expect(kept).toEqual([{ label: "speaker_0" }]);
+        });
+
+        it("tells only the organization account who confirmed a name", async () => {
+            const orgUserId = await share();
+            await put(
+                BOB,
+                { label: "speaker_0", displayName: "Petr" },
+                "?view=org",
+            );
+            const confirmers = async (user: string) => {
+                const response = await (getSpeakersRoute as unknown as Handler)(
+                    request(user, "?view=org"),
+                    { params: Promise.resolve({ id: REC }) },
+                );
+                const body = (await response.json()) as {
+                    speakers: { confirmedByUserId: string | null }[];
+                };
+                return body.speakers.map((row) => row.confirmedByUserId);
+            };
+            expect(await confirmers(BOB)).toEqual([null]);
+            expect(await confirmers(ALICE)).toEqual([null]);
+            expect(await confirmers(orgUserId)).toEqual([BOB]);
         });
     });
 });

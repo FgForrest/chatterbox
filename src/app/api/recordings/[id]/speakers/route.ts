@@ -6,14 +6,13 @@ import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import {
-    clearTranscriptSpeaker,
+    changeTranscriptSpeaker,
     getTranscriptSpeakers,
-    rejectSuggestion,
-    setTranscriptSpeaker,
+    type SpeakerAnswer,
     type TranscriptSpeaker,
+    transcriptChanged,
 } from "@/lib/knowledge/attribution";
 import {
-    createPerson,
     getPerson,
     MAX_DISPLAY_NAME_LENGTH,
     promotePerson,
@@ -25,7 +24,7 @@ import {
     requireRecordingView,
 } from "@/lib/sharing/access";
 import { orgContentChanged } from "@/lib/sharing/notify";
-import { ensureOrgTranscript } from "@/lib/sharing/org-transcript";
+import { changeOrgTranscriptSpeaker } from "@/lib/sharing/org-transcript";
 import { effectiveViewReader } from "@/lib/sharing/view-content";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -74,16 +73,21 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
  *
  * A suggestion is shown only to whoever may act on it: on the
  * Organization's own transcript that is the organization account, which
- * curates it. Everyone else reads the confirmed names. On the owner's
- * transcript, shown until the Organization has its own, a suggestion is
- * the owner's to review, so nobody sees it here.
+ * curates it. Everyone else reads the confirmed names, without who
+ * confirmed them. On the owner's transcript, shown until the Organization
+ * has its own, a suggestion is the owner's to review, so nobody sees it
+ * here.
  */
 function orgViewSpeakers(
     speakers: TranscriptSpeaker[],
     viewer: { curator: boolean; ownersTranscript: boolean },
 ): TranscriptSpeaker[] {
     if (viewer.curator && !viewer.ownersTranscript) return speakers;
-    return speakers.filter((speaker) => speaker.status === "confirmed");
+    return speakers.flatMap((speaker) =>
+        speaker.status === "confirmed"
+            ? [{ ...speaker, confirmedByUserId: null }]
+            : [],
+    );
 }
 
 /**
@@ -227,11 +231,7 @@ function assertSeenVersion(
         change.transcriptionId !== shown.id ||
         change.revision !== shown.revision
     ) {
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            "The transcript changed; reload",
-            409,
-        );
+        throw transcriptChanged();
     }
 }
 
@@ -267,6 +267,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     if (view === "org" && access.orgUserId) {
         assertOrgScopeWritable();
         const orgUserId = access.orgUserId;
+        const curator = session.user.id === orgUserId;
 
         // Checked before anything is copied, so a bad request leaves no trace.
         let personId: string | null = null;
@@ -279,50 +280,37 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             personId = person.id;
         }
         if (change.kind === "reject") {
+            // Only the curator is shown suggestions here, so only the
+            // curator can have one to refuse.
+            if (!curator) {
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "Only the organization account reviews suggestions",
+                    403,
+                );
+            }
             const person = await getPerson(session.user.id, change.personId);
             if (!person || person.scope !== "org") throw personNotFound();
         }
-        // What the view showed: the Organization's own transcript, or the
-        // owner's until the Organization has one. The first change copies
-        // the owner's, keeping its revision, so the check below still holds.
-        const reader = await effectiveViewReader(id, access, "transcript");
-        assertSeenVersion(
-            change,
-            await requireTranscript(reader.userId, id, request),
-        );
-        const transcript = await ensureOrgTranscript(
-            id,
-            requestedSource(request),
-            access,
-            session.user.id,
-        );
-        if (change.kind === "name" && !personId && change.displayName) {
-            const created = await createPerson({
-                userId: orgUserId,
-                displayName: change.displayName,
-                createdByUserId: session.user.id,
-            });
-            personId = created.id;
-        }
 
-        await applyChange(change, {
-            userId: orgUserId,
-            transcriptionId: transcript.id,
-            personId,
+        const result = await changeOrgTranscriptSpeaker({
+            recordingId: id,
+            source: requestedSource(request),
+            owners: access,
             actorUserId: session.user.id,
+            seen: change,
+            label: change.label,
+            answer: answerOf(change, personId),
         });
         await orgContentChanged(id);
         return NextResponse.json({
-            transcriptionId: transcript.id,
-            revision: transcript.revision,
+            transcriptionId: result.transcriptionId,
+            revision: result.revision,
             speakers: orgViewSpeakers(
-                await getTranscriptSpeakers(orgUserId, transcript.id, {
+                await getTranscriptSpeakers(orgUserId, result.transcriptionId, {
                     orgPeopleOnly: true,
                 }),
-                {
-                    curator: session.user.id === orgUserId,
-                    ownersTranscript: false,
-                },
+                { curator, ownersTranscript: false },
             ),
         });
     }
@@ -330,27 +318,23 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     const transcript = await requireTranscript(session.user.id, id, request);
     assertSeenVersion(change, transcript);
 
-    let personId: string | null = null;
+    let existingPersonId: string | null = null;
     if (change.kind === "name" && change.personId) {
         const person = await currentPerson(session.user.id, change.personId);
         if (!person) throw personNotFound();
-        personId = person.id;
-    } else if (change.kind === "name" && change.displayName) {
-        const created = await createPerson({
-            userId: session.user.id,
-            displayName: change.displayName,
-        });
-        personId = created.id;
+        existingPersonId = person.id;
     } else if (change.kind === "reject") {
         if (!(await getPerson(session.user.id, change.personId))) {
             throw personNotFound();
         }
     }
 
-    await applyChange(change, {
+    const personId = await changeTranscriptSpeaker({
         userId: session.user.id,
         transcriptionId: transcript.id,
-        personId,
+        revision: change.revision,
+        label: change.label,
+        answer: answerOf(change, existingPersonId),
         actorUserId: session.user.id,
     });
 
@@ -407,50 +391,31 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     });
 });
 
-/** Write one change to the transcript's speaker rows. */
-async function applyChange(
+/**
+ * The answer a change gives. `personId` is the checked person a `name`
+ * change picked; a `name` change without one creates a person, in the
+ * transaction that writes it.
+ */
+function answerOf(
     change: SpeakerChange,
-    target: {
-        userId: string;
-        transcriptionId: string;
-        /** The resolved person for a `name` change. */
-        personId: string | null;
-        /** The human making the change, recorded on what they confirm. */
-        actorUserId: string;
-    },
-): Promise<void> {
-    const where = {
-        userId: target.userId,
-        transcriptionId: target.transcriptionId,
-        revision: change.revision,
-        label: change.label,
-    };
+    personId: string | null,
+): SpeakerAnswer {
     switch (change.kind) {
         case "name":
-            await setTranscriptSpeaker({
-                ...where,
-                personId: target.personId,
-                source: "user",
-                status: "confirmed",
-                confirmedByUserId: target.actorUserId,
-            });
-            return;
-        case "unknown":
-            await setTranscriptSpeaker({
-                ...where,
-                personId: null,
-                source: "user",
-                status: "confirmed",
-                markedUnknown: true,
-                confirmedByUserId: target.actorUserId,
-            });
-            return;
-        case "clear":
-            await clearTranscriptSpeaker(where);
-            return;
+            if (personId) return { kind: "name", personId };
+            if (change.displayName) {
+                return { kind: "name", displayName: change.displayName };
+            }
+            throw new AppError(
+                ErrorCode.MISSING_REQUIRED_FIELD,
+                "personId or displayName is required",
+                400,
+            );
         case "reject":
-            await rejectSuggestion({ ...where, personId: change.personId });
-            return;
+            return { kind: "reject", personId: change.personId };
+        case "unknown":
+        case "clear":
+            return { kind: change.kind };
     }
 }
 

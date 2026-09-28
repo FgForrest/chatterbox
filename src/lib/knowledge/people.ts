@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     people,
     personNotes,
+    recordings,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -142,20 +143,28 @@ async function viewerNotesFor(
  * transcript supplies a name and nothing else. An email is optional, and
  * only some people will ever have one.
  */
-export async function createPerson({
-    userId,
-    displayName,
-    primaryEmail,
-    notes,
-    createdByUserId,
-}: CreatePersonArgs): Promise<Person> {
+export async function createPerson(args: CreatePersonArgs): Promise<Person> {
+    return createPersonInTx(db, args);
+}
+
+/** `createPerson` inside a caller's transaction, e.g. with the change naming them. */
+export async function createPersonInTx(
+    executor: Pick<typeof db, "select" | "insert">,
+    {
+        userId,
+        displayName,
+        primaryEmail,
+        notes,
+        createdByUserId,
+    }: CreatePersonArgs,
+): Promise<Person> {
     const trimmedName = displayName.trim();
     if (!trimmedName) {
         throw new Error("A person needs a name");
     }
     const email = primaryEmail?.trim() || null;
 
-    const [created] = await db
+    const [created] = await executor
         .insert(people)
         .values({
             userId,
@@ -167,7 +176,7 @@ export async function createPerson({
         })
         .returning({ id: people.id });
 
-    const row = created ? await readPersonRow(db, created.id) : null;
+    const row = created ? await readPersonRow(executor, created.id) : null;
     if (!row) throw new Error("Person was not created");
     return toPerson(row);
 }
@@ -338,12 +347,19 @@ async function updatePersonInTx(
  * Works on person ids alone: an Organization person is named in many
  * accounts' transcripts, so every attribution row is moved, whoever's it
  * is. Callers authorize first.
+ *
+ * A transcript rewrite replaces its speaker rows under its recording's
+ * lock, so the recordings of every transcript naming either person are
+ * held first: otherwise a rewrite could re-insert a row this merge moved,
+ * or move one it is about to.
  */
 async function mergeInTx(
     tx: Tx,
     winnerId: string,
     loserId: string,
 ): Promise<void> {
+    await lockRecordingsNaming(tx, [winnerId, loserId]);
+
     const attributionColumns = {
         id: transcriptSpeakers.id,
         transcriptionId: transcriptSpeakers.transcriptionId,
@@ -393,6 +409,7 @@ async function mergeInTx(
             .delete(transcriptSpeakerRejections)
             .where(eq(transcriptSpeakerRejections.personId, loserId));
     }
+    await settleContradictions(tx, winnerId);
 
     // Everyone's private notes about the loser follow the attributions.
     const loserNotes = await tx
@@ -425,6 +442,97 @@ async function mergeInTx(
         .update(people)
         .set({ mergedIntoId: winnerId, updatedAt: new Date() })
         .where(eq(people.mergedIntoId, loserId));
+}
+
+/**
+ * Lock, in id order, the recordings of every transcript that names one of
+ * `personIds` or rejects them for a label: the lock a transcript rewrite
+ * takes, shared, so moving these people's rows waits for a rewrite in
+ * progress and holds off the next one.
+ */
+async function lockRecordingsNaming(
+    tx: Tx,
+    personIds: string[],
+): Promise<void> {
+    const named = tx
+        .select({ id: transcriptSpeakers.transcriptionId })
+        .from(transcriptSpeakers)
+        .where(inArray(transcriptSpeakers.personId, personIds));
+    const rejected = tx
+        .select({ id: transcriptSpeakerRejections.transcriptionId })
+        .from(transcriptSpeakerRejections)
+        .where(inArray(transcriptSpeakerRejections.personId, personIds));
+    const touched = await tx
+        .selectDistinct({ recordingId: transcriptions.recordingId })
+        .from(transcriptions)
+        .where(
+            or(
+                inArray(transcriptions.id, named),
+                inArray(transcriptions.id, rejected),
+            ),
+        );
+    if (touched.length === 0) return;
+    await tx
+        .select({ id: recordings.id })
+        .from(recordings)
+        .where(
+            inArray(
+                recordings.id,
+                touched.map((row) => row.recordingId),
+            ),
+        )
+        .orderBy(recordings.id)
+        .for("share");
+}
+
+/**
+ * A merge can meet two answers about one label that now name the same
+ * person: "it is them" and "it is not them" (said about the other record
+ * of that human). The confirmation stands and the rejection goes, as when a
+ * person confirms someone they once rejected; a mere suggestion the
+ * rejection rules out goes instead.
+ */
+async function settleContradictions(tx: Tx, personId: string): Promise<void> {
+    // Both sides name `personId` on the same label of the same transcript.
+    const sameAnswer = and(
+        eq(transcriptSpeakers.personId, personId),
+        eq(transcriptSpeakerRejections.personId, personId),
+        eq(
+            transcriptSpeakers.transcriptionId,
+            transcriptSpeakerRejections.transcriptionId,
+        ),
+        eq(transcriptSpeakers.label, transcriptSpeakerRejections.label),
+    );
+    await tx.delete(transcriptSpeakerRejections).where(
+        and(
+            eq(transcriptSpeakerRejections.personId, personId),
+            exists(
+                tx
+                    .select({ id: transcriptSpeakers.id })
+                    .from(transcriptSpeakers)
+                    .where(
+                        and(
+                            sameAnswer,
+                            eq(transcriptSpeakers.status, "confirmed"),
+                        ),
+                    ),
+            ),
+        ),
+    );
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.personId, personId),
+                eq(transcriptSpeakers.status, "suggested"),
+                exists(
+                    tx
+                        .select({ id: transcriptSpeakerRejections.id })
+                        .from(transcriptSpeakerRejections)
+                        .where(sameAnswer),
+                ),
+            ),
+        );
 }
 
 /**
@@ -590,7 +698,7 @@ export async function addPersonNotes(
  * Returns the id of the Organization person. Permanent: unsharing the
  * recording that caused it does not demote anyone.
  */
-async function promotePersonInTx(
+export async function promotePersonInTx(
     tx: Tx,
     personId: string,
     orgUserId: string,
@@ -641,8 +749,11 @@ async function promotePersonInTx(
 /**
  * Serialize promotions, so two recordings shared at once cannot both create
  * an Organization person for the same email.
+ *
+ * Taken before any recording lock: a promotion may merge people, and a
+ * merge locks the recordings that name them.
  */
-async function lockOrgPeople(tx: Tx): Promise<void> {
+export async function lockOrgPeople(tx: Tx): Promise<void> {
     await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext('riffado:org-people'))`,
     );
