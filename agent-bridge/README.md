@@ -216,21 +216,36 @@ The stand-in logs in with an API key, so what only loads for a subscription logi
 
 **Upgrading the CLIs.** A flag the installed version does not know fails every request, and Codex's `--disable` refuses a feature name it does not recognise (`Unknown feature flag: ...`). That is deliberate: a renamed feature fails loudly instead of quietly handing the shell back. Run `smoke.sh` after every CLI upgrade.
 
-### Purging session data from before this fix
+### Purging session data from before this fix (optional)
 
-Bridges that ran before this change have left transcripts in the credentials volume. The bridge does not delete them itself; clearing them out is the operator's call. The commands below remove session transcripts, thread history and memories, and keep the login credentials (`.claude/.credentials.json`, `.codex/auth.json`) and configuration (`.claude.json`, `settings.json`, `config.toml`, `models_cache.json`).
+**Nothing needs to be deleted.** The hardening stops new session data from being written; what earlier bridges left in the credentials volume simply stays there. Leaving it alone is a perfectly valid choice, and the bridge never deletes anything itself.
 
-Run them from the directory whose compose project owns the bridge. The paths are the image's `CLAUDE_CONFIG_DIR` and `CODEX_HOME`.
+If you do want it gone, read this first:
+
+- **Only purge a dedicated volume.** The commands below delete directories under `/home/node/.claude` and `/home/node/.codex`. That is safe only when `/home/node` is the bridge's own Docker volume (`agent_creds` in the stock `docker-compose.yml`). If your setup bind-mounts a personal home directory, or your own `~/.claude` / `~/.codex`, into the container, **do not run them**: they would delete your own coding sessions, history and memories along with the bridge's. Step 2 checks this.
+- **Back up first.** Step 3 writes the whole volume to a tarball you can restore.
+
+The commands remove session transcripts, thread history and memories, and keep the login credentials (`.claude/.credentials.json`, `.codex/auth.json`) and configuration (`.claude.json`, `settings.json`, `config.toml`, `models_cache.json`). Run them from the directory whose compose project owns the bridge.
 
 ```sh
 # 1. Stop the bridge, so no CLI has these files open.
 docker compose stop agent-bridge
 
-# 2. Look first.
+# 2. Check what /home/node is. Continue only if it prints
+#    "volume <project>_agent_creds -> /home/node" and no "bind" line.
+docker inspect "$(docker compose ps -a -q agent-bridge)" \
+  --format '{{range .Mounts}}{{.Type}} {{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}} -> {{.Destination}}{{"\n"}}{{end}}'
+
+# 3. Back the volume up (mounted read-only). Use the volume name step 2
+#    printed; with the stock compose file it is <project>_agent_creds.
+docker run --rm -v riffado_agent_creds:/v:ro -v "$PWD":/backup alpine \
+  tar czf /backup/agent-creds-$(date +%F).tgz -C /v .
+
+# 4. Look.
 docker compose run --rm --no-deps agent-bridge \
   sh -c 'ls -la /home/node/.claude /home/node/.codex'
 
-# 3. Delete.
+# 5. Delete.
 docker compose run --rm --no-deps agent-bridge sh -c '
   cd /home/node/.claude &&
     rm -rf projects file-history tasks plans agent-memory session-env \
@@ -242,11 +257,14 @@ docker compose run --rm --no-deps agent-bridge sh -c '
            goals_*.sqlite* queue_*.sqlite* logs_*.sqlite*
 '
 
-# 4. Start it again and confirm both logins survived.
+# 6. Start it again and confirm both logins survived.
 docker compose up -d agent-bridge
 docker compose exec agent-bridge claude auth status
 docker compose exec agent-bridge codex login status
 ```
+
+To undo, stop the bridge and restore the tarball into the volume:
+`docker run --rm -v riffado_agent_creds:/v -v "$PWD":/backup alpine tar xzf /backup/agent-creds-<date>.tgz -C /v`.
 
 What those are:
 
@@ -360,7 +378,7 @@ Errors surface in Riffado as a failed summary. `docker compose logs -f agent-bri
 | `400 unknown model "gpt-4o-mini"` | The provider's Default Model is blank, so Riffado substituted its own fallback. Set it. |
 | `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS`, or one of the built-in [hardening flags](#hardening-no-tools-no-persistence), isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`; pin a version the hardening was verified against. |
 | `502 … Unknown feature flag: <name>` | The installed Codex no longer knows a feature the bridge disables. Pin a verified version, then check `codex features list` for what the feature became before changing `lib.mjs`. |
-| `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild, then purge what was written (see [Purging](#purging-session-data-from-before-this-fix)). |
+| `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild the image. Files written before that stay where they are; removing them is optional (see [Purging](#purging-session-data-from-before-this-fix-optional)). |
 | `502 … exited with code 1` mentioning login, credits, or a plan | Authentication or rate limit. Re-run the status commands under [Authentication](#authentication). |
 | `502 … produced output that is not the expected JSON envelope` | The Claude CLI's `--output-format json` envelope changed shape. Pin the version and check `parseClaudeEnvelope` in `lib.mjs`. |
 | `504 … exceeded BRIDGE_TIMEOUT_MS` | A long transcript against a slow model. Raise `BRIDGE_TIMEOUT_MS`. |
