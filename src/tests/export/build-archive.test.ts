@@ -7,6 +7,7 @@ const { dbMock } = vi.hoisted(() => ({ dbMock: { select: vi.fn() } }));
 
 vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/db/schema", () => ({
+    users: { id: "users.id", role: "users.role" },
     recordings: "recordings",
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",

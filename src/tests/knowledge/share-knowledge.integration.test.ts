@@ -9,7 +9,9 @@
  * create scratch databases on.
  */
 
+import type { Readable } from "node:stream";
 import { and, eq } from "drizzle-orm";
+import unzipper from "unzipper";
 import {
     afterAll,
     beforeAll,
@@ -86,6 +88,7 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { acceptCorrection } from "@/lib/knowledge/corrections";
 import { createEntity } from "@/lib/knowledge/entities";
@@ -100,6 +103,7 @@ import {
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
 import { ensureOrgAccount } from "@/lib/org/account";
+import type { StorageProvider } from "@/lib/storage/types";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -626,4 +630,75 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
                 .where(eq(knowledgeFacts.userId, orgUserId)),
         ).toHaveLength(1);
     });
+
+    it("exports, for the owner, the Organization's corrections on their shared recording and whom they name", async () => {
+        await correct("Novák", { personId: jan }, OWNER, "Novotný");
+        await share();
+        const apollo = (
+            await createEntity(orgUserId, {
+                typeKey: "project",
+                name: "Apollo",
+            })
+        ).id;
+        await correct("Orion", { entityId: apollo }, orgUserId, "Apollo");
+
+        const storage = new ArchiveStorage();
+        await buildAndUploadExportArchive({
+            userId: OWNER,
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/owner.zip",
+        });
+        const directory = await unzipper.Open.buffer(storage.uploaded);
+        const read = async (path: string) => {
+            const file = directory.files.find((entry) => entry.path === path);
+            return JSON.parse(
+                (await file?.buffer())?.toString("utf-8") ?? "{}",
+            );
+        };
+        const knowledge = await read("knowledge/people.json");
+        expect(
+            knowledge.corrections.map((row: { heard: string }) => row.heard),
+        ).toEqual(expect.arrayContaining(["Novák", "Orion"]));
+        expect(knowledge.corrections).toHaveLength(2);
+        expect(knowledge.people.map((row: { id: string }) => row.id)).toContain(
+            jan,
+        );
+        const entities = await read("knowledge/entities.json");
+        expect(entities.entities).toContainEqual(
+            expect.objectContaining({ id: apollo, organization: true }),
+        );
+    });
 });
+
+/** Captures the archive; the recording's audio is not there. */
+class ArchiveStorage implements StorageProvider {
+    uploaded = Buffer.alloc(0);
+    async uploadFile(key: string): Promise<string> {
+        return key;
+    }
+    async downloadFile(): Promise<Buffer> {
+        throw new Error("not found");
+    }
+    async downloadStream(): Promise<Readable> {
+        throw new Error("not found");
+    }
+    async uploadStream(key: string, stream: Readable): Promise<string> {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        this.uploaded = Buffer.concat(chunks);
+        return key;
+    }
+    async exists(): Promise<boolean> {
+        return false;
+    }
+    async getSignedUrl(): Promise<string> {
+        return "";
+    }
+    async deleteFile(): Promise<void> {}
+    async testConnection(): Promise<boolean> {
+        return true;
+    }
+}

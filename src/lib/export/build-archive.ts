@@ -1,6 +1,6 @@
 import { PassThrough, type Readable } from "node:stream";
 import { ZipArchive } from "archiver";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -24,6 +24,7 @@ import {
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { StorageProvider } from "@/lib/storage/types";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
@@ -727,6 +728,19 @@ interface ArchivedKnowledgeBase {
     }[];
 }
 
+// The corrections a user's archive carries: their own, and the
+// Organization's on their own transcripts -- a recording they shared is
+// still theirs, and the overlay on it the Organization's while shared.
+function exportedCorrections(userId: string) {
+    return or(
+        eq(transcriptCorrections.userId, userId),
+        and(
+            orgOwnedCondition(transcriptCorrections.userId),
+            sql`${transcriptCorrections.transcriptionId} in (select ${transcriptions.id} from ${transcriptions} where ${transcriptions.userId} = ${userId})`,
+        ),
+    );
+}
+
 // The knowledge base for one user, decrypted for the archive.
 //
 // `primaryEmailHash` is deliberately not exported: it is derived from the
@@ -790,7 +804,7 @@ async function collectKnowledgeBase(
                     createdAt: transcriptCorrections.createdAt,
                 })
                 .from(transcriptCorrections)
-                .where(eq(transcriptCorrections.userId, userId)),
+                .where(exportedCorrections(userId)),
         ]);
 
     // Organization people the user's own transcripts name: a restore must
@@ -1014,7 +1028,7 @@ async function collectEntities(
             .from(transcriptCorrections)
             .where(
                 and(
-                    eq(transcriptCorrections.userId, userId),
+                    exportedCorrections(userId),
                     isNotNull(transcriptCorrections.targetEntityId),
                 ),
             ),
