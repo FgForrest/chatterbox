@@ -20,14 +20,9 @@
  * (`withdrawKnowledgeInTx`). A private recording reads the owner's.
  */
 
-import { and, asc, eq, or, sql } from "drizzle-orm";
+import { and, asc, eq, not, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    recordingFolderAssignments,
-    recordingFolders,
-    transcriptCorrections,
-    transcriptions,
-} from "@/db/schema";
+import { transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -48,6 +43,7 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeopleShared,
     orgOwnedCondition,
+    recordingSharedCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
@@ -63,16 +59,11 @@ function readCorrection(ownerUserId: string) {
         orgOwnedCondition(transcriptCorrections.userId),
         and(
             eq(transcriptCorrections.userId, ownerUserId),
-            sql`not exists (
-                select 1
-                from ${recordingFolderAssignments}
-                inner join ${recordingFolders}
-                    on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
-                inner join ${transcriptions}
-                    on ${transcriptions.recordingId} = ${recordingFolderAssignments.recordingId}
-                where ${transcriptions.id} = ${transcriptCorrections.transcriptionId}
-                    and ${orgOwnedCondition(recordingFolders.userId)}
-            )`,
+            not(
+                recordingSharedCondition(
+                    sql`(select ${transcriptions.recordingId} from ${transcriptions} where ${transcriptions.id} = ${transcriptCorrections.transcriptionId})`,
+                ),
+            ),
         ),
     );
 }

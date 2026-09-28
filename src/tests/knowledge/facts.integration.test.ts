@@ -399,6 +399,22 @@ describeWithDatabase("facts and evidence (PostgreSQL)", () => {
             expect(await listFacts(ALICE, { personId: jan })).toEqual([]);
         });
 
+        it("counts only where it was said on recordings the viewer can open", async () => {
+            await confirmFrom(MARCH);
+            await recording(JUNE, "2026-06-14T09:00:00Z");
+            await confirmFrom(JUNE);
+            await db()
+                .update(recordings)
+                .set({ deletedAt: new Date() })
+                .where(eq(recordings.id, JUNE));
+            expect(await listFacts(ALICE, { personId: jan })).toEqual([
+                expect.objectContaining({
+                    supportedEvidence: 1,
+                    lastSaidAt: new Date("2026-03-03T12:04:00Z"),
+                }),
+            ]);
+        });
+
         it("is strengthened by a second recording, and decays as retention reaps them", async () => {
             await confirmFrom(MARCH);
             await recording(JUNE, "2026-06-14T09:00:00Z");

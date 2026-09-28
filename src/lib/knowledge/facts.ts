@@ -41,6 +41,7 @@ import {
     lockOrgPeopleShared,
     lockRecordingsNaming,
     orgOwnedCondition,
+    recordingSharedCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
@@ -556,8 +557,9 @@ function nodeOf(
 /**
  * The current facts about a person or an entity that `viewerUserId` may
  * see: their own scope's and the Organization's. A fact from recordings
- * shows while some of its evidence is supported; "last said" is when the
- * latest recording of it began.
+ * shows while some of its evidence is supported on a recording the viewer
+ * can open (their own, or a shared one); "last said" is when the latest of
+ * those began.
  */
 export async function listFacts(
     viewerUserId: string,
@@ -619,6 +621,12 @@ export async function listFacts(
                     rows.map((row) => row.id),
                 ),
                 eq(knowledgeFactEvidence.status, "supported"),
+                // On recordings the viewer can open: their own, or shared.
+                isNull(recordings.deletedAt),
+                or(
+                    eq(recordings.userId, viewerUserId),
+                    recordingSharedCondition(recordings.id),
+                ),
             ),
         )
         .groupBy(knowledgeFactEvidence.factId);

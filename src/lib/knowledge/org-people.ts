@@ -3,6 +3,8 @@ import type { db } from "@/db";
 import {
     knowledgeFactEvidence,
     knowledgeFacts,
+    recordingFolderAssignments,
+    recordingFolders,
     recordings,
     transcriptCorrections,
     transcriptions,
@@ -24,6 +26,21 @@ const ORG_PEOPLE_LOCK = sql`hashtext('riffado:org-people')`;
  */
 export function orgOwnedCondition(column: Column) {
     return sql`${column} in (select ${users.id} from ${users} where ${users.role} = 'org')`;
+}
+
+/**
+ * SQL predicate: the recording `recordingId` names is filed in the
+ * Organization's tree (shared). By role, as above.
+ */
+export function recordingSharedCondition(recordingId: Column | SQL) {
+    return sql`exists (
+        select 1
+        from ${recordingFolderAssignments}
+        inner join ${recordingFolders}
+            on ${recordingFolders.id} = ${recordingFolderAssignments.folderId}
+        where ${recordingFolderAssignments.recordingId} = ${recordingId}
+            and ${orgOwnedCondition(recordingFolders.userId)}
+    )`;
 }
 
 /**
