@@ -23,6 +23,9 @@ import {
     knowledgeEntityTypes,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
+    people,
+    recordings,
+    transcriptions,
     users,
 } from "@/db/schema";
 import {
@@ -76,6 +79,12 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    acceptCorrection,
+    listCorrections,
+    revertCorrection,
+} from "@/lib/knowledge/corrections";
 import {
     createPrivateType,
     deleteOwnType,
@@ -105,8 +114,22 @@ const worksWith = {
 async function refusal(promise: Promise<unknown>) {
     return promise.then(
         () => null,
-        (caught: unknown) => caught as { statusCode?: number; code?: string },
+        (caught: unknown) =>
+            caught as { statusCode?: number; code?: string; message?: string },
     );
+}
+
+/** The same answer, to the letter, as for something that does not exist. */
+function expectSameRefusal(
+    error: Awaited<ReturnType<typeof refusal>>,
+    missing: Awaited<ReturnType<typeof refusal>>,
+) {
+    expect(missing).not.toBeNull();
+    expect(error).toMatchObject({
+        statusCode: missing?.statusCode,
+        code: missing?.code,
+        message: missing?.message,
+    });
 }
 
 describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
@@ -194,6 +217,124 @@ describeWithDatabase("private knowledge stays private (PostgreSQL)", () => {
             const proposals = await listVocabularyProposals(orgUserId);
             expect(proposals).toHaveLength(1);
             expect(JSON.stringify(proposals)).not.toContain(ALICE);
+        });
+    });
+
+    describe("corrections", () => {
+        const TURNS = [
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 4_000,
+                text: "Tady Novák z Orionu.",
+            },
+        ];
+        const anchor = {
+            turnIndex: 0,
+            charStart: 5,
+            charEnd: 10,
+            heard: "Novák",
+        };
+
+        /** A recording of `userId`'s with one timed transcript, and a person. */
+        async function seed(userId: string) {
+            await db()
+                .insert(recordings)
+                .values({
+                    id: `rec-${userId}`,
+                    userId,
+                    deviceSn: "SN-1",
+                    plaudFileId: `plaud-${userId}`,
+                    filename: encryptText("Weekly"),
+                    duration: 4_000,
+                    startTime: new Date("2026-09-01T10:00:00Z"),
+                    endTime: new Date("2026-09-01T10:00:04Z"),
+                    filesize: 11,
+                    fileMd5: "0".repeat(32),
+                    storageType: "local",
+                    storagePath: `${userId}/rec.mp3`,
+                    plaudVersion: "1",
+                });
+            const [transcript] = await db()
+                .insert(transcriptions)
+                .values({
+                    recordingId: `rec-${userId}`,
+                    userId,
+                    text: encryptText(TURNS[0]?.text ?? ""),
+                    turns: encryptJsonField(TURNS),
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                    source: "riffado",
+                })
+                .returning({
+                    id: transcriptions.id,
+                    revision: transcriptions.revision,
+                });
+            const [person] = await db()
+                .insert(people)
+                .values({ userId, displayName: encryptText("Jan Novotný") })
+                .returning({ id: people.id });
+            return {
+                transcriptionId: transcript?.id ?? "",
+                revision: transcript?.revision ?? 0,
+                personId: person?.id ?? "",
+            };
+        }
+
+        function accept(
+            userId: string,
+            seeded: Awaited<ReturnType<typeof seed>>,
+            targetPersonId = seeded.personId,
+        ) {
+            return acceptCorrection({
+                userId,
+                transcriptionId: seeded.transcriptionId,
+                revision: seeded.revision,
+                anchor,
+                kind: "correct",
+                targetPersonId,
+                replacement: "Novotný",
+                actorUserId: userId,
+                orgUserId,
+            });
+        }
+
+        it("lists none of another account's corrections", async () => {
+            const alice = await seed(ALICE);
+            await accept(ALICE, alice);
+            expect(await listCorrections(BOB, alice.transcriptionId)).toEqual(
+                [],
+            );
+        });
+
+        it("answers another account's correction as a missing one", async () => {
+            const alice = await seed(ALICE);
+            const bob = await seed(BOB);
+            const id = await accept(ALICE, alice);
+            const revert = (correctionId: string) =>
+                revertCorrection({
+                    userId: BOB,
+                    transcriptionId: bob.transcriptionId,
+                    actorUserId: BOB,
+                    orgUserId,
+                    correctionId,
+                });
+            expectSameRefusal(
+                await refusal(revert(id)),
+                await refusal(revert("no-such")),
+            );
+            expect(
+                await listCorrections(ALICE, alice.transcriptionId),
+            ).toHaveLength(1);
+        });
+
+        it("answers another account's person as a missing one", async () => {
+            const alice = await seed(ALICE);
+            const bob = await seed(BOB);
+            expectSameRefusal(
+                await refusal(accept(BOB, bob, alice.personId)),
+                await refusal(accept(BOB, bob, "no-such")),
+            );
         });
     });
 });

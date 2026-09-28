@@ -13,6 +13,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    transcriptCorrections,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -232,6 +233,7 @@ export async function buildAndUploadExportArchive(input: {
             people: number;
             attributions: number;
             rejections: number;
+            corrections: number;
         };
         organization?: { folders: number; assignments: number };
         vocabulary?: {
@@ -512,7 +514,8 @@ export async function buildAndUploadExportArchive(input: {
     if (
         knowledge.people.length > 0 ||
         knowledge.attributions.length > 0 ||
-        knowledge.rejections.length > 0
+        knowledge.rejections.length > 0 ||
+        knowledge.corrections.length > 0
     ) {
         archive.append(Buffer.from(JSON.stringify(knowledge, null, 2)), {
             name: "knowledge/people.json",
@@ -521,6 +524,7 @@ export async function buildAndUploadExportArchive(input: {
             people: knowledge.people.length,
             attributions: knowledge.attributions.length,
             rejections: knowledge.rejections.length,
+            corrections: knowledge.corrections.length,
         };
     }
 
@@ -658,6 +662,20 @@ interface ArchivedKnowledgeBase {
         personId: string;
         createdAt: string;
     }[];
+    /** The overlay on the archived transcripts, whose text stays as heard. */
+    corrections: {
+        transcriptionId: string;
+        transcriptRevision: number;
+        turnIndex: number;
+        charStart: number;
+        charEnd: number;
+        heard: string;
+        kind: string;
+        targetPersonId: string;
+        replacement: string | null;
+        preTicked: boolean;
+        createdAt: string;
+    }[];
 }
 
 // The knowledge base for one user, decrypted for the archive.
@@ -676,40 +694,65 @@ async function collectKnowledgeBase(
         mergedIntoId: people.mergedIntoId,
         createdAt: people.createdAt,
     };
-    const [peopleRows, attributionRows, rejectionRows] = await Promise.all([
-        db.select(personColumns).from(people).where(eq(people.userId, userId)),
-        db
-            .select({
-                transcriptionId: transcriptSpeakers.transcriptionId,
-                label: transcriptSpeakers.label,
-                personId: transcriptSpeakers.personId,
-                source: transcriptSpeakers.source,
-                status: transcriptSpeakers.status,
-                confidence: transcriptSpeakers.confidence,
-                evidenceStartMs: transcriptSpeakers.evidenceStartMs,
-                markedUnknown: transcriptSpeakers.markedUnknown,
-                confirmedByUserId: transcriptSpeakers.confirmedByUserId,
-            })
-            .from(transcriptSpeakers)
-            .where(eq(transcriptSpeakers.userId, userId)),
-        db
-            .select({
-                transcriptionId: transcriptSpeakerRejections.transcriptionId,
-                label: transcriptSpeakerRejections.label,
-                personId: transcriptSpeakerRejections.personId,
-                createdAt: transcriptSpeakerRejections.createdAt,
-            })
-            .from(transcriptSpeakerRejections)
-            .where(eq(transcriptSpeakerRejections.userId, userId)),
-    ]);
+    const [peopleRows, attributionRows, rejectionRows, correctionRows] =
+        await Promise.all([
+            db
+                .select(personColumns)
+                .from(people)
+                .where(eq(people.userId, userId)),
+            db
+                .select({
+                    transcriptionId: transcriptSpeakers.transcriptionId,
+                    label: transcriptSpeakers.label,
+                    personId: transcriptSpeakers.personId,
+                    source: transcriptSpeakers.source,
+                    status: transcriptSpeakers.status,
+                    confidence: transcriptSpeakers.confidence,
+                    evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+                    markedUnknown: transcriptSpeakers.markedUnknown,
+                    confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+                })
+                .from(transcriptSpeakers)
+                .where(eq(transcriptSpeakers.userId, userId)),
+            db
+                .select({
+                    transcriptionId:
+                        transcriptSpeakerRejections.transcriptionId,
+                    label: transcriptSpeakerRejections.label,
+                    personId: transcriptSpeakerRejections.personId,
+                    createdAt: transcriptSpeakerRejections.createdAt,
+                })
+                .from(transcriptSpeakerRejections)
+                .where(eq(transcriptSpeakerRejections.userId, userId)),
+            db
+                .select({
+                    transcriptionId: transcriptCorrections.transcriptionId,
+                    transcriptRevision:
+                        transcriptCorrections.transcriptRevision,
+                    turnIndex: transcriptCorrections.turnIndex,
+                    charStart: transcriptCorrections.charStart,
+                    charEnd: transcriptCorrections.charEnd,
+                    heard: transcriptCorrections.heard,
+                    kind: transcriptCorrections.kind,
+                    personId: transcriptCorrections.targetPersonId,
+                    replacement: transcriptCorrections.replacement,
+                    preTicked: transcriptCorrections.preTicked,
+                    createdAt: transcriptCorrections.createdAt,
+                })
+                .from(transcriptCorrections)
+                .where(eq(transcriptCorrections.userId, userId)),
+        ]);
 
     // Organization people the user's own transcripts name: a restore must
     // still know who spoke. They carry only this user's own notes.
     const own = new Set(peopleRows.map((row) => row.id));
     const sharedIds = [
         ...new Set(
-            [...attributionRows, ...rejectionRows].flatMap((row) =>
-                row.personId && !own.has(row.personId) ? [row.personId] : [],
+            [...attributionRows, ...rejectionRows, ...correctionRows].flatMap(
+                (row) =>
+                    row.personId && !own.has(row.personId)
+                        ? [row.personId]
+                        : [],
             ),
         ),
     ];
@@ -763,6 +806,13 @@ async function collectKnowledgeBase(
         attributions: attributionRows,
         rejections: rejectionRows.map((row) => ({
             ...row,
+            createdAt: row.createdAt.toISOString(),
+        })),
+        corrections: correctionRows.map(({ personId, ...row }) => ({
+            ...row,
+            targetPersonId: personId,
+            heard: decryptText(row.heard),
+            replacement: row.replacement ? decryptText(row.replacement) : null,
             createdAt: row.createdAt.toISOString(),
         })),
     };

@@ -81,11 +81,14 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Moving the speaker rows is tested against a real database
-// (`attribution-remap.integration.test.ts`); here only that it happens.
+// Carrying speaker rows and corrections over is tested against a real
+// database (`attribution-remap`, `corrections` integration tests); here
+// only that it happens.
 vi.mock("@/lib/knowledge/attribution", () => ({
     copyMatchingSpeakerAttributions: vi.fn().mockResolvedValue(0),
-    remapTranscriptAttributionsInTx: vi.fn(),
+}));
+vi.mock("@/lib/knowledge/transcript-rewrite", () => ({
+    transcriptRewrittenInTx: vi.fn(),
 }));
 vi.mock("@/lib/knowledge/speaker-labels", () => ({
     storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
@@ -96,7 +99,7 @@ import { db } from "@/db";
 import { recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
-import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
+import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     storeBrowserTranscription,
@@ -798,7 +801,7 @@ describe("Transcription", () => {
             expect(updated.detectedLanguage).toBeNull();
             // A browser transcript has no speakers, so the old ones'
             // names have nowhere to go.
-            expect(remapTranscriptAttributionsInTx).toHaveBeenCalledWith(
+            expect(transcriptRewrittenInTx).toHaveBeenCalledWith(
                 expect.anything(),
                 {
                     userId: mockUserId,

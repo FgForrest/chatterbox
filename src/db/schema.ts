@@ -3,6 +3,7 @@ import {
     type AnyPgColumn,
     bigint,
     boolean,
+    check,
     date,
     index,
     integer,
@@ -1194,6 +1195,74 @@ export const knowledgeVocabularyVersion = pgTable(
         id: integer("id").primaryKey(),
         version: integer("version").notNull().default(0),
     },
+);
+
+// Corrections accepted on a transcript: an overlay, so the stored text
+// never changes and reverting deletes the row. Anchored to a turn and
+// character offsets of one revision; a rewrite of the transcript re-anchors
+// them (`recheckCorrectionsInTx`) or drops them.
+export const transcriptCorrections = pgTable(
+    "transcript_corrections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The transcript's owner, the scope, as on speaker rows.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        turnIndex: integer("turn_index").notNull(),
+        // UTF-16 offsets into the turn's text, as JavaScript slices it.
+        charStart: integer("char_start").notNull(),
+        charEnd: integer("char_end").notNull(),
+        heard: text("heard").notNull(),
+        // `domainLookupHash("correction-heard", heard)`.
+        heardHmac: varchar("heard_hmac", { length: 64 }).notNull(),
+        // `correct` replaces what was heard; `link` keeps it as spoken
+        // (a nickname, slang) and points at who or what it means.
+        kind: varchar("kind", { length: 8 })
+            .$type<"correct" | "link">()
+            .notNull(),
+        // Erasing a person deletes the corrections targeting them.
+        targetPersonId: text("target_person_id")
+            .notNull()
+            .references(() => people.id, { onDelete: "cascade" }),
+        // In the transcript's language. Null on a link, which shows the
+        // target's current name.
+        replacement: text("replacement"),
+        // Accepted by default in a review not yet finished.
+        preTicked: boolean("pre_ticked").notNull().default(false),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        transcriptIdx: index("transcript_corrections_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        userIdIdx: index("transcript_corrections_user_id_idx").on(table.userId),
+        targetPersonIdx: index(
+            "transcript_corrections_target_person_id_idx",
+        ).on(table.targetPersonId),
+        replacementForCorrect: check(
+            "transcript_corrections_replacement_check",
+            sql`(${table.kind} = 'correct') = (${table.replacement} is not null)`,
+        ),
+        kindCheck: check(
+            "transcript_corrections_kind_check",
+            sql`${table.kind} in ('correct', 'link')`,
+        ),
+        spanCheck: check(
+            "transcript_corrections_span_check",
+            sql`${table.charStart} >= 0 and ${table.charStart} < ${table.charEnd}`,
+        ),
+    }),
 );
 
 // AI Enhancements

@@ -16,10 +16,11 @@ vi.mock("@/lib/encryption/fields", () => ({
 
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
 
-// Moving the speaker rows is tested against a real database
-// (`attribution-remap.integration.test.ts`); here only that it happens.
-vi.mock("@/lib/knowledge/attribution", () => ({
-    remapTranscriptAttributionsInTx: vi.fn(),
+// Carrying speaker rows and corrections over is tested against a real
+// database (`attribution-remap`, `corrections` integration tests); here
+// only that it happens.
+vi.mock("@/lib/knowledge/transcript-rewrite", () => ({
+    transcriptRewrittenInTx: vi.fn(),
 }));
 vi.mock("@/lib/knowledge/speaker-labels", () => ({
     storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
@@ -37,7 +38,7 @@ vi.mock("@/lib/sharing/shared", () => ({
 }));
 
 import { db } from "@/db";
-import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
+import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -154,11 +155,11 @@ describe("upsertTranscription and turns", () => {
     it("moves the speaker rows onto the new text, and only on an overwrite", async () => {
         stubTransaction(null);
         await upsert(TURNS);
-        expect(remapTranscriptAttributionsInTx).not.toHaveBeenCalled();
+        expect(transcriptRewrittenInTx).not.toHaveBeenCalled();
 
         stubTransaction({ id: "tr-1" });
         await upsert(TURNS);
-        expect(remapTranscriptAttributionsInTx).toHaveBeenCalledWith(
+        expect(transcriptRewrittenInTx).toHaveBeenCalledWith(
             expect.anything(),
             {
                 userId: "user-1",
@@ -214,7 +215,7 @@ describe("upsertTranscription and turns", () => {
         });
         expect(harness.inserted).toHaveLength(0);
         expect(harness.updated).toHaveLength(0);
-        expect(remapTranscriptAttributionsInTx).not.toHaveBeenCalled();
+        expect(transcriptRewrittenInTx).not.toHaveBeenCalled();
     });
 
     it("lets the organization account rewrite a shared recording's transcript", async () => {
@@ -227,7 +228,7 @@ describe("upsertTranscription and turns", () => {
         expect(harness.updated[0]).toMatchObject({
             producedByUserId: "org-account",
         });
-        expect(remapTranscriptAttributionsInTx).toHaveBeenCalledOnce();
+        expect(transcriptRewrittenInTx).toHaveBeenCalledOnce();
     });
 
     it("writes nothing for the organization account once the recording is withdrawn", async () => {

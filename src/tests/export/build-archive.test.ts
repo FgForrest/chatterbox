@@ -54,6 +54,25 @@ vi.mock("@/db/schema", () => ({
         recordingId: "recordingFolderAssignments.recordingId",
         folderId: "recordingFolderAssignments.folderId",
     },
+    personNotes: {
+        personId: "personNotes.personId",
+        userId: "personNotes.userId",
+        notes: "personNotes.notes",
+    },
+    transcriptCorrections: {
+        userId: "transcriptCorrections.userId",
+        transcriptionId: "transcriptCorrections.transcriptionId",
+        transcriptRevision: "transcriptCorrections.transcriptRevision",
+        turnIndex: "transcriptCorrections.turnIndex",
+        charStart: "transcriptCorrections.charStart",
+        charEnd: "transcriptCorrections.charEnd",
+        heard: "transcriptCorrections.heard",
+        kind: "transcriptCorrections.kind",
+        targetPersonId: "transcriptCorrections.targetPersonId",
+        replacement: "transcriptCorrections.replacement",
+        preTicked: "transcriptCorrections.preTicked",
+        createdAt: "transcriptCorrections.createdAt",
+    },
     knowledgeEntityTypes: {
         userId: "knowledgeEntityTypes.userId",
         key: "knowledgeEntityTypes.key",
@@ -321,7 +340,85 @@ describe("buildAndUploadExportArchive", () => {
             people: 1,
             attributions: 2,
             rejections: 1,
+            corrections: 0,
         });
+    });
+
+    it("carries corrections, and the Organization people they target", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions
+            [],
+            [],
+            [],
+            [],
+            // corrections
+            [
+                {
+                    transcriptionId: "tr-1",
+                    transcriptRevision: 3,
+                    turnIndex: 0,
+                    charStart: 16,
+                    charEnd: 21,
+                    heard: "enc-Novák",
+                    kind: "correct",
+                    personId: "p-org",
+                    replacement: "enc-Novotný",
+                    preTicked: false,
+                    createdAt: new Date("2026-01-03T00:00:00Z"),
+                },
+            ],
+            // the Organization people referenced
+            [
+                {
+                    id: "p-org",
+                    displayName: "enc-Jan Novotný",
+                    primaryEmail: null,
+                    notes: null,
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // the user's own notes on them
+            [],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/corrections.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const knowledge = JSON.parse(
+            entries.get("knowledge/people.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(knowledge.corrections).toEqual([
+            {
+                transcriptionId: "tr-1",
+                transcriptRevision: 3,
+                turnIndex: 0,
+                charStart: 16,
+                charEnd: 21,
+                heard: "decrypted:enc-Novák",
+                kind: "correct",
+                targetPersonId: "p-org",
+                replacement: "decrypted:enc-Novotný",
+                preTicked: false,
+                createdAt: "2026-01-03T00:00:00.000Z",
+            },
+        ]);
+        expect(knowledge.people).toEqual([
+            expect.objectContaining({
+                id: "p-org",
+                displayName: "decrypted:enc-Jan Novotný",
+            }),
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.knowledge).toMatchObject({ corrections: 1, people: 1 });
     });
 
     it("carries folder organization and recording assignments", async () => {
@@ -344,6 +441,8 @@ describe("buildAndUploadExportArchive", () => {
             [],
             [],
             // rejected suggestions
+            [],
+            // corrections
             [],
             [
                 {
@@ -400,7 +499,8 @@ describe("buildAndUploadExportArchive", () => {
     it("carries the user's own vocabulary and the phrases they suggested", async () => {
         mockSelectSequence([
             // recordings, people, attributions, rejected suggestions,
-            // folders, assignments
+            // corrections, folders, assignments
+            [],
             [],
             [],
             [],

@@ -27,12 +27,10 @@ import {
     isMynahConfigured,
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
-import {
-    copyMatchingSpeakerAttributions,
-    remapTranscriptAttributionsInTx,
-} from "@/lib/knowledge/attribution";
+import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
@@ -220,8 +218,8 @@ export async function storeBrowserTranscription(
                             eq(transcriptions.userId, userId),
                         ),
                     );
-                // The speakers were named on the text just replaced.
-                await remapTranscriptAttributionsInTx(tx, {
+                // What was said about the text just replaced.
+                await transcriptRewrittenInTx(tx, {
                     userId,
                     transcriptionId: existing.id,
                     previous: storedSpeakerVersion(existing),

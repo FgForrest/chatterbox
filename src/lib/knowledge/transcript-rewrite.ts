@@ -1,0 +1,37 @@
+/**
+ * The one hook every writer of transcript text or turns calls, in the
+ * transaction that writes them and under the recording lock, right after
+ * the write: what was said about the old text is carried onto the new one,
+ * or dropped.
+ *
+ * - speaker rows and rejections, by speech overlap
+ *   (`remapTranscriptAttributionsInTx`);
+ * - corrections, by their words (`recheckCorrectionsInTx`).
+ *
+ * Fact evidence and pending Learn runs join it with them.
+ */
+
+import type { db } from "@/db";
+import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
+import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
+import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function transcriptRewrittenInTx(
+    tx: Tx,
+    args: {
+        userId: string;
+        transcriptionId: string;
+        previous: SpeakerVersion;
+        next: SpeakerVersion;
+    },
+): Promise<void> {
+    await remapTranscriptAttributionsInTx(tx, args);
+    await recheckCorrectionsInTx(tx, {
+        userId: args.userId,
+        transcriptionId: args.transcriptionId,
+        previousTurns: args.previous.turns,
+        nextTurns: args.next.turns,
+    });
+}

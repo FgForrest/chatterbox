@@ -477,6 +477,13 @@
       "when": 1790614460339,
       "tag": "0067_knowledge_vocabulary",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790614774801,
+      "tag": "0068_transcript_corrections",
+      "breakpoints": true
     }
   ]
 }
