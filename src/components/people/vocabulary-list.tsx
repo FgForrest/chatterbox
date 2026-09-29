@@ -15,7 +15,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
+import { parseApiError } from "@/lib/api-errors";
 import type { OwnType } from "@/lib/knowledge/vocabulary";
 
 const MAX_LABEL_LENGTH = 80;
@@ -107,24 +107,22 @@ export function VocabularyList({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(init.body),
             });
-            if (response.status === 409) {
-                // What it changes changed meanwhile: show the new count,
-                // for the person to confirm again.
+            if (!response.ok) {
                 const body = await parseApiError(response);
                 const count = body.details?.count;
-                if (init.method === "POST" && typeof count === "number") {
-                    setMergeCount(count);
+                if (response.status === 409 && typeof count === "number") {
+                    // What it changes changed meanwhile: show the new
+                    // count, for the person to confirm again.
+                    if (init.method === "POST") setMergeCount(count);
+                    toast.error(
+                        i18n(
+                            "This changed meanwhile. Check the new count and confirm again.",
+                        ),
+                    );
+                    router.refresh();
+                } else {
+                    toast.error(body.error || failure);
                 }
-                toast.error(
-                    i18n(
-                        "This changed meanwhile. Check the new count and confirm again.",
-                    ),
-                );
-                router.refresh();
-                return false;
-            }
-            if (!response.ok) {
-                toast.error(await getApiErrorMessage(response, failure));
                 return false;
             }
             setOpen(null);

@@ -16,6 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+import { toast } from "sonner";
 import { VocabularyList } from "@/components/people/vocabulary-list";
 
 const types: OwnType[] = [
@@ -68,6 +69,7 @@ describe("VocabularyList", () => {
     beforeEach(() => {
         calls = [];
         refresh.mockClear();
+        vi.mocked(toast.error).mockClear();
         vi.stubGlobal(
             "fetch",
             vi.fn(async (url: string, init?: RequestInit) => {
@@ -108,6 +110,33 @@ describe("VocabularyList", () => {
                 body: { keep: true },
             },
         ]);
+    });
+
+    it("says a name is taken as the server says it, keeping the rename open", async () => {
+        respond = () =>
+            Response.json(
+                {
+                    error: "A type with this name already exists",
+                    code: "CONFLICT",
+                    details: { field: "label" },
+                },
+                { status: 409 },
+            );
+        renderList();
+        fireEvent.click(
+            screen.getAllByRole("button", { name: "Rename" })[0] as HTMLElement,
+        );
+        fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+            target: { value: "venue" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        await waitFor(() =>
+            expect(toast.error).toHaveBeenCalledWith(
+                "A type with this name already exists",
+            ),
+        );
+        expect(refresh).not.toHaveBeenCalled();
+        expect(screen.getByRole("textbox", { name: "Name" })).toBeTruthy();
     });
 
     it("deletes with the count it showed", async () => {
