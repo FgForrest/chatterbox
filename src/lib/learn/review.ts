@@ -370,11 +370,24 @@ async function keepDraft(
     return updated;
 }
 
+/** Why an item ticked was not applied, for the reader's words. */
+export type SkipCode =
+    | "nobody_chosen"
+    | "answered_since"
+    | "speaker_not_named"
+    | "known_elsewhere"
+    | "nothing_chosen"
+    | "already_exists"
+    | "changed"
+    | "no_longer_fits";
+
 export interface FinishedReview {
     status: "finished" | "superseded";
+    /** Items applied. */
     applied: number;
     dismissed: number;
-    skipped: { itemId: string; reason: string }[];
+    /** Ticked items not applied: a code, and the server's words (logs). */
+    skipped: { itemId: string; code: SkipCode; reason: string }[];
 }
 
 /**
@@ -465,12 +478,23 @@ export async function finishReview(
                 applied++;
             } catch (error) {
                 if (error instanceof AppError) {
-                    skipped.push({ itemId, reason: error.message });
+                    skipped.push({
+                        itemId,
+                        code:
+                            error.code === ErrorCode.CONFLICT
+                                ? "changed"
+                                : "no_longer_fits",
+                        reason: error.message,
+                    });
                     return;
                 }
                 // A name taken meanwhile by another transaction.
                 if (isUniqueViolation(error)) {
-                    skipped.push({ itemId, reason: "Already exists" });
+                    skipped.push({
+                        itemId,
+                        code: "already_exists",
+                        reason: "Already exists",
+                    });
                     return;
                 }
                 throw error;
@@ -502,7 +526,11 @@ export async function finishReview(
                           ? { kind: "name", personId: payload.personId }
                           : null;
             if (!answer) {
-                skipped.push({ itemId: item.id, reason: "Nobody chosen" });
+                skipped.push({
+                    itemId: item.id,
+                    code: "nobody_chosen",
+                    reason: "Nobody chosen",
+                });
                 continue;
             }
             // Proposed for a label nobody had answered; an answer given
@@ -525,7 +553,11 @@ export async function finishReview(
                 )
                 .limit(1);
             if (answered) {
-                skipped.push({ itemId: item.id, reason: "Answered since" });
+                skipped.push({
+                    itemId: item.id,
+                    code: "answered_since",
+                    reason: "Answered since",
+                });
                 continue;
             }
             await attempt(item.id, async (sp) => {
@@ -652,6 +684,7 @@ export async function finishReview(
                 if (known?.userId !== run.scopeUserId) {
                     skipped.push({
                         itemId: item.id,
+                        code: "known_elsewhere",
                         reason: "Known in another scope",
                     });
                     continue;
@@ -667,6 +700,7 @@ export async function finishReview(
             ) {
                 skipped.push({
                     itemId: item.id,
+                    code: "speaker_not_named",
                     reason: "Its speaker is not named yet",
                 });
                 continue;
@@ -720,7 +754,11 @@ export async function finishReview(
                 continue;
             }
             if (!(choice && "action" in choice && choice.action === "create")) {
-                skipped.push({ itemId: item.id, reason: "Nothing chosen" });
+                skipped.push({
+                    itemId: item.id,
+                    code: "nothing_chosen",
+                    reason: "Nothing chosen",
+                });
                 continue;
             }
             const subject = await resolveSubject(payload.subject);

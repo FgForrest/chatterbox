@@ -121,9 +121,9 @@ export function LearnReview({
         (state?.run?.status === "queued" || state?.run?.status === "running");
     useEffect(() => {
         if (!learningElsewhere) return;
-        const timer = setTimeout(() => void load(), pollMs);
-        return () => clearTimeout(timer);
-    }, [learningElsewhere, load, pollMs, state]);
+        const timer = setInterval(() => void load(), pollMs);
+        return () => clearInterval(timer);
+    }, [learningElsewhere, load, pollMs]);
 
     const learn = async () => {
         setRunning(true);
@@ -235,7 +235,7 @@ export function LearnReview({
             const result = (await response.json()) as {
                 status: string;
                 applied: number;
-                skipped: { reason: string }[];
+                skipped: { itemId: string; code?: string }[];
             };
             if (result.status === "superseded") {
                 toast.error(
@@ -251,7 +251,15 @@ export function LearnReview({
                     ),
                 );
                 for (const skipped of result.skipped) {
-                    toast.warning(skipped.reason);
+                    const item = state.items.find(
+                        (other) => other.id === skipped.itemId,
+                    );
+                    toast.warning(
+                        i18n("{item}: {why}", {
+                            item: item ? describeItem(item) : "?",
+                            why: skipReason(skipped.code),
+                        }),
+                    );
                 }
             }
             setOpen(false);
@@ -274,6 +282,44 @@ export function LearnReview({
         [state],
     );
     const turnStart = (turnIndex: number) => turns[turnIndex]?.startMs ?? 0;
+
+    /** An item in a few words, as the review lists it. */
+    function describeItem(item: ItemView): string {
+        const payload = item.payload as Record<string, unknown>;
+        switch (item.kind) {
+            case "speaker":
+                return String(payload.label);
+            case "correction":
+                return `"${String(payload.heard)}"`;
+            case "relation_phrase":
+                return `"${String(payload.phrase)}"`;
+            default: {
+                const key = String(payload.relationKey);
+                return `${nameOf(payload.subject as Side)} — ${state?.relations[key] ?? key} — ${nameOf(payload.object as Side)}`;
+            }
+        }
+    }
+
+    function skipReason(code: string | undefined): string {
+        switch (code) {
+            case "nobody_chosen":
+                return i18n("nobody was chosen");
+            case "answered_since":
+                return i18n("someone answered it since");
+            case "speaker_not_named":
+                return i18n("its speaker is not named yet");
+            case "known_elsewhere":
+                return i18n("it is known in another scope");
+            case "nothing_chosen":
+                return i18n("nothing was chosen for it");
+            case "already_exists":
+                return i18n("it exists already");
+            case "changed":
+                return i18n("it changed since Learn ran");
+            default:
+                return i18n("it no longer fits");
+        }
+    }
 
     const groups = useMemo(() => {
         const items = state?.items ?? [];
@@ -626,6 +672,7 @@ export function LearnReview({
                                 <PhraseItem
                                     key={item.id}
                                     item={item}
+                                    organization={view === "org"}
                                     types={state?.types ?? {}}
                                     describe={nameOf}
                                     onDecide={decide}
@@ -677,11 +724,17 @@ export function LearnReview({
 /** A relation phrase: create it as the reviewer's own, suggest it, or dismiss it. */
 function PhraseItem({
     item,
+    organization,
     types,
     describe,
     onDecide,
 }: {
     item: ItemView;
+    /**
+     * On the Organization view: the relation is created as the
+     * Organization's, and there is nobody to suggest it to.
+     */
+    organization: boolean;
     types: Record<string, string>;
     describe: (side: Side | undefined) => string;
     onDecide: (
@@ -746,17 +799,23 @@ function PhraseItem({
                         })
                     }
                 >
-                    {i18n("Create as my relation")}
+                    {organization
+                        ? i18n("Create as an Organization relation")
+                        : i18n("Create as my relation")}
                 </Button>
-                <Button
-                    size="sm"
-                    variant={chosen === "suggest" ? "default" : "outline"}
-                    onClick={() =>
-                        void onDecide(item, "accepted", { action: "suggest" })
-                    }
-                >
-                    {i18n("Suggest to Organization")}
-                </Button>
+                {!organization && (
+                    <Button
+                        size="sm"
+                        variant={chosen === "suggest" ? "default" : "outline"}
+                        onClick={() =>
+                            void onDecide(item, "accepted", {
+                                action: "suggest",
+                            })
+                        }
+                    >
+                        {i18n("Suggest to Organization")}
+                    </Button>
+                )}
                 <Button
                     size="sm"
                     variant={chosen === "dismiss" ? "default" : "outline"}

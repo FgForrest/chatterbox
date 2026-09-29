@@ -7,6 +7,7 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
 
@@ -365,5 +366,85 @@ describe("LearnReview", () => {
         expect(
             await screen.findByRole("button", { name: "Review (2)" }),
         ).toBeTruthy();
+    });
+
+    it("says which items it could not apply, and why, in the reader's words", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": READY,
+            "POST /api/recordings/rec-1/review/finish?source=riffado": {
+                status: "finished",
+                applied: 1,
+                dismissed: 0,
+                skipped: [
+                    {
+                        itemId: "i-fact",
+                        code: "speaker_not_named",
+                        reason: "Its speaker is not named yet",
+                    },
+                ],
+            },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Finish review" }));
+        await waitFor(() =>
+            expect(toast.warning).toHaveBeenCalledWith(
+                "Jan — leads — Orion: its speaker is not named yet",
+            ),
+        );
+    });
+
+    it("offers the organization account one thing to do with a phrase: make it the Organization's", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado&view=org": {
+                ...READY,
+                items: [
+                    {
+                        id: "i-phrase",
+                        kind: "relation_phrase",
+                        preTicked: false,
+                        decision: null,
+                        choice: null,
+                        version: 0,
+                        dependsOnLabel: null,
+                        payload: {
+                            phrase: "vede",
+                            subject: { personId: "p-jan" },
+                            object: { entityId: "e-orion" },
+                            objectKind: "entity",
+                            startMs: 5_000,
+                            endMs: 9_000,
+                            count: 1,
+                        },
+                    },
+                ],
+            },
+        });
+        render(
+            <LearnReview
+                recordingId="rec-1"
+                view="org"
+                source="riffado"
+                turns={TURNS}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (1)" }),
+        );
+        expect(
+            screen.getByRole("button", {
+                name: "Create as an Organization relation",
+            }),
+        ).toBeTruthy();
+        expect(
+            screen.queryByRole("button", { name: "Suggest to Organization" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "Create as my relation" }),
+        ).toBeNull();
     });
 });
