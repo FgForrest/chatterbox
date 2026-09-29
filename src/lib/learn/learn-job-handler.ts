@@ -17,12 +17,14 @@ import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
     apiCredentials,
+    knowledgeAliases,
     knowledgeScopeGenerations,
     knowledgeVocabularyVersion,
     learnDismissals,
     learnReviewItems,
     learnRuns,
     recordings,
+    transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
@@ -32,7 +34,7 @@ import {
     pickLearnCredential,
 } from "@/lib/ai/enhancement-provider";
 import { decrypt } from "@/lib/encryption";
-import { encryptJsonField } from "@/lib/encryption/fields";
+import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
@@ -325,6 +327,67 @@ async function fenceOf(
 }
 
 /** Everything the validation needs to know of the run's scopes, frozen now. */
+/** A heard form and the name its correction wrote, as compared. */
+function heardFormKey(
+    target: { personId: string } | { entityId: string },
+    heard: string,
+    wrote: string,
+): string {
+    const fold = (text: string) => text.trim().normalize("NFC").toLowerCase();
+    return JSON.stringify([
+        "personId" in target ? target.personId : target.entityId,
+        fold(heard),
+        fold(wrote),
+    ]);
+}
+
+/**
+ * The heard forms in the run's scopes whose correction wrote the record's
+ * name exactly (`heardFormKey` of heard, target and what it wrote).
+ */
+async function heardFormsWritingName(
+    run: RunRow,
+    shared: boolean,
+): Promise<Set<string>> {
+    const scopes = readableScopes(
+        { kind: "recording", ownerUserId: run.userId, shared },
+        await sharingOrgUserId(),
+    );
+    const rows = await db
+        .select({
+            text: knowledgeAliases.text,
+            personId: knowledgeAliases.personId,
+            entityId: knowledgeAliases.entityId,
+            replacement: transcriptCorrections.replacement,
+        })
+        .from(knowledgeAliases)
+        .innerJoin(
+            transcriptCorrections,
+            eq(transcriptCorrections.id, knowledgeAliases.correctionId),
+        )
+        .where(
+            and(
+                eq(knowledgeAliases.kind, "heard_as"),
+                inArray(knowledgeAliases.userId, scopes),
+            ),
+        );
+    const found = new Set<string>();
+    for (const row of rows) {
+        if (!row.replacement) continue;
+        const target = row.personId
+            ? { personId: row.personId }
+            : { entityId: row.entityId ?? "" };
+        found.add(
+            heardFormKey(
+                target,
+                decryptText(row.text),
+                decryptText(row.replacement),
+            ),
+        );
+    }
+    return found;
+}
+
 async function frameFor(
     run: RunRow,
     transcript: {
@@ -363,6 +426,11 @@ async function frameFor(
         );
     const people = new Map<string, { name: string; aliases: string[] }>();
     const entities = new Map<string, { typeKey: string; name: string }>();
+    // A heard form pre-ticks only a rewrite the person accepted word for
+    // word: their correction wrote exactly the record's name. One they
+    // accepted in another grammatical form ("Terradomě" for "Terra doma")
+    // says nothing about the base name elsewhere.
+    const wroteName = await heardFormsWritingName(run, shared);
     const confirmedHeardAs = new Set<string>();
     for (const item of view.items) {
         if (item.kind === "person") {
@@ -377,6 +445,11 @@ async function frameFor(
         }
         for (const name of item.names) {
             if (name.kind !== "heard_as") continue;
+            if (
+                !wroteName.has(heardFormKey(name.target, name.text, item.name))
+            ) {
+                continue;
+            }
             confirmedHeardAs.add(
                 heardAsKey(
                     name.target,

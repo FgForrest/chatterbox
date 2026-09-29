@@ -982,6 +982,144 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             });
         }, 30_000);
 
+        it("pre-ticks a heard form only where the person's correction wrote the name itself", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Máme tu Tavesy a Tavesy zase.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            const confirm = (replacement: string) =>
+                acceptCorrection({
+                    userId: OWNER,
+                    transcriptionId: transcriptId,
+                    revision: 0,
+                    actorUserId: OWNER,
+                    orgUserId,
+                    anchor: {
+                        turnIndex: 0,
+                        charStart: 8,
+                        charEnd: 14,
+                        heard: "Tavesy",
+                    },
+                    kind: "correct",
+                    target: { entityId: tavesi },
+                    replacement,
+                });
+            const proposeSecond = async () => {
+                const { runId } = (await (await learn(OWNER)).json()) as {
+                    runId: string;
+                };
+                reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+                reply({
+                    speakers: [],
+                    corrections: [
+                        {
+                            turnIndex: 0,
+                            charStart: 17,
+                            charEnd: 23,
+                            heard: "Tavesy",
+                            kind: "correct",
+                            target: { entityId: tavesi },
+                            replacement: "Tavesi",
+                        },
+                    ],
+                    facts: [],
+                    relationPhrases: [],
+                });
+                await runJob(runId);
+                const items = await db()
+                    .select({ preTicked: learnReviewItems.preTicked })
+                    .from(learnReviewItems)
+                    .where(eq(learnReviewItems.runId, runId));
+                return items.map((item) => item.preTicked);
+            };
+
+            // Accepted in another form: nothing learned about the name.
+            await confirm("Tavesiho");
+            expect(await proposeSecond()).toEqual([false]);
+        });
+
+        it("pre-ticks the same rewrite the person accepted before", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Máme tu Tavesy a Tavesy zase.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            await acceptCorrection({
+                userId: OWNER,
+                transcriptionId: transcriptId,
+                revision: 0,
+                actorUserId: OWNER,
+                orgUserId,
+                anchor: {
+                    turnIndex: 0,
+                    charStart: 8,
+                    charEnd: 14,
+                    heard: "Tavesy",
+                },
+                kind: "correct",
+                target: { entityId: tavesi },
+                replacement: "Tavesi",
+            });
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            reply({
+                speakers: [],
+                corrections: [
+                    {
+                        turnIndex: 0,
+                        charStart: 17,
+                        charEnd: 23,
+                        heard: "Tavesy",
+                        kind: "correct",
+                        target: { entityId: tavesi },
+                        replacement: "Tavesi",
+                    },
+                ],
+                facts: [],
+                relationPhrases: [],
+            });
+            await runJob(runId);
+            expect(
+                (
+                    await db()
+                        .select({ preTicked: learnReviewItems.preTicked })
+                        .from(learnReviewItems)
+                        .where(eq(learnReviewItems.runId, runId))
+                ).map((item) => item.preTicked),
+            ).toEqual([true]);
+        });
+
         it("writes, pre-ticking nothing, when knowledge keeps moving", async () => {
             const tavesi = (
                 await createEntity(OWNER, {
