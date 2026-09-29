@@ -182,6 +182,14 @@ curl -H "Authorization: Bearer op_..." \
   "provider": "groq",
   "model": "whisper-large-v3",
   "created_at": "2026-05-13T12:01:23.000Z",
+  "turns": [
+    {
+      "speaker": "speaker_1",
+      "start_ms": 18000,
+      "end_ms": 40000,
+      "text": "Thanks. I'm Jan from Tavesy."
+    }
+  ],
   "corrections": [
     {
       "id": "c-1",
@@ -198,8 +206,10 @@ curl -H "Authorization: Bearer op_..." \
 ```
 
 `text` is the transcript as it was heard; corrections never rewrite it.
-`corrections` lists the confirmed ones as an overlay: a turn of the
-transcript and UTF-16 offsets into that turn's text. A `correct`
+`corrections` lists the confirmed ones as an overlay: an index into
+`turns` and UTF-16 offsets into that turn's text. `turns` is null for a
+transcript without stored turns (it then has no corrections either); a
+turn's `speaker` is the provider's label, never a name. A `correct`
 correction replaces the words with `replacement`; a `link` keeps them as
 spoken (a nickname, slang) and `meaning` names who or what they refer
 to.

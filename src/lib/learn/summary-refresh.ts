@@ -46,7 +46,27 @@ export async function isSummaryStale(
     return current !== null && current.fingerprint !== summary.inputFingerprint;
 }
 
+/**
+ * Runs after the change it follows has committed: it never throws, so a
+ * failure here does not report a change that took effect as failed (the
+ * summary then says it may be stale).
+ */
 export async function refreshSummaryAfterCorrections(input: {
+    ownerUserId: string;
+    recordingId: string;
+    view: RecordingView;
+}): Promise<void> {
+    try {
+        await refresh(input);
+    } catch (error) {
+        console.error(
+            `Could not refresh the summary of recording ${input.recordingId}:`,
+            error,
+        );
+    }
+}
+
+async function refresh(input: {
     ownerUserId: string;
     recordingId: string;
     view: RecordingView;

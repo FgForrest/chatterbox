@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
-import { apiHandler } from "@/lib/errors";
+import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { readBoundedJson } from "@/lib/http/bounded-json";
 import { finishReview, requestedReviewSource } from "@/lib/learn/review";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import {
@@ -19,7 +20,12 @@ type IdContext = { params: Promise<{ id: string }> };
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { access, actorUserId } = await authorizeLearn(request, id);
-    const body = (await request.json().catch(() => null)) as {
+    // One version per item, and there are few.
+    const read = await readBoundedJson(request, 64 * 1024);
+    if (read.tooLarge) {
+        throw new AppError(ErrorCode.INVALID_INPUT, "Request too large", 413);
+    }
+    const body = (read.body ?? null) as {
         versions?: unknown;
     } | null;
     const versions =
@@ -37,8 +43,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         versions,
         source: requestedReviewSource(request),
     });
-    // What it applied may change what a summary read.
-    if (finished.status === "finished" && finished.applied > 0) {
+    // What it applied, and what it left out that a waiting review had
+    // ticked, may change what a summary read.
+    if (finished.status === "finished") {
         await refreshSummaryAfterCorrections({
             ownerUserId: access.ownerUserId,
             recordingId: id,

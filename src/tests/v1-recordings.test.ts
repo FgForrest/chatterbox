@@ -188,6 +188,30 @@ describe("v1 recordings", () => {
                 meaning: "Greeting Inc.",
             },
         ]);
+        // Offsets point into turns, which come with them.
+        expect(
+            serializeTranscript(
+                {
+                    ...transcription,
+                    turns: [
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 900,
+                            text: "Hello world",
+                        },
+                    ],
+                },
+                [],
+            )?.turns,
+        ).toEqual([
+            {
+                speaker: "speaker_0",
+                start_ms: 0,
+                end_ms: 900,
+                text: "Hello world",
+            },
+        ]);
         expect(serializeTranscript(transcription)).not.toHaveProperty(
             "corrections",
         );

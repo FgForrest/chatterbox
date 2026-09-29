@@ -1599,6 +1599,59 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(await orgSummary()).toBe(true);
             });
 
+            it("summarizes again after a finish that applied nothing but took back what the summary read", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as { items: { id: string; kind: string }[] };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                // Summarized while the review waits: the tick is read.
+                createCompletion.mockReset();
+                reply({
+                    summary: "Tavesi came.",
+                    keyPoints: [],
+                    actionItems: [],
+                });
+                await generateSummaryForRecording(OWNER, REC);
+                await db()
+                    .insert(userSettings)
+                    .values({ userId: OWNER, autoSummarize: true });
+                // Unticked after all, and finished: nothing applied.
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "rejected", version: 1, choice: null },
+                    params: { itemId: id },
+                });
+                const finished = await route(
+                    postFinishRoute,
+                    OWNER,
+                    "review/finish",
+                    {
+                        method: "POST",
+                        body: { versions: { [id]: 2, [phrase]: 0 } },
+                    },
+                );
+                await expect(finished.json()).resolves.toMatchObject({
+                    status: "finished",
+                    applied: 0,
+                });
+                expect(
+                    await db()
+                        .select()
+                        .from(asyncJobs)
+                        .where(eq(asyncJobs.kind, "summary")),
+                ).toMatchObject([{ userId: OWNER, status: "pending" }]);
+            });
+
             it("supersedes instead of finishing when the transcript changed", async () => {
                 const { runId } = await readyRun();
                 await db()

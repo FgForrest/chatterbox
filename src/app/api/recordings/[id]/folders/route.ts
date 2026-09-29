@@ -44,7 +44,10 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     // made with the owner's may be stale there (it says so on its view).
     return NextResponse.json({
         assigned: true,
-        summaryStale: await isSummaryStale(session.user.id, id),
+        // Shared already: a failure here says nothing about the share.
+        summaryStale: await isSummaryStale(session.user.id, id).catch(
+            () => false,
+        ),
     });
 });
 

@@ -15,6 +15,7 @@ import {
     buildResolverMap,
     projectTranscript,
 } from "@/lib/knowledge/project-transcript";
+import { correctionOverlay } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
 
@@ -131,6 +132,7 @@ export const GET = apiHandler(async (request: Request) => {
         const group = transcriptionGroups.get(transcript.recordingId) ?? [];
         group.push({
             ...transcript,
+            // Its confirmed corrections applied, as people read it.
             text: projectTranscript(
                 {
                     id: transcript.id,
@@ -138,6 +140,7 @@ export const GET = apiHandler(async (request: Request) => {
                     turns: transcript.turns,
                 },
                 resolvers.get(transcript.id),
+                await correctionOverlay(transcript, { pending: false }),
             ),
         });
         transcriptionGroups.set(transcript.recordingId, group);
