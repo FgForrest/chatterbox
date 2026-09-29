@@ -7,6 +7,7 @@
  */
 
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
+import type { OverlayCorrection, RenderedSegment } from "@/lib/learn/render";
 
 type Target = { personId: string } | { entityId: string };
 
@@ -138,4 +139,89 @@ export function markedSegments(
     }
     if (at < text.length) segments.push({ text: text.slice(at) });
     return segments;
+}
+
+export type TurnPiece =
+    | { text: string; correction?: undefined; mark?: undefined }
+    | {
+          text: string;
+          correction: NonNullable<RenderedSegment["correction"]>;
+          mark?: undefined;
+      }
+    | { text: string; mark: LearnCorrectionMark; correction?: undefined };
+
+/**
+ * A turn's text as people read it, with a waiting review's marks in it:
+ * its confirmed corrections applied, and the marks on the words as heard
+ * that no confirmed correction covers. Everything is placed on the text
+ * as stored; one overlapping an earlier one is left out.
+ */
+export function turnPieces(
+    text: string,
+    turnIndex: number,
+    corrections: readonly OverlayCorrection[],
+    marks: readonly LearnCorrectionMark[],
+): TurnPiece[] {
+    type Placed =
+        | { start: number; end: number; correction: OverlayCorrection }
+        | { start: number; end: number; mark: LearnCorrectionMark };
+    const overlaps = (a: Placed, b: Placed) =>
+        a.start < b.end && b.start < a.end;
+    const placed: Placed[] = [];
+    const place = (candidate: Placed) => {
+        if (placed.some((held) => overlaps(held, candidate))) return;
+        placed.push(candidate);
+    };
+    // Confirmed corrections first: what is applied wins over a proposal.
+    for (const correction of corrections) {
+        if (correction.turnIndex !== turnIndex) continue;
+        if (
+            text.slice(correction.charStart, correction.charEnd) !==
+            correction.heard
+        ) {
+            continue;
+        }
+        place({
+            start: correction.charStart,
+            end: correction.charEnd,
+            correction,
+        });
+    }
+    for (const mark of marks) {
+        const quoted = text.slice(mark.charStart, mark.charEnd);
+        if (quoted.toLocaleLowerCase() !== mark.heard.toLocaleLowerCase()) {
+            continue;
+        }
+        place({ start: mark.charStart, end: mark.charEnd, mark });
+    }
+    placed.sort((a, b) => a.start - b.start);
+    const pieces: TurnPiece[] = [];
+    let at = 0;
+    for (const item of placed) {
+        if (item.start > at) pieces.push({ text: text.slice(at, item.start) });
+        if ("correction" in item) {
+            const { correction } = item;
+            pieces.push({
+                text:
+                    correction.kind === "correct" &&
+                    correction.replacement !== null
+                        ? correction.replacement
+                        : correction.heard,
+                correction: {
+                    ...(correction.id ? { id: correction.id } : {}),
+                    kind: correction.kind,
+                    heard: correction.heard,
+                    meaning: correction.meaning,
+                },
+            });
+        } else {
+            pieces.push({
+                text: text.slice(item.start, item.end),
+                mark: item.mark,
+            });
+        }
+        at = item.end;
+    }
+    if (at < text.length) pieces.push({ text: text.slice(at) });
+    return pieces;
 }

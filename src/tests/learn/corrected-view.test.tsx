@@ -84,4 +84,52 @@ describe("the corrected transcript", () => {
         render(<TranscriptView text="" storedTurns={TURNS} />);
         expect(screen.getByText("Great, Honza, Tavesy joined.")).toBeTruthy();
     });
+
+    it("shows a turn's confirmed corrections beside a waiting review's marks", () => {
+        const decide = vi.fn();
+        render(
+            <TranscriptView
+                text=""
+                storedTurns={TURNS}
+                corrections={{ list: [CORRECTIONS[1]], canUndo: false }}
+                learnMarks={{
+                    speakers: {},
+                    decide,
+                    corrections: [
+                        {
+                            itemId: "i-honza",
+                            turnIndex: 0,
+                            charStart: 7,
+                            charEnd: 12,
+                            heard: "Honza",
+                            suggestion: "Jan Novotný",
+                            ticked: false,
+                        },
+                        // Overlaps the confirmed correction: not shown.
+                        {
+                            itemId: "i-over",
+                            turnIndex: 0,
+                            charStart: 14,
+                            charEnd: 20,
+                            heard: "Tavesy",
+                            suggestion: "Other",
+                            ticked: false,
+                        },
+                    ],
+                }}
+            />,
+        );
+        expect(screen.getByText("Tavesi").getAttribute("title")).toBe(
+            "Heard as Tavesy",
+        );
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Honza → Jan Novotný: accept in the review",
+            }),
+        );
+        expect(decide).toHaveBeenCalledWith("i-honza", "accepted");
+        expect(
+            screen.queryByRole("button", { name: /Tavesy → Other/ }),
+        ).toBeNull();
+    });
 });

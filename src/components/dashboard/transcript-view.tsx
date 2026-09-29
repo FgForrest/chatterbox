@@ -4,9 +4,10 @@ import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { Fragment, useMemo } from "react";
 import { CorrectedText } from "@/components/learn/corrected-text";
-import type {
-    LearnCorrectionMark,
-    LearnMarks,
+import {
+    type LearnCorrectionMark,
+    type LearnMarks,
+    turnPieces,
 } from "@/components/learn/learn-marks";
 import { MarkedText } from "@/components/learn/marked-text";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
@@ -363,11 +364,48 @@ export function TranscriptView({
                                 className={`text-sm whitespace-pre-wrap leading-relaxed ${turn.label ? "pl-3.5" : ""}`}
                             >
                                 {marksByTurn.has(index) && learnMarks ? (
-                                    <MarkedText
-                                        text={turn.text}
-                                        marks={marksByTurn.get(index) ?? []}
-                                        decide={learnMarks.decide}
-                                    />
+                                    turnPieces(
+                                        turn.text,
+                                        index,
+                                        corrections?.list ?? [],
+                                        marksByTurn.get(index) ?? [],
+                                    ).map((piece, pieceIndex) =>
+                                        piece.mark ? (
+                                            <MarkedText
+                                                // Pieces are fixed by the text, its corrections and marks.
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                                text={piece.text}
+                                                marks={[
+                                                    {
+                                                        ...piece.mark,
+                                                        charStart: 0,
+                                                        charEnd:
+                                                            piece.text.length,
+                                                    },
+                                                ]}
+                                                decide={learnMarks.decide}
+                                            />
+                                        ) : piece.correction ? (
+                                            <CorrectedText
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                                segments={[piece]}
+                                                onUndo={
+                                                    corrections?.canUndo
+                                                        ? corrections.onUndo
+                                                        : undefined
+                                                }
+                                            />
+                                        ) : (
+                                            <Fragment
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                            >
+                                                {piece.text}
+                                            </Fragment>
+                                        ),
+                                    )
                                 ) : corrected?.[index] ? (
                                     <CorrectedText
                                         segments={corrected[index].segments}
