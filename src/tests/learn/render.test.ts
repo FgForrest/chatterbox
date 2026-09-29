@@ -158,6 +158,32 @@ describe("the corrected timeline", () => {
         expect(read[0]?.text).toContain("B said this first.");
     });
 
+    it("keeps them there when the turn's text has runs of spaces", () => {
+        const heard = `Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa said this first.${" ".repeat(100)}Then a second sentence of about equal length. And a third one closes it now.`;
+        const stored = [
+            { speaker: "speaker_0", startMs: 0, endMs: 120_000, text: heard },
+        ];
+        const corrections: OverlayCorrection[] = [
+            {
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 30,
+                heard: heard.slice(0, 30),
+                kind: "correct",
+                replacement: "B",
+                meaning: "B",
+            },
+        ];
+        const asHeard = buildTimeMarks(stored).map((mark) => mark.ms);
+        const read = buildTimeMarks(renderTurnsForLlm(stored, corrections), {
+            toHeard: correctedTimeline(stored, corrections),
+        });
+        expect(read.map((mark) => mark.ms)).toEqual(asHeard);
+        expect(read[1]?.text).toBe(
+            "Then a second sentence of about equal length.",
+        );
+    });
+
     it("maps nothing where nothing was corrected", () => {
         const toHeard = correctedTimeline(TURNS, []);
         expect(toHeard(0, 0.5)).toBe(0.5);

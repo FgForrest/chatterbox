@@ -39,6 +39,27 @@ const MIN_MARK_SPACING_MS = 15_000;
 const SENTENCE_BREAK = /(?<=[.!?…]["'”»)\]]*)\s+/u;
 
 /**
+ * A turn's sentences, each with where it starts in the text as it is, and
+ * its whitespace tidied for showing.
+ */
+function sentencesOf(raw: string): { text: string; at: number }[] {
+    const end = raw.trimEnd().length;
+    let at = raw.length - raw.trimStart().length;
+    const sentences: { text: string; at: number }[] = [];
+    const breaks = new RegExp(SENTENCE_BREAK.source, "gu");
+    for (const found of raw.slice(0, end).matchAll(breaks)) {
+        if (found.index < at) continue;
+        sentences.push({
+            text: raw.slice(at, found.index).replace(/\s+/g, " "),
+            at,
+        });
+        at = found.index + found[0].length;
+    }
+    sentences.push({ text: raw.slice(at, end).replace(/\s+/g, " "), at });
+    return sentences;
+}
+
+/**
  * Time marks for every turn: one at its start, and for a long turn more at
  * sentence boundaries inside it.
  *
@@ -75,14 +96,15 @@ export function buildTimeMarks(
             return;
         }
 
-        const sentences = text.split(SENTENCE_BREAK);
-        let offset = 0;
         let chunk: { ms: number; text: string } | null = null;
-        for (const sentence of sentences) {
+        for (const { text: sentence, at } of sentencesOf(turn.text)) {
+            // Placed by where it starts in the turn's text as it is, which
+            // is what `toHeard` maps; only what is shown is tidied.
             const ms =
                 turn.startMs +
-                Math.round(toHeard(turnIndex, offset / text.length) * duration);
-            offset += sentence.length + 1;
+                Math.round(
+                    toHeard(turnIndex, at / turn.text.length) * duration,
+                );
             if (chunk && ms - chunk.ms < MIN_MARK_SPACING_MS) {
                 chunk.text = `${chunk.text} ${sentence}`;
                 continue;
