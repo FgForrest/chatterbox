@@ -17,12 +17,16 @@ import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import type { RecordingView } from "@/lib/sharing/view";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 
-export async function refreshSummaryAfterCorrections(input: {
-    ownerUserId: string;
-    recordingId: string;
-    view: RecordingView;
-}): Promise<void> {
-    if (input.view !== "private") return;
+/**
+ * Whether the recording's summary was made from a reading of its
+ * transcript that differs from today's: its corrections changed, or, once
+ * it is shared, the Organization reads other corrections than the owner
+ * did. False for a summary made before corrections existed.
+ */
+export async function isSummaryStale(
+    ownerUserId: string,
+    recordingId: string,
+): Promise<boolean> {
     const [summary] = await db
         .select({
             transcriptionId: aiEnhancements.transcriptionId,
@@ -31,15 +35,24 @@ export async function refreshSummaryAfterCorrections(input: {
         .from(aiEnhancements)
         .where(
             and(
-                eq(aiEnhancements.recordingId, input.recordingId),
-                eq(aiEnhancements.userId, input.ownerUserId),
+                eq(aiEnhancements.recordingId, recordingId),
+                eq(aiEnhancements.userId, ownerUserId),
                 eq(aiEnhancements.source, "riffado"),
             ),
         )
         .limit(1);
-    if (!summary?.inputFingerprint || !summary.transcriptionId) return;
+    if (!summary?.inputFingerprint || !summary.transcriptionId) return false;
     const current = await llmRendering(summary.transcriptionId);
-    if (!current || current.fingerprint === summary.inputFingerprint) return;
+    return current !== null && current.fingerprint !== summary.inputFingerprint;
+}
+
+export async function refreshSummaryAfterCorrections(input: {
+    ownerUserId: string;
+    recordingId: string;
+    view: RecordingView;
+}): Promise<void> {
+    if (input.view !== "private") return;
+    if (!(await isSummaryStale(input.ownerUserId, input.recordingId))) return;
     const [settings] = await db
         .select({
             autoSummarize: userSettings.autoSummarize,

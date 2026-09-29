@@ -148,6 +148,7 @@ vi.mock("@/lib/auth-server", async () => {
 import { GET as getPending } from "@/app/api/learn/pending/route";
 import { DELETE as deleteCorrectionRoute } from "@/app/api/recordings/[id]/corrections/[correctionId]/route";
 import { GET as getCorrectionsRoute } from "@/app/api/recordings/[id]/corrections/route";
+import { POST as shareRoute } from "@/app/api/recordings/[id]/folders/route";
 import {
     GET as getLearnRoute,
     POST as postLearnRoute,
@@ -1396,6 +1397,75 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 const content = await exported();
                 expect(content).toContain("máme tu Tavesi.");
                 expect(content).not.toContain("Tavesy");
+            });
+
+            it("says at share time whether the summary reads as the Organization will", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as { items: { id: string; kind: string }[] };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: { versions: { [id]: 1, [phrase]: 0 } },
+                });
+                createCompletion.mockReset();
+                reply({
+                    summary: "Tavesi came.",
+                    keyPoints: [],
+                    actionItems: [],
+                });
+                await generateSummaryForRecording(OWNER, REC);
+
+                const [root] = await db()
+                    .select({ id: recordingFolders.id })
+                    .from(recordingFolders)
+                    .where(eq(recordingFolders.userId, orgUserId));
+                const shared = await route(shareRoute, OWNER, "folders", {
+                    method: "POST",
+                    body: { folderId: root?.id ?? "" },
+                });
+                // The owner's corrections are published with it, so the
+                // Organization reads what the summary read.
+                expect(await shared.json()).toEqual({
+                    assigned: true,
+                    summaryStale: false,
+                });
+                const orgSummary = async () =>
+                    (
+                        (await (
+                            await route(
+                                getSummaryRoute,
+                                OWNER,
+                                "summary?view=org",
+                            )
+                        ).json()) as { stale?: boolean }
+                    ).stale;
+                expect(await orgSummary()).toBe(false);
+                // The Organization takes the correction back: it now reads
+                // otherwise than the summary did.
+                const [correction] = await db()
+                    .select({ id: transcriptCorrections.id })
+                    .from(transcriptCorrections);
+                await route(
+                    deleteCorrectionRoute,
+                    orgUserId,
+                    `corrections/${correction?.id}?view=org`,
+                    {
+                        method: "DELETE",
+                        params: { correctionId: correction?.id ?? "" },
+                    },
+                );
+                expect(await orgSummary()).toBe(true);
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {

@@ -7,6 +7,7 @@ import {
     removeRecordingFromFolder,
     unshareRecording,
 } from "@/lib/folders/folders";
+import { isSummaryStale } from "@/lib/learn/summary-refresh";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -39,7 +40,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         recordingId: id,
         folderId,
     });
-    return NextResponse.json({ assigned: true });
+    // Shared: the Organization reads its own corrections, so a summary
+    // made with the owner's may be stale there (it says so on its view).
+    return NextResponse.json({
+        assigned: true,
+        summaryStale: await isSummaryStale(session.user.id, id),
+    });
 });
 
 /** Move a recording from one folder to another in the same tree. */
