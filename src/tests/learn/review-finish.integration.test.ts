@@ -501,6 +501,48 @@ describeWithDatabase("finishing a Learn review (PostgreSQL)", () => {
         expect(await db().select().from(transcriptCorrections)).toEqual([]);
     });
 
+    it("applies a correction at every occurrence however its words are composed", async () => {
+        const cafe = (
+            await createEntity(OWNER, {
+                typeKey: "organization",
+                name: "Kavárna",
+            })
+        ).id;
+        // "Café", composed, then as "e" and an accent.
+        const turns = [
+            { ...TURNS[0], text: "Caf\u00e9 a Cafe\u0301." },
+            TURNS[1],
+        ] as TranscriptTurn[];
+        await db()
+            .update(transcriptions)
+            .set({
+                text: encryptText(turns.map((t) => t.text).join("\n")),
+                turns: encryptJsonField(turns),
+            })
+            .where(eq(transcriptions.id, transcriptId));
+        await readyRun([
+            {
+                kind: "correction",
+                payload: {
+                    kind: "link",
+                    heard: "Caf\u00e9",
+                    target: { entityId: cafe },
+                    replacement: null,
+                    anchors: [
+                        { turnIndex: 0, charStart: 0, charEnd: 4 },
+                        { turnIndex: 0, charStart: 7, charEnd: 12 },
+                    ],
+                },
+                decision: "accepted",
+            },
+        ]);
+        expect((await finish()).body).toMatchObject({
+            applied: 1,
+            skipped: [],
+        });
+        expect(await db().select().from(transcriptCorrections)).toHaveLength(2);
+    });
+
     it("does not put back a value the person replaced after the run", async () => {
         const jan = (await createPerson({ userId: OWNER, displayName: "Jan" }))
             .id;

@@ -29,6 +29,7 @@ import {
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
+import { wordsAt } from "@/lib/knowledge/correction-anchors";
 import { acceptCorrectionInTx } from "@/lib/knowledge/corrections";
 import { confirmFactFromRecordingInTx } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -584,21 +585,18 @@ export async function finishReview(
             // words in any case; each is applied at its own.
             await attempt(item.id, async (sp) => {
                 for (const anchor of payload.anchors) {
-                    const words =
-                        turns?.[anchor.turnIndex]?.text.slice(
-                            anchor.charStart,
-                            anchor.charEnd,
-                        ) ?? "";
                     await acceptCorrectionInTx(sp, {
                         ...writer,
                         ...transcript,
                         anchor: {
                             ...anchor,
                             heard:
-                                words.toLocaleLowerCase() ===
-                                payload.heard.toLocaleLowerCase()
-                                    ? words
-                                    : payload.heard,
+                                wordsAt(
+                                    turns?.[anchor.turnIndex]?.text,
+                                    anchor.charStart,
+                                    anchor.charEnd,
+                                    payload.heard,
+                                ) ?? payload.heard,
                         },
                         kind: payload.kind,
                         target: payload.target,

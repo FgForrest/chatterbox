@@ -8,6 +8,7 @@ import {
     type LearnMarksSource,
     learnMarksFrom,
     markedSegments,
+    turnPieces,
 } from "@/components/learn/learn-marks";
 
 type Item = LearnMarksSource["items"][number];
@@ -235,5 +236,50 @@ describe("Learn marks", () => {
         );
         expect(screen.queryByText("Jan Novotný?")).toBeNull();
         expect(screen.getByText("Jana")).toBeTruthy();
+    });
+    it("take the heard words however composed, but never half a character", () => {
+        const mark = (charStart: number, charEnd: number, heard: string) => ({
+            itemId: "i",
+            turnIndex: 0,
+            charStart,
+            charEnd,
+            heard,
+            suggestion: "x",
+            ticked: false,
+        });
+        // "Café" written twice: composed, then as "e" and an accent.
+        const text = "Caf\u00e9 a Cafe\u0301.";
+        expect(
+            markedSegments(text, [
+                mark(0, 4, "Caf\u00e9"),
+                mark(7, 12, "Caf\u00e9"),
+            ])
+                .filter((segment) => segment.mark)
+                .map((segment) => segment.text),
+        ).toEqual(["Caf\u00e9", "Cafe\u0301"]);
+        // Half an emoji is no mark, beside a confirmed correction or not.
+        const emoji = "A\u{1F600}B tail";
+        const half = mark(0, 2, "A\uD83D");
+        expect(
+            markedSegments(emoji, [half]).some((segment) => segment.mark),
+        ).toBe(false);
+        expect(
+            turnPieces(
+                emoji,
+                0,
+                [
+                    {
+                        turnIndex: 0,
+                        charStart: 5,
+                        charEnd: 9,
+                        heard: "tail",
+                        kind: "correct",
+                        replacement: "tale",
+                        meaning: "tale",
+                    },
+                ],
+                [half],
+            ).some((piece) => piece.mark),
+        ).toBe(false);
     });
 });

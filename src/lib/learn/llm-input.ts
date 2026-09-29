@@ -22,6 +22,7 @@ import {
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { wordsAt } from "@/lib/knowledge/correction-anchors";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import {
@@ -220,18 +221,15 @@ export async function correctionOverlay(
         const meaning = names.get(targetId);
         if (meaning === undefined) continue;
         for (const anchor of payload.anchors) {
-            const words = turns?.[anchor.turnIndex]?.text.slice(
-                anchor.charStart,
-                anchor.charEnd,
-            );
             overlay.push({
                 ...anchor,
                 heard:
-                    words !== undefined &&
-                    words.toLocaleLowerCase() ===
-                        payload.heard.toLocaleLowerCase()
-                        ? words
-                        : payload.heard,
+                    wordsAt(
+                        turns?.[anchor.turnIndex]?.text,
+                        anchor.charStart,
+                        anchor.charEnd,
+                        payload.heard,
+                    ) ?? payload.heard,
                 kind: payload.kind,
                 replacement:
                     payload.kind === "correct" ? payload.replacement : null,

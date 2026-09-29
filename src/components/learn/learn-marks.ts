@@ -6,7 +6,7 @@
  * an unticked one stays shown, as the proposal it still is.
  */
 
-import { anchorMatches } from "@/lib/knowledge/correction-anchors";
+import { anchorMatches, wordsAt } from "@/lib/knowledge/correction-anchors";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { OverlayCorrection, RenderedSegment } from "@/lib/learn/render";
 
@@ -128,10 +128,8 @@ export function markedSegments(
     let at = 0;
     for (const mark of [...marks].sort((a, b) => a.charStart - b.charStart)) {
         if (mark.charStart < at) continue;
-        const quoted = text.slice(mark.charStart, mark.charEnd);
-        if (quoted.toLocaleLowerCase() !== mark.heard.toLocaleLowerCase()) {
-            continue;
-        }
+        const quoted = wordsAt(text, mark.charStart, mark.charEnd, mark.heard);
+        if (quoted === null) continue;
         if (mark.charStart > at) {
             segments.push({ text: text.slice(at, mark.charStart) });
         }
@@ -191,8 +189,7 @@ export function turnPieces(
         });
     }
     for (const mark of marks) {
-        const quoted = text.slice(mark.charStart, mark.charEnd);
-        if (quoted.toLocaleLowerCase() !== mark.heard.toLocaleLowerCase()) {
+        if (wordsAt(text, mark.charStart, mark.charEnd, mark.heard) === null) {
             continue;
         }
         place({ start: mark.charStart, end: mark.charEnd, mark });

@@ -47,6 +47,40 @@ export function anchorMatches(
 }
 
 /**
+ * The words at a place in a turn's text where they are `heard` in any case
+ * and however composed (an accent as its own code point, say), and whole
+ * characters of them; null otherwise. A Learn item groups its occurrences
+ * so, and each is read, shown and applied at its own words.
+ */
+export function wordsAt(
+    text: string | undefined,
+    charStart: number,
+    charEnd: number,
+    heard: string,
+): string | null {
+    if (
+        text === undefined ||
+        charStart < 0 ||
+        charStart >= charEnd ||
+        charEnd > text.length ||
+        splitsCharacter(text, charStart) ||
+        splitsCharacter(text, charEnd)
+    ) {
+        return null;
+    }
+    const words = text.slice(charStart, charEnd);
+    return sameWords(words, heard) ? words : null;
+}
+
+/** Whether two texts say the same words, in any case, however composed. */
+export function sameWords(a: string, b: string): boolean {
+    return (
+        a.normalize("NFC").toLocaleLowerCase() ===
+        b.normalize("NFC").toLocaleLowerCase()
+    );
+}
+
+/**
  * Whether an offset falls between the two UTF-16 units of one character
  * (an emoji, say): text cut there is no longer text.
  */
