@@ -51,6 +51,7 @@ import {
     heardIsFirstNameOnly,
     heardIsTheName,
     moreThanFirstName,
+    nameParts,
     nameTokens,
 } from "@/lib/learn/name-match";
 import type {
@@ -144,6 +145,7 @@ export type DropReason =
     | "knownElsewhere"
     | "conflicting"
     | "firstNameOnly"
+    | "ambiguousFirstName"
     | "budget";
 
 interface AnchorPosition {
@@ -381,6 +383,20 @@ export function validateLearnOutput(
         ]);
         if (dismissed(fingerprint)) continue;
         const person = personId ? frame.people.get(personId) : undefined;
+        const onlyFirstName =
+            person !== undefined &&
+            !fullNameNear(person, frame.turns, evidenceMs);
+        // A first name alone that two people known here share names
+        // neither: "Michale" is Michal Vondra or Michal Bednář (the
+        // model sees only what its lookups found, often one of them).
+        if (
+            onlyFirstName &&
+            personId &&
+            sharesFirstName(personId, frame.people)
+        ) {
+            drop("ambiguousFirstName");
+            continue;
+        }
         items.push({
             kind: "speaker",
             fingerprint,
@@ -390,9 +406,7 @@ export function validateLearnOutput(
                 personId,
                 evidenceMs,
                 reason,
-                ...(person && !fullNameNear(person, frame.turns, evidenceMs)
-                    ? { onlyFirstName: true as const }
-                    : {}),
+                ...(onlyFirstName ? { onlyFirstName: true as const } : {}),
             },
         });
     }
@@ -808,6 +822,19 @@ export function validateLearnOutput(
     }
 
     return { superseded: false, items, dropped };
+}
+
+/** Whether another person known here has this person's first name. */
+function sharesFirstName(
+    personId: string,
+    people: LearnRunFrame["people"],
+): boolean {
+    const first = nameParts(people.get(personId)?.name ?? "")[0];
+    if (!first) return false;
+    for (const [id, other] of people) {
+        if (id !== personId && nameParts(other.name)[0] === first) return true;
+    }
+    return false;
 }
 
 /** Turns either side of an evidence turn searched for the rest of a name. */

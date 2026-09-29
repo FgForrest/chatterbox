@@ -213,6 +213,65 @@ describe("validateLearnOutput", () => {
             ]);
         });
 
+        it("names nobody by a first name two people known here share, unless the surname is heard", () => {
+            const turns: TranscriptTurn[] = [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 9_000,
+                    text: "Michale, pošleš to?",
+                },
+                {
+                    speaker: "speaker_1",
+                    startMs: 9_000,
+                    endMs: 20_000,
+                    text: "Pošlu.",
+                },
+                {
+                    speaker: "speaker_0",
+                    startMs: 40_000,
+                    endMs: 50_000,
+                    text: "Díky, Bednáři.",
+                },
+                {
+                    speaker: "speaker_2",
+                    startMs: 50_000,
+                    endMs: 60_000,
+                    text: "Není zač.",
+                },
+            ];
+            const people = new Map([
+                ["p-vondra", { name: "Michal Vondra" }],
+                ["p-bednar", { name: "Michal Bednář" }],
+            ]);
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    speakers: [
+                        {
+                            label: "speaker_1",
+                            personId: "p-vondra",
+                            evidence: ["00:09"],
+                            reason: "",
+                        },
+                        {
+                            label: "speaker_2",
+                            personId: "p-bednar",
+                            evidence: ["00:50"],
+                            reason: "",
+                        },
+                    ],
+                }),
+                frame({ turns, answeredLabels: new Map(), people }),
+            );
+            expect(items.map((item) => item.payload)).toEqual([
+                expect.objectContaining({
+                    label: "speaker_2",
+                    personId: "p-bednar",
+                }),
+            ]);
+            expect(dropped).toMatchObject({ ambiguousFirstName: 1 });
+        });
+
         it("joins a label's suggestions: a name beats not-identified, and names that disagree give nothing", () => {
             const { items, dropped } = validateLearnOutput(
                 output({
