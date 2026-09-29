@@ -632,7 +632,8 @@ async function usesOfType(
  * Organization's own so the curator never learns how much members know
  * privately (Johnny, 2026-09-28); the confirmation says so in words:
  * - with its entities goes everything anyone knows about them (their
- *   facts, aliases, notes and corrections, in every scope);
+ *   facts, aliases, notes and corrections, in every scope), and so do
+ *   members' own entities of it, with what they know about those;
  * - a relation type goes from every member's facts: a member whose own
  *   type had been adopted as it gets that type back, with the facts they
  *   stated since (combined where they say the same); other members'
@@ -729,11 +730,18 @@ export async function deleteOwnType(
                 );
             }
         }
-        if (kind === "entity" && count > 0) {
+        // An Organization entity type takes every account's entities of it
+        // (Johnny, 2026-09-29): a member's entity of a type that is gone
+        // has nothing to be. Counted as the Organization's own only.
+        const entitiesGoing =
+            kind === "entity" && organization
+                ? eq(knowledgeEntities.typeKey, key)
+                : usesOfTypeCondition(kind, userId, key);
+        if (kind === "entity") {
             const doomed = await tx
                 .select({ id: knowledgeEntities.id })
                 .from(knowledgeEntities)
-                .where(usesOfTypeCondition(kind, userId, key));
+                .where(entitiesGoing);
             await lockRecordingsNaming(tx, {
                 entityIds: doomed.map((row) => row.id),
             });
@@ -747,9 +755,11 @@ export async function deleteOwnType(
                 entityIds: doomed.map((row) => row.id),
             });
         }
-        if (count > 0) {
+        if (kind === "entity") {
+            await tx.delete(knowledgeEntities).where(entitiesGoing);
+        } else if (count > 0) {
             await tx
-                .delete(kind === "entity" ? knowledgeEntities : knowledgeFacts)
+                .delete(knowledgeFacts)
                 .where(usesOfTypeCondition(kind, userId, key));
         }
         const table = tableOf(kind);

@@ -17,6 +17,7 @@ import {
     vi,
 } from "vitest";
 import {
+    knowledgeEntities,
     knowledgeEntityTypes,
     knowledgeFacts,
     knowledgeRelationTypes,
@@ -458,6 +459,37 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             .from(knowledgeFacts)
             .where(eq(knowledgeFacts.userId, ALICE));
         expect(left).toEqual([{ id: before, relationKey: alicesKey }]);
+    });
+
+    it("takes members' entities of an Organization type with it, counting only its own", async () => {
+        const venue = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "venue",
+        });
+        await createEntity(orgUserId, { typeKey: venue, name: "Hall A" });
+        const bobs = (
+            await createEntity(BOB, { typeKey: venue, name: "Kavárna" })
+        ).id;
+        // Alice's own type is hers, and stays.
+        const alicesType = await createPrivateType(ALICE, {
+            kind: "entity",
+            label: "place",
+        });
+        const alices = (
+            await createEntity(ALICE, { typeKey: alicesType, name: "Sklep" })
+        ).id;
+
+        // The count confirmed is the Organization's own.
+        expect(
+            await refusal(deleteOwnType(orgUserId, "entity", venue, 2)),
+        ).toMatchObject({ statusCode: 409 });
+        await deleteOwnType(orgUserId, "entity", venue, 1);
+
+        const left = await db()
+            .select({ id: knowledgeEntities.id })
+            .from(knowledgeEntities);
+        expect(left.map((row) => row.id)).toEqual([alices]);
+        expect(left.map((row) => row.id)).not.toContain(bobs);
     });
 
     it("stops counting a suggestion when its account goes, and drops it with the last", async () => {
