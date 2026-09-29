@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
 // No corrections: transcripts export as they are.
 vi.mock("@/lib/learn/llm-input", () => ({
-    correctionOverlay: vi.fn(async () => []),
+    confirmedOverlays: vi.fn(async () => new Map()),
 }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),

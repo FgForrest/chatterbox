@@ -23,7 +23,11 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { wordsAt } from "@/lib/knowledge/correction-anchors";
-import { listCorrections } from "@/lib/knowledge/corrections";
+import {
+    type Correction,
+    listCorrections,
+    listOwnersCorrections,
+} from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import {
     correctedTimeline,
@@ -197,25 +201,7 @@ export async function correctionOverlay(
         shared,
     });
     const names = new Map(view.items.map((item) => [item.id, item.name]));
-    const overlay: OverlayCorrection[] = [];
-    for (const correction of confirmed) {
-        // Carried, so what shows it can undo it.
-        const meaning =
-            names.get(
-                correction.targetPersonId ?? correction.targetEntityId ?? "",
-            ) ?? correction.replacement;
-        if (meaning === null || meaning === undefined) continue;
-        overlay.push({
-            id: correction.id,
-            turnIndex: correction.turnIndex,
-            charStart: correction.charStart,
-            charEnd: correction.charEnd,
-            heard: correction.heard,
-            kind: correction.kind,
-            replacement: correction.replacement,
-            meaning,
-        });
-    }
+    const overlay = confirmedOverlay(confirmed, names);
     for (const item of ticked) {
         const payload = decryptJsonField<ItemPayload>(item.payload);
         if (!payload) continue;
@@ -244,6 +230,69 @@ export async function correctionOverlay(
         }
     }
     return overlay;
+}
+
+/** Confirmed corrections as an overlay, each meaning its target's name. */
+function confirmedOverlay(
+    confirmed: readonly Correction[],
+    names: ReadonlyMap<string, string>,
+): OverlayCorrection[] {
+    const overlay: OverlayCorrection[] = [];
+    for (const correction of confirmed) {
+        // Carried, so what shows it can undo it.
+        const meaning =
+            names.get(
+                correction.targetPersonId ?? correction.targetEntityId ?? "",
+            ) ?? correction.replacement;
+        if (meaning === null || meaning === undefined) continue;
+        overlay.push({
+            id: correction.id,
+            turnIndex: correction.turnIndex,
+            charStart: correction.charStart,
+            charEnd: correction.charEnd,
+            heard: correction.heard,
+            kind: correction.kind,
+            replacement: correction.replacement,
+            meaning,
+        });
+    }
+    return overlay;
+}
+
+/**
+ * The confirmed corrections of every transcript of `ownerUserId`'s live
+ * recordings, as overlays keyed by transcript (`correctionOverlay` with
+ * `pending: false`, for all of them at once): an export of everything
+ * reads them in one query, and each view's names once.
+ */
+export async function confirmedOverlays(
+    ownerUserId: string,
+): Promise<Map<string, OverlayCorrection[]>> {
+    const corrections = await listOwnersCorrections(ownerUserId);
+    const namesOf = new Map<boolean, Promise<Map<string, string>>>();
+    const names = (shared: boolean) => {
+        let held = namesOf.get(shared);
+        if (!held) {
+            held = knowledgeView({
+                kind: "recording",
+                ownerUserId,
+                shared,
+            }).then(
+                (view) =>
+                    new Map(view.items.map((item) => [item.id, item.name])),
+            );
+            namesOf.set(shared, held);
+        }
+        return held;
+    };
+    const overlays = new Map<string, OverlayCorrection[]>();
+    for (const [transcriptionId, held] of corrections) {
+        overlays.set(
+            transcriptionId,
+            confirmedOverlay(held.corrections, await names(held.shared)),
+        );
+    }
+    return overlays;
 }
 
 /**

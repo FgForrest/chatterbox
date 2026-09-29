@@ -20,9 +20,9 @@
  * (`withdrawKnowledgeInTx`). A private recording reads the owner's.
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull, not, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { transcriptCorrections, transcriptions } from "@/db/schema";
+import { recordings, transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -43,6 +43,7 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeopleShared,
     orgOwnedCondition,
+    recordingSharedCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
@@ -341,4 +342,79 @@ export async function listCorrections(
         heard: decryptText(row.heard),
         replacement: row.replacement ? decryptText(row.replacement) : null,
     }));
+}
+
+/**
+ * The corrections on every transcript of `ownerUserId`'s live recordings,
+ * each in the scope its view reads (`listCorrections`), in one query: an
+ * export of everything. Per transcript, with whether its recording is
+ * shared (so its links read the Organization's names).
+ */
+export async function listOwnersCorrections(
+    ownerUserId: string,
+): Promise<Map<string, { shared: boolean; corrections: Correction[] }>> {
+    const orgUserId = await getOrgUserId();
+    const shared = orgUserId
+        ? recordingSharedCondition(recordings.id)
+        : sql`false`;
+    const rows = await db
+        .select({
+            transcriptionId: transcriptCorrections.transcriptionId,
+            shared: sql<boolean>`${shared}`,
+            id: transcriptCorrections.id,
+            transcriptRevision: transcriptCorrections.transcriptRevision,
+            turnIndex: transcriptCorrections.turnIndex,
+            charStart: transcriptCorrections.charStart,
+            charEnd: transcriptCorrections.charEnd,
+            heard: transcriptCorrections.heard,
+            kind: transcriptCorrections.kind,
+            targetPersonId: transcriptCorrections.targetPersonId,
+            targetEntityId: transcriptCorrections.targetEntityId,
+            replacement: transcriptCorrections.replacement,
+            preTicked: transcriptCorrections.preTicked,
+        })
+        .from(transcriptCorrections)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.id, transcriptCorrections.transcriptionId),
+        )
+        .innerJoin(recordings, eq(recordings.id, transcriptions.recordingId))
+        .where(
+            and(
+                eq(transcriptions.userId, ownerUserId),
+                isNull(recordings.deletedAt),
+                or(
+                    and(
+                        shared,
+                        orgOwnedCondition(transcriptCorrections.userId),
+                    ),
+                    and(
+                        not(shared),
+                        eq(transcriptCorrections.userId, ownerUserId),
+                    ),
+                ),
+            ),
+        )
+        .orderBy(
+            asc(transcriptCorrections.transcriptionId),
+            asc(transcriptCorrections.turnIndex),
+            asc(transcriptCorrections.charStart),
+        );
+    const byTranscript = new Map<
+        string,
+        { shared: boolean; corrections: Correction[] }
+    >();
+    for (const { transcriptionId, shared: isShared, ...row } of rows) {
+        const held = byTranscript.get(transcriptionId) ?? {
+            shared: isShared,
+            corrections: [],
+        };
+        held.corrections.push({
+            ...row,
+            heard: decryptText(row.heard),
+            replacement: row.replacement ? decryptText(row.replacement) : null,
+        });
+        byTranscript.set(transcriptionId, held);
+    }
+    return byTranscript;
 }

@@ -94,6 +94,7 @@ import {
     revertCorrection,
 } from "@/lib/knowledge/corrections";
 import { deletePerson } from "@/lib/knowledge/people";
+import { confirmedOverlays, correctionOverlay } from "@/lib/learn/llm-input";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -520,6 +521,34 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         } finally {
             mockEnv.SELF_HOST_MODE = "shared";
         }
+    });
+
+    it("reads every transcript's corrections for an export at once, each in its view, a deleted recording's not", async () => {
+        await share();
+        await ownersPrivateCorrection("Orionu");
+        await correct({
+            target: { personId: orgJan },
+            actorUserId: orgUserId,
+        });
+        const [transcript] = await db()
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.id, transcriptId));
+        if (!transcript) throw new Error("no transcript");
+        const batched = async () =>
+            (await confirmedOverlays(OWNER)).get(transcriptId);
+        const alone = () => correctionOverlay(transcript, { pending: false });
+
+        expect((await alone()).length).toBeGreaterThan(0);
+        expect(await batched()).toEqual(await alone());
+        await unshareRecording(OWNER, REC);
+        expect(await batched()).toEqual(await alone());
+
+        await db()
+            .update(recordings)
+            .set({ deletedAt: new Date() })
+            .where(eq(recordings.id, REC));
+        expect(await batched()).toBeUndefined();
     });
 
     it("keeps the Organization's correction, not a waiting one on the same words, through a re-transcription", async () => {

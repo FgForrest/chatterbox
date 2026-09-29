@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, getTableColumns, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -15,7 +15,7 @@ import {
     buildResolverMap,
     projectTranscript,
 } from "@/lib/knowledge/project-transcript";
-import { correctionOverlay } from "@/lib/learn/llm-input";
+import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
 
@@ -69,12 +69,22 @@ export const GET = apiHandler(async (request: Request) => {
 
     // Get transcriptions for all recordings
     const recordingIds = userRecordings.map((r) => r.id);
+    // Of live recordings only: a deleted one's never reach the file.
     const userTranscriptions =
         recordingIds.length > 0
             ? await db
-                  .select()
+                  .select(getTableColumns(transcriptions))
                   .from(transcriptions)
-                  .where(eq(transcriptions.userId, session.user.id))
+                  .innerJoin(
+                      recordings,
+                      eq(recordings.id, transcriptions.recordingId),
+                  )
+                  .where(
+                      and(
+                          eq(transcriptions.userId, session.user.id),
+                          isNull(recordings.deletedAt),
+                      ),
+                  )
             : [];
 
     const userEnhancements =
@@ -128,6 +138,11 @@ export const GET = apiHandler(async (request: Request) => {
             }
         >
     >();
+    // Every transcript's confirmed corrections, read at once.
+    const overlays =
+        userTranscriptions.length > 0
+            ? await confirmedOverlays(session.user.id)
+            : new Map<string, never[]>();
     for (const transcript of userTranscriptions) {
         const group = transcriptionGroups.get(transcript.recordingId) ?? [];
         group.push({
@@ -140,7 +155,7 @@ export const GET = apiHandler(async (request: Request) => {
                     turns: transcript.turns,
                 },
                 resolvers.get(transcript.id),
-                await correctionOverlay(transcript, { pending: false }),
+                overlays.get(transcript.id) ?? [],
             ),
         });
         transcriptionGroups.set(transcript.recordingId, group);
