@@ -6,7 +6,7 @@
  * create scratch databases on.
  */
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -21,6 +21,7 @@ import {
     knowledgeFacts,
     knowledgeRelationTypes,
     knowledgeVocabularyProposals,
+    knowledgeVocabularyVersion,
     people,
     users,
 } from "@/db/schema";
@@ -471,4 +472,74 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         await db().delete(users).where(eq(users.id, ALICE));
         expect(await listVocabularyProposals(orgUserId)).toEqual([]);
     });
+    it("adopts a phrase while a member renames or deletes their type of that name, deadlocking nothing", async () => {
+        const waiting = async () => {
+            const [row] = await db().execute<{ count: number }>(
+                sql`select count(*)::int as count from pg_stat_activity
+                    where datname = current_database() and wait_event_type = 'Lock'`,
+            );
+            return Number(row?.count ?? 0);
+        };
+        const until = async (count: number) => {
+            for (let i = 0; i < 200 && (await waiting()) < count; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 25));
+            }
+            expect(await waiting()).toBeGreaterThanOrEqual(count);
+        };
+        for (const change of ["rename", "delete"] as const) {
+            await db().delete(knowledgeVocabularyProposals);
+            const alicesKey = await createPrivateType(ALICE, {
+                ...worksWith,
+                label: `coaches ${change}`,
+            });
+            await proposePhrase(ALICE, `coaches ${change}`);
+            const [proposal] = await listVocabularyProposals(orgUserId);
+            // Something else changing the vocabulary holds its version, so
+            // the adoption waits for it after creating its type, and the
+            // member's change takes their type meanwhile.
+            let release = () => {};
+            const released = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const blocker = db().transaction(async (tx) => {
+                await tx
+                    .select()
+                    .from(knowledgeVocabularyVersion)
+                    .where(eq(knowledgeVocabularyVersion.id, 1))
+                    .for("update");
+                await released;
+            });
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            const adoption = adoptPhrase(orgUserId, proposal?.id ?? "", {
+                subjectTypes: ["person"],
+                objectTypes: ["person"],
+                objectKind: "entity",
+                cardinality: "many",
+            });
+            await until(1);
+            const members =
+                change === "rename"
+                    ? renameOwnType(
+                          ALICE,
+                          "relation",
+                          alicesKey,
+                          `trains ${change}`,
+                      )
+                    : deleteOwnType(ALICE, "relation", alicesKey, 0);
+            await until(2);
+            release();
+            await blocker;
+            const outcomes = await Promise.allSettled([adoption, members]);
+            expect(
+                outcomes.map((outcome) =>
+                    outcome.status === "rejected"
+                        ? String(
+                              (outcome.reason as { cause?: unknown }).cause ??
+                                  outcome.reason,
+                          )
+                        : "done",
+                ),
+            ).toEqual(["done", "done"]);
+        }
+    }, 30_000);
 });

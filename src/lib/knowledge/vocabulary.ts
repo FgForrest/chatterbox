@@ -13,7 +13,7 @@
  * run can tell the vocabulary it was made with is no longer current.
  */
 
-import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -950,6 +950,28 @@ export async function adoptPhrase(
             );
         }
         const label = spec.label ?? decryptText(proposal.phrase);
+        const labelHmac = domainLookupHash(
+            LABEL_DOMAIN.relation,
+            cleanLabel(label),
+        );
+        // The members' types of that name first, as renaming or deleting
+        // one takes it before the vocabulary's version: the type rows,
+        // then the version, then the scopes.
+        const adopters = await tx
+            .select({
+                id: knowledgeRelationTypes.id,
+                userId: knowledgeRelationTypes.userId,
+            })
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.labelHmac, labelHmac),
+                    sql`${knowledgeRelationTypes.userId} is not null`,
+                    sql`not ${orgOwnedCondition(knowledgeRelationTypes.userId)}`,
+                ),
+            )
+            .orderBy(asc(knowledgeRelationTypes.id))
+            .for("update");
         const key = await insertTypeInTx(tx, actorUserId, actorUserId, "o", {
             kind: "relation",
             label,
@@ -966,21 +988,17 @@ export async function adoptPhrase(
                 updatedAt: new Date(),
             })
             .where(eq(knowledgeVocabularyProposals.id, proposalId));
-        const labelHmac = domainLookupHash(
-            LABEL_DOMAIN.relation,
-            cleanLabel(label),
-        );
-        const adopters = await tx
-            .update(knowledgeRelationTypes)
-            .set({ adoptedAsKey: key, updatedAt: new Date() })
-            .where(
-                and(
-                    eq(knowledgeRelationTypes.labelHmac, labelHmac),
-                    sql`${knowledgeRelationTypes.userId} is not null`,
-                    sql`not ${orgOwnedCondition(knowledgeRelationTypes.userId)}`,
-                ),
-            )
-            .returning({ userId: knowledgeRelationTypes.userId });
+        if (adopters.length > 0) {
+            await tx
+                .update(knowledgeRelationTypes)
+                .set({ adoptedAsKey: key, updatedAt: new Date() })
+                .where(
+                    inArray(
+                        knowledgeRelationTypes.id,
+                        adopters.map((row) => row.id),
+                    ),
+                );
+        }
         await bumpScopeInTx(tx, [
             actorUserId,
             ...adopters.map((row) => row.userId),
