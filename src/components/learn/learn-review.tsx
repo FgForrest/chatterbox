@@ -753,6 +753,8 @@ function PhraseItem({
         count: number;
     };
     const [label, setLabel] = useState(payload.phrase);
+    // One value at a time (a new one replaces it: "works for"), or many.
+    const [cardinality, setCardinality] = useState<"one" | "many">("many");
     const typeOf = (side: Side): string | null => {
         if ("literal" in side) return null;
         if ("speakerLabel" in side) return "person";
@@ -782,6 +784,19 @@ function PhraseItem({
                     aria-label={i18n("Name of the relation")}
                     onChange={(event) => setLabel(event.target.value)}
                 />
+                <select
+                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                    aria-label={i18n("How many values")}
+                    value={cardinality}
+                    onChange={(event) =>
+                        setCardinality(
+                            event.target.value === "one" ? "one" : "many",
+                        )
+                    }
+                >
+                    <option value="many">{i18n("Many values")}</option>
+                    <option value="one">{i18n("One value at a time")}</option>
+                </select>
                 <Button
                     size="sm"
                     variant={chosen === "create" ? "default" : "outline"}
@@ -794,7 +809,7 @@ function PhraseItem({
                                 subjectTypes: [subjectType],
                                 objectTypes: objectType ? [objectType] : [],
                                 objectKind: objectType ? "entity" : "literal",
-                                cardinality: "many",
+                                cardinality,
                             },
                         })
                     }

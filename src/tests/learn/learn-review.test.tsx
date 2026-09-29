@@ -447,4 +447,54 @@ describe("LearnReview", () => {
             screen.queryByRole("button", { name: "Create as my relation" }),
         ).toBeNull();
     });
+
+    it("creates a relation of one value when asked", async () => {
+        const phrase = {
+            id: "i-phrase",
+            kind: "relation_phrase",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                phrase: "pracuje pro",
+                subject: { personId: "p-jan" },
+                object: { entityId: "e-tavesi" },
+                objectKind: "entity",
+                startMs: 5_000,
+                endMs: 9_000,
+                count: 1,
+            },
+        };
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [phrase],
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-phrase?source=riffado":
+                { version: 1 },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (1)" }),
+        );
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "How many values" }),
+            { target: { value: "one" } },
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Create as my relation" }),
+        );
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/items/i-phrase?source=riffado",
+                expect.objectContaining({
+                    body: expect.stringContaining('"cardinality":"one"'),
+                }),
+            ),
+        );
+    });
 });
