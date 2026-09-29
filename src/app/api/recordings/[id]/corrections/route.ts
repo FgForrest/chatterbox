@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { transcriptions } from "@/db/schema";
+import { recordings, transcriptions } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { listCorrections } from "@/lib/knowledge/corrections";
@@ -10,6 +10,7 @@ import {
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { assertMayChange } from "@/lib/sharing/writer";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -44,10 +45,27 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     if (!transcript) {
         throw new AppError(ErrorCode.NOT_FOUND, "No such transcript", 404);
     }
-    const corrections = await listCorrections(
-        access.contentUserId,
-        transcript.id,
-    );
+    // Read under the recording held for share, in the sharing state the
+    // request was authorized in: a withdrawal (or a share) landing since
+    // would otherwise hand a member the owner's private corrections.
+    const corrections = await db.transaction(async (tx) => {
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(eq(recordings.id, id))
+            .for("share");
+        const sharedNow =
+            access.orgUserId !== null &&
+            (await isRecordingShared(id, access.orgUserId, tx));
+        if (sharedNow !== access.shared) {
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording not found",
+                404,
+            );
+        }
+        return listCorrections(access.contentUserId, transcript.id, tx);
+    });
     const names = new Map(
         (
             await knowledgeView({

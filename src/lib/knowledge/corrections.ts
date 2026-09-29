@@ -277,8 +277,9 @@ export async function revertCorrection(
 export async function listCorrections(
     ownerUserId: string,
     transcriptionId: string,
+    executor: Pick<typeof db, "select"> = db,
 ): Promise<Correction[]> {
-    const rows = await db
+    const rows = await executor
         .select({
             id: transcriptCorrections.id,
             transcriptRevision: transcriptCorrections.transcriptRevision,
