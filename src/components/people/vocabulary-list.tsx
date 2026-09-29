@@ -422,7 +422,7 @@ export function VocabularyList({
                                       ))}{" "}
                             {organization &&
                                 i18n(
-                                    "Shares no longer bring those members' types in: what uses them stays private until the Organization has a type of that name again.",
+                                    "Members' types adopted as this one stay out of their shares, with what uses them, until the Organization again has a matching type of this name or theirs.",
                                 )}
                         </DialogDescription>
                     </DialogHeader>

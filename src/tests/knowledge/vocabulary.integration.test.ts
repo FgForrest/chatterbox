@@ -453,6 +453,66 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             .where(eq(knowledgeRelationTypes.key, alicesKey));
         expect(refused?.refused).toBeInstanceOf(Date);
         expect(await factsOf(BOB)).toEqual([]);
+
+        // The suggestion is open again: adopting it anew lifts the refusal.
+        const [reopened] = await listVocabularyProposals(orgUserId);
+        expect(reopened?.status).toBe("open");
+        const again = await adoptPhrase(orgUserId, reopened?.id ?? "", {
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        const [lifted] = await db()
+            .select({
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                refused: knowledgeRelationTypes.adoptionRefusedAt,
+                refusedAs: knowledgeRelationTypes.adoptionRefusedAs,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, alicesKey));
+        expect(lifted).toEqual({
+            adoptedAsKey: again,
+            refused: null,
+            refusedAs: null,
+        });
+    });
+
+    it("keeps a member's refusal through a rename and a merge of theirs", async () => {
+        const mentors = await createPrivateType(ALICE, worksWith);
+        const coaches = await createOrgType(orgUserId, {
+            ...worksWith,
+            label: "coaches",
+        });
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: coaches })
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        await deleteOwnType(orgUserId, "relation", coaches, 0);
+        const refusalOf = async (key: string) =>
+            (
+                await db()
+                    .select({
+                        adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                        refused: knowledgeRelationTypes.adoptionRefusedAt,
+                        refusedAs: knowledgeRelationTypes.adoptionRefusedAs,
+                    })
+                    .from(knowledgeRelationTypes)
+                    .where(eq(knowledgeRelationTypes.key, key))
+            )[0];
+        const refused = await refusalOf(mentors);
+        expect(refused?.refused).toBeInstanceOf(Date);
+        expect(refused?.refusedAs).toEqual(expect.any(String));
+
+        await renameOwnType(ALICE, "relation", mentors, "guides");
+        expect(await refusalOf(mentors)).toEqual(refused);
+
+        const tutors = await createPrivateType(ALICE, {
+            ...worksWith,
+            label: "tutors",
+        });
+        await mergeOwnTypes(ALICE, "relation", mentors, tutors, 0);
+        expect(await refusalOf(tutors)).toEqual(refused);
     });
 
     it("gives a member back only the facts that fit their own type", async () => {
@@ -956,11 +1016,15 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         expect(
             shapes.find((row) => row.key === bobsVisits)?.objectTypes,
         ).toEqual([place]);
+        // A merge by the curator refuses nothing.
         const [alices] = await db()
-            .select({ adoptedAsKey: knowledgeEntityTypes.adoptedAsKey })
+            .select({
+                adoptedAsKey: knowledgeEntityTypes.adoptedAsKey,
+                refused: knowledgeEntityTypes.adoptionRefusedAt,
+            })
             .from(knowledgeEntityTypes)
             .where(eq(knowledgeEntityTypes.key, alicesVenue));
-        expect(alices?.adoptedAsKey).toBe(place);
+        expect(alices).toEqual({ adoptedAsKey: place, refused: null });
         expect(
             (await vocabularyVisibleTo(orgUserId)).entityTypes.map(
                 (type) => type.key,

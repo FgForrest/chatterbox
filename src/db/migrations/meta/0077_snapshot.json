@@ -1,5 +1,5 @@
 {
-  "id": "4c9cadfb-5dfa-49f3-a1d3-102009c61205",
+  "id": "1fa04694-87e2-49bf-9e4f-9b6488c98bce",
   "prevId": "fefc5aba-065e-452b-840a-340d36d34e66",
   "version": "7",
   "dialect": "postgresql",
@@ -3585,6 +3585,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "adoption_refused_as": {
+          "name": "adoption_refused_as",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by_user_id": {
           "name": "created_by_user_id",
           "type": "text",
@@ -4374,6 +4380,12 @@
         "adoption_refused_at": {
           "name": "adoption_refused_at",
           "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "adoption_refused_as": {
+          "name": "adoption_refused_as",
+          "type": "varchar(64)",
           "primaryKey": false,
           "notNull": false
         },

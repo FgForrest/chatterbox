@@ -554,10 +554,10 @@ async function lockOwnType(
     kind: TypeKind,
     ownerUserId: string,
     key: string,
-): Promise<{ id: string }> {
+): Promise<{ id: string; labelHmac: string }> {
     const table = tableOf(kind);
     const [row] = await tx
-        .select({ id: table.id })
+        .select({ id: table.id, labelHmac: table.labelHmac })
         .from(table)
         .where(
             and(
@@ -780,7 +780,7 @@ export async function deleteOwnType(
 ): Promise<void> {
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
-        const { id } = await lockOwnType(tx, kind, userId, key);
+        const { id, labelHmac } = await lockOwnType(tx, kind, userId, key);
         // Of an entity type, the relation types relating it lose it: the
         // type rows, in id order, before anything else.
         const relating =
@@ -822,6 +822,7 @@ export async function deleteOwnType(
                 .set({
                     adoptedAsKey: null,
                     adoptionRefusedAt: now,
+                    adoptionRefusedAs: labelHmac,
                     updatedAt: now,
                 })
                 .where(
@@ -854,6 +855,7 @@ export async function deleteOwnType(
                 }
             }
             if (kind === "relation") {
+                await reopenProposalsInTx(tx, key);
                 const left = await tx
                     .select({ id: knowledgeFacts.id })
                     .from(knowledgeFacts)
@@ -992,11 +994,23 @@ async function dropFromRelationShapesInTx(
         for (const adopter of adopters) {
             if (adopter.userId) scopes.add(adopter.userId);
         }
+        await reopenProposalsInTx(tx, relation.key);
         await tx
             .delete(knowledgeRelationTypes)
             .where(eq(knowledgeRelationTypes.id, relation.id));
     }
     return scopes;
+}
+
+/**
+ * Suggestions adopted as a relation type that goes are open again, so the
+ * curator can adopt the phrase anew (which lifts members' refusals).
+ */
+async function reopenProposalsInTx(tx: Tx, key: string): Promise<void> {
+    await tx
+        .update(knowledgeVocabularyProposals)
+        .set({ status: "open", adoptedAsKey: null, updatedAt: new Date() })
+        .where(eq(knowledgeVocabularyProposals.adoptedAsKey, key));
 }
 
 /**
@@ -1106,6 +1120,8 @@ async function mergeableTypesInTx(
             key: table.key,
             userId: table.userId,
             adoptedAsKey: table.adoptedAsKey,
+            adoptionRefusedAt: table.adoptionRefusedAt,
+            adoptionRefusedAs: table.adoptionRefusedAs,
         })
         .from(table)
         .where(
@@ -1129,6 +1145,8 @@ type MergeableRow = {
     key: string;
     userId: string | null;
     adoptedAsKey: string | null;
+    adoptionRefusedAt: Date | null;
+    adoptionRefusedAs: string | null;
 };
 
 /**
@@ -1282,6 +1300,24 @@ export async function mergeOwnTypes(
                 .set({
                     adoptedAsKey: rows.from.adoptedAsKey,
                     adoptionRefusedAt: null,
+                    adoptionRefusedAs: null,
+                    updatedAt: new Date(),
+                })
+                .where(and(eq(table.userId, userId), eq(table.key, into)));
+        }
+        // Refused, as a rename keeps it: merging is no way around the
+        // curator.
+        if (
+            rows.from.adoptionRefusedAt &&
+            rows.into.userId === userId &&
+            !rows.into.adoptedAsKey &&
+            !rows.into.adoptionRefusedAt
+        ) {
+            await tx
+                .update(table)
+                .set({
+                    adoptionRefusedAt: rows.from.adoptionRefusedAt,
+                    adoptionRefusedAs: rows.from.adoptionRefusedAs,
                     updatedAt: new Date(),
                 })
                 .where(and(eq(table.userId, userId), eq(table.key, into)));
@@ -1537,6 +1573,7 @@ export async function adoptPhrase(
                 .set({
                     adoptedAsKey: key,
                     adoptionRefusedAt: null,
+                    adoptionRefusedAs: null,
                     updatedAt: new Date(),
                 })
                 .where(
@@ -1568,7 +1605,8 @@ export async function adoptPhrase(
  * one the Organization still has stays as it is. One whose adoption the
  * curator deleted (`adoptionRefusedAt`) is copied no more: it stays
  * private, with what uses it, until the Organization has a type of its
- * name (and shape) again, which it then takes (Johnny, 2026-09-29).
+ * name or of the deleted one's (and, for a relation, of its shape)
+ * again, which it then takes (Johnny, 2026-09-29).
  *
  * Inside the share's transaction, under the Organization-people lock: the
  * owner's type rows first, then the vocabulary's version, as renaming or
@@ -1684,7 +1722,11 @@ export async function adoptTypesForShareInTx(
         }
         const label = decryptText(type.label);
         let key = await sharedTypeNamed(tx, "entity", type.labelHmac);
-        // Refused, it stays private until the Organization has its name.
+        // Refused, it stays private until the Organization has its name,
+        // or the name of the type the curator deleted, again.
+        if (!key && type.adoptionRefusedAs) {
+            key = await sharedTypeNamed(tx, "entity", type.adoptionRefusedAs);
+        }
         if (!key && type.adoptionRefusedAt) continue;
         if (!key) {
             key = await insertAdoptedTypeInTx(tx, {
@@ -1702,6 +1744,7 @@ export async function adoptTypesForShareInTx(
             .set({
                 adoptedAsKey: key,
                 adoptionRefusedAt: null,
+                adoptionRefusedAs: null,
                 updatedAt: new Date(),
             })
             .where(eq(knowledgeEntityTypes.id, type.id));
@@ -1726,6 +1769,9 @@ export async function adoptTypesForShareInTx(
         if (unshared) continue;
         const label = decryptText(type.label);
         let key = await sharedRelationOfShape(tx, label, shape);
+        if (!key && type.adoptionRefusedAs) {
+            key = await sharedRelationNamed(tx, type.adoptionRefusedAs, shape);
+        }
         if (!key && type.adoptionRefusedAt) continue;
         if (!key) {
             key = await insertAdoptedTypeInTx(tx, {
@@ -1745,6 +1791,7 @@ export async function adoptTypesForShareInTx(
             .set({
                 adoptedAsKey: key,
                 adoptionRefusedAt: null,
+                adoptionRefusedAs: null,
                 updatedAt: new Date(),
             })
             .where(eq(knowledgeRelationTypes.id, type.id));
@@ -1875,6 +1922,28 @@ async function sharedRelationOfShape(
         );
         if (same) return same.key;
     }
+}
+
+/** A core or Organization relation type of `shape` with that name, active. */
+async function sharedRelationNamed(
+    tx: Tx,
+    labelHmac: string,
+    shape: RelationShape,
+): Promise<string | null> {
+    const rows = await tx
+        .select()
+        .from(knowledgeRelationTypes)
+        .where(
+            and(
+                eq(knowledgeRelationTypes.labelHmac, labelHmac),
+                or(
+                    isNull(knowledgeRelationTypes.userId),
+                    orgOwnedCondition(knowledgeRelationTypes.userId),
+                ),
+                eq(knowledgeRelationTypes.status, "active"),
+            ),
+        );
+    return rows.find((row) => sameShape(row, shape))?.key ?? null;
 }
 
 /** The key, when a core or Organization type of the kind exists under it. */

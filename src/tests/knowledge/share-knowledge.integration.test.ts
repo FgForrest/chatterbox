@@ -723,6 +723,47 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(own).toEqual({ adoptedAsKey: orgMentors, refused: null });
     });
 
+    it("adopts a refused type as the Organization's again when the curator makes the deleted one anew", async () => {
+        const mentors = await refusedMentors();
+        const coaches = await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "coaches",
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+
+        await share();
+
+        expect(await orgFacts()).toEqual([{ relationKey: coaches }]);
+        const [own] = await db()
+            .select({
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                refused: knowledgeRelationTypes.adoptionRefusedAt,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        expect(own).toEqual({ adoptedAsKey: coaches, refused: null });
+    });
+
+    it("keeps a refused relation private while the Organization's of its name has another shape", async () => {
+        await refusedMentors();
+        await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "mentors",
+            subjectTypes: ["organization"],
+            objectTypes: ["organization"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+
+        await share();
+
+        expect(await orgFacts()).toEqual([]);
+        expect(await owners(people, pavel)).toBe(OWNER);
+    });
+
     it("keeps an entity of a refused type private, and what relates it", async () => {
         const [ownSupplier] = await db()
             .select({ key: knowledgeEntityTypes.key })
