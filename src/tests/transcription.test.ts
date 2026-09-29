@@ -89,6 +89,7 @@ vi.mock("@/lib/knowledge/attribution", () => ({
 }));
 vi.mock("@/lib/knowledge/transcript-rewrite", () => ({
     transcriptRewrittenInTx: vi.fn(),
+    stampNewTranscriptAudioInTx: vi.fn(),
 }));
 vi.mock("@/lib/knowledge/speaker-labels", () => ({
     storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),

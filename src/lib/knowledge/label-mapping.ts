@@ -17,6 +17,18 @@ export interface LabelMapping {
     uncertain: Map<string, string>;
 }
 
+/**
+ * The mapping when the audio under the transcript changed: the timeline
+ * shifted, so no label is the same voice for certain; every pair is a
+ * suggestion at best.
+ */
+export function demoteAll(mapping: LabelMapping): LabelMapping {
+    return {
+        carried: new Map(),
+        uncertain: new Map([...mapping.uncertain, ...mapping.carried]),
+    };
+}
+
 export interface LabelMappingOptions {
     /** Share of the old label's speech that must fall in the new label. */
     minRecall?: number;

@@ -9,7 +9,11 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { mapLabels, remapAttributionRows } from "@/lib/knowledge/label-mapping";
+import {
+    demoteAll,
+    mapLabels,
+    remapAttributionRows,
+} from "@/lib/knowledge/label-mapping";
 import {
     lockOrgPeopleShared,
     orgOwnedCondition,
@@ -586,17 +590,21 @@ export async function remapTranscriptAttributionsInTx(
         transcriptionId,
         previous,
         next,
+        audioChanged = false,
     }: {
         userId: string;
         transcriptionId: string;
         previous: SpeakerVersion;
         next: SpeakerVersion;
+        /** The audio under it changed: every name a suggestion at best. */
+        audioChanged?: boolean;
     },
 ): Promise<void> {
-    const mapping = mapLabels(previous.turns, next.turns, {
+    const matched = mapLabels(previous.turns, next.turns, {
         previousLabels: previous.labels,
         nextLabels: next.labels,
     });
+    const mapping = audioChanged ? demoteAll(matched) : matched;
 
     const rows = await tx
         .select({

@@ -9,7 +9,10 @@ import {
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
-import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
+import {
+    stampNewTranscriptAudioInTx,
+    transcriptRewrittenInTx,
+} from "@/lib/knowledge/transcript-rewrite";
 import {
     contentWriterRefusal,
     sharingOrgUserId,
@@ -302,6 +305,12 @@ export async function upsertTranscription(
                     model,
                     source,
                     producedByUserId,
+                });
+                // Which audio it was made from, for a later rewrite.
+                await stampNewTranscriptAudioInTx(tx, {
+                    recordingId,
+                    userId,
+                    source: source,
                 });
             }
 

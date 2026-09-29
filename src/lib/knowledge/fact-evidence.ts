@@ -24,7 +24,7 @@ import {
     quoteFromTurns,
     quoteSimilarity,
 } from "@/lib/knowledge/fact-rules";
-import { mapLabels } from "@/lib/knowledge/label-mapping";
+import { demoteAll, mapLabels } from "@/lib/knowledge/label-mapping";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -139,10 +139,13 @@ export async function recheckEvidenceInTx(
         transcriptionId,
         previous,
         next,
+        audioChanged = false,
     }: {
         transcriptionId: string;
         previous: SpeakerVersion;
         next: SpeakerVersion;
+        /** The audio under it changed: no voice carries for certain. */
+        audioChanged?: boolean;
     },
 ): Promise<Set<string>> {
     const rows = await tx
@@ -165,10 +168,11 @@ export async function recheckEvidenceInTx(
         .from(transcriptions)
         .where(eq(transcriptions.id, transcriptionId));
     const revision = transcript?.revision ?? 0;
-    const mapping = mapLabels(previous.turns, next.turns, {
+    const matched = mapLabels(previous.turns, next.turns, {
         previousLabels: previous.labels,
         nextLabels: next.labels,
     });
+    const mapping = audioChanged ? demoteAll(matched) : matched;
 
     // Without times a quote is cut from every turn, so "alike" says nothing
     // about the fact's own words: only the same words keep it supported.

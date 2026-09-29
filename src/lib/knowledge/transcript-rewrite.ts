@@ -5,7 +5,8 @@
  * or dropped.
  *
  * - speaker rows and rejections, by speech overlap
- *   (`remapTranscriptAttributionsInTx`);
+ *   (`remapTranscriptAttributionsInTx`), as suggestions only when the
+ *   audio under the transcript changed (`audioMd5`: the timeline shifted);
  * - corrections, by their words (`recheckCorrectionsInTx`);
  * - fact evidence, by the words at its time and the voice it depends on
  *   (`recheckEvidenceInTx`).
@@ -16,9 +17,9 @@
  *   Riffado transcript goes: the new one's transcription decides.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import { learnRuns } from "@/db/schema";
+import { learnRuns, recordings, transcriptions } from "@/db/schema";
 import { remapTranscriptAttributionsInTx } from "@/lib/knowledge/attribution";
 import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
 import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
@@ -40,7 +41,11 @@ export async function transcriptRewrittenInTx(
         next: SpeakerVersion;
     },
 ): Promise<void> {
-    await remapTranscriptAttributionsInTx(tx, args);
+    const audioChanged = await stampTranscriptAudioInTx(
+        tx,
+        args.transcriptionId,
+    );
+    await remapTranscriptAttributionsInTx(tx, { ...args, audioChanged });
     const corrected = await recheckCorrectionsInTx(tx, {
         transcriptionId: args.transcriptionId,
         previousTurns: args.previous.turns,
@@ -50,6 +55,7 @@ export async function transcriptRewrittenInTx(
         transcriptionId: args.transcriptionId,
         previous: args.previous,
         next: args.next,
+        audioChanged,
     });
     await tx
         .update(learnRuns)
@@ -64,4 +70,56 @@ export async function transcriptRewrittenInTx(
     if (held) await clearAutoLearnHoldInTx(tx, held);
     // Once, after both: the knowledge of every scope the rewrite touched.
     await bumpScopeInTx(tx, [...corrected, ...evidenced]);
+}
+
+/**
+ * Record on a transcript the audio it is made from now (the recording's
+ * `fileMd5`), in the transaction that writes it. Returns whether that audio
+ * differs from what it was made from before; unknown before (older
+ * transcripts, no md5) is not a change.
+ */
+export async function stampTranscriptAudioInTx(
+    tx: Tx,
+    transcriptionId: string,
+): Promise<boolean> {
+    const [row] = await tx
+        .select({
+            before: transcriptions.audioMd5,
+            now: recordings.fileMd5,
+        })
+        .from(transcriptions)
+        .innerJoin(recordings, eq(recordings.id, transcriptions.recordingId))
+        .where(eq(transcriptions.id, transcriptionId))
+        .limit(1);
+    if (!row) return false;
+    if (row.before !== row.now) {
+        await tx
+            .update(transcriptions)
+            .set({ audioMd5: row.now })
+            .where(eq(transcriptions.id, transcriptionId));
+    }
+    return Boolean(row.before && row.now && row.before !== row.now);
+}
+
+/** `stampTranscriptAudioInTx` for a transcript just inserted. */
+export async function stampNewTranscriptAudioInTx(
+    tx: Tx,
+    {
+        recordingId,
+        userId,
+        source,
+    }: { recordingId: string; userId: string; source: string },
+): Promise<void> {
+    await tx
+        .update(transcriptions)
+        .set({
+            audioMd5: sql`(select ${recordings.fileMd5} from ${recordings} where ${recordings.id} = ${recordingId})`,
+        })
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, userId),
+                eq(transcriptions.source, source),
+            ),
+        );
 }

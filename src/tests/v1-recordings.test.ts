@@ -82,6 +82,7 @@ const transcription = {
     topicsInputFingerprint: null,
     producedByUserId: null,
     revision: 0,
+    audioMd5: null,
     createdAt: now,
 };
 

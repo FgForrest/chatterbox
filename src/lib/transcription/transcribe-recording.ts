@@ -27,7 +27,10 @@ import {
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
-import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
+import {
+    stampNewTranscriptAudioInTx,
+    transcriptRewrittenInTx,
+} from "@/lib/knowledge/transcript-rewrite";
 import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import {
@@ -238,6 +241,12 @@ export async function storeBrowserTranscription(
                     topics: null,
                     topicsInputFingerprint: null,
                     producedByUserId: userId,
+                });
+                // Which audio it was made from, for a later rewrite.
+                await stampNewTranscriptAudioInTx(tx, {
+                    recordingId,
+                    userId,
+                    source: "riffado",
                 });
             }
 

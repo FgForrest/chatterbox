@@ -837,6 +837,11 @@ export const transcriptions = pgTable(
         // run) can tell it is looking at the version it was made on. Topics
         // are not the transcript and leave it alone.
         revision: integer("revision").notNull().default(0),
+        // The md5 of the audio this was made from (`recordings.fileMd5`
+        // when it was written). A rewrite over different audio (a Plaud
+        // recording trimmed and synced again) shifts the timeline: names
+        // are then carried only as suggestions. Null before it was kept.
+        audioMd5: varchar("audio_md5", { length: 32 }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
