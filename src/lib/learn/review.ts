@@ -16,9 +16,10 @@
  * reported, not the whole review lost.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    knowledgeFacts,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -84,6 +85,25 @@ export interface ReviewView {
     types: Record<string, string>;
     /** Labels of the relations the items use, by key. */
     relations: Record<string, string>;
+}
+
+/** A unique index refused a row another transaction wrote meanwhile. */
+function isUniqueViolation(error: unknown): boolean {
+    const value = error as { code?: unknown; cause?: { code?: unknown } };
+    return value?.code === "23505" || value?.cause?.code === "23505";
+}
+
+/**
+ * The speaker a fact depends on: the one it is about, else the one who
+ * said it; null when neither.
+ */
+function speakerOf(payload: {
+    subject: LearnSubject;
+    speakerLabel: string | null;
+}): string | null {
+    return "speakerLabel" in payload.subject
+        ? payload.subject.speakerLabel
+        : payload.speakerLabel;
 }
 
 function reviewNotFound(): AppError {
@@ -247,20 +267,43 @@ export async function decideReviewItem(
         choice?: unknown;
     },
 ): Promise<{ version: number }> {
-    const run = await latestRun(access);
-    if (!run || run.status !== "ready") throw reviewNotFound();
-    const [item] = await db
+    const latest = await latestRun(access);
+    if (!latest || latest.status !== "ready") throw reviewNotFound();
+    // Under the run held for share: a finish holds it for update, so a
+    // draft either lands before it (and is applied) or finds it finished.
+    return db.transaction(async (tx) => {
+        const [run] = await tx
+            .select({ status: learnRuns.status })
+            .from(learnRuns)
+            .where(eq(learnRuns.id, latest.id))
+            .for("share");
+        if (run?.status !== "ready") throw reviewNotFound();
+        return keepDraft(tx, latest.id, itemId, input);
+    });
+}
+
+async function keepDraft(
+    tx: Tx,
+    runId: string,
+    itemId: string,
+    input: {
+        decision: "accepted" | "rejected" | null;
+        version: number;
+        choice?: unknown;
+    },
+): Promise<{ version: number }> {
+    const [item] = await tx
         .select({ kind: learnReviewItems.kind })
         .from(learnReviewItems)
         .where(
             and(
                 eq(learnReviewItems.id, itemId),
-                eq(learnReviewItems.runId, run.id),
+                eq(learnReviewItems.runId, runId),
             ),
         );
     if (!item) throw reviewNotFound();
     const choice = validChoice(item.kind, input.choice);
-    const [updated] = await db
+    const [updated] = await tx
         .update(learnReviewItems)
         .set({
             decision: input.decision,
@@ -312,7 +355,7 @@ export async function finishReview(
             userId: latest.userId,
             transcriptionId: latest.transcriptionId,
         };
-        const { revision } = await lockTranscriptForChange(tx, version, {
+        const { revision, turns } = await lockTranscriptForChange(tx, version, {
             actorUserId,
             orgUserId,
         });
@@ -339,15 +382,18 @@ export async function finishReview(
             .from(learnReviewItems)
             .where(eq(learnReviewItems.runId, run.id))
             .for("update");
-        for (const row of rows) {
-            const seen = versions[row.id];
-            if (seen !== undefined && seen !== row.version) {
-                throw new AppError(
-                    ErrorCode.CONFLICT,
-                    "The review changed; reload it",
-                    409,
-                );
-            }
+        // Every item as the person saw it, and nothing else: a default
+        // applied to an item they never loaded is no decision of theirs.
+        const shown = Object.keys(versions);
+        if (
+            shown.length !== rows.length ||
+            rows.some((row) => versions[row.id] !== row.version)
+        ) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The review changed; reload it",
+                409,
+            );
         }
         const items = rows.map((row) => ({
             id: row.id,
@@ -373,8 +419,16 @@ export async function finishReview(
                 await tx.transaction(async (sp) => apply(sp as Tx));
                 applied++;
             } catch (error) {
-                if (!(error instanceof AppError)) throw error;
-                skipped.push({ itemId, reason: error.message });
+                if (error instanceof AppError) {
+                    skipped.push({ itemId, reason: error.message });
+                    return;
+                }
+                // A name taken meanwhile by another transaction.
+                if (isUniqueViolation(error)) {
+                    skipped.push({ itemId, reason: "Already exists" });
+                    return;
+                }
+                throw error;
             }
         };
         const writer = { actorUserId, orgUserId };
@@ -404,6 +458,29 @@ export async function finishReview(
                 skipped.push({ itemId: item.id, reason: "Nobody chosen" });
                 continue;
             }
+            // Proposed for a label nobody had answered; an answer given
+            // since is the person's, and stays.
+            const [answered] = await tx
+                .select({ id: transcriptSpeakers.id })
+                .from(transcriptSpeakers)
+                .where(
+                    and(
+                        eq(
+                            transcriptSpeakers.transcriptionId,
+                            run.transcriptionId,
+                        ),
+                        eq(transcriptSpeakers.label, payload.label),
+                        or(
+                            eq(transcriptSpeakers.status, "confirmed"),
+                            eq(transcriptSpeakers.markedUnknown, true),
+                        ),
+                    ),
+                )
+                .limit(1);
+            if (answered) {
+                skipped.push({ itemId: item.id, reason: "Answered since" });
+                continue;
+            }
             await attempt(item.id, async (sp) => {
                 await answerSpeakerInTx(
                     sp,
@@ -424,18 +501,32 @@ export async function finishReview(
                 ReviewCandidate,
                 { kind: "correction" }
             >["payload"];
-            for (const anchor of payload.anchors) {
-                await attempt(item.id, async (sp) => {
+            // All its occurrences or none. The item groups them by their
+            // words in any case; each is applied at its own.
+            await attempt(item.id, async (sp) => {
+                for (const anchor of payload.anchors) {
+                    const words =
+                        turns?.[anchor.turnIndex]?.text.slice(
+                            anchor.charStart,
+                            anchor.charEnd,
+                        ) ?? "";
                     await acceptCorrectionInTx(sp, {
                         ...writer,
                         ...transcript,
-                        anchor: { ...anchor, heard: payload.heard },
+                        anchor: {
+                            ...anchor,
+                            heard:
+                                words.toLocaleLowerCase() ===
+                                payload.heard.toLocaleLowerCase()
+                                    ? words
+                                    : payload.heard,
+                        },
                         kind: payload.kind,
                         target: payload.target,
                         replacement: payload.replacement,
                     });
-                });
-            }
+                }
+            });
         }
 
         /** Whom a fact's speaker-bound side names now, or null. */
@@ -473,6 +564,7 @@ export async function finishReview(
                 endMs: number;
                 speakerLabel: string | null;
             },
+            expectedCurrentFactId: string | null,
         ) => {
             await confirmFactFromRecordingInTx(sp, {
                 ...writer,
@@ -485,7 +577,9 @@ export async function finishReview(
                 startMs: fact.startMs,
                 endMs: fact.endMs,
                 speakerLabel: fact.speakerLabel,
-                replaceCurrent: true,
+                // Replaces only the value the item showed as current (none
+                // when it showed none): one changed since is the person's.
+                expectedCurrentFactId,
             });
         };
 
@@ -500,40 +594,82 @@ export async function finishReview(
                 ReviewCandidate,
                 { kind: "fact" | "known_fact" }
             >["payload"];
+            // A known fact of another scope (the Organization's, on a
+            // private recording) is not copied into the actor's.
+            if (item.kind === "known_fact" && payload.factId) {
+                const [known] = await tx
+                    .select({ userId: knowledgeFacts.userId })
+                    .from(knowledgeFacts)
+                    .where(eq(knowledgeFacts.id, payload.factId))
+                    .limit(1);
+                if (known?.userId !== run.scopeUserId) {
+                    skipped.push({
+                        itemId: item.id,
+                        reason: "Known in another scope",
+                    });
+                    continue;
+                }
+            }
+            // A fact about a speaker, or said by one, holds only once that
+            // speaker is named, and its evidence stays tied to them.
+            const speakerLabel = speakerOf(payload);
             const subject = await resolveSubject(payload.subject);
-            if (!subject) {
+            if (
+                !subject ||
+                (speakerLabel !== null && !(await speakerPerson(speakerLabel)))
+            ) {
                 skipped.push({
                     itemId: item.id,
                     reason: "Its speaker is not named yet",
                 });
                 continue;
             }
-            // Evidence depends on the speaker only when that speaker is named.
-            const speakerLabel =
-                payload.speakerLabel &&
-                (await speakerPerson(payload.speakerLabel))
-                    ? payload.speakerLabel
-                    : null;
+            const expected =
+                item.kind === "known_fact"
+                    ? (payload.factId ?? null)
+                    : (payload.replaces?.factId ?? null);
             await attempt(item.id, (sp) =>
-                confirm(sp, payload.relationKey, subject, payload.object, {
-                    ...payload,
-                    speakerLabel,
-                }),
+                confirm(
+                    sp,
+                    payload.relationKey,
+                    subject,
+                    payload.object,
+                    { ...payload, speakerLabel },
+                    expected,
+                ),
             );
         }
 
         const organization = orgUserId !== null && actorUserId === orgUserId;
-        for (const item of items) {
-            if (item.kind !== "relation_phrase" || !item.accepted) continue;
-            const payload = item.payload as Extract<
-                ReviewCandidate,
-                { kind: "relation_phrase" }
-            >["payload"];
-            const choice = item.choice;
+        const phrases = items.flatMap((item) =>
+            item.kind === "relation_phrase" && item.accepted
+                ? [
+                      {
+                          item,
+                          payload: item.payload as Extract<
+                              ReviewCandidate,
+                              { kind: "relation_phrase" }
+                          >["payload"],
+                          choice: item.choice,
+                      },
+                  ]
+                : [],
+        );
+        // Suggestions first, then new types: every finish takes the
+        // proposal rows before the vocabulary's version row, so two never
+        // wait on each other the wrong way round.
+        for (const { item, payload, choice } of phrases) {
+            if (
+                !(choice && "action" in choice && choice.action === "suggest")
+            ) {
+                continue;
+            }
+            await attempt(item.id, (sp) =>
+                proposePhraseInTx(sp, actorUserId, payload.phrase),
+            );
+        }
+        for (const { item, payload, choice } of phrases) {
             if (choice && "action" in choice && choice.action === "suggest") {
-                await attempt(item.id, (sp) =>
-                    proposePhraseInTx(sp, actorUserId, payload.phrase),
-                );
                 continue;
             }
             if (!(choice && "action" in choice && choice.action === "create")) {
@@ -541,6 +677,10 @@ export async function finishReview(
                 continue;
             }
             const subject = await resolveSubject(payload.subject);
+            const speakerLabel =
+                "speakerLabel" in payload.subject
+                    ? payload.subject.speakerLabel
+                    : null;
             await attempt(item.id, async (sp) => {
                 const key = await createOwnTypeInTx(
                     sp,
@@ -556,10 +696,14 @@ export async function finishReview(
                 if (subject && object) {
                     await sp
                         .transaction((inner) =>
-                            confirm(inner as Tx, key, subject, object, {
-                                ...payload,
-                                speakerLabel: null,
-                            }),
+                            confirm(
+                                inner as Tx,
+                                key,
+                                subject,
+                                object,
+                                { ...payload, speakerLabel },
+                                null,
+                            ),
                         )
                         .catch((error: unknown) => {
                             if (!(error instanceof AppError)) throw error;

@@ -62,6 +62,8 @@ export interface VisibleRelation {
     /** The types an entity object may have; a literal relation has none. */
     objectTypes: readonly string[];
     objectKind: "entity" | "literal";
+    /** One value at a time (a new one replaces it), or many. */
+    cardinality?: "one" | "many";
     /** Its name, screened against the denied topics. */
     label?: string;
 }
@@ -90,8 +92,20 @@ export interface LearnRunFrame {
     answeredLabels: ReadonlyMap<string, string | null>;
     /** `heardAsKey` of every heard-as form a person confirmed. */
     confirmedHeardAs: ReadonlySet<string>;
-    /** Current facts in the run's scopes: `factKey` -> fact id. */
+    /** Current facts in the run's own scope: `factKey` -> fact id. */
     knownFacts: ReadonlyMap<string, string>;
+    /**
+     * `factKey` of current facts in the other scopes the run reads (the
+     * Organization's, on a private recording): known there, and not
+     * proposed to be copied into the run's scope.
+     */
+    foreignFacts?: ReadonlySet<string>;
+    /**
+     * The current value of a subject's relation in the run's own scope,
+     * by `currentFactKey`: what a new fact on a relation of one value
+     * replaces.
+     */
+    currentFacts?: ReadonlyMap<string, { factId: string; object: LearnObject }>;
     /** Items a person dismissed on this recording, as `fingerprintKey` gives them. */
     dismissed: ReadonlySet<string>;
     /** How a fingerprint is stored (a keyed HMAC); as is by default. */
@@ -112,6 +126,7 @@ export type DropReason =
     | "speakerDecided"
     | "badTime"
     | "dismissed"
+    | "knownElsewhere"
     | "budget";
 
 interface AnchorPosition {
@@ -159,6 +174,11 @@ export type ReviewCandidate =
               startMs: number;
               endMs: number;
               speakerLabel: string | null;
+              /**
+               * On a relation with one value: the value current when the
+               * run looked, which confirming replaces (and nothing else).
+               */
+              replaces?: { factId: string; object: LearnObject };
           };
       }
     | {
@@ -182,6 +202,14 @@ export interface ValidationResult {
     superseded: boolean;
     items: ReviewCandidate[];
     dropped: Partial<Record<DropReason, number>>;
+}
+
+/** How `currentFacts` is keyed: a subject's relation. */
+export function currentFactKey(
+    subjectKey: string,
+    relationKey: string,
+): string {
+    return JSON.stringify(["current", subjectKey, relationKey]);
 }
 
 /** How a heard-as form is compared: its words, case and form aside. */
@@ -617,12 +645,18 @@ export function validateLearnOutput(
                     !frame.answeredLabels.has(fact.speakerLabel)
                   ? fact.speakerLabel
                   : undefined;
+        // A fact about a speaker depends on who that speaker is, whoever
+        // said it: its evidence is tied to them.
+        const tiedTo =
+            "speakerLabel" in fact.subject
+                ? fact.subject.speakerLabel
+                : fact.speakerLabel;
         const payload = {
             subject,
             relationKey: fact.relationKey,
             object: fact.object,
             ...times,
-            speakerLabel: fact.speakerLabel,
+            speakerLabel: tiedTo,
         };
         const knownId =
             subjectSide.key !== null
@@ -644,6 +678,15 @@ export function validateLearnOutput(
             });
             continue;
         }
+        if (
+            subjectSide.key !== null &&
+            frame.foreignFacts?.has(
+                factKey(subjectSide.key, fact.relationKey, object.key),
+            )
+        ) {
+            drop("knownElsewhere");
+            continue;
+        }
         const fingerprint = factFingerprint(
             fact,
             subjectSide.key,
@@ -651,6 +694,12 @@ export function validateLearnOutput(
             transcriptKey,
         );
         if (dismissed(fingerprint)) continue;
+        const replaces =
+            relation.cardinality === "one" && subjectSide.key !== null
+                ? frame.currentFacts?.get(
+                      currentFactKey(subjectSide.key, fact.relationKey),
+                  )
+                : undefined;
         if (newFacts >= MAX_NEW_FACTS) {
             drop("budget");
             continue;
@@ -661,7 +710,7 @@ export function validateLearnOutput(
             fingerprint,
             preTicked: false,
             ...(pendingLabel ? { dependsOnLabel: pendingLabel } : {}),
-            payload,
+            payload: replaces ? { ...payload, replaces } : payload,
         });
     }
 

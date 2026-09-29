@@ -217,4 +217,69 @@ describe("LearnReview", () => {
         unmount();
         expect(onMarks).toHaveBeenLastCalledWith(null);
     });
+
+    it("keeps a fact waiting on its speaker until that speaker is ticked, and says what it replaces", async () => {
+        const item = (overrides: Record<string, unknown>) => ({
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            ...overrides,
+        });
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review": {
+                ...READY,
+                names: { ...READY.names, "e-acme": "Acme" },
+                items: [
+                    item({
+                        id: "i-speaker",
+                        kind: "speaker",
+                        payload: {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidenceMs: [5_000],
+                            reason: "introduces himself",
+                        },
+                    }),
+                    item({
+                        id: "i-works",
+                        kind: "fact",
+                        dependsOnLabel: "speaker_1",
+                        payload: {
+                            subject: { speakerLabel: "speaker_1" },
+                            relationKey: "works_for",
+                            object: { entityId: "e-tavesi" },
+                            startMs: 5_000,
+                            endMs: 9_000,
+                            speakerLabel: "speaker_1",
+                            replaces: {
+                                factId: "f-acme",
+                                object: { entityId: "e-acme" },
+                            },
+                        },
+                    }),
+                ],
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-speaker": {
+                version: 1,
+            },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        );
+        const fact = screen.getByRole("checkbox", {
+            name: /speaker_1 — works_for — Tavesi/,
+        }) as HTMLInputElement;
+        expect(fact.disabled).toBe(true);
+        expect(screen.getByText("replaces Acme")).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Accept speaker_1 as Jan" }),
+        );
+        await waitFor(() => expect(fact.disabled).toBe(false));
+        expect(fetch).toHaveBeenCalled();
+    });
 });

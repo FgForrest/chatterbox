@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LearnOutput } from "@/lib/learn/output";
 import {
+    currentFactKey,
     factKey,
     heardAsKey,
     type LearnRunFrame,
@@ -759,6 +760,105 @@ describe("validateLearnOutput", () => {
                 }),
             );
             expect(other.items).toHaveLength(1);
+        });
+    });
+
+    describe("after the Phase 4 review", () => {
+        it("ties a fact about a speaker to that speaker, answered or not", () => {
+            const pending = validateLearnOutput(
+                output({ facts: [{ ...janLeadsOrion, speakerLabel: null }] }),
+                frame(),
+            );
+            expect(pending.items).toEqual([
+                expect.objectContaining({
+                    kind: "fact",
+                    dependsOnLabel: "speaker_1",
+                    payload: expect.objectContaining({
+                        subject: { speakerLabel: "speaker_1" },
+                        speakerLabel: "speaker_1",
+                    }),
+                }),
+            ]);
+            const answered = validateLearnOutput(
+                output({
+                    facts: [
+                        {
+                            ...janLeadsOrion,
+                            subject: { speakerLabel: "speaker_0" },
+                            speakerLabel: null,
+                            start: "00:00",
+                            end: "00:00",
+                        },
+                    ],
+                }),
+                frame(),
+            );
+            expect(answered.items[0]?.payload).toMatchObject({
+                subject: { personId: "p-alice" },
+                speakerLabel: "speaker_0",
+            });
+        });
+
+        it("drops a fact another scope knows, instead of copying it into this one", () => {
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    facts: [
+                        {
+                            ...janLeadsOrion,
+                            subject: { personId: "p-jan" },
+                            speakerLabel: null,
+                        },
+                    ],
+                }),
+                frame({
+                    foreignFacts: new Set([
+                        factKey("p:p-jan", "leads", "e:e-orion"),
+                    ]),
+                }),
+            );
+            expect(items).toEqual([]);
+            expect(dropped.knownElsewhere).toBe(1);
+        });
+
+        it("says which value a new fact on a relation of one value replaces", () => {
+            const worksForTavesi = {
+                ...janLeadsOrion,
+                subject: { personId: "p-jan" },
+                relationKey: "works_for",
+                object: { entityId: "e-tavesi" },
+                speakerLabel: null,
+            };
+            const one = frame({
+                relations: new Map([
+                    [
+                        "works_for",
+                        {
+                            subjectTypes: ["person"],
+                            objectTypes: ["organization"],
+                            objectKind: "entity",
+                            cardinality: "one",
+                        },
+                    ],
+                ]),
+                currentFacts: new Map([
+                    [
+                        currentFactKey("p:p-jan", "works_for"),
+                        { factId: "f-acme", object: { entityId: "e-acme" } },
+                    ],
+                ]),
+            });
+            expect(
+                validateLearnOutput(output({ facts: [worksForTavesi] }), one)
+                    .items[0]?.payload,
+            ).toMatchObject({
+                replaces: { factId: "f-acme", object: { entityId: "e-acme" } },
+            });
+            // Many values: nothing is replaced.
+            const many = validateLearnOutput(
+                output({ facts: [worksForTavesi] }),
+                frame({ currentFacts: one.currentFacts }),
+            );
+            expect(many.items[0]?.payload).not.toHaveProperty("replaces");
         });
     });
 });

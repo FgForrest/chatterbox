@@ -53,6 +53,7 @@ import {
     type LearnJobPayload,
     parseLearnJobPayload,
 } from "@/lib/learn/learn-job";
+import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
 import {
     type LearnChat,
@@ -61,6 +62,7 @@ import {
 } from "@/lib/learn/run-fallback";
 import { findEntities, type LearnToolContext } from "@/lib/learn/tools";
 import {
+    currentFactKey,
     factKey,
     heardAsKey,
     type LearnRunFrame,
@@ -295,17 +297,31 @@ async function frameFor(
         }
     }
     const literalKey = (literal: string) => objectKeyOf({ literal });
+    // The run writes its own scope: the owner's on a private recording,
+    // the Organization's on a shared one.
+    const ownScope = shared ? "org" : "personal";
     const knownFacts = new Map<string, string>();
+    const foreignFacts = new Set<string>();
+    const currentFacts = new Map<
+        string,
+        { factId: string; object: LearnObject }
+    >();
     for (const fact of view.facts) {
-        knownFacts.set(
-            factKey(
-                nodeKey(fact.subject),
-                fact.relationKey,
-                "literal" in fact.object
-                    ? literalKey(fact.object.literal)
-                    : nodeKey(fact.object),
-            ),
-            fact.id,
+        const key = factKey(
+            nodeKey(fact.subject),
+            fact.relationKey,
+            "literal" in fact.object
+                ? literalKey(fact.object.literal)
+                : nodeKey(fact.object),
+        );
+        if (fact.scope !== ownScope) {
+            foreignFacts.add(key);
+            continue;
+        }
+        knownFacts.set(key, fact.id);
+        currentFacts.set(
+            currentFactKey(nodeKey(fact.subject), fact.relationKey),
+            { factId: fact.id, object: fact.object },
         );
     }
     return {
@@ -335,6 +351,8 @@ async function frameFor(
         ),
         confirmedHeardAs,
         knownFacts,
+        foreignFacts,
+        currentFacts,
         dismissed: new Set(dismissed.map((row) => row.hmac)),
         fingerprintKey: learnFingerprintHmac,
         literalKey,

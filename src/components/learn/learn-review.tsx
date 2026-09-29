@@ -84,6 +84,9 @@ export function LearnReview({
     const [open, setOpen] = useState(false);
     const [running, setRunning] = useState(false);
     const [finishing, setFinishing] = useState(false);
+    // Drafts on their way to the server: Finish waits for them, so what
+    // it applies is what the person ticked.
+    const [saving, setSaving] = useState(0);
 
     const url = useCallback(
         (path: string) =>
@@ -141,11 +144,12 @@ export function LearnReview({
         decision: "accepted" | "rejected",
         choice: Record<string, unknown> | null = item.choice,
     ) => {
+        setSaving((count) => count + 1);
         const response = await fetch(url(`review/items/${item.id}`), {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ decision, version: item.version, choice }),
-        });
+        }).finally(() => setSaving((count) => count - 1));
         if (!response.ok) {
             toast.error(
                 await getApiErrorMessage(
@@ -278,11 +282,36 @@ export function LearnReview({
         </button>
     );
 
-    const checkbox = (item: ItemView, label: string) => (
+    /**
+     * Whether a fact waits for its speaker: one the review proposes to
+     * name, and nobody ticked yet (or ticked as unknown).
+     */
+    const waitsForSpeaker = (item: ItemView) => {
+        if (!item.dependsOnLabel) return false;
+        const speaker = groups.speakers.find(
+            (other) =>
+                (other.payload as { label: string }).label ===
+                item.dependsOnLabel,
+        );
+        if (!speaker) return false;
+        const named =
+            speaker.choice && "personId" in speaker.choice
+                ? true
+                : speaker.choice && "unknown" in speaker.choice
+                  ? false
+                  : Boolean(
+                        (speaker.payload as { personId: string | null })
+                            .personId,
+                    );
+        return !(ticked(speaker) && named);
+    };
+
+    const checkbox = (item: ItemView, label: string, blocked = false) => (
         <input
             type="checkbox"
             className="mt-1 size-4 shrink-0"
-            checked={ticked(item)}
+            checked={ticked(item) && !blocked}
+            disabled={blocked || finishing}
             aria-label={label}
             onChange={(event) =>
                 void decide(
@@ -460,7 +489,9 @@ export function LearnReview({
                                             relationKey: string;
                                             object: Side;
                                             startMs: number;
+                                            replaces?: { object: Side };
                                         };
+                                        const blocked = waitsForSpeaker(item);
                                         const relation =
                                             state?.relations[
                                                 payload.relationKey
@@ -471,10 +502,24 @@ export function LearnReview({
                                                 key={item.id}
                                                 className="flex items-start gap-2 text-sm"
                                             >
-                                                {checkbox(item, text)}
+                                                {checkbox(item, text, blocked)}
                                                 <div className="min-w-0">
                                                     {text}{" "}
                                                     {seek(payload.startMs)}
+                                                    {payload.replaces && (
+                                                        <div className="text-xs text-muted-foreground">
+                                                            {i18n(
+                                                                "replaces {value}",
+                                                                {
+                                                                    value: nameOf(
+                                                                        payload
+                                                                            .replaces
+                                                                            .object,
+                                                                    ),
+                                                                },
+                                                            )}
+                                                        </div>
+                                                    )}
                                                     {item.dependsOnLabel && (
                                                         <div className="text-xs text-muted-foreground">
                                                             {i18n(
@@ -518,7 +563,7 @@ export function LearnReview({
                             {i18n("Save and continue later")}
                         </Button>
                         <Button
-                            disabled={finishing}
+                            disabled={finishing || saving > 0}
                             onClick={() => void finish()}
                         >
                             {finishing && (

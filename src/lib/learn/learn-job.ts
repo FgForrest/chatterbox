@@ -5,7 +5,7 @@
  * route imports this; only the worker imports the handler.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
 import { asyncJobs, learnRuns, recordings, transcriptions } from "@/db/schema";
@@ -15,7 +15,7 @@ import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { vocabularyVersion } from "@/lib/knowledge/vocabulary";
-import { learnRunDead, learnRunInFlight } from "@/lib/learn/learn-open";
+import { learnRunDead, learnRunOpen } from "@/lib/learn/learn-open";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
@@ -75,48 +75,60 @@ export async function startLearnRun(input: {
             400,
         );
     }
-    const [transcript] = await db
-        .select({
-            id: transcriptions.id,
-            revision: transcriptions.revision,
-            turns: transcriptions.turns,
-        })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, access.recordingId),
-                eq(transcriptions.userId, access.ownerUserId),
-                eq(transcriptions.source, source),
-            ),
-        )
-        .limit(1);
-    if (!transcript) {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "This recording has no such transcript",
-            400,
-        );
-    }
-    const turns = readTranscriptTurns(transcript);
-    if (!turns?.length || isUntimed(turns)) {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "This transcript has no timings, so Learn cannot read it. Transcribe it with a provider that reports them.",
-            400,
-        );
-    }
-
     const view: RecordingView = access.view;
     await settleDeadLearnRuns(access.recordingId);
-    // The run, under the lock sharing and withdrawal take, with the writer
-    // rule checked again there: a share or withdrawal that landed since the
-    // route authorized the actor refuses it.
+    // The run, under the lock sharing, withdrawal, rewrites and erasure
+    // take, with the transcript read and the writer rule checked there: a
+    // share, withdrawal, rewrite or erase that landed since the route
+    // authorized the actor is seen.
     const inserted = await db.transaction(async (tx) => {
-        await tx
+        const [live] = await tx
             .select({ id: recordings.id })
             .from(recordings)
-            .where(eq(recordings.id, access.recordingId))
+            .where(
+                and(
+                    eq(recordings.id, access.recordingId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
             .for("share");
+        if (!live) {
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording not found",
+                404,
+            );
+        }
+        const [transcript] = await tx
+            .select({
+                id: transcriptions.id,
+                revision: transcriptions.revision,
+                turns: transcriptions.turns,
+            })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, access.recordingId),
+                    eq(transcriptions.userId, access.ownerUserId),
+                    eq(transcriptions.source, source),
+                ),
+            )
+            .limit(1);
+        if (!transcript) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "This recording has no such transcript",
+                400,
+            );
+        }
+        const turns = readTranscriptTurns(transcript);
+        if (!turns?.length || isUntimed(turns)) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "This transcript has no timings, so Learn cannot read it. Transcribe it with a provider that reports them.",
+                400,
+            );
+        }
         const refusal = await contentWriterRefusal(tx, {
             recordingId: access.recordingId,
             ownerUserId: access.ownerUserId,
@@ -124,6 +136,8 @@ export async function startLearnRun(input: {
             orgUserId: access.orgUserId,
         });
         if (refusal) throw writerRefusalError(refusal);
+        // One open run per transcript and view: one learning, or one whose
+        // review waits (a second would leave that review unreachable).
         const [open] = await tx
             .select({ id: learnRuns.id, jobId: learnRuns.jobId })
             .from(learnRuns)
@@ -131,7 +145,7 @@ export async function startLearnRun(input: {
                 and(
                     eq(learnRuns.transcriptionId, transcript.id),
                     eq(learnRuns.view, view),
-                    learnRunInFlight(),
+                    learnRunOpen(),
                 ),
             )
             .orderBy(desc(learnRuns.createdAt))
@@ -154,7 +168,10 @@ export async function startLearnRun(input: {
                 vocabularyVersion: await vocabularyVersion(tx),
             })
             .returning({ id: learnRuns.id });
-        return { runId: (run as { id: string }).id };
+        return {
+            runId: (run as { id: string }).id,
+            transcriptionId: transcript.id,
+        };
     });
     if ("open" in inserted && inserted.open) {
         return {
@@ -164,6 +181,7 @@ export async function startLearnRun(input: {
         };
     }
     const runId = inserted.runId as string;
+    const transcriptionId = inserted.transcriptionId as string;
     const enqueue = () =>
         enqueueJob({
             userId: actorUserId,
@@ -195,7 +213,7 @@ export async function startLearnRun(input: {
                 .limit(1);
             const holderOpen =
                 holder?.status === "queued" || holder?.status === "running";
-            if (holderOpen && holder?.transcriptionId === transcript.id) {
+            if (holderOpen && holder?.transcriptionId === transcriptionId) {
                 await abandon();
                 return {
                     runId: holderId,
