@@ -180,16 +180,17 @@ export function extractJson(text) {
  * Verified against Claude Code 2.1.270 and 2.1.281 -- see the README.
  */
 const CLAUDE_LOCKDOWN_ARGS = [
-    // Empties the built-in tool set. `--allowedTools` only pre-approves
-    // tools; this is the flag that removes them. The option is variadic,
-    // so the element after "" has to be a flag -- anything else would be
-    // read as a tool name.
-    "--tools",
-    "",
     // `--tools` covers built-in tools only: an MCP server in the volume's
     // user config was still offered to the model with it set. With no
-    // `--mcp-config` next to it, this loads no MCP server at all.
+    // `--mcp-config` next to it, this loads no MCP server at all; with
+    // one, only that one (Learn's).
     "--strict-mcp-config",
+    // No user, project or local settings file: a user `advisorModel`
+    // keeps a server-side advisor that forwards the whole conversation to
+    // another model, and neither `--disallowedTools` nor `--settings`
+    // removes it (Spike 0.1). OAuth still works without them.
+    "--setting-sources",
+    "",
     // Otherwise every request leaves its full transcript under
     // `projects/`, in the credentials volume, outside Riffado's
     // retention settings.
@@ -263,6 +264,104 @@ const CODEX_LOCKDOWN_ARGS = [
     'history.persistence="none"',
 ];
 
+/** The MCP server name Learn's tools are offered under. */
+const MCP_SERVER = "riffado";
+
+/**
+ * The environment variable a Learn request's run token reaches the CLI
+ * through: never argv, never a file (both CLIs expand it themselves).
+ */
+export const MCP_TOKEN_ENV = "RIFFADO_MCP_TOKEN";
+
+const TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const TOKEN_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
+const MAX_TOOLS = 16;
+const MAX_SCHEMA_BYTES = 64 * 1024;
+
+/**
+ * What a request asks beyond a plain completion (Learn, Task 3.6):
+ * - `response_format: {type: "json_schema", json_schema: {schema}}`: the
+ *   answer's JSON Schema;
+ * - `riffado_mcp: {token, tools}`: call Riffado's read-only knowledge
+ *   tools with this run's token. The tools' URL is this bridge's own
+ *   setting (`learnMcpUrl`, from `BRIDGE_LEARN_MCP_URL`), never the
+ *   request's, so a request cannot point the CLI anywhere else.
+ */
+export function parseLearnRequest(payload, learnMcpUrl) {
+    let schema = null;
+    const format = payload?.response_format;
+    if (format?.type === "json_schema") {
+        const candidate = format.json_schema?.schema;
+        if (
+            !candidate ||
+            typeof candidate !== "object" ||
+            Array.isArray(candidate) ||
+            Buffer.byteLength(JSON.stringify(candidate)) > MAX_SCHEMA_BYTES
+        ) {
+            throw new BridgeError(
+                400,
+                "`response_format.json_schema.schema` must be a JSON Schema object",
+            );
+        }
+        schema = candidate;
+    }
+    let mcp = null;
+    const extension = payload?.riffado_mcp;
+    if (extension !== undefined) {
+        if (!learnMcpUrl) {
+            throw new BridgeError(
+                400,
+                "this bridge has no BRIDGE_LEARN_MCP_URL, so it cannot offer Riffado's tools",
+            );
+        }
+        const token = extension?.token;
+        const tools = extension?.tools;
+        if (typeof token !== "string" || !TOKEN_PATTERN.test(token)) {
+            throw new BridgeError(400, "`riffado_mcp.token` is not a run token");
+        }
+        if (
+            !Array.isArray(tools) ||
+            tools.length === 0 ||
+            tools.length > MAX_TOOLS ||
+            !tools.every(
+                (name) => typeof name === "string" && TOOL_NAME_PATTERN.test(name),
+            )
+        ) {
+            throw new BridgeError(
+                400,
+                "`riffado_mcp.tools` must name 1-16 tools",
+            );
+        }
+        mcp = { url: learnMcpUrl, token, tools: [...new Set(tools)] };
+    }
+    return { schema, mcp };
+}
+
+/**
+ * Claude's `--mcp-config` for Learn: one HTTP server whose bearer token
+ * the CLI expands from its own environment, so the file holds no secret.
+ */
+export function claudeMcpConfig(url) {
+    return JSON.stringify({
+        mcpServers: {
+            [MCP_SERVER]: {
+                type: "http",
+                url,
+                headers: { Authorization: `Bearer \${${MCP_TOKEN_ENV}}` },
+            },
+        },
+    });
+}
+
+/** Replace every secret in `text`, for anything a log or error could show. */
+export function redact(text, secrets) {
+    let out = String(text);
+    for (const secret of secrets) {
+        if (secret) out = out.split(secret).join("[redacted]");
+    }
+    return out;
+}
+
 /**
  * Build the argv for a backend. The prompt is NOT included: it goes in on
  * stdin, because Linux caps a single argv element at MAX_ARG_STRLEN
@@ -275,7 +374,13 @@ const CODEX_LOCKDOWN_ARGS = [
  * CLAUDE_LOCKDOWN_ARGS and CODEX_LOCKDOWN_ARGS). `extraArgs` come after
  * those flags, so an operator can still override them -- and should not.
  */
-export function buildArgs(backend, model, extraArgs = [], codexOutPath = "") {
+export function buildArgs(
+    backend,
+    model,
+    extraArgs = [],
+    codexOutPath = "",
+    { mcp = null, schema = null } = {},
+) {
     // A bare backend id -- "claude", "codex" -- means "whatever this
     // account would pick", and omits --model entirely. That is not a
     // nicety: vendor slugs are gated by plan, and `gpt-5-codex` is
@@ -289,11 +394,30 @@ export function buildArgs(backend, model, extraArgs = [], codexOutPath = "") {
         // `--print`, never `--bare`: --bare disables OAuth and demands
         // ANTHROPIC_API_KEY, which is the one thing this bridge exists to
         // avoid.
+        // Empties the built-in tool set, or narrows it to Learn's MCP
+        // tools by exact name. `--allowedTools` only pre-approves (print
+        // mode refuses what is not); `--tools` is what removes the rest.
+        // Both are variadic, so what follows them must be a flag.
+        const names = mcp
+            ? mcp.tools.map((tool) => `mcp__${MCP_SERVER}__${tool}`)
+            : [];
+        const toolArgs = mcp
+            ? [
+                  "--tools",
+                  ...names,
+                  "--allowedTools",
+                  ...names,
+                  "--mcp-config",
+                  mcp.configPath,
+              ]
+            : ["--tools", ""];
         return [
             "--print",
             "--output-format",
             "json",
+            ...toolArgs,
             ...CLAUDE_LOCKDOWN_ARGS,
+            ...(schema ? ["--json-schema", schema.json] : []),
             ...modelArgs,
             ...extraArgs,
         ];
@@ -313,6 +437,17 @@ export function buildArgs(backend, model, extraArgs = [], codexOutPath = "") {
             "--sandbox",
             "read-only",
             ...CODEX_LOCKDOWN_ARGS,
+            // Learn's tools: one server, its token from the environment.
+            // `--ignore-user-config` above keeps any other server out.
+            ...(mcp
+                ? [
+                      "-c",
+                      `mcp_servers.${MCP_SERVER}.url=${JSON.stringify(mcp.url)}`,
+                      "-c",
+                      `mcp_servers.${MCP_SERVER}.bearer_token_env_var="${MCP_TOKEN_ENV}"`,
+                  ]
+                : []),
+            ...(schema ? ["--output-schema", schema.path] : []),
             "--output-last-message",
             codexOutPath,
             ...modelArgs,
@@ -367,8 +502,15 @@ export function chatCompletion(model, content, id, createdMs = Date.now()) {
     };
 }
 
-/** Parse the `--output-format json` envelope from the Claude CLI. */
-export function parseClaudeEnvelope(stdout, bin = "claude") {
+/**
+ * Parse the `--output-format json` envelope from the Claude CLI. Asked for
+ * a JSON Schema (`structured`), the answer is its `structured_output`.
+ */
+export function parseClaudeEnvelope(
+    stdout,
+    bin = "claude",
+    { structured = false } = {},
+) {
     let envelope;
     try {
         envelope = JSON.parse(stdout);
@@ -386,6 +528,13 @@ export function parseClaudeEnvelope(stdout, bin = "claude") {
         );
     }
 
+    if (
+        structured &&
+        envelope.structured_output &&
+        typeof envelope.structured_output === "object"
+    ) {
+        return JSON.stringify(envelope.structured_output);
+    }
     const text = typeof envelope.result === "string" ? envelope.result : "";
     if (!text.trim()) {
         throw new BridgeError(502, `${bin} returned an empty result`);

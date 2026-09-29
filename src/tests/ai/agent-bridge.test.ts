@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 // Plain ESM sidecar module. `allowJs` infers its signatures, so this
 // needs no declaration file.
 import {
+    type BridgeError,
     buildArgs,
     buildPrompt,
     chatCompletion,
+    claudeMcpConfig,
     contentToText,
     diagnosticTail,
     extractJson,
+    MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseLearnRequest,
+    redact,
     resolveBackend,
     sanitizeForLog,
     splitArgs,
@@ -268,6 +273,14 @@ describe("agent-bridge", () => {
                 expect(args).not.toContain("--mcp-config");
             });
 
+            it("reads no user or project settings, so no advisor rides along", () => {
+                // A user `advisorModel` setting keeps a server-side advisor
+                // that forwards the conversation; only dropping the
+                // setting sources removes it (Spike 0.1).
+                const args = buildArgs("claude", "claude-sonnet-5");
+                expect(valuesOf(args, "--setting-sources")).toEqual([""]);
+            });
+
             it("keeps Claude sessions and auto-memory off disk", () => {
                 const args = buildArgs("claude", "claude-sonnet-5");
                 expect(args).toContain("--no-session-persistence");
@@ -462,6 +475,157 @@ describe("agent-bridge", () => {
                 completion_tokens: 0,
                 total_tokens: 0,
             });
+        });
+    });
+
+    /**
+     * Learn (Task 3.6): one request may call Riffado's read-only knowledge
+     * tools over MCP and answer in a JSON Schema. The tools' URL is the
+     * bridge's own setting; the request brings only the run's token and
+     * the tool names.
+     */
+    describe("Learn requests", () => {
+        const URL = "http://app:3000/api/learn/mcp";
+        const schema = {
+            type: "object",
+            properties: { speakers: { type: "array" } },
+        };
+        const valuesOf = (args: string[], flag: string) =>
+            args.flatMap((arg, i) => (arg === flag ? [args[i + 1]] : []));
+
+        it("reads the schema and the MCP extension, with the URL from the bridge's env", () => {
+            expect(
+                parseLearnRequest(
+                    {
+                        response_format: {
+                            type: "json_schema",
+                            json_schema: { name: "learn", schema },
+                        },
+                        riffado_mcp: {
+                            token: "lr1.run-1.1.sig_-",
+                            tools: ["find_entities", "get_entity"],
+                        },
+                    },
+                    URL,
+                ),
+            ).toEqual({
+                schema,
+                mcp: {
+                    url: URL,
+                    token: "lr1.run-1.1.sig_-",
+                    tools: ["find_entities", "get_entity"],
+                },
+            });
+            expect(parseLearnRequest({}, URL)).toEqual({
+                schema: null,
+                mcp: null,
+            });
+        });
+
+        it("refuses tools where this bridge has no URL for them, and odd tokens or names", () => {
+            const mcp = { token: "t", tools: ["find_entities"] };
+            const refused = (payload: unknown, url = URL) => {
+                try {
+                    parseLearnRequest(payload, url);
+                } catch (error) {
+                    return (error as BridgeError).status;
+                }
+                return null;
+            };
+            expect(refused({ riffado_mcp: mcp }, "")).toBe(400);
+            expect(refused({ riffado_mcp: { ...mcp, token: "a b" } })).toBe(
+                400,
+            );
+            expect(refused({ riffado_mcp: { ...mcp, token: "" } })).toBe(400);
+            expect(refused({ riffado_mcp: { ...mcp, tools: ["Bash"] } })).toBe(
+                400,
+            );
+            expect(refused({ riffado_mcp: { ...mcp, tools: [] } })).toBe(400);
+            expect(
+                refused({
+                    response_format: {
+                        type: "json_schema",
+                        json_schema: { schema: "no" },
+                    },
+                }),
+            ).toBe(400);
+        });
+
+        it("offers Claude exactly the named tools, pre-approved, from one MCP config and nothing else", () => {
+            const args = buildArgs("claude", "claude-opus-5-5", [], "", {
+                mcp: {
+                    tools: ["find_entities", "get_entity"],
+                    configPath: "/tmp/x/mcp.json",
+                },
+                schema: { json: JSON.stringify(schema) },
+            });
+            const names = [
+                "mcp__riffado__find_entities",
+                "mcp__riffado__get_entity",
+            ];
+            const at = args.indexOf("--tools");
+            expect(args.slice(at + 1, at + 3)).toEqual(names);
+            expect(args[at + 3]).toMatch(/^--/);
+            const allowed = args.indexOf("--allowedTools");
+            expect(args.slice(allowed + 1, allowed + 3)).toEqual(names);
+            expect(args[allowed + 3]).toMatch(/^--/);
+            expect(valuesOf(args, "--mcp-config")).toEqual(["/tmp/x/mcp.json"]);
+            expect(args).toContain("--strict-mcp-config");
+            expect(valuesOf(args, "--json-schema")).toEqual([
+                JSON.stringify(schema),
+            ]);
+            // Still no sessions on disk, no settings files.
+            expect(args).toContain("--no-session-persistence");
+            expect(valuesOf(args, "--setting-sources")).toEqual([""]);
+        });
+
+        it("puts the token in the child's environment, never in the MCP config or argv", () => {
+            const config = JSON.parse(claudeMcpConfig(URL));
+            expect(config).toEqual({
+                mcpServers: {
+                    riffado: {
+                        type: "http",
+                        url: URL,
+                        headers: {
+                            Authorization: `Bearer \${${MCP_TOKEN_ENV}}`,
+                        },
+                    },
+                },
+            });
+            const codex = buildArgs("codex", "gpt-5.6-terra", [], "/tmp/o", {
+                mcp: { url: URL, tools: ["find_entities"] },
+                schema: { path: "/tmp/x/schema.json" },
+            });
+            expect(valuesOf(codex, "-c")).toEqual(
+                expect.arrayContaining([
+                    `mcp_servers.riffado.url=${JSON.stringify(URL)}`,
+                    `mcp_servers.riffado.bearer_token_env_var="${MCP_TOKEN_ENV}"`,
+                ]),
+            );
+            expect(valuesOf(codex, "--output-schema")).toEqual([
+                "/tmp/x/schema.json",
+            ]);
+            // The shell stays off with MCP on.
+            expect(valuesOf(codex, "--disable")).toContain("shell_tool");
+            expect(codex.at(-1)).toBe("-");
+        });
+
+        it("answers with Claude's structured output when a schema was asked for", () => {
+            const stdout = JSON.stringify({
+                result: "Done.",
+                structured_output: { speakers: [] },
+            });
+            expect(
+                parseClaudeEnvelope(stdout, "claude", { structured: true }),
+            ).toBe('{"speakers":[]}');
+            expect(parseClaudeEnvelope(stdout)).toBe("Done.");
+        });
+
+        it("redacts the token from anything it could reach", () => {
+            expect(
+                redact("401 for Bearer lr1.x.y and lr1.x.y", ["lr1.x.y"]),
+            ).toBe("401 for Bearer [redacted] and [redacted]");
+            expect(redact("nothing", [""])).toBe("nothing");
         });
     });
 });
