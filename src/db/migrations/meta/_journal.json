@@ -547,6 +547,13 @@
       "when": 1790671060190,
       "tag": "0077_types_adoption_refused",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790714363530,
+      "tag": "0078_credentials_default_learn",
+      "breakpoints": true
     }
   ]
 }

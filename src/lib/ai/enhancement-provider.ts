@@ -26,6 +26,22 @@ export function pickEnhancementCredential<T extends EnhancementCandidate>(
 }
 
 /**
+ * Pick the credential Learn runs on: the one marked for Learn (a stronger
+ * model for learning, say) when it can chat, else what summaries use.
+ */
+export function pickLearnCredential<
+    T extends EnhancementCandidate & { isDefaultLearn?: boolean },
+>(credentials: readonly T[]): T | undefined {
+    return (
+        credentials.find(
+            (candidate) =>
+                candidate.isDefaultLearn === true &&
+                !isTranscriptionOnlyProvider(candidate.provider),
+        ) ?? pickEnhancementCredential(credentials)
+    );
+}
+
+/**
  * The chat model to run enhancement with.
  *
  * The configured "default model" on a credential can be a Whisper

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
+import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import {
     getManagedTranscriptionProvider,
     isRiffadoIncludedProviderId,
@@ -13,6 +14,11 @@ export interface ProviderListItem {
     defaultModel: string | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
+    /**
+     * Whether Learn runs on it; absent where this instance has no Learn,
+     * so the list offers the choice only where it means something.
+     */
+    isDefaultLearn?: boolean;
     createdAt: Date;
     /** Present and true only for the instance-managed included provider. */
     managed?: boolean;
@@ -49,6 +55,7 @@ export async function listUserProviders(
             baseUrl: apiCredentials.baseUrl,
             defaultModel: apiCredentials.defaultModel,
             isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
+            isDefaultLearn: apiCredentials.isDefaultLearn,
             createdAt: apiCredentials.createdAt,
         })
         .from(apiCredentials)
@@ -60,10 +67,14 @@ export async function listUserProviders(
         // millisecond.
         .orderBy(apiCredentials.createdAt, apiCredentials.id);
 
-    const credentials: ProviderListItem[] = rows.map((row) => ({
-        ...row,
-        isDefaultTranscription: row.id === pointer,
-    }));
+    const learn = isLearnDeploymentAvailable();
+    const credentials: ProviderListItem[] = rows.map(
+        ({ isDefaultLearn, ...row }) => ({
+            ...row,
+            isDefaultTranscription: row.id === pointer,
+            ...(learn ? { isDefaultLearn } : {}),
+        }),
+    );
 
     const managed = await getManagedTranscriptionProvider(
         userId,

@@ -1955,6 +1955,10 @@ export const apiCredentials = pgTable("api_credentials", {
     isDefaultEnhancement: boolean("is_default_enhancement")
         .notNull()
         .default(false),
+    // The provider Learn runs on, where it should differ from the
+    // enhancement default (a stronger model for learning, say). None
+    // marked: Learn uses the enhancement default.
+    isDefaultLearn: boolean("is_default_learn").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

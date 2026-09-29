@@ -21,7 +21,7 @@ vi.mock("@/lib/auth-server", () => ({
 }));
 
 vi.mock("@/db", () => ({
-    db: { select: vi.fn(), transaction: vi.fn() },
+    db: { select: vi.fn(), transaction: vi.fn(), update: vi.fn() },
 }));
 
 vi.mock("@/lib/ai/list-providers", () => ({
@@ -43,6 +43,10 @@ vi.mock("@/lib/hosted/transcription/mynah", () => ({
 
 import { PUT as updateProvider } from "@/app/api/settings/ai/providers/[id]/route";
 import { PUT as setDefaultEnhancement } from "@/app/api/settings/ai/providers/default-enhancement/route";
+import {
+    DELETE as clearDefaultLearn,
+    PUT as setDefaultLearn,
+} from "@/app/api/settings/ai/providers/default-learn/route";
 import { PUT as setDefaultTranscription } from "@/app/api/settings/ai/providers/default-transcription/route";
 import { POST as addProvider } from "@/app/api/settings/ai/providers/route";
 import { db } from "@/db";
@@ -257,5 +261,85 @@ describe("enhancement-only providers cannot become the transcription default", (
             expect(updates[0]).toMatchObject({ isDefaultEnhancement: false });
             expect(updates[1]).toMatchObject({ isDefaultEnhancement: true });
         });
+    });
+});
+
+/**
+ * Learn may run on its own provider (a stronger model for learning than
+ * the one summaries use). None marked: Learn uses the enhancement default.
+ */
+describe("PUT / DELETE /providers/default-learn", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it("refuses a transcription-only provider and the managed entry", async () => {
+        queueSelect([{ id: "cred-1", provider: "ElevenLabs" }]);
+        expect(
+            (
+                await setDefaultLearn(
+                    jsonRequest({ providerId: "cred-1" }, "PUT"),
+                )
+            ).status,
+        ).toBe(400);
+        expect(
+            (
+                await setDefaultLearn(
+                    jsonRequest({ providerId: "riffado-included" }, "PUT"),
+                )
+            ).status,
+        ).toBe(400);
+        expect(db.transaction as Mock).not.toHaveBeenCalled();
+    });
+
+    it("404s on a provider belonging to someone else", async () => {
+        queueSelect([]);
+        const response = await setDefaultLearn(
+            jsonRequest({ providerId: "cred-other" }, "PUT"),
+        );
+        expect(response.status).toBe(404);
+    });
+
+    it("clears the previous one and marks the new one in one transaction", async () => {
+        queueSelect([{ id: "cred-1", provider: "Claude Code" }]);
+        const updates: unknown[] = [];
+        const tx = {
+            update: vi.fn().mockReturnValue({
+                set: vi.fn((values: unknown) => {
+                    updates.push(values);
+                    return { where: vi.fn().mockResolvedValue(undefined) };
+                }),
+            }),
+        };
+        (db.transaction as Mock).mockImplementationOnce(
+            async (fn: (t: unknown) => Promise<unknown>) => fn(tx),
+        );
+
+        const response = await setDefaultLearn(
+            jsonRequest({ providerId: "cred-1" }, "PUT"),
+        );
+
+        expect(response.status).toBe(200);
+        expect(updates).toEqual([
+            { isDefaultLearn: false },
+            expect.objectContaining({ isDefaultLearn: true }),
+        ]);
+    });
+
+    it("unmarks it, so Learn follows the enhancement default again", async () => {
+        const set = vi.fn().mockReturnValue({
+            where: vi.fn().mockResolvedValue(undefined),
+        });
+        (db.update as Mock).mockReturnValueOnce({ set });
+
+        const response = await clearDefaultLearn(
+            new Request(
+                "https://app.example.com/api/settings/ai/providers/default-learn",
+                { method: "DELETE" },
+            ),
+        );
+
+        expect(response.status).toBe(200);
+        expect(set).toHaveBeenCalledWith({ isDefaultLearn: false });
     });
 });

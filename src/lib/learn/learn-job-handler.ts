@@ -29,7 +29,7 @@ import {
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import {
     enhancementChatModel,
-    pickEnhancementCredential,
+    pickLearnCredential,
 } from "@/lib/ai/enhancement-provider";
 import { decrypt } from "@/lib/encryption";
 import { encryptJsonField } from "@/lib/encryption/fields";
@@ -117,7 +117,10 @@ async function setStatus(
         .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")));
 }
 
-/** The actor's chat provider, as the Learn pass talks to it. */
+/**
+ * The actor's chat provider, as the Learn pass talks to it: the one marked
+ * for Learn, else the enhancement default.
+ */
 async function chatFor(
     actorUserId: string,
     signal: AbortSignal,
@@ -126,7 +129,7 @@ async function chatFor(
         .select()
         .from(apiCredentials)
         .where(eq(apiCredentials.userId, actorUserId));
-    const credentials = pickEnhancementCredential(configured);
+    const credentials = pickLearnCredential(configured);
     if (!credentials) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
