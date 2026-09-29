@@ -460,6 +460,70 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(await owners(people, pavel)).toBe(OWNER);
     });
 
+    it("adopts no type for what then stays private", async () => {
+        const supplies = await createPrivateType(OWNER, {
+            kind: "relation",
+            label: "supplies",
+            subjectTypes: [
+                (
+                    await db()
+                        .select({ typeKey: knowledgeEntities.typeKey })
+                        .from(knowledgeEntities)
+                        .where(eq(knowledgeEntities.id, acme))
+                )[0]?.typeKey ?? "",
+            ],
+            objectTypes: ["project"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        // Adopted as an Organization relation between organizations only:
+        // "Acme supplies Orion" does not fit it, and stays private.
+        const partners = await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "partners with",
+            subjectTypes: ["organization"],
+            objectTypes: ["organization"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        await confirmFactFromRecording({
+            subject: { entityId: acme },
+            relationKey: supplies,
+            object: { entityId: orion },
+            ownerUserId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            startMs: 0,
+            endMs: 12_000,
+        });
+
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: partners })
+            .where(eq(knowledgeRelationTypes.key, supplies));
+
+        await share();
+
+        expect(
+            await db()
+                .select({ id: knowledgeFacts.id })
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, orgUserId)),
+        ).toEqual([]);
+        expect(await owners(knowledgeEntities, acme)).toBe(OWNER);
+        // Nothing published names a Supplier: the curator never sees one.
+        expect((await orgTypes()).map((type) => type.label)).toEqual([
+            "partners with",
+        ]);
+        const [supplier] = await db()
+            .select({ adoptedAsKey: knowledgeEntityTypes.adoptedAsKey })
+            .from(knowledgeEntityTypes)
+            .where(eq(knowledgeEntityTypes.userId, OWNER));
+        expect(supplier?.adoptedAsKey).toBeNull();
+    });
+
     it("does not overwrite what the Organization knows of a single-valued relation", async () => {
         const [orgJan] = await db()
             .insert(people)

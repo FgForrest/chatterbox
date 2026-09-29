@@ -26,6 +26,8 @@ export default async function VocabularyPage() {
     const ownLayer = organization ? "org" : "private";
     const targets = [...vocabulary.entityTypes, ...vocabulary.relationTypes]
         .filter((type) => type.layer === "core" || type.layer === ownLayer)
+        // Entities never become people.
+        .filter((type) => !(type.kind === "entity" && type.key === "person"))
         .map((type) => ({
             kind: type.kind,
             key: type.key,

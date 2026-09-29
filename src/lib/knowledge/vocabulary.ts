@@ -388,7 +388,9 @@ async function assertEntityTypesUsable(
             ),
         )
         // Held until the new type is in: a merge or delete taking one of
-        // them waits, then finds the new type relating it.
+        // them waits, then finds the new type relating it. In id order, as
+        // merges and shares take them.
+        .orderBy(asc(knowledgeEntityTypes.id))
         .for("share");
     const found = new Set(rows.map((row) => row.key));
     if (keys.some((key) => !found.has(key))) {
@@ -418,6 +420,7 @@ async function insertTypeInTx(
     actorUserId: string,
     keyPrefix: "u" | "o",
     spec: NewTypeSpec,
+    { bumpVersion = true }: { bumpVersion?: boolean } = {},
 ): Promise<string> {
     const label = cleanLabel(spec.label);
     const labelHmac = domainLookupHash(LABEL_DOMAIN[spec.kind], label);
@@ -467,7 +470,7 @@ async function insertTypeInTx(
             createdByUserId: actorUserId,
         });
     }
-    await bumpVocabularyVersionInTx(tx);
+    if (bumpVersion) await bumpVocabularyVersionInTx(tx);
     return key;
 }
 
@@ -499,9 +502,13 @@ export async function createPrivateType(
 
 /**
  * A new type of the actor's own, inside a caller's transaction, which
- * checked who the actor is and bumps their scope once, last (a finished
- * review): a private type for a member, an Organization type for the
- * organization account. Returns its key.
+ * checked who the actor is and bumps the vocabulary's version and their
+ * scope once, last (a finished review): a private type for a member, an
+ * Organization type for the organization account. Returns its key.
+ *
+ * The version is the caller's to bump: held from the first type on, it
+ * would be taken before the type rows the next one relates, which a rename
+ * takes the other way round.
  */
 export async function createOwnTypeInTx(
     tx: Tx,
@@ -515,6 +522,7 @@ export async function createOwnTypeInTx(
         actorUserId,
         organization ? "o" : "u",
         spec,
+        { bumpVersion: false },
     );
 }
 
@@ -773,6 +781,10 @@ export async function deleteOwnType(
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
         const { id } = await lockOwnType(tx, kind, userId, key);
+        // Of an entity type, the relation types relating it lose it: the
+        // type rows, in id order, before anything else.
+        const relating =
+            kind === "entity" ? await relationTypesRelatingInTx(tx, key) : [];
         const count = await usesOfType(tx, kind, userId, key);
         if (count !== confirmCount) {
             throw new AppError(
@@ -883,10 +895,101 @@ export async function deleteOwnType(
                 .where(usesOfTypeCondition(kind, userId, key));
         }
         const table = tableOf(kind);
+        for (const scope of await dropFromRelationShapesInTx(
+            tx,
+            relating,
+            key,
+        )) {
+            scopes.add(scope);
+        }
         await tx.delete(table).where(eq(table.id, id));
         await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
     });
+}
+
+type RelatingRow = {
+    id: string;
+    key: string;
+    userId: string | null;
+    subjectTypes: string[];
+    objectTypes: string[];
+    objectKind: "entity" | "literal";
+};
+
+/**
+ * Every account's relation types relating entity type `key`, locked in id
+ * order: a merge or delete of the entity type rewrites their shapes.
+ */
+async function relationTypesRelatingInTx(
+    tx: Tx,
+    key: string,
+): Promise<RelatingRow[]> {
+    return tx
+        .select({
+            id: knowledgeRelationTypes.id,
+            key: knowledgeRelationTypes.key,
+            userId: knowledgeRelationTypes.userId,
+            subjectTypes: knowledgeRelationTypes.subjectTypes,
+            objectTypes: knowledgeRelationTypes.objectTypes,
+            objectKind: knowledgeRelationTypes.objectKind,
+        })
+        .from(knowledgeRelationTypes)
+        .where(
+            sql`${knowledgeRelationTypes.subjectTypes} ? ${key} or ${knowledgeRelationTypes.objectTypes} ? ${key}`,
+        )
+        .orderBy(asc(knowledgeRelationTypes.id))
+        .for("update");
+}
+
+/**
+ * Take a deleted entity type out of the shapes of the relation types
+ * relating it, so none names a type that is gone (which a share would
+ * never adopt). One left relating nothing on a side goes: its facts went
+ * with the entities of the type, and types adopted as it are adopted no
+ * longer. Returns the scopes whose vocabulary changed.
+ */
+async function dropFromRelationShapesInTx(
+    tx: Tx,
+    relating: readonly RelatingRow[],
+    key: string,
+): Promise<Set<string>> {
+    const scopes = new Set<string>();
+    for (const relation of relating) {
+        if (relation.userId) scopes.add(relation.userId);
+        const subjectTypes = relation.subjectTypes.filter((k) => k !== key);
+        const objectTypes = relation.objectTypes.filter((k) => k !== key);
+        const empty =
+            subjectTypes.length === 0 ||
+            (relation.objectKind === "entity" && objectTypes.length === 0);
+        if (!empty) {
+            await tx
+                .update(knowledgeRelationTypes)
+                .set({ subjectTypes, objectTypes, updatedAt: new Date() })
+                .where(eq(knowledgeRelationTypes.id, relation.id));
+            continue;
+        }
+        const left = await tx
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.relationKey, relation.key));
+        await deleteFactsInTx(
+            tx,
+            left.map((row) => row.id),
+        );
+        const adopters = await tx
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: null, updatedAt: new Date() })
+            .where(eq(knowledgeRelationTypes.adoptedAsKey, relation.key))
+            .returning({ userId: knowledgeRelationTypes.userId });
+        for (const adopter of adopters) {
+            if (adopter.userId) scopes.add(adopter.userId);
+        }
+        await tx
+            .delete(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.id, relation.id));
+    }
+    return scopes;
 }
 
 /**
@@ -971,7 +1074,7 @@ async function mergeableTypesInTx(
     from: string,
     into: string,
     lock: boolean,
-): Promise<void> {
+): Promise<{ from: MergeableRow; into: MergeableRow }> {
     if (from === into) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -980,9 +1083,23 @@ async function mergeableTypesInTx(
             { field: "into" },
         );
     }
+    // People are not entities (`assertTypeUsable`): an entity of type
+    // person would split one human in two.
+    if (kind === "entity" && into === "person") {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Entities cannot become people",
+            400,
+            { field: "into" },
+        );
+    }
     const table = tableOf(kind);
     const query = tx
-        .select({ key: table.key, userId: table.userId })
+        .select({
+            key: table.key,
+            userId: table.userId,
+            adoptedAsKey: table.adoptedAsKey,
+        })
         .from(table)
         .where(
             and(
@@ -994,10 +1111,18 @@ async function mergeableTypesInTx(
         .orderBy(asc(table.id));
     const rows = lock ? await query.for("update") : await query;
     const fromRow = rows.find((row) => row.key === from);
-    if (fromRow?.userId !== userId || !rows.some((row) => row.key === into)) {
+    const intoRow = rows.find((row) => row.key === into);
+    if (!fromRow || fromRow.userId !== userId || !intoRow) {
         throw typeNotFound();
     }
+    return { from: fromRow, into: intoRow };
 }
+
+type MergeableRow = {
+    key: string;
+    userId: string | null;
+    adoptedAsKey: string | null;
+};
 
 /**
  * How many of the account's own things merging `from` into `into` changes:
@@ -1050,22 +1175,16 @@ export async function mergeOwnTypes(
 ): Promise<void> {
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
-        await mergeableTypesInTx(tx, userId, kind, from, into, true);
+        const rows = await mergeableTypesInTx(
+            tx,
+            userId,
+            kind,
+            from,
+            into,
+            true,
+        );
         const relating =
-            kind === "entity"
-                ? await tx
-                      .select({
-                          id: knowledgeRelationTypes.id,
-                          subjectTypes: knowledgeRelationTypes.subjectTypes,
-                          objectTypes: knowledgeRelationTypes.objectTypes,
-                      })
-                      .from(knowledgeRelationTypes)
-                      .where(
-                          sql`${knowledgeRelationTypes.subjectTypes} ? ${from} or ${knowledgeRelationTypes.objectTypes} ? ${from}`,
-                      )
-                      .orderBy(asc(knowledgeRelationTypes.id))
-                      .for("update")
-                : [];
+            kind === "entity" ? await relationTypesRelatingInTx(tx, from) : [];
         const plan = await planTypeMergeInTx(tx, kind, from, into);
         const count = mergeCountOf(plan, userId);
         if (count !== confirmCount) {
@@ -1141,6 +1260,23 @@ export async function mergeOwnTypes(
                 .update(knowledgeVocabularyProposals)
                 .set({ adoptedAsKey: into, updatedAt: new Date() })
                 .where(eq(knowledgeVocabularyProposals.adoptedAsKey, from));
+        }
+        // A member's type the Organization adopted: what they stated with it
+        // since is stored under the Organization's key, and comes back to
+        // `into` should the Organization delete that type, as it would
+        // have come back to `from`.
+        if (
+            rows.from.adoptedAsKey &&
+            rows.into.userId === userId &&
+            !rows.into.adoptedAsKey
+        ) {
+            await tx
+                .update(table)
+                .set({
+                    adoptedAsKey: rows.from.adoptedAsKey,
+                    updatedAt: new Date(),
+                })
+                .where(and(eq(table.userId, userId), eq(table.key, into)));
         }
         await tx
             .delete(table)
@@ -1421,8 +1557,9 @@ export async function adoptPhrase(
  *
  * Inside the share's transaction, under the Organization-people lock: the
  * owner's type rows first, then the vocabulary's version, as renaming or
- * deleting a type takes them; the caller bumps the scopes last. Returns
- * whether it changed the vocabulary.
+ * deleting a type takes them; the caller bumps the scopes last. Returns the
+ * copies it made, for `dropUnusedAdoptionsInTx` once the share published
+ * what it could.
  */
 export async function adoptTypesForShareInTx(
     tx: Tx,
@@ -1437,7 +1574,8 @@ export async function adoptTypesForShareInTx(
         entityIds: readonly string[];
         relationKeys: readonly string[];
     },
-): Promise<boolean> {
+): Promise<ShareAdoption[]> {
+    const created: ShareAdoption[] = [];
     const needsAdoption = async (kind: TypeKind, adoptedAsKey: string | null) =>
         !adoptedAsKey || !(await sharedTypeKey(tx, kind, adoptedAsKey));
 
@@ -1482,7 +1620,7 @@ export async function adoptTypesForShareInTx(
             );
         for (const row of named) entityTypeKeys.add(row.typeKey);
     }
-    if (entityTypeKeys.size === 0 && ownRelations.length === 0) return false;
+    if (entityTypeKeys.size === 0 && ownRelations.length === 0) return created;
 
     let changed = false;
     // The owner's entity types, then relation types, each in id order.
@@ -1530,14 +1668,17 @@ export async function adoptTypesForShareInTx(
             continue;
         }
         const label = decryptText(type.label);
-        const key =
-            (await sharedTypeNamed(tx, "entity", type.labelHmac)) ??
-            (await insertAdoptedTypeInTx(tx, {
+        let key = await sharedTypeNamed(tx, "entity", type.labelHmac);
+        if (!key) {
+            key = await insertAdoptedTypeInTx(tx, {
                 kind: "entity",
                 label,
                 orgUserId,
                 ownerUserId,
-            }));
+            });
+            if (key)
+                created.push({ kind: "entity", key, memberTypeId: type.id });
+        }
         if (!key) continue;
         await tx
             .update(knowledgeEntityTypes)
@@ -1548,13 +1689,13 @@ export async function adoptTypesForShareInTx(
     }
 
     for (const type of relationTypes) {
-        if (!(await needsAdoption("relation", type.adoptedAsKey))) continue;
         const shape = {
             subjectTypes: type.subjectTypes.map((k) => asShared.get(k) ?? k),
             objectTypes: type.objectTypes.map((k) => asShared.get(k) ?? k),
             objectKind: type.objectKind,
             cardinality: type.cardinality,
         };
+        if (!(await needsAdoption("relation", type.adoptedAsKey))) continue;
         // Relating a type that stayed private, it stays private too.
         const related = [...shape.subjectTypes, ...shape.objectTypes];
         let unshared = false;
@@ -1563,30 +1704,19 @@ export async function adoptTypesForShareInTx(
         }
         if (unshared) continue;
         const label = decryptText(type.label);
-        const named = await tx
-            .select()
-            .from(knowledgeRelationTypes)
-            .where(
-                and(
-                    eq(knowledgeRelationTypes.labelHmac, type.labelHmac),
-                    or(
-                        isNull(knowledgeRelationTypes.userId),
-                        orgOwnedCondition(knowledgeRelationTypes.userId),
-                    ),
-                    eq(knowledgeRelationTypes.status, "active"),
-                ),
-            )
-            .limit(1);
-        const same = named[0] && sameShape(named[0], shape);
-        const key = same
-            ? (named[0]?.key ?? null)
-            : await insertAdoptedTypeInTx(tx, {
-                  kind: "relation",
-                  label,
-                  orgUserId,
-                  ownerUserId,
-                  shape,
-              });
+        let key = await sharedRelationOfShape(tx, label, shape);
+        if (!key) {
+            key = await insertAdoptedTypeInTx(tx, {
+                kind: "relation",
+                label,
+                orgUserId,
+                ownerUserId,
+                shape,
+            });
+            if (key) {
+                created.push({ kind: "relation", key, memberTypeId: type.id });
+            }
+        }
         if (!key) continue;
         await tx
             .update(knowledgeRelationTypes)
@@ -1595,7 +1725,64 @@ export async function adoptTypesForShareInTx(
         changed = true;
     }
     if (changed) await bumpVocabularyVersionInTx(tx);
-    return changed;
+    return created;
+}
+
+/** A copy a share made of a member's type (`adoptTypesForShareInTx`). */
+export type ShareAdoption = {
+    kind: TypeKind;
+    /** The Organization's new type. */
+    key: string;
+    /** The member's type adopted as it. */
+    memberTypeId: string;
+};
+
+/**
+ * Take back the copies a share made that nothing it published uses: a
+ * fact that stayed private must not tell the curator the name of a
+ * private type either. The member's type is adopted no longer. Relations
+ * first, so an entity type only a dropped relation related goes too.
+ */
+export async function dropUnusedAdoptionsInTx(
+    tx: Tx,
+    created: readonly ShareAdoption[],
+): Promise<void> {
+    const dropped = new Set<string>();
+    const drop = async (adoption: ShareAdoption) => {
+        const table = tableOf(adoption.kind);
+        await tx.delete(table).where(eq(table.key, adoption.key));
+        await tx
+            .update(table)
+            .set({ adoptedAsKey: null, updatedAt: new Date() })
+            .where(eq(table.id, adoption.memberTypeId));
+        dropped.add(adoption.key);
+    };
+    for (const adoption of created) {
+        if (adoption.kind !== "relation") continue;
+        const [used] = await tx
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.relationKey, adoption.key))
+            .limit(1);
+        if (!used) await drop(adoption);
+    }
+    for (const adoption of created) {
+        if (adoption.kind !== "entity") continue;
+        const [named] = await tx
+            .select({ id: knowledgeEntities.id })
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.typeKey, adoption.key))
+            .limit(1);
+        const [related] = await tx
+            .select({ id: knowledgeRelationTypes.id })
+            .from(knowledgeRelationTypes)
+            .where(
+                sql`${knowledgeRelationTypes.subjectTypes} ? ${adoption.key} or ${knowledgeRelationTypes.objectTypes} ? ${adoption.key}`,
+            )
+            .limit(1);
+        if (!named && !related) await drop(adoption);
+    }
+    if (dropped.size > 0) await bumpVocabularyVersionInTx(tx);
 }
 
 type RelationShape = {
@@ -1614,6 +1801,54 @@ function sameShape(a: RelationShape, b: RelationShape): boolean {
         a.objectKind === b.objectKind &&
         a.cardinality === b.cardinality
     );
+}
+
+/**
+ * "name", then "name (2)", "name (3)"…: the names a share gives a copy of a
+ * member's type when the name is taken (`insertAdoptedTypeInTx`).
+ */
+function numberedLabel(base: string, n: number): string {
+    const suffix = n === 1 ? "" : ` (${n})`;
+    return `${base.slice(0, MAX_TYPE_LABEL_LENGTH - suffix.length).trimEnd()}${suffix}`;
+}
+
+/**
+ * A core or Organization relation type of `shape` named `label` or a
+ * numbered copy of it, active: what a share adopts a member's relation as
+ * rather than making another copy. Looked for along the numbers while each
+ * name is taken.
+ */
+async function sharedRelationOfShape(
+    tx: Tx,
+    label: string,
+    shape: RelationShape,
+): Promise<string | null> {
+    const base = label.trim().replace(/\s+/g, " ");
+    for (let n = 1; ; n++) {
+        const rows = await tx
+            .select()
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(
+                        knowledgeRelationTypes.labelHmac,
+                        domainLookupHash(
+                            LABEL_DOMAIN.relation,
+                            numberedLabel(base, n),
+                        ),
+                    ),
+                    or(
+                        isNull(knowledgeRelationTypes.userId),
+                        orgOwnedCondition(knowledgeRelationTypes.userId),
+                    ),
+                ),
+            );
+        if (rows.length === 0) return null;
+        const same = rows.find(
+            (row) => row.status === "active" && sameShape(row, shape),
+        );
+        if (same) return same.key;
+    }
 }
 
 /** The key, when a core or Organization type of the kind exists under it. */
@@ -1701,10 +1936,7 @@ async function insertAdoptedTypeInTx(
     // since: such a type stays private.
     const base = label.trim().replace(/\s+/g, " ");
     if (!base || deniedTopicOf(base)) return null;
-    const numbered = (n: number) => {
-        const suffix = n === 1 ? "" : ` (${n})`;
-        return `${base.slice(0, MAX_TYPE_LABEL_LENGTH - suffix.length).trimEnd()}${suffix}`;
-    };
+    const numbered = (n: number) => numberedLabel(base, n);
     let n = 1;
     while (await taken(numbered(n))) n++;
     const name = numbered(n);

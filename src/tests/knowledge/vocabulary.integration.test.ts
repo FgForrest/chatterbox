@@ -83,7 +83,10 @@ import { confirmManualFact } from "@/lib/knowledge/facts";
 import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
 import {
     adoptPhrase,
+    adoptTypesForShareInTx,
+    bumpVocabularyVersionInTx,
     createOrgType,
+    createOwnTypeInTx,
     createPrivateType,
     deleteOwnType,
     keepAdoptedType,
@@ -638,6 +641,191 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         expect(await vocabularyVersion()).toBeGreaterThan(version);
     });
 
+    it("gives the type a member merges into the adoption of the one that goes, so their facts come back to it", async () => {
+        const mentors = await createPrivateType(ALICE, worksWith);
+        const coaches = await createPrivateType(ALICE, {
+            ...worksWith,
+            label: "coaches",
+        });
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+        const shared = await adoptPhrase(orgUserId, proposal?.id ?? "", {
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        const [jan, pavel] = await db()
+            .insert(people)
+            .values([
+                { userId: ALICE, displayName: encryptText("Jan") },
+                { userId: ALICE, displayName: encryptText("Pavel") },
+            ])
+            .returning({ id: people.id });
+        // Stated with her type, stored under the Organization's.
+        const fact = await confirmManualFact(ALICE, {
+            subject: { personId: jan?.id ?? "" },
+            relationKey: mentors,
+            object: { personId: pavel?.id ?? "" },
+        });
+
+        await mergeOwnTypes(ALICE, "relation", mentors, coaches, 0);
+        await deleteOwnType(orgUserId, "relation", shared, 0);
+
+        expect(
+            await db()
+                .select({
+                    id: knowledgeFacts.id,
+                    relationKey: knowledgeFacts.relationKey,
+                })
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.userId, ALICE)),
+        ).toEqual([{ id: fact, relationKey: coaches }]);
+    });
+
+    it("takes a deleted entity type out of the relations relating it", async () => {
+        const gadget = await createPrivateType(ALICE, {
+            kind: "entity",
+            label: "gadget",
+        });
+        const builds = await createPrivateType(ALICE, {
+            kind: "relation",
+            label: "builds",
+            subjectTypes: ["organization"],
+            objectTypes: [gadget, "project"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        const tinkers = await createPrivateType(ALICE, {
+            kind: "relation",
+            label: "tinkers with",
+            subjectTypes: ["person"],
+            objectTypes: [gadget],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+
+        await deleteOwnType(ALICE, "entity", gadget, 0);
+
+        const relations = await db()
+            .select({
+                key: knowledgeRelationTypes.key,
+                objectTypes: knowledgeRelationTypes.objectTypes,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.userId, ALICE));
+        // One keeps what it still relates; one relating nothing else goes.
+        expect(relations).toEqual([{ key: builds, objectTypes: ["project"] }]);
+        expect(relations.map((row) => row.key)).not.toContain(tinkers);
+    });
+
+    it("adopts again, whole, what a share needs after the curator deleted an entity type it adopted", async () => {
+        const venue = await createPrivateType(ALICE, {
+            kind: "entity",
+            label: "venue",
+        });
+        const hosts = await createPrivateType(ALICE, {
+            kind: "relation",
+            label: "hosts",
+            subjectTypes: [venue],
+            objectTypes: [],
+            objectKind: "literal",
+            cardinality: "many",
+        });
+        const hall = await createEntity(ALICE, {
+            typeKey: venue,
+            name: "Hall",
+        });
+        const adopt = () =>
+            db().transaction((tx) =>
+                adoptTypesForShareInTx(tx, {
+                    ownerUserId: ALICE,
+                    orgUserId,
+                    entityIds: [hall.id],
+                    relationKeys: [hosts],
+                }),
+            );
+        const adoptions = async () => {
+            const [entity] = await db()
+                .select({ adoptedAsKey: knowledgeEntityTypes.adoptedAsKey })
+                .from(knowledgeEntityTypes)
+                .where(eq(knowledgeEntityTypes.key, venue));
+            const [relation] = await db()
+                .select({ adoptedAsKey: knowledgeRelationTypes.adoptedAsKey })
+                .from(knowledgeRelationTypes)
+                .where(eq(knowledgeRelationTypes.key, hosts));
+            const [shape] = await db()
+                .select({ subjectTypes: knowledgeRelationTypes.subjectTypes })
+                .from(knowledgeRelationTypes)
+                .where(
+                    eq(
+                        knowledgeRelationTypes.key,
+                        relation?.adoptedAsKey ?? "",
+                    ),
+                );
+            return {
+                venue: entity?.adoptedAsKey ?? null,
+                hosts: relation?.adoptedAsKey ?? null,
+                hostsRelates: shape?.subjectTypes ?? null,
+            };
+        };
+        await adopt();
+        const first = await adoptions();
+        expect(first.hostsRelates).toEqual([first.venue]);
+
+        await deleteOwnType(orgUserId, "entity", first.venue ?? "", 0);
+        await adopt();
+
+        const second = await adoptions();
+        expect(second.venue).not.toBe(first.venue);
+        expect(second.hostsRelates).toEqual([second.venue]);
+    });
+
+    it("reuses a numbered copy a share made for another member's relation of the same name and shape", async () => {
+        // The members named theirs before the Organization had "supplies".
+        const keys = new Map<string, string>();
+        for (const member of [ALICE, BOB]) {
+            keys.set(
+                member,
+                await createPrivateType(member, {
+                    kind: "relation",
+                    label: "supplies",
+                    subjectTypes: ["person"],
+                    objectTypes: ["project"],
+                    objectKind: "entity",
+                    cardinality: "many",
+                }),
+            );
+        }
+        await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "supplies",
+            subjectTypes: ["organization"],
+            objectTypes: ["organization"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        for (const [member, key] of keys) {
+            await db().transaction((tx) =>
+                adoptTypesForShareInTx(tx, {
+                    ownerUserId: member,
+                    orgUserId,
+                    entityIds: [],
+                    relationKeys: [key],
+                }),
+            );
+        }
+        const labels = (
+            await db()
+                .select({ label: knowledgeRelationTypes.label })
+                .from(knowledgeRelationTypes)
+                .where(eq(knowledgeRelationTypes.userId, orgUserId))
+        )
+            .map((row) => decryptText(row.label))
+            .sort();
+        expect(labels).toEqual(["supplies", "supplies (2)"]);
+    });
+
     it("merges an Organization entity type into another: every account's entities of it, same names folded, relations and adoptions following", async () => {
         // Alice's own "venue", adopted as the Organization's.
         const alicesVenue = await createPrivateType(ALICE, {
@@ -784,6 +972,13 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             typeKey: gadget,
             name: "Toaster",
         });
+        // People are not entities: nothing becomes a "person" entity.
+        expect(
+            await refusal(mergeOwnTypes(ALICE, "entity", gadget, "person", 0)),
+        ).toMatchObject({ statusCode: 400 });
+        expect(
+            await refusal(typeMergeCount(ALICE, "entity", gadget, "person")),
+        ).toMatchObject({ statusCode: 400 });
         await mergeOwnTypes(ALICE, "entity", gadget, "project", 0);
         const [row] = await db()
             .select({ typeKey: knowledgeEntities.typeKey })
@@ -912,6 +1107,109 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
                     : "done",
             ),
         ).toEqual(["done", 400]);
+    }, 30_000);
+
+    it("makes a relation type relating two types while one merges into the other, deadlocking nothing", async () => {
+        const first = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "venue",
+        });
+        const second = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "place",
+        });
+        // Rewritten, the first row goes last in the table and first by id:
+        // a scan meets the second first.
+        await db()
+            .update(knowledgeEntityTypes)
+            .set({ id: "0000000000000000000" })
+            .where(eq(knowledgeEntityTypes.key, first));
+        // Holds the second without keeping readers off it, so the merge
+        // waits there with the first taken.
+        let release = () => {};
+        const released = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const blocker = db().transaction(async (tx) => {
+            await tx.execute(
+                sql`select 1 from knowledge_entity_types where key = ${second} for key share`,
+            );
+            await released;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const merge = mergeOwnTypes(orgUserId, "entity", first, second, 0);
+        await untilWaiting(1);
+        const made = createPrivateType(BOB, {
+            kind: "relation",
+            label: "visits",
+            subjectTypes: ["person"],
+            objectTypes: [second, first],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        await untilWaiting(2);
+        release();
+        await blocker;
+        const outcomes = await Promise.allSettled([merge, made]);
+        expect(
+            outcomes.map((outcome) =>
+                outcome.status === "rejected"
+                    ? ((outcome.reason as { statusCode?: number }).statusCode ??
+                      String(
+                          (outcome.reason as { cause?: unknown }).cause ??
+                              outcome.reason,
+                      ))
+                    : "done",
+            ),
+        ).toEqual(["done", 400]);
+    }, 30_000);
+
+    it("creates two types in one finish while the curator renames the one the second relates, deadlocking nothing", async () => {
+        const venue = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "venue",
+        });
+        let resume = () => {};
+        const resumed = new Promise<void>((resolve) => {
+            resume = resolve;
+        });
+        // As a finished review does: types one after another, the scope
+        // and the vocabulary's version bumped once, last.
+        const finish = db().transaction(async (tx) => {
+            await createOwnTypeInTx(tx, ALICE, false, {
+                kind: "entity",
+                label: "stage",
+            });
+            await resumed;
+            await createOwnTypeInTx(tx, ALICE, false, {
+                kind: "relation",
+                label: "plays at",
+                subjectTypes: ["person"],
+                objectTypes: [venue],
+                objectKind: "entity",
+                cardinality: "many",
+            });
+            await bumpVocabularyVersionInTx(tx);
+        });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const rename = renameOwnType(orgUserId, "entity", venue, "hall");
+        // The rename either finishes or waits for the finish.
+        await Promise.race([
+            rename.catch(() => {}),
+            new Promise((resolve) => setTimeout(resolve, 500)),
+        ]);
+        resume();
+        const outcomes = await Promise.allSettled([finish, rename]);
+        expect(
+            outcomes.map((outcome) =>
+                outcome.status === "rejected"
+                    ? String(
+                          (outcome.reason as { cause?: unknown }).cause ??
+                              outcome.reason,
+                      )
+                    : "done",
+            ),
+        ).toEqual(["done", "done"]);
     }, 30_000);
 
     it("stops counting a suggestion when its account goes, and drops it with the last", async () => {

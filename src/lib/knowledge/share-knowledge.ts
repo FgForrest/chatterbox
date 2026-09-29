@@ -64,7 +64,10 @@ import {
     promotePersonInTx,
 } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
-import { adoptTypesForShareInTx } from "@/lib/knowledge/vocabulary";
+import {
+    adoptTypesForShareInTx,
+    dropUnusedAdoptionsInTx,
+} from "@/lib/knowledge/vocabulary";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -200,7 +203,7 @@ export async function publishKnowledgeInTx(
 
     // The owner's private types what it names needs become the
     // Organization's first (Johnny, 2026-09-29), so it all publishes.
-    await adoptTypesForShareInTx(tx, {
+    const adopted = await adoptTypesForShareInTx(tx, {
         ownerUserId,
         orgUserId,
         entityIds: [
@@ -272,6 +275,8 @@ export async function publishKnowledgeInTx(
         if (shared) result.facts++;
         else result.privateFacts++;
     }
+    // A type adopted for what then stayed private is not the curator's.
+    await dropUnusedAdoptionsInTx(tx, adopted);
     return result;
 }
 

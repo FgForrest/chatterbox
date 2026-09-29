@@ -41,6 +41,7 @@ import {
 } from "@/lib/knowledge/speaker-changes";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import {
+    bumpVocabularyVersionInTx,
     createOwnTypeInTx,
     type NewTypeSpec,
     proposePhraseInTx,
@@ -747,6 +748,7 @@ export async function finishReview(
                 proposePhraseInTx(sp, actorUserId, payload.phrase),
             );
         }
+        let typesCreated = false;
         for (const { item, payload, choice } of phrases) {
             if (choice && "action" in choice && choice.action === "suggest") {
                 continue;
@@ -771,6 +773,7 @@ export async function finishReview(
                     organization,
                     choice.spec,
                 );
+                typesCreated = true;
                 // The relation works at once: the words that named it are
                 // its first fact, where it takes them (never text, which a
                 // review item does not keep). In a savepoint of its own, so
@@ -816,6 +819,8 @@ export async function finishReview(
                 updatedAt: new Date(),
             })
             .where(eq(learnRuns.id, run.id));
+        // Once, after every type the finish made (`createOwnTypeInTx`).
+        if (typesCreated) await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
         return {
             status: "finished",
