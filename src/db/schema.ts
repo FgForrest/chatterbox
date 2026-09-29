@@ -1075,6 +1075,12 @@ export const knowledgeEntityTypes = pgTable(
         // Set on a private type when the Organization adopted one of the
         // same name: the user's later facts use the shared key.
         adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        // An Organization type a share made from a member's private one
+        // (Johnny, 2026-09-29): listed first for the curator, until they
+        // keep, rename or merge it.
+        adoptedFromShare: boolean("adopted_from_share")
+            .notNull()
+            .default(false),
         createdByUserId: text("created_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
@@ -1129,6 +1135,10 @@ export const knowledgeRelationTypes = pgTable(
             .notNull()
             .default("active"),
         adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        // As on entity types.
+        adoptedFromShare: boolean("adopted_from_share")
+            .notNull()
+            .default(false),
         createdByUserId: text("created_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),

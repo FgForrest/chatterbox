@@ -24,6 +24,7 @@ import {
 import {
     knowledgeAliases,
     knowledgeEntities,
+    knowledgeEntityTypes,
     knowledgeFactEvidence,
     knowledgeFacts,
     knowledgeRelationTypes,
@@ -87,7 +88,11 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { acceptCorrection } from "@/lib/knowledge/corrections";
@@ -272,7 +277,37 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
                 .where(eq(table.id, id))
         )[0]?.userId;
 
-    it("publishes what can be shared, promoting who and what it names, and keeps the rest private", async () => {
+    /** The Organization's own types, as the curator would list them. */
+    const orgTypes = async () => [
+        ...(
+            await db()
+                .select({
+                    label: knowledgeEntityTypes.label,
+                    fromShare: knowledgeEntityTypes.adoptedFromShare,
+                })
+                .from(knowledgeEntityTypes)
+                .where(eq(knowledgeEntityTypes.userId, orgUserId))
+        ).map((row) => ({
+            kind: "entity" as const,
+            label: decryptText(row.label),
+            fromShare: row.fromShare,
+        })),
+        ...(
+            await db()
+                .select({
+                    label: knowledgeRelationTypes.label,
+                    fromShare: knowledgeRelationTypes.adoptedFromShare,
+                })
+                .from(knowledgeRelationTypes)
+                .where(eq(knowledgeRelationTypes.userId, orgUserId))
+        ).map((row) => ({
+            kind: "relation" as const,
+            label: decryptText(row.label),
+            fromShare: row.fromShare,
+        })),
+    ];
+
+    it("publishes what it names, adopting the owner's private types it needs, and promoting who and what it names", async () => {
         const toJan = await correct(
             "Novák",
             { personId: jan },
@@ -318,9 +353,24 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
 
         expect(await owners(people, jan)).toBe(orgUserId);
         expect(await owners(knowledgeEntities, orion)).toBe(orgUserId);
-        expect(await owners(knowledgeEntities, acme)).toBe(OWNER);
+        // Her private "Supplier" and "mentors" became the Organization's
+        // (Johnny, 2026-09-29), so Acme and the fact went with the share.
+        expect(await owners(knowledgeEntities, acme)).toBe(orgUserId);
+        expect(await owners(people, pavel)).toBe(orgUserId);
         expect(await scopeOf(toJan)).toBe(orgUserId);
-        expect(await scopeOf(toAcme)).toBe(OWNER);
+        expect(await scopeOf(toAcme)).toBe(orgUserId);
+        const adopted = await orgTypes();
+        expect(adopted).toEqual(
+            expect.arrayContaining([
+                { kind: "entity", label: "Supplier", fromShare: true },
+                { kind: "relation", label: "mentors", fromShare: true },
+            ]),
+        );
+        const [ownType] = await db()
+            .select({ adoptedAsKey: knowledgeRelationTypes.adoptedAsKey })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        expect(ownType?.adoptedAsKey).toMatch(/^o_/);
         const heardAs = await db()
             .select({ userId: knowledgeAliases.userId })
             .from(knowledgeAliases)
@@ -331,14 +381,19 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
             .select()
             .from(knowledgeFacts)
             .where(eq(knowledgeFacts.userId, orgUserId));
-        expect(orgFacts.map((fact) => fact.relationKey)).toEqual(["leads"]);
+        expect(orgFacts.map((fact) => fact.relationKey).sort()).toEqual(
+            ["leads", ownType?.adoptedAsKey].sort(),
+        );
+        const leadsInOrg = orgFacts.find(
+            (fact) => fact.relationKey === "leads",
+        );
         const evidence = await db()
             .select({
                 userId: knowledgeFactEvidence.userId,
                 transcriptionId: knowledgeFactEvidence.transcriptionId,
             })
             .from(knowledgeFactEvidence)
-            .where(eq(knowledgeFactEvidence.factId, orgFacts[0]?.id ?? ""));
+            .where(eq(knowledgeFactEvidence.factId, leadsInOrg?.id ?? ""));
         expect(evidence).toEqual([
             { userId: orgUserId, transcriptionId: transcriptId },
         ]);
@@ -510,7 +565,7 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(orgEvidence).toEqual([{ factId: slaMeans }]);
     });
 
-    it("keeps a fact private whose relation was adopted as a type the Organization deleted, promoting nothing", async () => {
+    it("adopts again, under its own name, a type whose adoption the Organization deleted", async () => {
         const mentors = await createPrivateType(OWNER, {
             kind: "relation",
             label: "mentors",
@@ -548,13 +603,84 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
 
         await share();
 
+        expect(await orgTypes()).toContainEqual({
+            kind: "relation",
+            label: "mentors",
+            fromShare: true,
+        });
         expect(
             await db()
-                .select()
+                .select({ id: knowledgeFacts.id })
                 .from(knowledgeFacts)
                 .where(eq(knowledgeFacts.userId, orgUserId)),
-        ).toEqual([]);
-        expect(await owners(people, pavel)).toBe(OWNER);
+        ).toHaveLength(1);
+        expect(await owners(people, pavel)).toBe(orgUserId);
+    });
+
+    it("uses the Organization's type of the same name and shape, and names a copy of another shape apart", async () => {
+        const orgSupplier = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "Supplier",
+        });
+        const [ownSupplier] = await db()
+            .select({ key: knowledgeEntityTypes.key })
+            .from(knowledgeEntityTypes)
+            .where(eq(knowledgeEntityTypes.userId, OWNER));
+        const supplies = await createPrivateType(OWNER, {
+            kind: "relation",
+            label: "supplies",
+            subjectTypes: [ownSupplier?.key ?? ""],
+            objectTypes: ["project"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        // The Organization named its own "supplies" since, relating
+        // organizations only; hers relates her suppliers to projects.
+        await createOrgType(orgUserId, {
+            kind: "relation",
+            label: "supplies",
+            subjectTypes: ["organization"],
+            objectTypes: ["organization"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        await confirmFactFromRecording({
+            subject: { entityId: acme },
+            relationKey: supplies,
+            object: { entityId: orion },
+            ownerUserId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            startMs: 0,
+            endMs: 12_000,
+        });
+
+        await share();
+
+        // Her "Supplier" is the Organization's: no second one.
+        const [promoted] = await db()
+            .select({ typeKey: knowledgeEntities.typeKey })
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.id, acme));
+        expect(promoted?.typeKey).toBe(orgSupplier);
+        const labels = (await orgTypes()).map((type) => type.label).sort();
+        expect(labels).toEqual(["Supplier", "supplies", "supplies (2)"]);
+        const [copy] = await db()
+            .select()
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.adoptedFromShare, true));
+        expect(copy).toMatchObject({
+            userId: orgUserId,
+            subjectTypes: [orgSupplier],
+            objectTypes: ["project"],
+        });
+        const [fact] = await db()
+            .select({ relationKey: knowledgeFacts.relationKey })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, orgUserId));
+        expect(fact?.relationKey).toBe(copy?.key);
     });
 
     it("takes the Organization's evidence back on withdrawal, gives the owner the corrections, and publishes again on a new share", async () => {

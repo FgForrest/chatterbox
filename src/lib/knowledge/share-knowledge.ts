@@ -63,6 +63,7 @@ import {
     promotePersonInTx,
 } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
+import { adoptTypesForShareInTx } from "@/lib/knowledge/vocabulary";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -195,6 +196,21 @@ export async function publishKnowledgeInTx(
                 eq(knowledgeFactEvidence.status, "supported"),
             ),
         );
+
+    // The owner's private types what it names needs become the
+    // Organization's first (Johnny, 2026-09-29), so it all publishes.
+    await adoptTypesForShareInTx(tx, {
+        ownerUserId,
+        orgUserId,
+        entityIds: [
+            ...corrections.map((row) => row.targetEntityId),
+            ...facts.flatMap((row) => [
+                row.subjectEntityId,
+                row.objectEntityId,
+            ]),
+        ].filter((id): id is string => Boolean(id)),
+        relationKeys: [...new Set(facts.map((row) => row.relationKey))],
+    });
 
     // Everyone naming what may be promoted, read before it is.
     for (const scope of await scopesNamingInTx(tx, {

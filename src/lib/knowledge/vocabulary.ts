@@ -1016,3 +1016,322 @@ export async function adoptPhrase(
         return key;
     });
 }
+
+/**
+ * The owner's private types a share needs, adopted by the Organization
+ * (Johnny, 2026-09-29), so what the share names is published rather than
+ * left private: the entity types of the entities it names, the relation
+ * types of the facts it states, and the entity types those relate.
+ *
+ * Each takes a core or Organization type of the same name and shape where
+ * one exists; otherwise a copy the curator finds marked
+ * (`adoptedFromShare`), named apart ("supplies (2)") where its name is
+ * taken by a type of another shape. The owner's type records it
+ * (`adoptedAsKey`), as a manual adoption does. A type already adopted as
+ * one the Organization still has stays as it is.
+ *
+ * Inside the share's transaction, under the Organization-people lock: the
+ * owner's type rows first, then the vocabulary's version, as renaming or
+ * deleting a type takes them; the caller bumps the scopes last. Returns
+ * whether it changed the vocabulary.
+ */
+export async function adoptTypesForShareInTx(
+    tx: Tx,
+    {
+        ownerUserId,
+        orgUserId,
+        entityIds,
+        relationKeys,
+    }: {
+        ownerUserId: string;
+        orgUserId: string;
+        entityIds: readonly string[];
+        relationKeys: readonly string[];
+    },
+): Promise<boolean> {
+    const needsAdoption = async (kind: TypeKind, adoptedAsKey: string | null) =>
+        !adoptedAsKey || !(await sharedTypeKey(tx, kind, adoptedAsKey));
+
+    // Which of the owner's relation types the facts need, and so which
+    // entity types they relate, read first; locked in order below.
+    const ownRelations =
+        relationKeys.length > 0
+            ? await tx
+                  .select({
+                      key: knowledgeRelationTypes.key,
+                      adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                      subjectTypes: knowledgeRelationTypes.subjectTypes,
+                      objectTypes: knowledgeRelationTypes.objectTypes,
+                  })
+                  .from(knowledgeRelationTypes)
+                  .where(
+                      and(
+                          eq(knowledgeRelationTypes.userId, ownerUserId),
+                          inArray(knowledgeRelationTypes.key, [
+                              ...relationKeys,
+                          ]),
+                          eq(knowledgeRelationTypes.status, "active"),
+                      ),
+                  )
+            : [];
+    const entityTypeKeys = new Set<string>();
+    for (const relation of ownRelations) {
+        if (!(await needsAdoption("relation", relation.adoptedAsKey))) continue;
+        for (const key of [...relation.subjectTypes, ...relation.objectTypes]) {
+            entityTypeKeys.add(key);
+        }
+    }
+    if (entityIds.length > 0) {
+        const named = await tx
+            .select({ typeKey: knowledgeEntities.typeKey })
+            .from(knowledgeEntities)
+            .where(
+                and(
+                    inArray(knowledgeEntities.id, [...entityIds]),
+                    eq(knowledgeEntities.userId, ownerUserId),
+                ),
+            );
+        for (const row of named) entityTypeKeys.add(row.typeKey);
+    }
+    if (entityTypeKeys.size === 0 && ownRelations.length === 0) return false;
+
+    let changed = false;
+    // The owner's entity types, then relation types, each in id order.
+    const entityTypes =
+        entityTypeKeys.size > 0
+            ? await tx
+                  .select()
+                  .from(knowledgeEntityTypes)
+                  .where(
+                      and(
+                          eq(knowledgeEntityTypes.userId, ownerUserId),
+                          inArray(knowledgeEntityTypes.key, [
+                              ...entityTypeKeys,
+                          ]),
+                          eq(knowledgeEntityTypes.status, "active"),
+                      ),
+                  )
+                  .orderBy(asc(knowledgeEntityTypes.id))
+                  .for("update")
+            : [];
+    const relationTypes =
+        ownRelations.length > 0
+            ? await tx
+                  .select()
+                  .from(knowledgeRelationTypes)
+                  .where(
+                      and(
+                          eq(knowledgeRelationTypes.userId, ownerUserId),
+                          inArray(
+                              knowledgeRelationTypes.key,
+                              ownRelations.map((relation) => relation.key),
+                          ),
+                          eq(knowledgeRelationTypes.status, "active"),
+                      ),
+                  )
+                  .orderBy(asc(knowledgeRelationTypes.id))
+                  .for("update")
+            : [];
+
+    // The owner's entity type keys as the Organization reads them.
+    const asShared = new Map<string, string>();
+    for (const type of entityTypes) {
+        if (!(await needsAdoption("entity", type.adoptedAsKey))) {
+            asShared.set(type.key, type.adoptedAsKey ?? type.key);
+            continue;
+        }
+        const label = decryptText(type.label);
+        const key =
+            (await sharedTypeNamed(tx, "entity", type.labelHmac)) ??
+            (await insertAdoptedTypeInTx(tx, {
+                kind: "entity",
+                label,
+                orgUserId,
+                ownerUserId,
+            }));
+        if (!key) continue;
+        await tx
+            .update(knowledgeEntityTypes)
+            .set({ adoptedAsKey: key, updatedAt: new Date() })
+            .where(eq(knowledgeEntityTypes.id, type.id));
+        asShared.set(type.key, key);
+        changed = true;
+    }
+
+    for (const type of relationTypes) {
+        if (!(await needsAdoption("relation", type.adoptedAsKey))) continue;
+        const shape = {
+            subjectTypes: type.subjectTypes.map((k) => asShared.get(k) ?? k),
+            objectTypes: type.objectTypes.map((k) => asShared.get(k) ?? k),
+            objectKind: type.objectKind,
+            cardinality: type.cardinality,
+        };
+        // Relating a type that stayed private, it stays private too.
+        const related = [...shape.subjectTypes, ...shape.objectTypes];
+        let unshared = false;
+        for (const key of related) {
+            if (!(await sharedTypeKey(tx, "entity", key))) unshared = true;
+        }
+        if (unshared) continue;
+        const label = decryptText(type.label);
+        const named = await tx
+            .select()
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.labelHmac, type.labelHmac),
+                    or(
+                        isNull(knowledgeRelationTypes.userId),
+                        orgOwnedCondition(knowledgeRelationTypes.userId),
+                    ),
+                    eq(knowledgeRelationTypes.status, "active"),
+                ),
+            )
+            .limit(1);
+        const same = named[0] && sameShape(named[0], shape);
+        const key = same
+            ? (named[0]?.key ?? null)
+            : await insertAdoptedTypeInTx(tx, {
+                  kind: "relation",
+                  label,
+                  orgUserId,
+                  ownerUserId,
+                  shape,
+              });
+        if (!key) continue;
+        await tx
+            .update(knowledgeRelationTypes)
+            .set({ adoptedAsKey: key, updatedAt: new Date() })
+            .where(eq(knowledgeRelationTypes.id, type.id));
+        changed = true;
+    }
+    if (changed) await bumpVocabularyVersionInTx(tx);
+    return changed;
+}
+
+type RelationShape = {
+    subjectTypes: string[];
+    objectTypes: string[];
+    objectKind: "entity" | "literal";
+    cardinality: "one" | "many";
+};
+
+function sameShape(a: RelationShape, b: RelationShape): boolean {
+    const sameSet = (x: readonly string[], y: readonly string[]) =>
+        new Set(x).size === new Set(y).size && x.every((k) => y.includes(k));
+    return (
+        sameSet(a.subjectTypes, b.subjectTypes) &&
+        sameSet(a.objectTypes, b.objectTypes) &&
+        a.objectKind === b.objectKind &&
+        a.cardinality === b.cardinality
+    );
+}
+
+/** The key, when a core or Organization type of the kind exists under it. */
+async function sharedTypeKey(
+    tx: Tx,
+    kind: TypeKind,
+    key: string,
+): Promise<string | null> {
+    const table = tableOf(kind);
+    const [row] = await tx
+        .select({ key: table.key })
+        .from(table)
+        .where(
+            and(
+                eq(table.key, key),
+                or(isNull(table.userId), orgOwnedCondition(table.userId)),
+                eq(table.status, "active"),
+            ),
+        )
+        .limit(1);
+    return row?.key ?? null;
+}
+
+/** A core or Organization type of the kind with that name, active. */
+async function sharedTypeNamed(
+    tx: Tx,
+    kind: TypeKind,
+    labelHmac: string,
+): Promise<string | null> {
+    const table = tableOf(kind);
+    const [row] = await tx
+        .select({ key: table.key })
+        .from(table)
+        .where(
+            and(
+                eq(table.labelHmac, labelHmac),
+                or(isNull(table.userId), orgOwnedCondition(table.userId)),
+                eq(table.status, "active"),
+            ),
+        )
+        .limit(1);
+    return row?.key ?? null;
+}
+
+/**
+ * An Organization type copied from a member's for a share, marked for the
+ * curator, under the member's name or, where a core or Organization type
+ * has it (another shape, or retired), the first "name (n)" free. Null for
+ * a name the deny list refuses now.
+ */
+async function insertAdoptedTypeInTx(
+    tx: Tx,
+    {
+        kind,
+        label,
+        orgUserId,
+        ownerUserId,
+        shape,
+    }: {
+        kind: TypeKind;
+        label: string;
+        orgUserId: string;
+        ownerUserId: string;
+        shape?: RelationShape;
+    },
+): Promise<string | null> {
+    const table = tableOf(kind);
+    const taken = async (candidate: string) => {
+        const [row] = await tx
+            .select({ id: table.id })
+            .from(table)
+            .where(
+                and(
+                    eq(
+                        table.labelHmac,
+                        domainLookupHash(LABEL_DOMAIN[kind], candidate),
+                    ),
+                    or(isNull(table.userId), eq(table.userId, orgUserId)),
+                ),
+            )
+            .limit(1);
+        return Boolean(row);
+    };
+    // Checked when the member named it, but the deny list may have grown
+    // since: such a type stays private.
+    const base = label.trim().replace(/\s+/g, " ");
+    if (!base || deniedTopicOf(base)) return null;
+    const numbered = (n: number) => {
+        const suffix = n === 1 ? "" : ` (${n})`;
+        return `${base.slice(0, MAX_TYPE_LABEL_LENGTH - suffix.length).trimEnd()}${suffix}`;
+    };
+    let n = 1;
+    while (await taken(numbered(n))) n++;
+    const name = numbered(n);
+    const key = `o_${nanoid(12)}`;
+    const common = {
+        userId: orgUserId,
+        key,
+        label: encryptText(name),
+        labelHmac: domainLookupHash(LABEL_DOMAIN[kind], name),
+        adoptedFromShare: true,
+        createdByUserId: ownerUserId,
+    };
+    if (kind === "entity") {
+        await tx.insert(knowledgeEntityTypes).values(common);
+    } else if (shape) {
+        await tx.insert(knowledgeRelationTypes).values({ ...common, ...shape });
+    }
+    return key;
+}
