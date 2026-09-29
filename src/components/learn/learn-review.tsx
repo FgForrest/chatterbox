@@ -444,6 +444,7 @@ export function LearnReview({
                                     personId: string | null;
                                     evidenceMs: number[];
                                     reason: string;
+                                    onlyFirstName?: boolean;
                                 };
                                 const choice = item.choice;
                                 const unknown = Boolean(
@@ -524,6 +525,14 @@ export function LearnReview({
                                                     {i18n("Unknown")}
                                                 </Button>
                                             </div>
+                                            {payload.onlyFirstName &&
+                                                payload.personId && (
+                                                    <div className="text-xs text-amber-700 dark:text-amber-400">
+                                                        {i18n(
+                                                            "Only the first name was heard: someone else of that name may be speaking.",
+                                                        )}
+                                                    </div>
+                                                )}
                                             <div className="text-xs text-muted-foreground">
                                                 {payload.reason}{" "}
                                                 {payload.evidenceMs.map(

@@ -72,8 +72,13 @@ import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 const FINGERPRINT_DOMAIN = "learn-fingerprint";
-/** Knowledge lookups one run may make. */
-const TOOL_BUDGET = 60;
+/**
+ * Knowledge lookups one run may make: room for every distinct mention of a
+ * long recording (up to 40 a window, four windows for about two hours).
+ * The pilot's 60 ran out on every recording over half an hour, and the
+ * later windows were adjudicated knowing nothing.
+ */
+const TOOL_BUDGET = 160;
 const CALL_RETRY_ATTEMPTS = 3;
 /**
  * How often a run validates again when what it validated against changed
@@ -300,12 +305,20 @@ async function frameFor(
                 eq(learnDismissals.userId, run.scopeUserId),
             ),
         );
-    const people = new Map<string, { name: string }>();
+    const people = new Map<string, { name: string; aliases: string[] }>();
     const entities = new Map<string, { typeKey: string; name: string }>();
     const confirmedHeardAs = new Set<string>();
     for (const item of view.items) {
-        if (item.kind === "person") people.set(item.id, { name: item.name });
-        else entities.set(item.id, { typeKey: item.typeKey, name: item.name });
+        if (item.kind === "person") {
+            people.set(item.id, {
+                name: item.name,
+                aliases: item.names
+                    .filter((name) => name.kind === "alias")
+                    .map((name) => name.text),
+            });
+        } else {
+            entities.set(item.id, { typeKey: item.typeKey, name: item.name });
+        }
         for (const name of item.names) {
             if (name.kind !== "heard_as") continue;
             confirmedHeardAs.add(

@@ -19,7 +19,11 @@
  *   so does anything whose words name a denied topic (`deniedTopicOf`, a
  *   floor under the model's judgement);
  * - one speaker suggestion per label, and none for a label a person
- *   answered; a fact whose speaker a person already answered otherwise
+ *   answered: a label's suggestions (one per window) join, a name beats
+ *   "nobody known", and names that disagree give nothing; a name heard
+ *   only as a first name (no surname or nickname of theirs near the
+ *   evidence) is marked so, for the reviewer;
+ * - a fact whose speaker a person already answered otherwise
  *   goes; at most `MAX_NEW_FACTS` new facts, and bounded corrections and
  *   phrases;
  * - what a person dismissed before goes, except on a manual run.
@@ -83,8 +87,8 @@ export interface LearnRunFrame {
     language: string | null;
     provider: string | null;
     manual: boolean;
-    /** The people and entities in the run's scopes. */
-    people: ReadonlyMap<string, { name: string }>;
+    /** The people and entities in the run's scopes; a person's nicknames too. */
+    people: ReadonlyMap<string, { name: string; aliases?: readonly string[] }>;
     entities: ReadonlyMap<string, { typeKey: string; name: string }>;
     /** The relations visible to the run's scope, active. */
     relations: ReadonlyMap<string, VisibleRelation>;
@@ -132,6 +136,7 @@ export type DropReason =
     | "badTime"
     | "dismissed"
     | "knownElsewhere"
+    | "conflicting"
     | "budget";
 
 interface AnchorPosition {
@@ -152,6 +157,8 @@ export type ReviewCandidate =
               personId: string | null;
               evidenceMs: number[];
               reason: string;
+              /** Heard by a first name alone: no surname or nickname near it. */
+              onlyFirstName?: true;
           };
       }
     | {
@@ -307,8 +314,12 @@ export function validateLearnOutput(
     const denied = (...texts: (string | undefined)[]) =>
         texts.some((text) => text !== undefined && deniedTopicOf(text));
 
-    // Speakers: one per label a person has not answered.
-    const suggested = new Set<string>();
+    // Speakers: one per label a person has not answered, the label's
+    // suggestions (a run makes one per window) joined.
+    const perLabel = new Map<
+        string,
+        { personId: string | null; evidenceMs: number[]; reason: string }[]
+    >();
     for (const speaker of output.speakers) {
         if (!labels.has(speaker.label)) {
             drop("unknownLabel");
@@ -322,10 +333,6 @@ export function validateLearnOutput(
             drop("outOfScope");
             continue;
         }
-        if (suggested.has(speaker.label)) {
-            drop("budget");
-            continue;
-        }
         const evidenceMs = speaker.evidence
             .map((clock) => time.start(clock))
             .filter((ms): ms is number => ms !== null);
@@ -333,23 +340,52 @@ export function validateLearnOutput(
             drop("badTime");
             continue;
         }
+        const held = perLabel.get(speaker.label) ?? [];
+        held.push({
+            personId: speaker.personId,
+            evidenceMs,
+            reason: speaker.reason,
+        });
+        perLabel.set(speaker.label, held);
+    }
+    for (const [label, suggestions] of perLabel) {
+        const named = suggestions.filter((one) => one.personId !== null);
+        const people = new Set(named.map((one) => one.personId));
+        if (people.size > 1) {
+            // Windows that disagree: no side is shown as Learn's answer.
+            for (const _ of named) drop("conflicting");
+            continue;
+        }
+        // A name beats "nobody known", which only a window without the
+        // evidence may have said.
+        const kept = named.length > 0 ? named : suggestions;
+        const personId = kept[0]?.personId ?? null;
+        const evidenceMs = [
+            ...new Set(kept.flatMap((one) => one.evidenceMs)),
+        ].sort((a, b) => a - b);
+        const reason = [...new Set(kept.map((one) => one.reason))]
+            .filter(Boolean)
+            .join(" ");
         const fingerprint = JSON.stringify([
             "speaker",
             transcriptKey,
-            speaker.label,
-            speaker.personId,
+            label,
+            personId,
         ]);
         if (dismissed(fingerprint)) continue;
-        suggested.add(speaker.label);
+        const person = personId ? frame.people.get(personId) : undefined;
         items.push({
             kind: "speaker",
             fingerprint,
             preTicked: false,
             payload: {
-                label: speaker.label,
-                personId: speaker.personId,
-                evidenceMs: [...new Set(evidenceMs)],
-                reason: speaker.reason,
+                label,
+                personId,
+                evidenceMs,
+                reason,
+                ...(person && !fullNameNear(person, frame.turns, evidenceMs)
+                    ? { onlyFirstName: true as const }
+                    : {}),
             },
         });
     }
@@ -740,6 +776,81 @@ export function validateLearnOutput(
     }
 
     return { superseded: false, items, dropped };
+}
+
+/** Turns either side of an evidence turn searched for the rest of a name. */
+const NAME_RADIUS = 3;
+
+/** Letters only, lower case, without diacritics: how names are compared. */
+function nameWords(text: string): string[] {
+    return text
+        .normalize("NFKD")
+        .replace(/\p{M}/gu, "")
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(Boolean);
+}
+
+/**
+ * Whether more than a first name backs a speaker: the person's surname (any
+ * word of the name after the first) or a nickname of theirs, said within
+ * `NAME_RADIUS` turns of the evidence. Czech inflects names ("Bednářovi"),
+ * so a word matches on its first letters.
+ */
+export function fullNameNear(
+    person: { name: string; aliases?: readonly string[] },
+    turns: readonly TranscriptTurn[],
+    evidenceMs: readonly number[],
+): boolean {
+    const rest = nameWords(person.name).slice(1);
+    const aliases = (person.aliases ?? []).map((alias) =>
+        nameWords(alias).join(" "),
+    );
+    // A one-word name is all there is to hear.
+    if (rest.length === 0) return true;
+    const near = new Set<number>();
+    for (const ms of evidenceMs) {
+        let at = 0;
+        turns.forEach((turn, index) => {
+            const best = turns[at] as TranscriptTurn;
+            if (Math.abs(turn.startMs - ms) < Math.abs(best.startMs - ms)) {
+                at = index;
+            }
+        });
+        for (
+            let index = Math.max(0, at - NAME_RADIUS);
+            index <= Math.min(turns.length - 1, at + NAME_RADIUS);
+            index++
+        ) {
+            near.add(index);
+        }
+    }
+    const stem = (word: string) => word.slice(0, Math.max(4, word.length - 2));
+    for (const index of near) {
+        const words = nameWords(turns[index]?.text ?? "");
+        const text = words.join(" ");
+        if (
+            rest.some((part) =>
+                words.some((word) => word.startsWith(stem(part))),
+            )
+        ) {
+            return true;
+        }
+        if (
+            aliases.some(
+                (alias) =>
+                    alias &&
+                    (` ${text} `.includes(` ${alias} `) ||
+                        (!alias.includes(" ") &&
+                            words.some((word) =>
+                                word.startsWith(stem(alias)),
+                            ))),
+            )
+        ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function factFingerprint(

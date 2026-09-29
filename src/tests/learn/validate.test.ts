@@ -147,12 +147,131 @@ describe("validateLearnOutput", () => {
                         personId: "p-jan",
                         evidenceMs: [18_000],
                         reason: "introduces himself as Jan",
+                        // "Jan" alone, near the evidence: no surname.
+                        onlyFirstName: true,
                     },
                 }),
             ]);
         });
 
-        it("drops one for a label a person answered, an unknown label, someone out of scope, or a second one for a label", () => {
+        it("marks no first name alone where the surname or a nickname is said near the evidence", () => {
+            const turns: TranscriptTurn[] = [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 9_000,
+                    text: "Díky, Michale.",
+                },
+                {
+                    speaker: "speaker_1",
+                    startMs: 9_000,
+                    endMs: 20_000,
+                    text: "Není zač.",
+                },
+                {
+                    speaker: "speaker_0",
+                    startMs: 20_000,
+                    endMs: 30_000,
+                    text: "Bednářovi to pošlu.",
+                },
+                {
+                    speaker: "speaker_2",
+                    startMs: 30_000,
+                    endMs: 40_000,
+                    text: "Jo, Vonďo, pošli.",
+                },
+            ];
+            const { items } = validateLearnOutput(
+                output({
+                    speakers: [
+                        {
+                            label: "speaker_1",
+                            personId: "p-michal",
+                            evidence: ["00:09"],
+                            reason: "",
+                        },
+                        {
+                            label: "speaker_2",
+                            personId: "p-vondra",
+                            evidence: ["00:30"],
+                            reason: "",
+                        },
+                    ],
+                }),
+                frame({
+                    turns,
+                    answeredLabels: new Map(),
+                    people: new Map([
+                        ["p-michal", { name: "Michal Bednář" }],
+                        ["p-vondra", { name: "Michal Vondra", aliases: ["Vonďa"] }],
+                    ]),
+                }),
+            );
+            expect(items.map((item) => item.payload)).toEqual([
+                expect.not.objectContaining({ onlyFirstName: true }),
+                expect.not.objectContaining({ onlyFirstName: true }),
+            ]);
+        });
+
+        it("joins a label's suggestions: a name beats not-identified, and names that disagree give nothing", () => {
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    speakers: [
+                        {
+                            label: "speaker_1",
+                            personId: null,
+                            evidence: ["00:18"],
+                            reason: "no name yet",
+                        },
+                        {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidence: ["00:19"],
+                            reason: "Jan",
+                        },
+                        {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidence: ["00:40"],
+                            reason: "Honzo",
+                        },
+                    ],
+                }),
+                frame(),
+            );
+            expect(items.map((item) => item.payload)).toEqual([
+                expect.objectContaining({
+                    label: "speaker_1",
+                    personId: "p-jan",
+                    evidenceMs: [18_000, 40_000],
+                }),
+            ]);
+            expect(dropped).toEqual({});
+
+            const split = validateLearnOutput(
+                output({
+                    speakers: [
+                        {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidence: ["00:18"],
+                            reason: "",
+                        },
+                        {
+                            label: "speaker_1",
+                            personId: "p-alice",
+                            evidence: ["00:40"],
+                            reason: "",
+                        },
+                    ],
+                }),
+                frame(),
+            );
+            expect(split.items).toEqual([]);
+            expect(split.dropped).toMatchObject({ conflicting: 2 });
+        });
+
+        it("drops one for a label a person answered, an unknown label or someone out of scope, and joins the rest per label", () => {
             const { items, dropped } = validateLearnOutput(
                 output({
                     speakers: [
@@ -182,8 +301,8 @@ describe("validateLearnOutput", () => {
                         },
                         {
                             label: "speaker_1",
-                            personId: "p-alice",
-                            evidence: ["00:18"],
+                            personId: "p-jan",
+                            evidence: ["00:40"],
                             reason: "",
                         },
                     ],
@@ -194,13 +313,13 @@ describe("validateLearnOutput", () => {
                 expect.objectContaining({
                     label: "speaker_1",
                     personId: "p-jan",
+                    evidenceMs: [18_000, 40_000],
                 }),
             ]);
             expect(dropped).toMatchObject({
                 answered: 1,
                 unknownLabel: 1,
                 outOfScope: 1,
-                budget: 1,
             });
         });
     });
