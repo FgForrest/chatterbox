@@ -1111,6 +1111,31 @@ export function TranscriptionPanel({
                                                         {summaryData.model}
                                                     </span>
                                                 )}
+                                                {summaryData.stale &&
+                                                    summarySource ===
+                                                        "riffado" && (
+                                                        <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                                            {i18n(
+                                                                "May contain stale names or terms",
+                                                            )}
+                                                            {!readOnly && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                                                                    disabled={
+                                                                        isSummarizing
+                                                                    }
+                                                                    onClick={
+                                                                        handleSummarize
+                                                                    }
+                                                                >
+                                                                    {i18n(
+                                                                        "Regenerate",
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    )}
                                                 {multiPassBadge && (
                                                     <span
                                                         className={

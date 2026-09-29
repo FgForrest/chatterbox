@@ -77,6 +77,7 @@ const transcription = {
     source: "riffado",
     turns: null,
     topics: null,
+    topicsInputFingerprint: null,
     producedByUserId: null,
     revision: 0,
     createdAt: now,
@@ -94,6 +95,7 @@ const enhancement = {
     source: "riffado",
     transcriptionId: "tr-1",
     // Single-pass summary: multi-pass provenance is NULL.
+    inputFingerprint: null,
     multiPassRounds: null,
     multiPassUsed: null,
     multiPassMerged: null,

@@ -97,6 +97,11 @@ export interface UpsertEnhancementArgs {
         passesUsed: number;
         merged: boolean;
     };
+    /**
+     * `llmInputFingerprint` of what the model read; null (or absent) for a
+     * summary nobody can tell stale, as an import. Written on every upsert.
+     */
+    inputFingerprint?: string | null;
     /** Permit an explicit user action to replace a deliberately erased summary. */
     allowReaped?: boolean;
     /** Who makes the change; defaults to `userId`. See `UpsertTranscriptionArgs`. */
@@ -247,6 +252,7 @@ export async function upsertTranscription(
                         turns: encryptedTurns,
                         // Anchored to the turns just replaced.
                         topics: null,
+                        topicsInputFingerprint: null,
                         detectedLanguage,
                         transcriptionType,
                         provider,
@@ -289,6 +295,7 @@ export async function upsertTranscription(
                     text: encryptedText,
                     turns: encryptedTurns,
                     topics: null,
+                    topicsInputFingerprint: null,
                     detectedLanguage,
                     transcriptionType,
                     provider,
@@ -398,6 +405,7 @@ export async function upsertEnhancement(
 
             // Always written, NULL included -- see `multiPass` on the args.
             const multiPassColumns = {
+                inputFingerprint: args.inputFingerprint ?? null,
                 multiPassRounds: multiPass?.roundsRequested ?? null,
                 multiPassUsed: multiPass?.passesUsed ?? null,
                 multiPassMerged: multiPass?.merged ?? null,

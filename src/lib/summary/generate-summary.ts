@@ -27,6 +27,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
+import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -307,8 +308,11 @@ export async function generateSummaryForRecording(
     const model = enhancementChatModel(credentials);
 
     // Decrypt the transcript before sending it to the LLM. Plaintext is
-    // the LLM's input contract; ciphertext lives only in the DB.
-    const transcriptText = decryptText(transcription.text);
+    // the LLM's input contract; ciphertext lives only in the DB. Its
+    // corrections applied, and the fingerprint of that kept, so the summary
+    // can tell when they moved on.
+    const input = await modelInput(transcription);
+    const transcriptText = input.text;
 
     // Apply the AI output language directive via the system message rather
     // than the user prompt. This separates concerns: the user prompt carries
@@ -530,6 +534,7 @@ Correct the serialization without dropping or inventing information. Return exac
         provider: credentials.provider,
         model,
         multiPass,
+        inputFingerprint: input.fingerprint,
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         jobId: opts.jobId,

@@ -31,6 +31,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
+import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
@@ -204,8 +205,12 @@ export async function generateTopicsForTranscript(
         getAiOutputLanguageDirective(settings?.aiOutputLanguage ?? null),
     ].join("\n\n");
 
-    const marks = buildTimeMarks(turns);
-    const endMs = Math.max(...turns.map((turn) => turn.endMs));
+    // Read with its corrections applied (same turns, same times), and the
+    // fingerprint of that kept with the topics.
+    const input = await modelInput(transcript);
+    const readTurns = input.turns ?? turns;
+    const marks = buildTimeMarks(readTurns);
+    const endMs = Math.max(...readTurns.map((turn) => turn.endMs));
     const windows = splitIntoWindows(marks, WINDOW_CHARS, WINDOW_OVERLAP_CHARS);
 
     const topicsPerWindow: TranscriptTopic[][] = [];
@@ -307,7 +312,10 @@ export async function generateTopicsForTranscript(
         if (shared) throw writerRefusalError(shared);
         return tx
             .update(transcriptions)
-            .set({ topics: encryptJsonField(stored) })
+            .set({
+                topics: encryptJsonField(stored),
+                topicsInputFingerprint: input.fingerprint,
+            })
             .where(
                 and(
                     eq(transcriptions.id, transcript.id),

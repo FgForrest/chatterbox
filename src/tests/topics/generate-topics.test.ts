@@ -15,6 +15,14 @@ import {
 } from "@/db/schema";
 import { ErrorCode } from "@/lib/errors";
 
+// Without corrections a model reads the stored turns as they are.
+vi.mock("@/lib/learn/llm-input", () => ({
+    modelInput: vi.fn(async (transcript: { text: string }) => ({
+        text: transcript.text,
+        turns: null,
+        fingerprint: null,
+    })),
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),

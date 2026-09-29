@@ -209,6 +209,7 @@ export async function storeBrowserTranscription(
                         source: "riffado",
                         turns: null,
                         topics: null,
+                        topicsInputFingerprint: null,
                         producedByUserId: userId,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
@@ -242,6 +243,7 @@ export async function storeBrowserTranscription(
                     source: "riffado",
                     turns: null,
                     topics: null,
+                    topicsInputFingerprint: null,
                     producedByUserId: userId,
                 });
             }

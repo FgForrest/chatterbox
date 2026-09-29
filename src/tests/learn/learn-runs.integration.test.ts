@@ -154,6 +154,7 @@ import { POST as postFinishRoute } from "@/app/api/recordings/[id]/review/finish
 import { PATCH as patchItemRoute } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
 import { GET as getReviewRoute } from "@/app/api/recordings/[id]/review/route";
 import { DELETE as deleteRecordingRoute } from "@/app/api/recordings/[id]/route";
+import { GET as getSummaryRoute } from "@/app/api/recordings/[id]/summary/route";
 import { encrypt } from "@/lib/encryption";
 import {
     decryptJsonField,
@@ -175,6 +176,7 @@ import {
 } from "@/lib/learn/pending";
 import { ensureOrgAccount } from "@/lib/org/account";
 import type { StorageProvider } from "@/lib/storage/types";
+import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -1237,6 +1239,62 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     [],
                 );
                 expect((await undo(OWNER)).status).toBe(404);
+            });
+
+            it("summarizes the corrected transcript, and says when the corrections moved on", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as { items: { id: string; kind: string }[] };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: { versions: { [id]: 1, [phrase]: 0 } },
+                });
+
+                createCompletion.mockReset();
+                reply({
+                    summary: "Tavesi came.",
+                    keyPoints: [],
+                    actionItems: [],
+                });
+                await generateSummaryForRecording(OWNER, REC);
+                const sent = JSON.stringify(
+                    createCompletion.mock.calls[0]?.[0],
+                );
+                expect(sent).toContain("máme tu Tavesi.");
+                expect(sent).not.toContain("Tavesy");
+                const summary = async () =>
+                    (await (
+                        await route(getSummaryRoute, OWNER, "summary")
+                    ).json()) as { summary: string; stale?: boolean };
+                expect(await summary()).toMatchObject({
+                    summary: expect.stringContaining("Tavesi"),
+                    stale: false,
+                });
+
+                const [correction] = await db()
+                    .select({ id: transcriptCorrections.id })
+                    .from(transcriptCorrections);
+                await route(
+                    deleteCorrectionRoute,
+                    OWNER,
+                    `corrections/${correction?.id}`,
+                    {
+                        method: "DELETE",
+                        params: { correctionId: correction?.id ?? "" },
+                    },
+                );
+                expect((await summary()).stale).toBe(true);
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {

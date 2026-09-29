@@ -9,6 +9,7 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
+import { llmRendering } from "@/lib/learn/llm-input";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -366,10 +367,23 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         model: stored.model,
         multiPass: stored.multiPass,
         createdAt: stored.createdAt,
+        // Made from the transcript before its corrections changed: names
+        // or terms in it may be stale. Only when both fingerprints exist.
+        stale: await summaryIsStale(stored),
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
     });
 });
+
+/** Whether the transcript as a model reads it moved on since the summary. */
+async function summaryIsStale(stored: {
+    inputFingerprint: string | null;
+    transcriptionId: string | null;
+}): Promise<boolean> {
+    if (!stored.inputFingerprint || !stored.transcriptionId) return false;
+    const current = await llmRendering(stored.transcriptionId);
+    return current !== null && current.fingerprint !== stored.inputFingerprint;
+}
 
 // DELETE - Remove summary
 export const DELETE = apiHandler<IdContext>(async (request, context) => {

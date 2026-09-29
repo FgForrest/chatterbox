@@ -14,7 +14,7 @@ import { createHmac, hkdfSync } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { learnReviewItems, learnRuns, transcriptions } from "@/db/schema";
-import { decryptJsonField } from "@/lib/encryption/fields";
+import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -182,5 +182,41 @@ export async function llmRendering(transcriptionId: string): Promise<{
         turns,
         text: flattenTurns(turns),
         fingerprint: llmInputFingerprint(turns),
+    };
+}
+
+/**
+ * What a model is given of a transcript (summaries, topics, titles): the
+ * stored text as it is while no correction changes it, so a transcript
+ * without corrections reads exactly as before; the corrected rendering
+ * once one does. With the fingerprint of the corrected turns, null for a
+ * transcript without turns (nothing can correct it).
+ */
+export async function modelInput(transcript: {
+    id: string;
+    userId: string;
+    recordingId: string;
+    revision: number;
+    text: string;
+    turns: unknown;
+}): Promise<{
+    text: string;
+    turns: TranscriptTurn[] | null;
+    fingerprint: string | null;
+}> {
+    const stored = decryptText(transcript.text) ?? "";
+    const turns = readTranscriptTurns(transcript);
+    if (!turns?.length) return { text: stored, turns: null, fingerprint: null };
+    const rendered = renderTurnsForLlm(
+        turns,
+        await correctionOverlay(transcript),
+    );
+    const corrected = rendered.some(
+        (turn, index) => turn.text !== turns[index]?.text,
+    );
+    return {
+        text: corrected ? flattenTurns(rendered) : stored,
+        turns: rendered,
+        fingerprint: llmInputFingerprint(rendered),
     };
 }

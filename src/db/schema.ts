@@ -812,6 +812,11 @@ export const transcriptions = pgTable(
         // times in `turns`, so every write of the transcript rewrites it,
         // as NULL: topics never outlive the transcript they were read from.
         topics: jsonb("topics"),
+        // `llmInputFingerprint` of the transcript the topics were detected
+        // on (its corrections applied); null before corrections existed.
+        topicsInputFingerprint: varchar("topics_input_fingerprint", {
+            length: 64,
+        }),
         // Who ran the provider. Differs from `userId` when the organization
         // account changes a shared recording: the rows stay the owner's, and
         // the organization account produced (and paid for) them.
@@ -1886,6 +1891,10 @@ export const aiEnhancements = pgTable(
         // clean one, so without persisting it the user cannot tell that the
         // summary in front of them was built from two passes instead of
         // three. That distinction only matters after the fact.
+        // `llmInputFingerprint` of the transcript as the model read it (its
+        // corrections applied); null for a summary made before corrections
+        // existed, which never reads as stale.
+        inputFingerprint: varchar("input_fingerprint", { length: 64 }),
         multiPassRounds: integer("multi_pass_rounds"),
         multiPassUsed: integer("multi_pass_passes_used"),
         multiPassMerged: boolean("multi_pass_merged"),

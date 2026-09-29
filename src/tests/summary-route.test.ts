@@ -14,6 +14,15 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
  *      object it always did.
  */
 
+// Without corrections a model reads the stored text as it is.
+vi.mock("@/lib/learn/llm-input", () => ({
+    modelInput: vi.fn(async (transcript: { text: string }) => ({
+        text: transcript.text,
+        turns: null,
+        fingerprint: null,
+    })),
+    llmRendering: vi.fn(async () => null),
+}));
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
     isOrgScopeEnabled: () => false,

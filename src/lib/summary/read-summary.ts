@@ -25,6 +25,8 @@ export interface StoredSummary {
     provider: string | null;
     model: string | null;
     multiPass?: MultiPassProvenance;
+    /** What the model read, see `llmInputFingerprint`; null when unknown. */
+    inputFingerprint: string | null;
     createdAt: Date;
 }
 
@@ -70,6 +72,7 @@ export async function readStoredSummary(
                       passesUsed: enhancement.multiPassUsed ?? 0,
                       merged: enhancement.multiPassMerged ?? false,
                   },
+        inputFingerprint: enhancement.inputFingerprint ?? null,
         createdAt: enhancement.createdAt,
     };
 }
