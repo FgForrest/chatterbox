@@ -101,6 +101,7 @@ import {
     sweepAutoLearnHolds,
 } from "@/lib/learn/auto-learn";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { emitEvent } from "@/lib/webhooks/emit";
@@ -463,6 +464,27 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await runRelease();
 
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
+    it("queues what waited for when the hourly limit opens again, rather than dropping it", async () => {
+        for (let i = 0; i < 20; i++) {
+            await consumeRateLimitBucket(`auto-summary:user:${OWNER}`, {
+                limit: 20,
+                windowMs: 60 * 60 * 1000,
+            });
+        }
+        await hold();
+
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+        await runRelease();
+
+        const [summary] = await db()
+            .select({ nextAttemptAt: asyncJobs.nextAttemptAt })
+            .from(asyncJobs)
+            .where(eq(asyncJobs.kind, "summary"));
+        expect(summary?.nextAttemptAt.getTime()).toBeGreaterThan(
+            Date.now() + 30 * 60 * 1000,
+        );
     });
 
     it("keeps a summary the person made while it waited", async () => {

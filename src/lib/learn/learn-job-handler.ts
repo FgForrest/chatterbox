@@ -527,6 +527,9 @@ async function runLearnJob({
             status: "running",
             startedAt: new Date(),
             updatedAt: new Date(),
+            // Each attempt looks things up afresh: what an earlier attempt's
+            // model spent does not count against this one.
+            stats: sql`coalesce(${learnRuns.stats}, '{}'::jsonb) - 'tool_calls'`,
         })
         .where(
             and(

@@ -408,6 +408,32 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         ).toMatchObject({ statusCode: 404 });
     });
 
+    it("adopts members' types by the phrase they suggested, whatever name the curator gives it", async () => {
+        const alicesKey = await createPrivateType(ALICE, worksWith);
+        const bobsKey = await createPrivateType(BOB, {
+            ...worksWith,
+            label: "coaches",
+        });
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+
+        const key = await adoptPhrase(orgUserId, proposal?.id ?? "", {
+            label: "coaches",
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+
+        const adopted = async (user: string, own: string) =>
+            (await vocabularyVisibleTo(user)).relationTypes.find(
+                (r) => r.key === own,
+            )?.adoptedAsKey;
+        expect(await adopted(ALICE, alicesKey)).toBe(key);
+        // Named like the new relation, but never suggested as it.
+        expect(await adopted(BOB, bobsKey)).toBeNull();
+    });
+
     it("rejects a suggested phrase, which members' types keep as theirs", async () => {
         const alicesKey = await createPrivateType(ALICE, worksWith);
         await proposePhrase(ALICE, "mentors");

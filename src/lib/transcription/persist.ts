@@ -71,6 +71,12 @@ export interface UpsertTranscriptionArgs {
      * withdrawn, erased or deleted), it writes nothing, even if the
      * recording is shared again by then.
      */
+    /**
+     * The md5 of the audio this text was made from, as read when its
+     * transcription began (a sync may replace the audio meanwhile); the
+     * recording's current one by default.
+     */
+    audioMd5?: string | null;
     jobId?: string;
 }
 
@@ -276,6 +282,7 @@ export async function upsertTranscription(
                     transcriptionId: current.id,
                     previous: storedSpeakerVersion(current),
                     next: speakerVersionOf({ source, model, text, turns }),
+                    audioMd5: args.audioMd5,
                 });
                 if (args.dropSummaryOnReplace) {
                     await tx
@@ -311,6 +318,7 @@ export async function upsertTranscription(
                     recordingId,
                     userId,
                     source: source,
+                    audioMd5: args.audioMd5,
                 });
             }
 

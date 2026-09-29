@@ -134,7 +134,8 @@ services:
       # writes a credential into the agent_creds volume below.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       BRIDGE_MAX_CONCURRENCY: ${BRIDGE_MAX_CONCURRENCY:-1}
-      BRIDGE_TIMEOUT_MS: ${BRIDGE_TIMEOUT_MS:-300000}
+      # Learn with tools can take several minutes on a long recording.
+      BRIDGE_TIMEOUT_MS: ${BRIDGE_TIMEOUT_MS:-900000}
       # Learn's read-only knowledge tools on the app (see agent-bridge/README.md).
       BRIDGE_LEARN_MCP_URL: ${LEARN_MCP_URL:-}
       CLAUDE_EXTRA_ARGS: ${CLAUDE_EXTRA_ARGS:-}

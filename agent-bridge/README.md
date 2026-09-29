@@ -299,7 +299,7 @@ The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN
 | `BRIDGE_LEARN_MCP_URL` | — | The one URL of Riffado's knowledge tools a Learn request may use, e.g. `http://app:3000/api/mcp/learn`. Unset, requests cannot use tools. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | From `claude setup-token`. Optional if you logged in interactively. |
 | `BRIDGE_MAX_CONCURRENCY` | `1` | Each request spawns a model session drawing on the same rolling window as your interactive coding. |
-| `BRIDGE_TIMEOUT_MS` | `300000` | Per request. The child is SIGKILLed on expiry. |
+| `BRIDGE_TIMEOUT_MS` | `300000` (compose: `900000`) | Per request. The child is SIGKILLed on expiry, and when the caller goes away. Learn with tools needs several minutes on a long recording. |
 | `BRIDGE_MAX_BODY_BYTES` | `20000000` | Transcripts are large; this is the ceiling. |
 | `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` | — | Extra flags, space-separated, applied verbatim after the bridge's own. |
 | `CLAUDE_BIN` / `CODEX_BIN` | `claude` / `codex` | Override to test a different build. |

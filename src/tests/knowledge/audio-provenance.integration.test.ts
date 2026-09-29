@@ -86,6 +86,7 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 }));
 
 import { encryptText } from "@/lib/encryption/fields";
+import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { upsertTranscription } from "@/lib/transcription/persist";
 
@@ -207,5 +208,47 @@ describeWithDatabase("audio provenance on transcripts (PostgreSQL)", () => {
             .select({ audioMd5: transcriptions.audioMd5 })
             .from(transcriptions);
         expect(transcript?.audioMd5).toBe("b".repeat(32));
+    });
+
+    it("demotes the names on a transcript whose audio a sync replaced and kept it", async () => {
+        await db().transaction(async (tx) => {
+            await tx
+                .update(recordings)
+                .set({ fileMd5: "b".repeat(32) })
+                .where(eq(recordings.id, REC));
+            await audioReplacedInTx(tx, REC, "b".repeat(32));
+        });
+
+        expect(await speaker0()).toBe("suggested");
+        // Still made from the old audio: a later rewrite sees the change too.
+        const [transcript] = await db()
+            .select({ audioMd5: transcriptions.audioMd5 })
+            .from(transcriptions);
+        expect(transcript?.audioMd5).toBe("a".repeat(32));
+    });
+
+    it("stamps the audio a transcription was made from, not what a sync put there meanwhile", async () => {
+        await db()
+            .update(recordings)
+            .set({ fileMd5: "b".repeat(32) })
+            .where(eq(recordings.id, REC));
+        // Began on audio "a"; the trim landed before it finished.
+        await upsertTranscription({
+            userId: OWNER,
+            recordingId: REC,
+            text: "Ahoj. Čau.",
+            detectedLanguage: "cs",
+            source: "plaud",
+            provider: "plaud",
+            model: "plaud",
+            turns: TURNS,
+            audioMd5: "a".repeat(32),
+        });
+
+        expect(await speaker0()).toBe("confirmed");
+        const [transcript] = await db()
+            .select({ audioMd5: transcriptions.audioMd5 })
+            .from(transcriptions);
+        expect(transcript?.audioMd5).toBe("a".repeat(32));
     });
 });

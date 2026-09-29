@@ -285,7 +285,7 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
  */
 export async function sweepAutoLearnHolds(
     now = new Date(),
-    limit = 50,
+    limit = 500,
 ): Promise<number> {
     const held = await db
         .select({ id: recordings.id, dueAt: recordings.summaryDueAt })

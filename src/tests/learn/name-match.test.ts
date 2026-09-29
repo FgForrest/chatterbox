@@ -20,6 +20,10 @@ describe("name matching, as Czech says names", () => {
     it("knows the consonant a Czech ending changes, and only real endings", () => {
         expect(isNameWord("prochazce", "prochazka")).toBe(true);
         expect(isNameWord("zelenyho", "zeleny")).toBe(true);
+        expect(isNameWord("krejciho", "krejci")).toBe(true);
+        expect(isNameWord("krejcimu", "krejci")).toBe(true);
+        expect(isNameWord("novakuv", "novak")).toBe(true);
+        expect(isNameWord("novakovych", "novak")).toBe(true);
         // Another name that starts like a first name is not it.
         expect(isNameWord("janusek", "jan")).toBe(false);
         expect(isNameWord("janda", "jan")).toBe(false);

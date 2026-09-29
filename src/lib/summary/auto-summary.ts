@@ -29,6 +29,18 @@ export async function queueAutoSummary(
         },
     );
 
+    if (!rateLimit.allowed && strict) {
+        // What was held for Learn: queued for when the window opens again,
+        // not dropped.
+        await enqueueSummaryJob({
+            userId,
+            recordingId,
+            presetId: presetId ?? undefined,
+            trigger: "auto",
+            delayMs: Math.max(0, rateLimit.resetAt.getTime() - Date.now()),
+        });
+        return;
+    }
     if (!rateLimit.allowed) {
         console.warn(
             `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,

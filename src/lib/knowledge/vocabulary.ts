@@ -1528,10 +1528,13 @@ export async function adoptPhrase(
                 404,
             );
         }
-        const label = spec.label ?? decryptText(proposal.phrase);
+        const phrase = decryptText(proposal.phrase);
+        const label = spec.label ?? phrase;
+        // Members' types named as they suggested it, whatever the curator
+        // names the new relation.
         const labelHmac = domainLookupHash(
             LABEL_DOMAIN.relation,
-            cleanLabel(label),
+            cleanLabel(phrase),
         );
         // The members' types of that name first, as renaming or deleting
         // one takes it before the vocabulary's version: the type rows,
@@ -1628,6 +1631,7 @@ export async function mapPhrase(
             .where(
                 and(
                     eq(knowledgeRelationTypes.key, key),
+                    eq(knowledgeRelationTypes.status, "active"),
                     or(
                         isNull(knowledgeRelationTypes.userId),
                         orgOwnedCondition(knowledgeRelationTypes.userId),

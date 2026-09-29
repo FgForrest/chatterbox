@@ -754,6 +754,9 @@ async function transcribeRecordingInner(
             // The summary describes the text a forced re-run replaces.
             dropSummaryOnReplace: opts.force ? "riffado" : undefined,
             jobId: opts.jobId,
+            // The audio this run downloaded, not whatever a sync put there
+            // meanwhile.
+            audioMd5: recording.fileMd5,
         });
 
         if (!committed && reason) return refusedResult(reason);

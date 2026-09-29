@@ -18,6 +18,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
+import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
 import { getOrgUserId } from "@/lib/org/config";
@@ -576,6 +577,12 @@ async function processRecording(
                             eq(recordings.userId, context.userId),
                         ),
                     );
+                // The transcripts it keeps were made from the old audio.
+                await audioReplacedInTx(
+                    tx,
+                    existingRecording.id,
+                    plaudRecording.file_md5,
+                );
                 return true;
             });
 

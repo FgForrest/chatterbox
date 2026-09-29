@@ -84,8 +84,11 @@ export async function enqueueTopicsJob(input: {
     source: TopicSource;
     trigger: "manual" | "auto";
     view?: RecordingView;
+    /** Not before this many ms from now (a rate limit's window). */
+    delayMs?: number;
 }): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
+        ...(input.delayMs ? { delayMs: input.delayMs } : {}),
         userId: input.userId,
         kind: TOPICS_JOB_KIND,
         subjectId: recordingJobSubject(
@@ -138,6 +141,21 @@ export async function queueAutoTopics(
             },
         );
         if (!rateLimit.allowed) {
+            // Strict (what was held for Learn): queued for when the window
+            // opens again, not dropped.
+            if (strict) {
+                await enqueueTopicsJob({
+                    userId,
+                    recordingId,
+                    source,
+                    trigger: "auto",
+                    delayMs: Math.max(
+                        0,
+                        rateLimit.resetAt.getTime() - Date.now(),
+                    ),
+                });
+                return;
+            }
             console.warn(
                 `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
             );

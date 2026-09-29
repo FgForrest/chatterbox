@@ -112,6 +112,8 @@ export interface EnqueueSummaryInput {
     presetId?: string;
     trigger: "manual" | "auto";
     view?: RecordingView;
+    /** Not before this many ms from now (a rate limit's window). */
+    delayMs?: number;
 }
 
 /**
@@ -125,6 +127,7 @@ export async function enqueueSummaryJob(
     input: EnqueueSummaryInput,
 ): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
+        ...(input.delayMs ? { delayMs: input.delayMs } : {}),
         userId: input.userId,
         kind: SUMMARY_JOB_KIND,
         subjectId: recordingJobSubject(
