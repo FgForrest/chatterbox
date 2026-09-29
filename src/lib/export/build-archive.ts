@@ -1,4 +1,4 @@
-import { PassThrough, type Readable } from "node:stream";
+import { PassThrough, type Readable, Transform } from "node:stream";
 import { ZipArchive } from "archiver";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
@@ -164,13 +164,20 @@ export async function buildAndUploadExportArchive(input: {
     }
 
     const archive = new ZipArchive({ zlib: { level: 6 } });
-    const passthrough = new PassThrough();
     // Count bytes as they flow through rather than re-reading the
-    // finished archive back out of storage just to learn its size.
+    // finished archive back out of storage just to learn its size. In the
+    // transform, not a `data` listener: that would start the stream
+    // flowing before the storage attaches its writer (LocalStorage checks
+    // its directory first), and whatever came out in between was counted
+    // but never stored -- a corrupt archive whose download promised more
+    // bytes than the file had.
     let fileSize = 0;
-    passthrough.on("data", (chunk: Buffer) => {
-        fileSize += chunk.length;
-        onProgress?.();
+    const passthrough = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+            fileSize += chunk.length;
+            onProgress?.();
+            callback(null, chunk);
+        },
     });
     archive.pipe(passthrough);
 

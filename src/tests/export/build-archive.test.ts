@@ -124,6 +124,18 @@ class FakeStorage implements StorageProvider {
     }
 }
 
+/** Starts reading the archive only after a delay, as LocalStorage does after its directory checks. */
+class LateStorage extends FakeStorage {
+    override async uploadStream(
+        key: string,
+        stream: Readable,
+        contentType: string,
+    ): Promise<string> {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return super.uploadStream(key, stream, contentType);
+    }
+}
+
 /**
  * A stream that never produces data and, crucially, never finishes
  * being destroyed -- `_destroy` deliberately never calls its callback.
@@ -722,6 +734,45 @@ describe("buildAndUploadExportArchive", () => {
         );
         expect(audioEntry?.[1].compressionMethod).toBe(0);
         expect(entries.get("manifest.json")?.compressionMethod).toBe(8);
+    });
+
+    it("records the size of what was stored when the storage starts reading late", async () => {
+        // LocalStorage checks its directory before it pipes the archive to
+        // disk: whatever flowed before that was counted but never written,
+        // so the download's Content-Length promised bytes the file lacked.
+        const late = new LateStorage();
+        late.files.set("audio/rec-1.mp3", Buffer.alloc(256 * 1024, 7));
+        mockSelectSequence([
+            [
+                {
+                    id: "rec-1",
+                    userId: "user-1",
+                    filename: "enc-filename",
+                    startTime: new Date("2026-01-01T00:00:00Z"),
+                    endTime: new Date("2026-01-01T00:01:00Z"),
+                    duration: 60000,
+                    filesize: 256 * 1024,
+                    deviceSn: "SN123",
+                    storagePath: "audio/rec-1.mp3",
+                },
+            ],
+            [],
+            [],
+        ]);
+
+        const result = await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: late,
+            destinationStorage: late,
+            storageKey: "exports/user-1/job-late.zip",
+        });
+
+        expect(late.uploaded?.length).toBe(result.fileSize);
+        const entries = await readZipEntries(late.uploaded as Buffer);
+        const audio = [...entries.entries()].find(([n]) =>
+            n.endsWith("/audio.mp3"),
+        );
+        expect(audio?.[1].buffer.length).toBe(256 * 1024);
     });
 
     it("skips missing audio without failing the whole export, and notes why in the manifest", async () => {
