@@ -164,6 +164,7 @@ import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
+import { llmRendering } from "@/lib/learn/llm-input";
 import {
     pendingReviewCount,
     recordingsNeedingReview,
@@ -1043,6 +1044,49 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(
                     (await route(getReviewRoute, OWNER, "review")).status,
                 ).toBe(200);
+            });
+
+            it("feeds the model the ticked corrections of an unfinished review, then the confirmed ones", async () => {
+                await readyRun();
+                const before = await llmRendering(transcriptId);
+                expect(before?.text).toBe(
+                    "speaker_0: Dobrý den, máme tu Tavesy.",
+                );
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as {
+                    items: { id: string; kind: string; version: number }[];
+                };
+                const correction = items.find(
+                    (item) => item.kind === "correction",
+                );
+                const phrase = items.find(
+                    (item) => item.kind === "relation_phrase",
+                );
+                const id = correction?.id ?? "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                const ticked = await llmRendering(transcriptId);
+                expect(ticked?.text).toBe(
+                    "speaker_0: Dobrý den, máme tu Tavesi.",
+                );
+                expect(ticked?.fingerprint).not.toBe(before?.fingerprint);
+
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: {
+                        versions: { [id]: 1, [phrase?.id ?? ""]: 0 },
+                    },
+                });
+                const finished = await llmRendering(transcriptId);
+                expect(finished?.text).toBe(ticked?.text);
+                expect(finished?.fingerprint).toBe(ticked?.fingerprint);
+                expect(finished?.turns[0]?.text).toBe(
+                    "Dobrý den, máme tu Tavesi.",
+                );
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {
