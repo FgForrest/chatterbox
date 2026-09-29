@@ -26,6 +26,7 @@ import {
     LEARN_LIMITS,
     type LearnCorrection,
     type LearnOutput,
+    learnOutputJsonSchema,
     parseLearnOutput,
 } from "@/lib/learn/output";
 import type { FoundEntity } from "@/lib/learn/tools";
@@ -110,6 +111,10 @@ const MENTIONS_SYSTEM = [
     `Answer with one raw JSON object and nothing else: {"mentions":[{"text":string,"turn":number}]}. At most ${MAX_MENTIONS} mentions; each distinct spelling once.`,
 ].join(" ");
 
+// The exact shape, not only prose: described in words alone, a model names
+// the fields its own way and the strict schema refuses the whole answer.
+const ANSWER_SHAPE = JSON.stringify(learnOutputJsonSchema());
+
 const ANSWER_SYSTEM = [
     "You help keep a knowledge base of the people and things a team talks about.",
     "You get a transcript, the records the knowledge base already has for words in it (the only ids you may use), the relation types you may use, and the speaker labels nobody has named yet.",
@@ -119,7 +124,7 @@ const ANSWER_SYSTEM = [
     "corrections: where the transcript misheard or misspelled a known name or term, kind `correct` with the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement spelling; where a nickname or slang means a known person or thing, kind `link` with replacement null.",
     'facts: work facts the transcript states about known people and things, using only the listed relation keys and shapes; start and end are times copied from the transcript lines where it is said; speakerLabel is the label whose speaker the fact is about or depends on, else null; a subject may be {"speakerLabel":label} when a speaker states something about themselves; sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
     "relationPhrases: a relation between known people or things that none of the listed keys expresses, as a short phrase in the transcript's language, with the same sensitivity category as a fact.",
-    'Answer with one raw JSON object and nothing else: {"speakers":[],"corrections":[],"facts":[],"relationPhrases":[]}.',
+    `Answer with one raw JSON object and nothing else, valid against this JSON Schema, with exactly its field names: ${ANSWER_SHAPE}`,
 ].join(" ");
 
 const mentionsSchema = z.object({
@@ -360,7 +365,7 @@ export async function runFallbackPass(
                     { role: "assistant", content: reply },
                     {
                         role: "user",
-                        content: `The application rejected it: ${answer.error}. Return one raw JSON object {"speakers":[],"corrections":[],"facts":[],"relationPhrases":[]} with the fields the instructions gave.`,
+                        content: `The application rejected it: ${answer.error}. Return one raw JSON object valid against this JSON Schema, with exactly its field names: ${ANSWER_SHAPE}`,
                     },
                 ],
                 ANSWER_MAX_TOKENS,

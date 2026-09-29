@@ -521,6 +521,11 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
                 lookups: pass.lookups,
                 windows: pass.windows,
                 repairs: pass.repairs,
+                // A window whose answer was never the shape is lost: said,
+                // not hidden behind a run that merely found nothing.
+                ...(pass.failedWindows > 0
+                    ? { failed_windows: pass.failedWindows }
+                    : {}),
             };
             for (let fenceAttempt = 1; ; fenceAttempt++) {
                 const lastAttempt = fenceAttempt >= FENCE_ATTEMPTS;

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { LearnToolBudgetExhausted } from "@/lib/learn/errors";
+import { learnOutputJsonSchema } from "@/lib/learn/output";
 import {
     anchorCorrections,
     type LearnChatMessage,
@@ -160,6 +161,44 @@ describe("runFallbackPass", () => {
                 unnamedLabels: [],
             }),
         ).rejects.toThrow(/not the shape/);
+    });
+
+    it("gives the model the answer's exact shape, and the repair too", async () => {
+        // Described only in prose, the model named the fields its own way
+        // (`speakerLabel`, `turn`, `targetId`, evidence as quoted lines):
+        // the strict schema refused it, the repair had no shape to aim at,
+        // and every window's proposals were lost (the Learn pilot, 2026-09-29).
+        const lookup = {
+            findEntities: vi.fn(async () => ({
+                byMeaning: false,
+                entities: [],
+            })),
+        };
+        const empty = JSON.stringify({
+            speakers: [],
+            corrections: [],
+            facts: [],
+            relationPhrases: [],
+        });
+        const { chat, calls } = fakeChat([
+            '{"mentions":[]}',
+            "not json",
+            empty,
+        ]);
+        await runFallbackPass({
+            chat,
+            lookup,
+            turns: TURNS,
+            language: "cs",
+            relations,
+            unnamedLabels: ["speaker_0"],
+        });
+        const schema = JSON.stringify(learnOutputJsonSchema());
+        const answer = calls[1]?.map((m) => m.content).join("\n") ?? "";
+        const repair = calls[2]?.map((m) => m.content).join("\n") ?? "";
+        for (const prompt of [answer, repair]) {
+            expect(prompt).toContain(schema);
+        }
     });
 
     it("reads a long transcript in windows and joins their answers", async () => {
