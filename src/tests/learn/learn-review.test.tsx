@@ -497,4 +497,58 @@ describe("LearnReview", () => {
             ),
         );
     });
+
+    it("lets a fact be ticked once its speaker is named as someone new", async () => {
+        const speaker = {
+            id: "i-speaker",
+            kind: "speaker",
+            preTicked: false,
+            decision: "accepted",
+            choice: { displayName: "Jan Nový" },
+            version: 1,
+            dependsOnLabel: null,
+            payload: {
+                label: "speaker_1",
+                personId: null,
+                evidenceMs: [],
+                reason: "",
+            },
+        };
+        const fact = {
+            id: "i-fact",
+            kind: "fact",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: "speaker_1",
+            payload: {
+                subject: { speakerLabel: "speaker_1" },
+                relationKey: "leads",
+                object: { entityId: "e-orion" },
+                startMs: 5_000,
+                endMs: 9_000,
+                speakerLabel: "speaker_1",
+            },
+        };
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [speaker, fact],
+            },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        );
+        expect(
+            (
+                screen.getByRole("checkbox", {
+                    name: /speaker_1 — leads — Orion/,
+                }) as HTMLInputElement
+            ).disabled,
+        ).toBe(false);
+    });
 });

@@ -361,8 +361,11 @@ export function LearnReview({
                 item.dependsOnLabel,
         );
         if (!speaker) return false;
+        // Whom the reviewer chose (someone known, or someone new), else
+        // whom Learn proposed; unknown names nobody.
         const named =
-            speaker.choice && "personId" in speaker.choice
+            speaker.choice &&
+            ("personId" in speaker.choice || "displayName" in speaker.choice)
                 ? true
                 : speaker.choice && "unknown" in speaker.choice
                   ? false

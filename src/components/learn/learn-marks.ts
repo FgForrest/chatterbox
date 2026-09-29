@@ -37,6 +37,8 @@ export interface LearnMarksSource {
         kind: string;
         preTicked: boolean;
         decision: "accepted" | "rejected" | null;
+        /** The reviewer's choice for the item, where they made one. */
+        choice?: Record<string, unknown> | null;
         payload: Record<string, unknown>;
     }[];
 }
@@ -58,9 +60,18 @@ export function learnMarksFrom(
                 label: string;
                 personId: string | null;
             };
-            const name = payload.personId
-                ? state.names[payload.personId]
-                : undefined;
+            // As the reviewer chose (someone known, or someone new), else
+            // as Learn proposed; answered unknown, nobody is shown.
+            const choice = item.choice ?? null;
+            if (choice?.unknown === true) continue;
+            const name =
+                typeof choice?.personId === "string"
+                    ? state.names[choice.personId]
+                    : typeof choice?.displayName === "string"
+                      ? choice.displayName
+                      : payload.personId
+                        ? state.names[payload.personId]
+                        : undefined;
             if (!name) continue;
             speakers[speakerKey(payload.label)] = {
                 itemId: item.id,

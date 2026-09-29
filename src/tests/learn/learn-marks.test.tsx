@@ -138,6 +138,41 @@ describe("Learn marks", () => {
         ]);
     });
 
+    it("name a speaker as the reviewer chose, and none they answered unknown", () => {
+        const marks = learnMarksFrom(
+            {
+                ...STATE,
+                names: { ...STATE.names, "p-petr": "Petr" },
+                items: [
+                    {
+                        ...STATE.items[1],
+                        decision: "accepted",
+                        choice: { personId: "p-petr" },
+                    },
+                    item({
+                        id: "i-new",
+                        kind: "speaker",
+                        decision: "accepted",
+                        choice: { displayName: "Jana Nová" },
+                        payload: { label: "speaker_2", personId: "p-jan" },
+                    }),
+                    item({
+                        id: "i-unknown",
+                        kind: "speaker",
+                        decision: "accepted",
+                        choice: { unknown: true },
+                        payload: { label: "speaker_0", personId: "p-jan" },
+                    }),
+                ],
+            },
+            vi.fn(),
+        );
+        expect(marks?.speakers).toEqual({
+            speaker_1: { itemId: "i-speaker", name: "Petr", ticked: true },
+            speaker_2: { itemId: "i-new", name: "Jana Nová", ticked: true },
+        });
+    });
+
     it("split a turn's text at the marks that still quote it, in order", () => {
         const mark = (charStart: number, charEnd: number, heard: string) => ({
             itemId: `${charStart}`,
