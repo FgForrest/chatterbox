@@ -628,7 +628,7 @@ export async function listOwnTypes(userId: string): Promise<OwnType[]> {
             key: knowledgeEntityTypes.key,
             label: knowledgeEntityTypes.label,
             adoptedFromShare: knowledgeEntityTypes.adoptedFromShare,
-            uses: sql<number>`(select count(*)::int from ${knowledgeEntities} where ${knowledgeEntities.userId} = ${userId} and ${knowledgeEntities.typeKey} = ${knowledgeEntityTypes.key})`,
+            uses: sql<number>`(select count(*)::int from ${knowledgeEntities} where ${knowledgeEntities.userId} = ${userId} and ${knowledgeEntities.typeKey} = ${knowledgeEntityTypes.key} and ${knowledgeEntities.mergedIntoId} is null)`,
         })
         .from(knowledgeEntityTypes)
         .where(
@@ -726,10 +726,19 @@ async function usesOfType(
     ownerUserId: string,
     key: string,
 ): Promise<number> {
+    // Entities merged away go too, but were counted where they were
+    // merged: the person counts the ones they see.
     const [row] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(kind === "entity" ? knowledgeEntities : knowledgeFacts)
-        .where(usesOfTypeCondition(kind, ownerUserId, key));
+        .where(
+            kind === "entity"
+                ? and(
+                      usesOfTypeCondition(kind, ownerUserId, key),
+                      isNull(knowledgeEntities.mergedIntoId),
+                  )
+                : usesOfTypeCondition(kind, ownerUserId, key),
+        );
     return row?.count ?? 0;
 }
 
