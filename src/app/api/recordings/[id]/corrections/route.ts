@@ -64,7 +64,9 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                 404,
             );
         }
-        return listCorrections(access.contentUserId, transcript.id, tx);
+        return listCorrections(access.contentUserId, transcript.id, tx, {
+            shared: access.shared,
+        });
     });
     const names = new Map(
         (

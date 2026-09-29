@@ -20,7 +20,7 @@
  * (`withdrawKnowledgeInTx`). A private recording reads the owner's.
  */
 
-import { and, asc, eq, not, or, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { transcriptCorrections, transcriptions } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
@@ -43,32 +43,48 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeopleShared,
     orgOwnedCondition,
-    recordingSharedCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
+import { getOrgUserId } from "@/lib/org/config";
+import { isRecordingShared } from "@/lib/sharing/shared";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const HEARD_DOMAIN = "correction-heard";
 
 /**
- * SQL predicate: the correction is one its transcript's views read -- the
- * Organization's, and the owner's while the recording is not shared.
+ * SQL predicate: the correction is in the scope a view of the transcript
+ * reads: the Organization's while the recording is shared, the owner's
+ * otherwise.
  */
-function readCorrection(ownerUserId: string) {
-    return or(
-        orgOwnedCondition(transcriptCorrections.userId),
-        and(
-            eq(transcriptCorrections.userId, ownerUserId),
-            not(
-                recordingSharedCondition(
-                    sql`(select ${transcriptions.recordingId} from ${transcriptions} where ${transcriptions.id} = ${transcriptCorrections.transcriptionId})`,
-                ),
-            ),
-        ),
-    );
+function correctionsIn(ownerUserId: string, shared: boolean) {
+    return shared
+        ? orgOwnedCondition(transcriptCorrections.userId)
+        : eq(transcriptCorrections.userId, ownerUserId);
 }
+
+/**
+ * Whether the transcript's recording is shared, as this instance decides
+ * it: never where it shows no Organization (a `local` instance keeps a
+ * recording once shared in its folders, and its owner's view private).
+ */
+async function transcriptShared(
+    executor: Pick<typeof db, "select">,
+    transcriptionId: string,
+): Promise<boolean> {
+    const orgUserId = await getOrgUserId();
+    if (!orgUserId) return false;
+    const [row] = await executor
+        .select({ recordingId: transcriptions.recordingId })
+        .from(transcriptions)
+        .where(eq(transcriptions.id, transcriptionId))
+        .limit(1);
+    return row
+        ? isRecordingShared(row.recordingId, orgUserId, executor)
+        : false;
+}
+
 /** Long enough for any name or term, short enough to keep it one. */
 const MAX_REPLACEMENT_LENGTH = 200;
 
@@ -188,9 +204,10 @@ export async function acceptCorrectionInTx(
             and(
                 eq(transcriptCorrections.transcriptionId, args.transcriptionId),
                 eq(transcriptCorrections.turnIndex, anchor.turnIndex),
-                // Only what the actor's view shows: a waiting private
-                // correction neither blocks nor gives itself away.
-                readCorrection(args.userId),
+                // Only what the actor's view shows, which the writer rule
+                // made the actor's scope: a waiting private correction
+                // neither blocks nor gives itself away.
+                eq(transcriptCorrections.userId, actorUserId),
             ),
         );
     if (onTurn.some((other) => anchorsOverlap(other, anchor))) {
@@ -278,7 +295,17 @@ export async function listCorrections(
     ownerUserId: string,
     transcriptionId: string,
     executor: Pick<typeof db, "select"> = db,
+    {
+        shared,
+    }: {
+        /**
+         * The sharing state the reader was authorized in; looked up when
+         * not given.
+         */
+        shared?: boolean;
+    } = {},
 ): Promise<Correction[]> {
+    const scope = shared ?? (await transcriptShared(executor, transcriptionId));
     const rows = await executor
         .select({
             id: transcriptCorrections.id,
@@ -302,7 +329,7 @@ export async function listCorrections(
             and(
                 eq(transcriptions.userId, ownerUserId),
                 eq(transcriptCorrections.transcriptionId, transcriptionId),
-                readCorrection(ownerUserId),
+                correctionsIn(ownerUserId, scope),
             ),
         )
         .orderBy(

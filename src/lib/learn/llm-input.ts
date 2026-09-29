@@ -108,18 +108,23 @@ export async function correctionOverlay(
     const orgUserId = await sharingOrgUserId();
     const { shared, confirmed } =
         sharedAs === undefined
-            ? {
-                  shared:
+            ? await (async () => {
+                  const sharedNow =
                       orgUserId !== null &&
                       (await isRecordingShared(
                           transcript.recordingId,
                           orgUserId,
-                      )),
-                  confirmed: await listCorrections(
-                      transcript.userId,
-                      transcript.id,
-                  ),
-              }
+                      ));
+                  return {
+                      shared: sharedNow,
+                      confirmed: await listCorrections(
+                          transcript.userId,
+                          transcript.id,
+                          db,
+                          { shared: sharedNow },
+                      ),
+                  };
+              })()
             : await db.transaction(async (tx) => {
                   await tx
                       .select({ id: recordings.id })
@@ -146,6 +151,7 @@ export async function correctionOverlay(
                           transcript.userId,
                           transcript.id,
                           tx,
+                          { shared: sharedNow },
                       ),
                   };
               });

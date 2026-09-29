@@ -498,6 +498,30 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
         expect(back[0]?.id).toBe(curators);
     });
 
+    it("reads the owner's own corrections once the instance runs local, the Organization's not at all", async () => {
+        await share();
+        await ownersPrivateCorrection("Orionu");
+        await correct({
+            target: { personId: orgJan },
+            actorUserId: orgUserId,
+        });
+        const owners = (
+            await db()
+                .select({ id: transcriptCorrections.id })
+                .from(transcriptCorrections)
+                .where(eq(transcriptCorrections.userId, OWNER))
+        ).map((row) => row.id);
+        expect(owners).toHaveLength(1);
+        mockEnv.SELF_HOST_MODE = "local";
+        try {
+            expect(
+                (await listCorrections(OWNER, transcriptId)).map((c) => c.id),
+            ).toEqual(owners);
+        } finally {
+            mockEnv.SELF_HOST_MODE = "shared";
+        }
+    });
+
     it("keeps the Organization's correction, not a waiting one on the same words, through a re-transcription", async () => {
         await share();
         await ownersPrivateCorrection("Novák");

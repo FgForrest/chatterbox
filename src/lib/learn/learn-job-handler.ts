@@ -377,13 +377,15 @@ async function frameFor(
         currentFacts,
         // The words that already carry a confirmed correction, as everyone
         // reading the transcript in its view sees them.
-        corrected: (await listCorrections(run.userId, run.transcriptionId)).map(
-            ({ turnIndex, charStart, charEnd }) => ({
-                turnIndex,
-                charStart,
-                charEnd,
-            }),
-        ),
+        corrected: (
+            await listCorrections(run.userId, run.transcriptionId, db, {
+                shared: run.view === "org",
+            })
+        ).map(({ turnIndex, charStart, charEnd }) => ({
+            turnIndex,
+            charStart,
+            charEnd,
+        })),
         dismissed: new Set(dismissed.map((row) => row.hmac)),
         fingerprintKey: learnFingerprintHmac,
         literalKey,
