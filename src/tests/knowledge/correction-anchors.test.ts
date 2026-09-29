@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
     anchorMatches,
     remapCorrectionAnchors,
+    wordsAt,
 } from "@/lib/knowledge/correction-anchors";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -36,7 +37,35 @@ describe("anchorMatches", () => {
     });
 });
 
+describe("wordsAt", () => {
+    it("matches letters case-blind the same way whatever the runtime's locale", () => {
+        // A Turkish default locale lowercases "I" to a dotless "ı": the
+        // server and a browser must still agree that "Ivo" is "ivo".
+        const turkish = vi
+            .spyOn(String.prototype, "toLocaleLowerCase")
+            .mockImplementation(function (this: string) {
+                return this.replaceAll("I", "ı").toLowerCase();
+            });
+        try {
+            expect(wordsAt("Ivo a Ivana", 0, 3, "ivo")).toBe("Ivo");
+        } finally {
+            turkish.mockRestore();
+        }
+    });
+});
+
 describe("remapCorrectionAnchors", () => {
+    it("never lands a remapped anchor inside a character", () => {
+        const previous = [turn(0, 4000, "Cafe today, Cafe tomorrow.")];
+        // Re-transcribed: the first word gains an accent written apart.
+        const next = [turn(0, 4000, "Cafe\u0301 today, Cafe tomorrow.")];
+        const anchor = anchorOf(previous, 0, "Cafe");
+        const at = next[0]?.text.lastIndexOf("Cafe") ?? -1;
+        expect(remapCorrectionAnchors([anchor], previous, next)).toEqual([
+            { turnIndex: 0, charStart: at, charEnd: at + 4 },
+        ]);
+    });
+
     it("keeps anchors on an unchanged transcript", () => {
         const anchors = [
             anchorOf(before, 0, "Novák"),

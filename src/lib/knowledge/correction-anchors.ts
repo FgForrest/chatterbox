@@ -72,11 +72,14 @@ export function wordsAt(
     return sameWords(words, heard) ? words : null;
 }
 
-/** Whether two texts say the same words, in any case, however composed. */
+/**
+ * Whether two texts say the same words, in any case, however composed.
+ * Case is folded without a locale, as Learn's validation groups them: a
+ * browser in another locale (Turkish "I") and the server must agree.
+ */
 export function sameWords(a: string, b: string): boolean {
     return (
-        a.normalize("NFC").toLocaleLowerCase() ===
-        b.normalize("NFC").toLocaleLowerCase()
+        a.normalize("NFC").toLowerCase() === b.normalize("NFC").toLowerCase()
     );
 }
 
@@ -182,6 +185,13 @@ function remapOne(
             at >= 0;
             at = turn.text.indexOf(anchor.heard, at + 1)
         ) {
+            // Part of a character as a reader sees it is not the words.
+            if (
+                splitsCharacter(turn.text, at) ||
+                splitsCharacter(turn.text, at + anchor.heard.length)
+            ) {
+                continue;
+            }
             const distance = Math.abs(momentOf(turn, at) - moment);
             if (!best || distance < best.distance) {
                 best = {
