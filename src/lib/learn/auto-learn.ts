@@ -46,6 +46,7 @@ import {
 } from "@/lib/knowledge/availability";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunOpen } from "@/lib/learn/learn-open";
+import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
@@ -220,14 +221,12 @@ async function queueReleased(
         .where(eq(userSettings.userId, userId))
         .limit(1);
     const queued: string[] = [];
-    // A failure here fails the job, which is retried: nothing is lost.
-    if (settings?.autoGenerateTitle ?? true) {
-        await enqueueTitleJob(userId, recordingId);
-        queued.push("title");
-    }
-    await queueAutoTopics(userId, recordingId, "riffado");
+    // A failure here fails the job, which is retried: nothing is lost. The
+    // summary first, and only while no summary of the transcript as it
+    // reads now exists, so a retry does not pay for one twice. A summary a
+    // person made while it waited is kept; one made from an older reading
+    // (an automatic job that ran before a newer hold) is not.
     if (settings?.autoSummarize) {
-        // A person who made one while it waited keeps theirs.
         const [made] = await db
             .select({ id: aiEnhancements.id })
             .from(aiEnhancements)
@@ -239,14 +238,20 @@ async function queueReleased(
                 ),
             )
             .limit(1);
-        if (!made) {
+        if (!made || (await isSummaryStale(userId, recordingId))) {
             await queueAutoSummary(
                 userId,
                 recordingId,
                 settings.autoSummarizePreset ?? null,
+                { strict: true },
             );
             queued.push("summary");
         }
+    }
+    await queueAutoTopics(userId, recordingId, "riffado", { strict: true });
+    if (settings?.autoGenerateTitle ?? true) {
+        await enqueueTitleJob(userId, recordingId);
+        queued.push("title");
     }
     return { queued };
 }

@@ -111,12 +111,14 @@ export async function enqueueTopicsJob(input: {
 /**
  * Queue topics after a transcript with timings was written, when the user
  * asked for that. Never throws: the transcript is what matters to whoever
- * wrote it, and topics can always be detected by hand.
+ * wrote it, and topics can always be detected by hand. `strict` (a job
+ * that retries until what it queues is queued) throws a failure to queue.
  */
 export async function queueAutoTopics(
     userId: string,
     recordingId: string,
     source: TopicSource,
+    { strict = false }: { strict?: boolean } = {},
 ): Promise<void> {
     try {
         const [settings] = await db
@@ -148,6 +150,7 @@ export async function queueAutoTopics(
             trigger: "auto",
         });
     } catch (error) {
+        if (strict) throw error;
         console.error(
             `Could not queue topics for recording ${recordingId}:`,
             error,

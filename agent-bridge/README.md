@@ -289,7 +289,7 @@ Riffado's Learn reads a transcript and proposes speaker names, corrections and f
 
 The token is in the child's environment only: never in argv or a file, redacted from error text, never logged. It names one Learn run, expires, and works only while that run is running. The temp files go when the request ends. Verified with Claude Code 2.1.284 and Codex 0.155.1 (Spike 0.1, and a round trip through this bridge to a probe MCP server).
 
-The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, which is what tells Riffado to use it.
+The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, and `LEARN_BRIDGE_URL` to this bridge's base URL as the provider names it (`http://agent-bridge:8787/v1`): Riffado sends a run's token only to a Claude Code or Codex provider whose base URL is exactly that, never to an endpoint merely named like one.
 
 ## Configuration
 

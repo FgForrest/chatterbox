@@ -51,7 +51,7 @@ import {
     heardIsFirstNameOnly,
     heardIsTheName,
     moreThanFirstName,
-    nameWords,
+    nameTokens,
 } from "@/lib/learn/name-match";
 import type {
     LearnCorrection,
@@ -841,10 +841,10 @@ export function fullNameNear(
             near.add(index);
         }
     }
-    const words = [...near].flatMap((index) =>
-        nameWords(turns[index]?.text ?? ""),
+    const tokens = [...near].flatMap((index) =>
+        nameTokens(turns[index]?.text ?? ""),
     );
-    return moreThanFirstName(words, person);
+    return moreThanFirstName(tokens, person);
 }
 
 function factFingerprint(

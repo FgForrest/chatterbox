@@ -4,7 +4,7 @@ import {
     heardIsTheName,
     isNameWord,
     moreThanFirstName,
-    nameWords,
+    nameTokens,
 } from "@/lib/learn/name-match";
 
 describe("name matching, as Czech says names", () => {
@@ -24,7 +24,7 @@ describe("name matching, as Czech says names", () => {
     });
 
     it("hears more than a first name only in a surname or a real nickname", () => {
-        const words = (text: string) => nameWords(text);
+        const words = (text: string) => nameTokens(text);
         expect(
             moreThanFirstName(words("Bednářovi to pošlu"), {
                 name: "Michal Bednář",
@@ -52,6 +52,18 @@ describe("name matching, as Czech says names", () => {
             moreThanFirstName(words("Jo, Vonďo, pošli"), {
                 name: "Michal Vondra",
                 aliases: ["Vonďa"],
+            }),
+        ).toBe(true);
+        // An adjective is not the surname it looks like: Czech writes
+        // names with a capital.
+        expect(
+            moreThanFirstName(words("Jan měl veselé ráno"), {
+                name: "Jan Veselý",
+            }),
+        ).toBe(false);
+        expect(
+            moreThanFirstName(words("To Veselého nezajímá"), {
+                name: "Jan Veselý",
             }),
         ).toBe(true);
         // "Jo" is Czech for yes: too short to be told from a word.

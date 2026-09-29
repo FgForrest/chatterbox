@@ -7,12 +7,14 @@ import { emitEvent } from "@/lib/webhooks/emit";
  * Queue the automatic summary of a recording, as auto-summarize asks after
  * a transcript: right after it, or when automatic Learn releases what it
  * held back. Never throws; a summary that could not be queued says so with
- * `summary.failed`.
+ * `summary.failed`. `strict` (a job that retries until what it queues is
+ * queued) throws a failure to queue instead.
  */
 export async function queueAutoSummary(
     userId: string,
     recordingId: string,
     presetId: string | null,
+    { strict = false }: { strict?: boolean } = {},
 ): Promise<void> {
     // Per-user hourly cap on auto-summary calls. Cheap defense against
     // runaway provider cost if a sync replays N recordings or the user
@@ -54,6 +56,7 @@ export async function queueAutoSummary(
             trigger: "auto",
         });
     } catch (error) {
+        if (strict) throw error;
         // Only a failure to QUEUE reaches here, which means the database
         // refused the insert -- the summary itself has not been attempted
         // yet. Never roll back the transcript over it: the user wants the

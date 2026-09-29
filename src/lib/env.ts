@@ -177,6 +177,19 @@ const baseEnvSchema = z.object({
      */
     LEARN_AUTO: optionalStrictBoolean,
     /**
+     * This instance's agent bridge (its base URL, as a provider names it,
+     * e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex
+     * provider pointing exactly here takes Learn's bridge path and is sent
+     * a run's token for the knowledge tools.
+     */
+    LEARN_BRIDGE_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "LEARN_BRIDGE_URL must be an http(s) URL",
+        }),
+    /**
      * The one URL of this app's read-only knowledge tools (MCP) the Learn
      * bridge may call back; nothing else is reachable from it.
      */
@@ -940,6 +953,7 @@ function validateEnv(): Env {
             EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
             LEARN_MCP_URL: process.env.LEARN_MCP_URL,
             LEARN_AUTO: process.env.LEARN_AUTO,
+            LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
             KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,

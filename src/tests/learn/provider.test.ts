@@ -3,39 +3,49 @@ import { chooseLearnPath } from "@/lib/learn/provider";
 
 describe("chooseLearnPath", () => {
     const mcpUrl = "http://riffado:3000/api/mcp/learn";
+    const bridgeUrl = "http://agent-bridge:8787/v1";
 
-    it("takes the bridge for its presets, once built and pointed at the MCP URL", () => {
+    it("takes the bridge for its presets pointed at this instance's bridge, with the tools URL set", () => {
         for (const provider of ["Claude Code", "Codex"]) {
             expect(
-                chooseLearnPath({ provider }, { mcpUrl, bridgeReady: true }),
+                chooseLearnPath(
+                    { provider, baseUrl: "HTTP://agent-bridge:8787/v1/" },
+                    { mcpUrl, bridgeUrl },
+                ),
             ).toBe("bridge");
             expect(
                 chooseLearnPath(
-                    { provider },
-                    { mcpUrl: undefined, bridgeReady: true },
+                    { provider, baseUrl: bridgeUrl },
+                    { mcpUrl: undefined, bridgeUrl },
                 ),
             ).toBe("fallback");
         }
     });
 
-    it("takes the fallback for any other provider, and for all when the bridge path is off", () => {
+    it("never sends a run's token to an endpoint merely labelled as a bridge", () => {
         expect(
             chooseLearnPath(
-                { provider: "OpenAI" },
-                { mcpUrl, bridgeReady: true },
+                { provider: "Codex", baseUrl: "https://attacker.example/v1" },
+                { mcpUrl, bridgeUrl },
             ),
         ).toBe("fallback");
         expect(
             chooseLearnPath(
-                { provider: "Claude Code" },
-                { mcpUrl, bridgeReady: false },
+                { provider: "Codex", baseUrl: bridgeUrl },
+                { mcpUrl, bridgeUrl: undefined },
             ),
         ).toBe("fallback");
-    });
-
-    it("is built: the bridge presets take it by default where the MCP URL is set", () => {
-        expect(chooseLearnPath({ provider: "Codex" }, { mcpUrl })).toBe(
-            "bridge",
-        );
+        expect(
+            chooseLearnPath(
+                { provider: "OpenAI", baseUrl: bridgeUrl },
+                { mcpUrl, bridgeUrl },
+            ),
+        ).toBe("fallback");
+        expect(
+            chooseLearnPath(
+                { provider: "Claude Code", baseUrl: bridgeUrl },
+                { mcpUrl, bridgeUrl, bridgeReady: false },
+            ),
+        ).toBe("fallback");
     });
 });

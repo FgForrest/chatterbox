@@ -423,6 +423,27 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual([]);
     });
 
+    it("makes the summary again where the one there was made from an older reading", async () => {
+        await hold();
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                transcriptionId: riffadoId,
+                summary: encryptText("Made before the review."),
+                provider: "openai",
+                model: "gpt-test",
+                source: "riffado",
+                inputFingerprint: "an-older-reading",
+            });
+
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+        await runRelease();
+
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
     it("keeps a summary the person made while it waited", async () => {
         await hold();
         await db()

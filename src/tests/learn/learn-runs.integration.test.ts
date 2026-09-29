@@ -683,10 +683,13 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 .set({
                     provider: "Claude Code",
                     defaultModel: "claude-opus-5-5",
+                    baseUrl: "http://agent-bridge:8787/v1",
                 })
                 .where(eq(apiCredentials.userId, OWNER));
             (mockEnv as Record<string, unknown>).LEARN_MCP_URL =
                 "http://app:3000/api/mcp/learn";
+            (mockEnv as Record<string, unknown>).LEARN_BRIDGE_URL =
+                "http://agent-bridge:8787/v1";
             try {
                 const { runId } = (await (await learn(OWNER)).json()) as {
                     runId: string;
@@ -730,6 +733,8 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 );
             } finally {
                 (mockEnv as Record<string, unknown>).LEARN_MCP_URL = undefined;
+                (mockEnv as Record<string, unknown>).LEARN_BRIDGE_URL =
+                    undefined;
             }
         });
 

@@ -131,6 +131,7 @@ async function chatFor(
     chat: LearnChat;
     bridge: LearnBridgeChat;
     provider: string;
+    baseUrl: string | null;
     model: string;
 }> {
     const configured = await db
@@ -164,6 +165,7 @@ async function chatFor(
         });
     return {
         provider: credentials.provider,
+        baseUrl: credentials.baseUrl,
         model,
         // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
         // the answer's JSON Schema, and this run's token for Riffado's
@@ -577,15 +579,15 @@ async function runLearnJob({
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
-        const { chat, bridge, provider, model } = await chatFor(
+        const { chat, bridge, provider, baseUrl, model } = await chatFor(
             run.actorUserId ?? "",
             signal,
         );
         // Path 1: the bridge's CLI looks things up itself over MCP;
         // anything else takes the fallback, which looks up for it.
         const path = chooseLearnPath(
-            { provider },
-            { mcpUrl: env.LEARN_MCP_URL },
+            { provider, baseUrl },
+            { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
         const unnamedLabels = labels.filter(
             (label) => !frameBefore.answeredLabels.has(label),

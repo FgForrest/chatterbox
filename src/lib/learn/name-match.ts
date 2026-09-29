@@ -4,7 +4,8 @@
  * surnames drop ("Hájek" → "Hájka", "Němec" → "Němcovi"), and without
  * titles or initials ("Ing.", "F."). Pure; conservative on purpose: a
  * common word that merely starts like a name ("nová" for "Novák", "dost"
- * for "Dostál") is not the name.
+ * for "Dostál") is not the name, and in a transcript a surname is written
+ * with a capital, as Czech writes names ("veselé" is not "Veselý").
  */
 
 const TITLES = new Set([
@@ -36,6 +37,18 @@ export function nameWords(text: string): string[] {
         .toLowerCase()
         .split(/[^\p{L}\p{N}]+/u)
         .filter(Boolean);
+}
+
+/** A transcript's words, as `nameWords` gives them, each with its capital. */
+export function nameTokens(text: string): { word: string; capital: boolean }[] {
+    return text
+        .split(/[^\p{L}\p{N}\p{M}]+/u)
+        .filter(Boolean)
+        .map((raw) => ({
+            word: nameWords(raw).join(""),
+            capital: /^\p{Lu}/u.test(raw),
+        }))
+        .filter((token) => token.word);
 }
 
 /** A name's own words: no titles, no initials. */
@@ -119,19 +132,27 @@ export function heardIsFirstNameOnly(
 }
 
 /**
- * Whether more than a first name backs naming this person in these words:
- * their surname (any word of the name after the first) or a nickname of
- * theirs is among them. A one-word name is a first name alone unless a
- * nickname is heard.
+ * Whether more than a first name backs naming this person in these words
+ * (`nameTokens` of a transcript): their surname (any word of the name
+ * after the first, written with a capital) or a nickname of theirs is
+ * among them. A one-word name is a first name alone unless a nickname is
+ * heard.
  */
 export function moreThanFirstName(
-    words: readonly string[],
+    tokens: readonly { word: string; capital: boolean }[],
     person: { name: string; aliases?: readonly string[] },
 ): boolean {
     const rest = nameParts(person.name).slice(1);
-    if (rest.some((part) => words.some((word) => isNameWord(word, part)))) {
+    if (
+        rest.some((part) =>
+            tokens.some(
+                (token) => token.capital && isNameWord(token.word, part),
+            ),
+        )
+    ) {
         return true;
     }
+    const words = tokens.map((token) => token.word);
     return usableAliases(person.aliases).some((alias) =>
         aliasAmong(words, alias),
     );
