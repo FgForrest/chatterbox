@@ -303,7 +303,11 @@ export function parseLearnRequest(payload, learnMcpUrl) {
                 "`response_format.json_schema.schema` must be a JSON Schema object",
             );
         }
-        schema = candidate;
+        // Claude's validator knows JSON Schema draft-07 only and refuses a
+        // schema declaring another (`"$schema": ".../2020-12/schema"`);
+        // the declaration adds nothing either CLI uses.
+        const { $schema: _declared, ...rest } = candidate;
+        schema = rest;
     }
     let mcp = null;
     const extension = payload?.riffado_mcp;
@@ -335,6 +339,22 @@ export function parseLearnRequest(payload, learnMcpUrl) {
         mcp = { url: learnMcpUrl, token, tools: [...new Set(tools)] };
     }
     return { schema, mcp };
+}
+
+/**
+ * The schema as Codex gets it: without `pattern`, on which its constrained
+ * decoding stalls until the request times out (Codex 0.159, a 4.5 kB
+ * schema whose times carry a regex: 13 s without it, no answer in 5 min
+ * with it). The caller validates the answer against the full schema.
+ */
+export function schemaForCodex(schema) {
+    if (Array.isArray(schema)) return schema.map(schemaForCodex);
+    if (!schema || typeof schema !== "object") return schema;
+    return Object.fromEntries(
+        Object.entries(schema)
+            .filter(([key]) => key !== "pattern")
+            .map(([key, value]) => [key, schemaForCodex(value)]),
+    );
 }
 
 /**

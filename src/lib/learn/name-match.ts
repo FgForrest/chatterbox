@@ -22,12 +22,62 @@ const TITLES = new Set([
     "doc",
     "jr",
     "sr",
+    "dis",
+    "csc",
+    "drsc",
+    "arch",
+    "mba",
+    "paeddr",
+    "thdr",
 ]);
 
-/** How many letters an inflection may add after a name's stem. */
-const MAX_ENDING = 4;
+/**
+ * The endings Czech declension puts after a name's stem (diacritics gone):
+ * "Bednářovi", "Hrubcovou", "Zeleného", "Hájka", "Michale". Anything
+ * else after the stem is another word ("Janoušek" is not "Jan").
+ */
+const ENDINGS = new Set([
+    "",
+    "a",
+    "e",
+    "i",
+    "o",
+    "u",
+    "y",
+    "em",
+    "ou",
+    "am",
+    "im",
+    "ym",
+    "ami",
+    "imi",
+    "ymi",
+    "ech",
+    "ich",
+    "ych",
+    "eho",
+    "emu",
+    "yho",
+    "ymu",
+    "ovi",
+    "ova",
+    "ove",
+    "ovu",
+    "ovy",
+    "ovou",
+    "ovym",
+    "ata",
+    "ete",
+    "eti",
+]);
 const VOWELS = /[aeiouy]+$/;
 const DROPPED_E = /^(.*[^aeiouy])e([^aeiouy])$/;
+/** Consonants that change before an ending: "Procházka" → "Procházce". */
+const ALTERNATIONS: [RegExp, string][] = [
+    [/k$/, "c"],
+    [/h$/, "z"],
+    [/g$/, "z"],
+];
 
 /** Letters only, lower case, without diacritics. */
 export function nameWords(text: string): string[] {
@@ -65,6 +115,11 @@ function stems(part: string): string[] {
     found.add(base);
     const dropped = DROPPED_E.exec(base);
     if (dropped) found.add(`${dropped[1]}${dropped[2]}`);
+    for (const stem of [...found]) {
+        for (const [ending, instead] of ALTERNATIONS) {
+            if (ending.test(stem)) found.add(stem.replace(ending, instead));
+        }
+    }
     return [...found].filter((stem) => stem.length >= 3);
 }
 
@@ -72,8 +127,7 @@ function stems(part: string): string[] {
 export function isNameWord(word: string, part: string): boolean {
     if (word === part) return true;
     return stems(part).some(
-        (stem) =>
-            word.startsWith(stem) && word.length - stem.length <= MAX_ENDING,
+        (stem) => word.startsWith(stem) && ENDINGS.has(word.slice(stem.length)),
     );
 }
 
@@ -119,7 +173,8 @@ export function heardIsFirstNameOnly(
 ): boolean {
     const words = nameWords(heard);
     const [first, ...rest] = nameParts(person.name);
-    if (!first || words.length === 0) return false;
+    // A one-word name is all there is: nothing tells a first name from it.
+    if (!first || rest.length === 0 || words.length === 0) return false;
     if (
         usableAliases(person.aliases).some((alias) => aliasAmong(words, alias))
     ) {

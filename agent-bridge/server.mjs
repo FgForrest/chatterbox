@@ -44,6 +44,7 @@ import {
     parseLearnRequest,
     redact,
     resolveBackend,
+    schemaForCodex,
     sanitizeForLog,
     splitArgs,
 } from "./lib.mjs";
@@ -107,12 +108,13 @@ async function learnOptions(backend, dir, learn) {
         }
     }
     if (learn.schema) {
-        const json = JSON.stringify(learn.schema);
         if (backend === "claude") {
-            options.schema = { json };
+            options.schema = { json: JSON.stringify(learn.schema) };
         } else {
             const path = join(dir, "schema.json");
-            await writeFile(path, json, { mode: 0o600 });
+            await writeFile(path, JSON.stringify(schemaForCodex(learn.schema)), {
+                mode: 0o600,
+            });
             options.schema = { path };
         }
     }

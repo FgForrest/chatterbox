@@ -278,26 +278,25 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
     run: ({ userId, payload }) => queueReleased(userId, payload.recordingId),
 };
 
-/** Release the holds whose time is up, a batch at a time. */
+/**
+ * Release the holds whose time is up, and those nothing holds any more (a
+ * run whose job died is settled first: its hold would otherwise wait out
+ * the 72 h), a batch at a time.
+ */
 export async function sweepAutoLearnHolds(
     now = new Date(),
     limit = 50,
 ): Promise<number> {
-    const due = await db
-        .select({ id: recordings.id })
+    const held = await db
+        .select({ id: recordings.id, dueAt: recordings.summaryDueAt })
         .from(recordings)
-        .where(
-            and(
-                isNotNull(recordings.summaryDueAt),
-                lte(recordings.summaryDueAt, now),
-            ),
-        )
+        .where(isNotNull(recordings.summaryDueAt))
+        .orderBy(recordings.summaryDueAt)
         .limit(limit);
     let released = 0;
-    for (const { id } of due) {
-        if (await releaseAutoLearnHold(id, { expired: true, now })) {
-            released++;
-        }
+    for (const { id, dueAt } of held) {
+        const expired = dueAt !== null && dueAt <= now;
+        if (await releaseAutoLearnHold(id, { expired, now })) released++;
     }
     return released;
 }

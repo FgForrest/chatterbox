@@ -16,6 +16,7 @@ import {
     redact,
     resolveBackend,
     sanitizeForLog,
+    schemaForCodex,
     splitArgs,
 } from "../../../agent-bridge/lib.mjs";
 
@@ -516,6 +517,24 @@ describe("agent-bridge", () => {
                     tools: ["find_entities", "get_entity"],
                 },
             });
+            // A draft declaration Claude's validator refuses is dropped.
+            expect(
+                parseLearnRequest(
+                    {
+                        response_format: {
+                            type: "json_schema",
+                            json_schema: {
+                                schema: {
+                                    $schema:
+                                        "https://json-schema.org/draft/2020-12/schema",
+                                    ...schema,
+                                },
+                            },
+                        },
+                    },
+                    URL,
+                ).schema,
+            ).toEqual(schema);
             expect(parseLearnRequest({}, URL)).toEqual({
                 schema: null,
                 mcp: null,
@@ -619,6 +638,27 @@ describe("agent-bridge", () => {
                 parseClaudeEnvelope(stdout, "claude", { structured: true }),
             ).toBe('{"speakers":[]}');
             expect(parseClaudeEnvelope(stdout)).toBe("Done.");
+        });
+
+        it("gives Codex the schema without regex patterns, on which it stalls", () => {
+            expect(
+                schemaForCodex({
+                    type: "object",
+                    properties: {
+                        start: { type: "string", pattern: "^\\d+$" },
+                        list: {
+                            type: "array",
+                            items: { type: "string", pattern: "x" },
+                        },
+                    },
+                }),
+            ).toEqual({
+                type: "object",
+                properties: {
+                    start: { type: "string" },
+                    list: { type: "array", items: { type: "string" } },
+                },
+            });
         });
 
         it("redacts the token from anything it could reach", () => {

@@ -374,6 +374,27 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         ).toBe(true);
     });
 
+    it("lets the sweep release a hold whose run's job died, without waiting 72 h", async () => {
+        await hold();
+        const [job] = await db()
+            .insert(asyncJobs)
+            .values({
+                userId: OWNER,
+                kind: "learn.run",
+                subjectId: "gone",
+                status: "failed",
+            })
+            .returning({ id: asyncJobs.id });
+        const dead = await run("running");
+        await db()
+            .update(learnRuns)
+            .set({ jobId: job?.id ?? "" })
+            .where(eq(learnRuns.id, dead));
+
+        expect(await sweepAutoLearnHolds(new Date())).toBe(1);
+        expect(await dueAt()).toBeNull();
+    });
+
     it("releases when the run's job died, however its row reads", async () => {
         await hold();
         const [job] = await db()

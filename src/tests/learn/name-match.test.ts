@@ -17,6 +17,15 @@ describe("name matching, as Czech says names", () => {
         expect(isNameWord("vondo", "vonda")).toBe(true);
     });
 
+    it("knows the consonant a Czech ending changes, and only real endings", () => {
+        expect(isNameWord("prochazce", "prochazka")).toBe(true);
+        expect(isNameWord("zelenyho", "zeleny")).toBe(true);
+        // Another name that starts like a first name is not it.
+        expect(isNameWord("janusek", "jan")).toBe(false);
+        expect(isNameWord("janda", "jan")).toBe(false);
+        expect(isNameWord("petrusek", "petr")).toBe(false);
+    });
+
     it("does not take a common word that starts like a surname for it", () => {
         expect(isNameWord("nova", "novak")).toBe(false);
         expect(isNameWord("dost", "dostal")).toBe(false);
@@ -83,6 +92,19 @@ describe("name matching, as Czech says names", () => {
         expect(heardIsTheName("Vonďa", "Michal Vondra")).toBe(false);
         expect(heardIsTheName("Terra doma", "Terradoma")).toBe(false);
 
+        // A misheard surname is corrected, not taken for a first name.
+        expect(heardIsFirstNameOnly("Janušek", { name: "Jan Janoušek" })).toBe(
+            false,
+        );
+        // A one-word record: nothing to tell a first name from.
+        expect(heardIsFirstNameOnly("Bednař", { name: "Bednář" })).toBe(
+            false,
+        );
+        expect(
+            moreThanFirstName(nameTokens("Ing. Jan, DiS., tady"), {
+                name: "Ing. Jan Novák, DiS.",
+            }),
+        ).toBe(false);
         const michal = { name: "Michal Bednář" };
         expect(heardIsFirstNameOnly("Michale", michal)).toBe(true);
         expect(heardIsFirstNameOnly("Michal", michal)).toBe(true);

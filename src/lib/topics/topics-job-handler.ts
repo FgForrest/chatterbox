@@ -27,10 +27,12 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     parsePayload: parseTopicsJobPayload,
 
     async run({ payload, userId, reportProgress }): Promise<JobResult> {
-        // As for automatic summaries: the hold's release detects them.
+        // As for automatic summaries: the hold's release detects them. It
+        // holds the Riffado transcript's; the Plaud one's go on.
         if (
             payload.trigger !== "manual" &&
             payload.view !== "org" &&
+            payload.source === "riffado" &&
             (await isHeldForLearn(payload.recordingId))
         ) {
             return { skipped: "held" };

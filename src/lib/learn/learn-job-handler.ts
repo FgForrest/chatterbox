@@ -83,6 +83,8 @@ const FINGERPRINT_DOMAIN = "learn-fingerprint";
  */
 const TOOL_BUDGET = 160;
 const CALL_RETRY_ATTEMPTS = 3;
+/** A Learn call through the bridge, tools and all; the job allows 20 min. */
+const BRIDGE_CALL_TIMEOUT_MS = 18 * 60 * 1000;
 /**
  * How often a run validates again when what it validated against changed
  * before the items were written; the last time, it writes without
@@ -151,18 +153,12 @@ async function chatFor(
         baseURL: credentials.baseUrl || undefined,
     });
     const model = enhancementChatModel(credentials);
-    const retried = <T>(run: () => Promise<T>) =>
-        retryWithBackoff({
-            attempts: CALL_RETRY_ATTEMPTS,
-            baseMs: 1_500,
-            maxMs: 15_000,
-            jitter: 0.5,
-            isRetryable: isRetryableError,
-            run: async () => {
-                signal.throwIfAborted();
-                return run();
-            },
-        });
+    const bridgeClient = new OpenAI({
+        apiKey: decrypt(credentials.apiKey),
+        baseURL: credentials.baseUrl || undefined,
+        maxRetries: 0,
+        timeout: BRIDGE_CALL_TIMEOUT_MS,
+    });
     return {
         provider: credentials.provider,
         baseUrl: credentials.baseUrl,
@@ -170,32 +166,37 @@ async function chatFor(
         // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
         // the answer's JSON Schema, and this run's token for Riffado's
         // tools. Unknown fields travel in the body as they are.
+        // One attempt: a CLI session with tools spends the run's lookups,
+        // and a second one would answer knowing nothing. The job's own
+        // retry starts over with a fresh run budget instead. Long enough
+        // for a CLI that looks things up (the bridge's BRIDGE_TIMEOUT_MS
+        // bounds it on the other side).
         bridge: {
-            complete: ({ system, user, schema, mcp, maxTokens }) =>
-                retried(async () => {
-                    const response = await openai.chat.completions.create(
-                        {
-                            ...buildChatCompletionParams({
-                                model,
-                                messages: [
-                                    { role: "system", content: system },
-                                    { role: "user", content: user },
-                                ],
-                                temperature: 0.1,
-                                maxTokens,
-                            }),
-                            response_format: {
-                                type: "json_schema",
-                                json_schema: { name: "learn_output", schema },
-                            },
-                            ...(mcp ? { riffado_mcp: mcp } : {}),
-                        } as Parameters<
-                            typeof openai.chat.completions.create
-                        >[0] & { stream?: false },
-                        { signal },
-                    );
-                    return response.choices[0]?.message?.content?.trim() || "";
-                }),
+            complete: async ({ system, user, schema, mcp, maxTokens }) => {
+                signal.throwIfAborted();
+                const response = await bridgeClient.chat.completions.create(
+                    {
+                        ...buildChatCompletionParams({
+                            model,
+                            messages: [
+                                { role: "system", content: system },
+                                { role: "user", content: user },
+                            ],
+                            temperature: 0.1,
+                            maxTokens,
+                        }),
+                        response_format: {
+                            type: "json_schema",
+                            json_schema: { name: "learn_output", schema },
+                        },
+                        ...(mcp ? { riffado_mcp: mcp } : {}),
+                    } as Parameters<
+                        typeof openai.chat.completions.create
+                    >[0] & { stream?: false },
+                    { signal },
+                );
+                return response.choices[0]?.message?.content?.trim() || "";
+            },
         },
         chat: {
             complete: (messages, maxTokens) =>
