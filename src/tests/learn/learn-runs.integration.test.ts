@@ -170,7 +170,10 @@ import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
-import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
+import {
+    bumpVocabularyVersionInTx,
+    seedCoreVocabulary,
+} from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { llmRendering } from "@/lib/learn/llm-input";
 import {
@@ -821,6 +824,70 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 fence_retries: 1,
             });
         });
+
+        it("takes the vocabulary before the scopes, as writers do, so a type changing meanwhile deadlocks nothing", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            let writer: Promise<unknown> = Promise.resolve();
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            createCompletion.mockImplementationOnce(async () => {
+                beforeVocabulary.current = async () => {
+                    let bumped = () => {};
+                    const didBump = new Promise<void>((resolve) => {
+                        bumped = resolve;
+                    });
+                    // A type created, renamed or deleted: the vocabulary's
+                    // version first, the scope generations last.
+                    writer = db().transaction(async (tx) => {
+                        await bumpVocabularyVersionInTx(tx);
+                        bumped();
+                        await new Promise((resolve) =>
+                            setTimeout(resolve, 400),
+                        );
+                        await bumpScopeInTx(tx, [OWNER]);
+                    });
+                    await didBump;
+                };
+                return {
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    speakers: [],
+                                    corrections: [
+                                        {
+                                            turnIndex: 0,
+                                            charStart: 19,
+                                            charEnd: 25,
+                                            heard: "Tavesy",
+                                            kind: "correct",
+                                            target: { entityId: tavesi },
+                                            replacement: "Tavesi",
+                                        },
+                                    ],
+                                    facts: [],
+                                    relationPhrases: [],
+                                }),
+                            },
+                        },
+                    ],
+                };
+            });
+            await expect(runJob(runId)).resolves.toMatchObject({
+                status: "ready",
+            });
+            await expect(writer).resolves.toBeUndefined();
+            expect((await statusAndStats(runId))?.stats).toMatchObject({
+                fence_retries: 1,
+            });
+        }, 30_000);
 
         it("writes, pre-ticking nothing, when knowledge keeps moving", async () => {
             const tavesi = (

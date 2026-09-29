@@ -212,8 +212,14 @@ async function fenceOf(
         orgUserId,
     );
     // Under the write, the counters are held for share: a change that has
-    // bumped them and not yet committed is waited for, and then seen.
-    // Writers bump them last, so nothing they hold waits on the run.
+    // bumped them and not yet committed is waited for, and then seen. In
+    // the order writers take them (the vocabulary's version first, the
+    // scope generations last), so the two never wait on each other.
+    const versioned = executor
+        .select({ version: knowledgeVocabularyVersion.version })
+        .from(knowledgeVocabularyVersion)
+        .where(eq(knowledgeVocabularyVersion.id, 1));
+    const [vocabulary] = await (lock ? versioned.for("share") : versioned);
     const generations = new Map(scopes.map((scope) => [scope, 0]));
     const counted = executor
         .select({
@@ -222,15 +228,12 @@ async function fenceOf(
         })
         .from(knowledgeScopeGenerations)
         .where(inArray(knowledgeScopeGenerations.userId, scopes))
-        .orderBy(asc(knowledgeScopeGenerations.userId));
+        // The order `bumpScopeInTx` sorts in (code units), whatever the
+        // database's collation.
+        .orderBy(sql`${knowledgeScopeGenerations.userId} collate "C"`);
     for (const row of await (lock ? counted.for("share") : counted)) {
         generations.set(row.userId, row.generation);
     }
-    const versioned = executor
-        .select({ version: knowledgeVocabularyVersion.version })
-        .from(knowledgeVocabularyVersion)
-        .where(eq(knowledgeVocabularyVersion.id, 1));
-    const [vocabulary] = await (lock ? versioned.for("share") : versioned);
     const answered = await executor
         .select({
             label: transcriptSpeakers.label,
