@@ -345,15 +345,25 @@ export async function listCorrections(
 }
 
 /**
- * The corrections on every transcript of `ownerUserId`'s live recordings,
- * each in the scope its view reads (`listCorrections`), in one query: an
- * export of everything. Per transcript, with whether its recording is
- * shared (so its links read the Organization's names).
+ * Which transcripts a library holds: an owner's (their live recordings,
+ * each read in its view, the Organization's corrections where shared), or
+ * the Organization's (every live shared recording, the Organization's).
  */
-export async function listOwnersCorrections(
-    ownerUserId: string,
+export type CorrectionLibrary =
+    | { ownerUserId: string }
+    | { organization: true };
+
+/**
+ * The corrections on every transcript of a library's live recordings, each
+ * in the scope its view reads (`listCorrections`), in one query: an export
+ * of everything, the recording list. Per transcript, with whether its
+ * recording is shared (so its links read the Organization's names).
+ */
+export async function listLibraryCorrections(
+    library: CorrectionLibrary,
 ): Promise<Map<string, { shared: boolean; corrections: Correction[] }>> {
     const orgUserId = await getOrgUserId();
+    if (!orgUserId && "organization" in library) return new Map();
     const shared = orgUserId
         ? recordingSharedCondition(recordings.id)
         : sql`false`;
@@ -380,20 +390,30 @@ export async function listOwnersCorrections(
         )
         .innerJoin(recordings, eq(recordings.id, transcriptions.recordingId))
         .where(
-            and(
-                eq(transcriptions.userId, ownerUserId),
-                isNull(recordings.deletedAt),
-                or(
-                    and(
-                        shared,
-                        orgOwnedCondition(transcriptCorrections.userId),
-                    ),
-                    and(
-                        not(shared),
-                        eq(transcriptCorrections.userId, ownerUserId),
-                    ),
-                ),
-            ),
+            "organization" in library
+                ? and(
+                      isNull(recordings.deletedAt),
+                      eq(recordings.userId, transcriptions.userId),
+                      shared,
+                      orgOwnedCondition(transcriptCorrections.userId),
+                  )
+                : and(
+                      eq(transcriptions.userId, library.ownerUserId),
+                      isNull(recordings.deletedAt),
+                      or(
+                          and(
+                              shared,
+                              orgOwnedCondition(transcriptCorrections.userId),
+                          ),
+                          and(
+                              not(shared),
+                              eq(
+                                  transcriptCorrections.userId,
+                                  library.ownerUserId,
+                              ),
+                          ),
+                      ),
+                  ),
         )
         .orderBy(
             asc(transcriptCorrections.transcriptionId),

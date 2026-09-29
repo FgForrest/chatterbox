@@ -25,8 +25,9 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { wordsAt } from "@/lib/knowledge/correction-anchors";
 import {
     type Correction,
+    type CorrectionLibrary,
     listCorrections,
-    listOwnersCorrections,
+    listLibraryCorrections,
 } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import {
@@ -260,15 +261,19 @@ function confirmedOverlay(
 }
 
 /**
- * The confirmed corrections of every transcript of `ownerUserId`'s live
- * recordings, as overlays keyed by transcript (`correctionOverlay` with
- * `pending: false`, for all of them at once): an export of everything
- * reads them in one query, and each view's names once.
+ * The confirmed corrections of every transcript in a library (an owner's
+ * live recordings, or the Organization's), as overlays keyed by transcript
+ * (`correctionOverlay` with `pending: false`, for all of them at once): an
+ * export of everything, or the recording list, reads them in one query,
+ * and each view's names once.
  */
 export async function confirmedOverlays(
-    ownerUserId: string,
+    library: CorrectionLibrary,
 ): Promise<Map<string, OverlayCorrection[]>> {
-    const corrections = await listOwnersCorrections(ownerUserId);
+    const corrections = await listLibraryCorrections(library);
+    const orgUserId = await sharingOrgUserId();
+    const ownerUserId =
+        "ownerUserId" in library ? library.ownerUserId : (orgUserId ?? "");
     const namesOf = new Map<boolean, Promise<Map<string, string>>>();
     const names = (shared: boolean) => {
         let held = namesOf.get(shared);

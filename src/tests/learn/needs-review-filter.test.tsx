@@ -29,13 +29,19 @@ class NoIntersections {
     disconnect() {}
 }
 
-function list(recordings: Recording[]) {
+function list(
+    recordings: Recording[],
+    transcriptions: Map<
+        string,
+        { text?: string; readText?: string }
+    > = new Map(),
+) {
     vi.stubGlobal("IntersectionObserver", NoIntersections);
     return render(
         <ConfirmDialogProvider>
             <RecordingList
                 recordings={recordings}
-                transcriptions={new Map()}
+                transcriptions={transcriptions}
                 currentRecording={null}
                 pendingUploads={[]}
                 inFlightActions={new Map()}
@@ -72,5 +78,38 @@ describe("the Needs review filter", () => {
         expect(
             screen.queryByRole("button", { name: /Needs review/ }),
         ).toBeNull();
+    });
+});
+
+describe("the list, as people read the transcript", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
+
+    it("previews the corrected text and finds a recording by either words", () => {
+        list(
+            [recording("r1", "Weekly"), recording("r2", "Budget")],
+            new Map([
+                [
+                    "r1",
+                    {
+                        text: "speaker_0: Sanesi joined.",
+                        readText: "speaker_0: Tavesi joined.",
+                    },
+                ],
+                ["r2", { text: "speaker_0: Numbers." }],
+            ]),
+        );
+        expect(screen.getByText(/Tavesi joined\./)).toBeTruthy();
+        expect(screen.queryByText(/Sanesi joined\./)).toBeNull();
+        const search = screen.getByRole("textbox", {
+            name: "Search recordings",
+        });
+        for (const words of ["tavesi", "sanesi"]) {
+            fireEvent.change(search, { target: { value: words } });
+            expect(screen.getByText("Weekly")).toBeTruthy();
+            expect(screen.queryByText("Budget")).toBeNull();
+        }
     });
 });

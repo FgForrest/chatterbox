@@ -112,7 +112,9 @@ describe("GET /api/export (regression: summary decryption)", () => {
         expect(JSON.stringify(body)).not.toContain("enc:");
         // Every transcript's corrections read at once, not one by one.
         expect(confirmedOverlays).toHaveBeenCalledTimes(1);
-        expect(confirmedOverlays).toHaveBeenCalledWith("user-1");
+        expect(confirmedOverlays).toHaveBeenCalledWith({
+            ownerUserId: "user-1",
+        });
     });
 });
 

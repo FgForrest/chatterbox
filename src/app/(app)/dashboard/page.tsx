@@ -16,7 +16,9 @@ import { exportProvidersAvailability } from "@/lib/folder-exports/configurations
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { isAdminEmail } from "@/lib/hosted/admin/guard";
+import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { recordingsNeedingReview } from "@/lib/learn/pending";
+import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
@@ -46,15 +48,24 @@ type TranscriptVariant = {
     model?: string;
     turns: ReturnType<typeof readTranscriptTurns>;
     topics: ReturnType<typeof readTranscriptTopics>;
+    /**
+     * The text as people read it, its corrections applied, when any
+     * change it: what the list previews and searches beside the text.
+     */
+    readText?: string;
 };
 
 /** Decrypt transcript rows into per-recording variants, preferred source first. */
 function buildTranscriptVariants(
     rows: TranscriptRow[],
     preferredSource: string,
+    /** Each transcript's confirmed corrections (`confirmedOverlays`). */
+    overlays: ReadonlyMap<string, OverlayCorrection[]> = new Map(),
 ): Map<string, TranscriptVariant[]> {
     const variantsByRecording = new Map<string, TranscriptVariant[]>();
     for (const transcript of rows) {
+        const turns = readTranscriptTurns(transcript);
+        const readText = readTextOf(turns, overlays.get(transcript.id));
         const variant = {
             source: transcript.source,
             text: decryptText(transcript.text),
@@ -65,8 +76,9 @@ function buildTranscriptVariants(
             language: transcript.detectedLanguage || undefined,
             provider: transcript.provider ?? undefined,
             model: transcript.model ?? undefined,
-            turns: readTranscriptTurns(transcript),
+            turns,
             topics: readTranscriptTopics(transcript),
+            ...(readText !== null ? { readText } : {}),
         };
         const variants = variantsByRecording.get(transcript.recordingId) ?? [];
         variants.push(variant);
@@ -162,7 +174,13 @@ async function loadOrganizationLibrary(
     ]);
     const summaryIds = new Set(summaryRows.map((row) => row.recordingId));
     const transcriptIds = new Set(transcriptRows.map((row) => row.recordingId));
-    const variants = buildTranscriptVariants(transcriptRows, preferredSource);
+    const variants = buildTranscriptVariants(
+        transcriptRows,
+        preferredSource,
+        transcriptRows.length > 0
+            ? await confirmedOverlays({ organization: true })
+            : new Map(),
+    );
     const library = rows.map(
         ({
             waveformPeaks,
@@ -318,6 +336,9 @@ export default async function DashboardPage() {
     const transcriptVariants = buildTranscriptVariants(
         ownTranscriptions,
         preferredTranscriptSource,
+        ownTranscriptions.length > 0
+            ? await confirmedOverlays({ ownerUserId: session.user.id })
+            : new Map(),
     );
     const transcriptionMap = primaryVariants(transcriptVariants);
 

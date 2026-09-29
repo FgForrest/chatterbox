@@ -139,6 +139,23 @@ export function renderTurnsForPeople(
     );
 }
 
+/**
+ * A transcript's text as people read it, its corrections applied, the way
+ * the transcript is stored; null when no correction changes it (the stored
+ * text then reads as it is).
+ */
+export function readTextOf(
+    turns: readonly TranscriptTurn[] | null,
+    corrections: readonly OverlayCorrection[] | undefined,
+): string | null {
+    if (!turns?.length || !corrections?.length) return null;
+    const read = renderTurnsForPeople(turns, corrections);
+    if (read.every((turn, index) => turn.text === turns[index]?.text)) {
+        return null;
+    }
+    return flattenTurns(read.map(({ segments: _segments, ...turn }) => turn));
+}
+
 /** The rendering a model reads: replacements applied, links explained. */
 export function renderTurnsForLlm(
     turns: readonly TranscriptTurn[],

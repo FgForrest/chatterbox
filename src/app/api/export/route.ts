@@ -141,7 +141,7 @@ export const GET = apiHandler(async (request: Request) => {
     // Every transcript's confirmed corrections, read at once.
     const overlays =
         userTranscriptions.length > 0
-            ? await confirmedOverlays(session.user.id)
+            ? await confirmedOverlays({ ownerUserId: session.user.id })
             : new Map<string, never[]>();
     for (const transcript of userTranscriptions) {
         const group = transcriptionGroups.get(transcript.recordingId) ?? [];

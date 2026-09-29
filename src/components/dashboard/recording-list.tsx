@@ -30,6 +30,8 @@ export type { SortOrder } from "@/components/dashboard/recording-list-toolbar";
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
 }
 
@@ -128,8 +130,11 @@ export function RecordingList({
         const base = q
             ? pool.filter((r) => {
                   if (r.filename.toLowerCase().includes(q)) return true;
+                  // What people read, and the words as heard, both.
                   const t = transcriptions.get(r.id);
-                  return !!t?.text && t.text.toLowerCase().includes(q);
+                  return [t?.readText, t?.text].some(
+                      (text) => !!text && text.toLowerCase().includes(q),
+                  );
               })
             : pool;
 
@@ -319,7 +324,9 @@ export function RecordingList({
                                         )}
                                         snippet={transcriptSnippet(
                                             transcriptions.get(recording.id)
-                                                ?.text,
+                                                ?.readText ??
+                                                transcriptions.get(recording.id)
+                                                    ?.text,
                                         )}
                                         isCompact={false}
                                         rowPadding={rowPadding}

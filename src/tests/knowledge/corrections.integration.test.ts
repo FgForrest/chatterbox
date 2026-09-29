@@ -536,13 +536,19 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
             .where(eq(transcriptions.id, transcriptId));
         if (!transcript) throw new Error("no transcript");
         const batched = async () =>
-            (await confirmedOverlays(OWNER)).get(transcriptId);
+            (await confirmedOverlays({ ownerUserId: OWNER })).get(transcriptId);
         const alone = () => correctionOverlay(transcript, { pending: false });
+
+        const organizations = async () =>
+            (await confirmedOverlays({ organization: true })).get(transcriptId);
 
         expect((await alone()).length).toBeGreaterThan(0);
         expect(await batched()).toEqual(await alone());
+        // The Organization's library reads it as its members do.
+        expect(await organizations()).toEqual(await alone());
         await unshareRecording(OWNER, REC, { withdraw: true });
         expect(await batched()).toEqual(await alone());
+        expect(await organizations()).toBeUndefined();
 
         await db()
             .update(recordings)

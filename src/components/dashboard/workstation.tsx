@@ -50,6 +50,8 @@ import type { Recording } from "@/types/recording";
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
     source?: string;
     provider?: string;
