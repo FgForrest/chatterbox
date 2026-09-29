@@ -64,32 +64,40 @@ type ItemPayload = {
     anchors: { turnIndex: number; charStart: number; charEnd: number }[];
 };
 
-/** The corrections a model reads on a transcript, as an overlay. */
-export async function correctionOverlay(transcript: {
-    id: string;
-    userId: string;
-    recordingId: string;
-    revision: number;
-}): Promise<OverlayCorrection[]> {
+/**
+ * The corrections on a transcript, as an overlay: the confirmed ones, and
+ * (for a model, `pending`) the ticked items of a review not yet finished.
+ */
+export async function correctionOverlay(
+    transcript: {
+        id: string;
+        userId: string;
+        recordingId: string;
+        revision: number;
+    },
+    { pending = true }: { pending?: boolean } = {},
+): Promise<OverlayCorrection[]> {
     const orgUserId = await sharingOrgUserId();
     const shared =
         orgUserId !== null &&
         (await isRecordingShared(transcript.recordingId, orgUserId));
     const confirmed = await listCorrections(transcript.userId, transcript.id);
-    const [run] = await db
-        .select({ id: learnRuns.id })
-        .from(learnRuns)
-        .where(
-            and(
-                eq(learnRuns.transcriptionId, transcript.id),
-                eq(learnRuns.view, shared ? "org" : "private"),
-                eq(learnRuns.status, "ready"),
-                eq(learnRuns.transcriptRevision, transcript.revision),
-            ),
-        )
-        .orderBy(desc(learnRuns.createdAt))
-        .limit(1);
-    const pending = run
+    const [run] = !pending
+        ? []
+        : await db
+              .select({ id: learnRuns.id })
+              .from(learnRuns)
+              .where(
+                  and(
+                      eq(learnRuns.transcriptionId, transcript.id),
+                      eq(learnRuns.view, shared ? "org" : "private"),
+                      eq(learnRuns.status, "ready"),
+                      eq(learnRuns.transcriptRevision, transcript.revision),
+                  ),
+              )
+              .orderBy(desc(learnRuns.createdAt))
+              .limit(1);
+    const ticked = run
         ? (
               await db
                   .select()
@@ -107,7 +115,7 @@ export async function correctionOverlay(transcript: {
                   "accepted",
           )
         : [];
-    if (confirmed.length === 0 && pending.length === 0) return [];
+    if (confirmed.length === 0 && ticked.length === 0) return [];
 
     // A link shows its target's current name, as the view's readers see it.
     const view = await knowledgeView({
@@ -118,12 +126,14 @@ export async function correctionOverlay(transcript: {
     const names = new Map(view.items.map((item) => [item.id, item.name]));
     const overlay: OverlayCorrection[] = [];
     for (const correction of confirmed) {
+        // Carried, so what shows it can undo it.
         const meaning =
             names.get(
                 correction.targetPersonId ?? correction.targetEntityId ?? "",
             ) ?? correction.replacement;
         if (meaning === null || meaning === undefined) continue;
         overlay.push({
+            id: correction.id,
             turnIndex: correction.turnIndex,
             charStart: correction.charStart,
             charEnd: correction.charEnd,
@@ -133,7 +143,7 @@ export async function correctionOverlay(transcript: {
             meaning,
         });
     }
-    for (const item of pending) {
+    for (const item of ticked) {
         const payload = decryptJsonField<ItemPayload>(item.payload);
         if (!payload) continue;
         const targetId =

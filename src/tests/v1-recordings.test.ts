@@ -18,6 +18,7 @@ import {
     encodeRecordingCursor,
     serializeRecording,
     serializeRecordingDetail,
+    serializeTranscript,
 } from "@/lib/v1/serialize";
 
 const now = new Date("2026-05-06T12:00:00.000Z");
@@ -159,6 +160,37 @@ describe("v1 recordings", () => {
         expect(detail.summary?.text).toBe("A short summary");
         expect(detail.summary?.action_items).toEqual(["Follow up"]);
         expect(detail.summary?.key_points).toEqual(["Planning"]);
+    });
+
+    it("adds a transcript's corrections beside its text, which stays as heard", () => {
+        const serialized = serializeTranscript(transcription, [
+            {
+                id: "c-1",
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 5,
+                heard: "Hello",
+                kind: "link",
+                replacement: null,
+                meaning: "Greeting Inc.",
+            },
+        ]);
+        expect(serialized?.text).toBe("Hello world");
+        expect(serialized?.corrections).toEqual([
+            {
+                id: "c-1",
+                turn_index: 0,
+                char_start: 0,
+                char_end: 5,
+                heard: "Hello",
+                kind: "link",
+                replacement: null,
+                meaning: "Greeting Inc.",
+            },
+        ]);
+        expect(serializeTranscript(transcription)).not.toHaveProperty(
+            "corrections",
+        );
     });
 
     it("keeps legacy plaintext rows readable through the same serializers", () => {

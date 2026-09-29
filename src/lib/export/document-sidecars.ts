@@ -14,6 +14,7 @@ import {
     inferSummarySpeakerNumberOffset,
     projectSummarySpeakerReferencesForExport,
 } from "@/lib/knowledge/speaker-references";
+import { correctionOverlay } from "@/lib/learn/llm-input";
 import {
     reconcileRecordingStorage,
     recordingStorageNeedsReconciliation,
@@ -269,6 +270,17 @@ async function renderRecordingMarkdownDocument(
             .at(-1);
         if (!filename) return null;
 
+        // As people read it: its confirmed corrections applied (a review
+        // not yet finished is not in a document).
+        const corrections = await correctionOverlay(
+            {
+                id: primary.id,
+                userId: primary.userId,
+                recordingId: recording.id,
+                revision: primary.revision,
+            },
+            { pending: false },
+        );
         const text = projectTranscript(
             {
                 id: primary.id,
@@ -276,6 +288,7 @@ async function renderRecordingMarkdownDocument(
                 turns: primary.turns,
             },
             projection.resolve,
+            corrections,
         );
         if (!text?.trim()) return null;
 

@@ -164,6 +164,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
+import { getRecordingMarkdownDocument } from "@/lib/export/document-sidecars";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
@@ -1360,6 +1361,41 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(await summaryJobs()).toMatchObject([
                     { userId: OWNER, status: "pending" },
                 ]);
+            });
+
+            it("exports the transcript as people read it: its confirmed corrections applied", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as { items: { id: string; kind: string }[] };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                const exported = async () =>
+                    (
+                        await getRecordingMarkdownDocument(
+                            OWNER,
+                            REC,
+                            "transcript",
+                            "riffado",
+                        )
+                    )?.content;
+                // Ticked in a review not yet finished: not in an export.
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                expect(await exported()).not.toContain("Tavesi");
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: { versions: { [id]: 1, [phrase]: 0 } },
+                });
+                const content = await exported();
+                expect(content).toContain("máme tu Tavesi.");
+                expect(content).not.toContain("Tavesy");
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {

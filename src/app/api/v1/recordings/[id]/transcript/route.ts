@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
 import { authenticateRequest } from "@/lib/auth-request";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { correctionOverlay } from "@/lib/learn/llm-input";
 import {
     enforceV1AuthenticatedRateLimit,
     enforceV1IpRateLimit,
@@ -71,5 +72,15 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         });
     }
 
-    return NextResponse.json(serializeTranscript(primary));
+    // Its confirmed corrections beside the text as heard.
+    const corrections = await correctionOverlay(
+        {
+            id: primary.id,
+            userId: primary.userId,
+            recordingId: recording.id,
+            revision: primary.revision,
+        },
+        { pending: false },
+    );
+    return NextResponse.json(serializeTranscript(primary, corrections));
 });
