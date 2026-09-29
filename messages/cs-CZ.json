@@ -1646,6 +1646,8 @@
   "ojvD8b": "Aktualizovat název souboru ve vašem zařízení Plaud, když jsou názvy generovány",
   "1924tE": "Šablony názvů",
   "GPz4Ty": "na místě, kam patří přepis. Model musí odpovědět pouze samotným názvem jako prostým textem. U dlouhého přepisu se odesílá jen jeho začátek.",
+  "a1FV0d": "Učit se automaticky",
+  "FeFnMg": "Spustí učení na každém novém přepisu s časy. Název, shrnutí a témata počkají, až zkontrolujete, co našlo, nejdéle 72 hodin, aby vznikla z opraveného přepisu.",
   "-eBjrv": "Automaticky rozpoznávat témata",
   "PPXO2Z": "Rozdělí každý nový přepis na témata, mezi kterými můžete přeskakovat. Funguje u přepisů s časovými značkami: z Plaudu, z Whisperu a s rozlišenými mluvčími. Témata v nich můžete rozpoznat i ručně.",
   "8Bnt_7": "Šablony témat",

@@ -51,6 +51,7 @@ const recording = {
     remoteRetentionClaimedAt: null,
     unsharedAt: null,
     titleEditedAt: null,
+    summaryDueAt: null,
     createdAt: now,
     updatedAt: now,
 };

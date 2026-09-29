@@ -57,6 +57,7 @@ type EnvModule = {
     };
 };
 
+type AutoLearnModule = { startAutoLearnSweeper: () => void };
 type PosthogServerModule = {
     captureServerException: (
         error: unknown,
@@ -159,6 +160,11 @@ export async function register() {
     const { startKnowledgeEmbedSeeder } =
         require("./lib/knowledge/knowledge-embed") as KnowledgeEmbedModule;
     startKnowledgeEmbedSeeder();
+
+    // Releases what automatic Learn held back once its 72 hours are up.
+    const { startAutoLearnSweeper } =
+        require("./lib/learn/auto-learn") as AutoLearnModule;
+    startAutoLearnSweeper();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

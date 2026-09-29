@@ -1646,6 +1646,8 @@
   "ojvD8b": "Update the filename in your Plaud device when titles are generated",
   "1924tE": "Title templates",
   "GPz4Ty": "where the transcript goes. The model must reply with the title alone, as plain text. Only the beginning of a long transcript is sent.",
+  "a1FV0d": "Learn automatically",
+  "FeFnMg": "Run Learn on each new transcript with timings. The title, summary and topics wait until you review what it found, 72 hours at most, so they are made from the corrected transcript.",
   "-eBjrv": "Auto-detect topics",
   "PPXO2Z": "Split each new transcript into topics you can jump to. Works on transcripts with timings: Plaud's, Whisper's and speaker-labelled ones. You can also detect topics on them by hand.",
   "8Bnt_7": "Topic templates",

@@ -45,6 +45,7 @@ import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
+import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { isFinalLearnError } from "@/lib/learn/errors";
 import {
     LEARN_JOB_KIND,
@@ -419,6 +420,22 @@ function counts(
     return stats;
 }
 
+/**
+ * Whatever a run ended with, short of waiting for its review, may release
+ * the title, summary and topics automatic Learn held back (Task 5.5).
+ */
+async function settled(runId: string): Promise<void> {
+    const [run] = await db
+        .select({
+            recordingId: learnRuns.recordingId,
+            status: learnRuns.status,
+        })
+        .from(learnRuns)
+        .where(eq(learnRuns.id, runId));
+    if (!run || run.status === "queued" || run.status === "running") return;
+    await releaseAutoLearnHold(run.recordingId);
+}
+
 export const learnJobHandler: JobHandler<LearnJobPayload> = {
     kind: LEARN_JOB_KIND,
     // One at a time: runs go to the same providers as summaries.
@@ -428,268 +445,271 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseLearnJobPayload,
 
-    async run({
-        payload,
-        attempt,
-        maxAttempts,
-        signal,
-        reportProgress,
-    }): Promise<JobResult> {
-        const [run] = await db
-            .select()
-            .from(learnRuns)
-            .where(eq(learnRuns.id, payload.runId));
-        if (!run) return { skipped: "gone" };
-        if (run.status !== "queued" && run.status !== "running") {
-            return { skipped: run.status };
-        }
-        const claimed = await db
-            .update(learnRuns)
-            .set({
-                status: "running",
-                startedAt: new Date(),
-                updatedAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(learnRuns.id, run.id),
-                    inArray(learnRuns.status, ["queued", "running"]),
-                ),
-            )
-            .returning({ id: learnRuns.id });
-        if (claimed.length === 0) return { skipped: "claimed" };
-
+    async run(context): Promise<JobResult> {
         try {
-            const [transcript] = await db
-                .select()
-                .from(transcriptions)
-                .where(eq(transcriptions.id, run.transcriptionId));
-            if (!transcript) {
-                await setStatus(run.id, "cancelled");
-                return { skipped: "gone" };
-            }
-            if (transcript.revision !== run.transcriptRevision) {
-                await setStatus(run.id, "superseded");
-                return { skipped: "superseded" };
-            }
-            const orgUserId = await sharingOrgUserId();
-            if (!(await mayStillRun(run, orgUserId))) {
-                await setStatus(run.id, "cancelled");
-                return { skipped: "not allowed" };
-            }
-            const turns = readTranscriptTurns(transcript);
-            if (!turns?.length) {
-                await setStatus(run.id, "cancelled");
-                return { skipped: "untimed" };
-            }
+            return await runLearnJob(context);
+        } finally {
+            await settled(context.payload.runId).catch(() => undefined);
+        }
+    },
+};
 
-            const shared = run.view === "org";
-            const tools: LearnToolContext = {
-                read: { kind: "recording", ownerUserId: run.userId, shared },
-                budget: { remaining: TOOL_BUDGET },
-            };
-            const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
-                sharedOnly: shared,
-            });
-            const relations: LearnRelationChoice[] =
-                vocabulary.relationTypes.filter(
-                    (relation) => !relation.adoptedAsKey,
-                );
-            const frameBefore = await frameFor(run, {
+async function runLearnJob({
+    payload,
+    attempt,
+    maxAttempts,
+    signal,
+    reportProgress,
+}: Parameters<JobHandler<LearnJobPayload>["run"]>[0]): Promise<JobResult> {
+    const [run] = await db
+        .select()
+        .from(learnRuns)
+        .where(eq(learnRuns.id, payload.runId));
+    if (!run) return { skipped: "gone" };
+    if (run.status !== "queued" && run.status !== "running") {
+        return { skipped: run.status };
+    }
+    const claimed = await db
+        .update(learnRuns)
+        .set({
+            status: "running",
+            startedAt: new Date(),
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(learnRuns.id, run.id),
+                inArray(learnRuns.status, ["queued", "running"]),
+            ),
+        )
+        .returning({ id: learnRuns.id });
+    if (claimed.length === 0) return { skipped: "claimed" };
+
+    try {
+        const [transcript] = await db
+            .select()
+            .from(transcriptions)
+            .where(eq(transcriptions.id, run.transcriptionId));
+        if (!transcript) {
+            await setStatus(run.id, "cancelled");
+            return { skipped: "gone" };
+        }
+        if (transcript.revision !== run.transcriptRevision) {
+            await setStatus(run.id, "superseded");
+            return { skipped: "superseded" };
+        }
+        const orgUserId = await sharingOrgUserId();
+        if (!(await mayStillRun(run, orgUserId))) {
+            await setStatus(run.id, "cancelled");
+            return { skipped: "not allowed" };
+        }
+        const turns = readTranscriptTurns(transcript);
+        if (!turns?.length) {
+            await setStatus(run.id, "cancelled");
+            return { skipped: "untimed" };
+        }
+
+        const shared = run.view === "org";
+        const tools: LearnToolContext = {
+            read: { kind: "recording", ownerUserId: run.userId, shared },
+            budget: { remaining: TOOL_BUDGET },
+        };
+        const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
+            sharedOnly: shared,
+        });
+        const relations: LearnRelationChoice[] =
+            vocabulary.relationTypes.filter(
+                (relation) => !relation.adoptedAsKey,
+            );
+        const frameBefore = await frameFor(run, {
+            revision: transcript.revision,
+            turns,
+            language: transcript.detectedLanguage,
+            provider: transcript.provider,
+        });
+        const labels = [...new Set(turns.map((turn) => turn.speaker))];
+        const { chat, provider, model } = await chatFor(
+            run.actorUserId ?? "",
+            signal,
+        );
+        // Path 1 (the bridge, with tools) lands with Task 3.6; until
+        // then every run takes the fallback, and says so.
+        const path = chooseLearnPath(
+            { provider },
+            { mcpUrl: env.LEARN_MCP_URL },
+        );
+        reportProgress({ phase: "reading" });
+        const pass = await runFallbackPass({
+            chat,
+            lookup: {
+                findEntities: (query) => findEntities(tools, query),
+            },
+            turns,
+            language: transcript.detectedLanguage,
+            relations,
+            unnamedLabels: labels.filter(
+                (label) => !frameBefore.answeredLabels.has(label),
+            ),
+            signal,
+        });
+        reportProgress({ phase: "checking" });
+
+        // Validated against the knowledge as it is now; written under the
+        // recording and transcript locks, with the revision, the writer
+        // rule and the run's own status checked once more, and validated
+        // again when what the validation read moved meanwhile.
+        const baseStats = {
+            calls: pass.calls,
+            lookups: pass.lookups,
+            windows: pass.windows,
+            repairs: pass.repairs,
+            // A window whose answer was never the shape is lost: said,
+            // not hidden behind a run that merely found nothing.
+            ...(pass.failedWindows > 0
+                ? { failed_windows: pass.failedWindows }
+                : {}),
+        };
+        for (let fenceAttempt = 1; ; fenceAttempt++) {
+            const lastAttempt = fenceAttempt >= FENCE_ATTEMPTS;
+            const fence = await fenceOf(db, run, orgUserId);
+            const frame = await frameFor(run, {
                 revision: transcript.revision,
                 turns,
                 language: transcript.detectedLanguage,
                 provider: transcript.provider,
             });
-            const labels = [...new Set(turns.map((turn) => turn.speaker))];
-            const { chat, provider, model } = await chatFor(
-                run.actorUserId ?? "",
-                signal,
-            );
-            // Path 1 (the bridge, with tools) lands with Task 3.6; until
-            // then every run takes the fallback, and says so.
-            const path = chooseLearnPath(
-                { provider },
-                { mcpUrl: env.LEARN_MCP_URL },
-            );
-            reportProgress({ phase: "reading" });
-            const pass = await runFallbackPass({
-                chat,
-                lookup: {
-                    findEntities: (query) => findEntities(tools, query),
-                },
-                turns,
-                language: transcript.detectedLanguage,
-                relations,
-                unnamedLabels: labels.filter(
-                    (label) => !frameBefore.answeredLabels.has(label),
-                ),
-                signal,
-            });
-            reportProgress({ phase: "checking" });
-
-            // Validated against the knowledge as it is now; written under the
-            // recording and transcript locks, with the revision, the writer
-            // rule and the run's own status checked once more, and validated
-            // again when what the validation read moved meanwhile.
-            const baseStats = {
-                calls: pass.calls,
-                lookups: pass.lookups,
-                windows: pass.windows,
-                repairs: pass.repairs,
-                // A window whose answer was never the shape is lost: said,
-                // not hidden behind a run that merely found nothing.
-                ...(pass.failedWindows > 0
-                    ? { failed_windows: pass.failedWindows }
-                    : {}),
-            };
-            for (let fenceAttempt = 1; ; fenceAttempt++) {
-                const lastAttempt = fenceAttempt >= FENCE_ATTEMPTS;
-                const fence = await fenceOf(db, run, orgUserId);
-                const frame = await frameFor(run, {
-                    revision: transcript.revision,
-                    turns,
-                    language: transcript.detectedLanguage,
-                    provider: transcript.provider,
-                });
-                const validated = validateLearnOutput(pass.output, frame);
-                const items: ReviewCandidate[] = lastAttempt
-                    ? validated.items.map(
-                          (item) =>
-                              ({
-                                  ...item,
-                                  preTicked: false,
-                              }) as ReviewCandidate,
-                      )
-                    : validated.items;
-                const stats = counts(items, {
-                    ...baseStats,
-                    ...(fenceAttempt > 1
-                        ? { fence_retries: fenceAttempt - 1 }
-                        : {}),
-                    ...Object.fromEntries(
-                        Object.entries(validated.dropped).map(([reason, n]) => [
-                            `dropped_${reason}`,
-                            n ?? 0,
-                        ]),
-                    ),
-                });
-                const outcome = await db.transaction(async (tx) => {
-                    await tx
-                        .select({ id: recordings.id })
-                        .from(recordings)
-                        .where(eq(recordings.id, run.recordingId))
-                        .for("share");
-                    // Speaker answers are written under the transcript held
-                    // for update: holding it for share keeps them still.
-                    const [current] = await tx
-                        .select({ revision: transcriptions.revision })
-                        .from(transcriptions)
-                        .where(eq(transcriptions.id, run.transcriptionId))
-                        .for("share");
-                    const [still] = await tx
-                        .select({ status: learnRuns.status })
-                        .from(learnRuns)
-                        .where(eq(learnRuns.id, run.id))
-                        .for("update");
-                    if (!current || still?.status !== "running") {
-                        return { status: "cancelled" as const, items: 0 };
-                    }
-                    const finish = (
-                        status:
-                            | "ready"
-                            | "finished"
-                            | "superseded"
-                            | "cancelled",
-                    ) =>
-                        tx
-                            .update(learnRuns)
-                            .set({
-                                status,
-                                path,
-                                provider,
-                                model,
-                                // Merged: the MCP route counts its tool
-                                // calls on the same row.
-                                stats: sql`coalesce(${learnRuns.stats}, '{}'::jsonb) || ${JSON.stringify(stats)}::jsonb`,
-                                finishedAt:
-                                    status === "ready" ? null : new Date(),
-                                updatedAt: new Date(),
-                            })
-                            .where(eq(learnRuns.id, run.id));
-                    if (
-                        validated.superseded ||
-                        current.revision !== run.transcriptRevision
-                    ) {
-                        await finish("superseded");
-                        return { status: "superseded" as const, items: 0 };
-                    }
-                    if (!(await mayStillRun(run, orgUserId, tx))) {
-                        await finish("cancelled");
-                        return { status: "cancelled" as const, items: 0 };
-                    }
-                    if (
-                        !lastAttempt &&
-                        (await fenceOf(tx, run, orgUserId, { lock: true })) !==
-                            fence
-                    ) {
-                        return { status: "stale" as const, items: 0 };
-                    }
-                    if (items.length > 0) {
-                        await tx.insert(learnReviewItems).values(
-                            items.map((item) => ({
-                                runId: run.id,
-                                userId: run.scopeUserId,
-                                kind: item.kind,
-                                fingerprintHmac: learnFingerprintHmac(
-                                    item.fingerprint,
-                                ),
-                                payload: encryptJsonField(item.payload),
-                                preTicked: item.preTicked,
-                                dependsOnLabel:
-                                    "dependsOnLabel" in item
-                                        ? (item.dependsOnLabel ?? null)
-                                        : null,
-                            })),
-                        );
-                    }
-                    // An empty run says "nothing new found" and counts as
-                    // finished.
-                    const status =
-                        items.length > 0
-                            ? ("ready" as const)
-                            : ("finished" as const);
-                    await finish(status);
-                    return { status, items: items.length };
-                });
-                if (outcome.status === "stale") continue;
-                return { status: outcome.status, items: outcome.items };
-            }
-        } catch (caught) {
-            // Final for Learn (lookups spent, no usable answer): no retry.
-            const error = isFinalLearnError(caught)
-                ? new AppError(
-                      ErrorCode.AI_PROVIDER_API_ERROR,
-                      caught instanceof Error ? caught.message : "Learn failed",
-                      502,
+            const validated = validateLearnOutput(pass.output, frame);
+            const items: ReviewCandidate[] = lastAttempt
+                ? validated.items.map(
+                      (item) =>
+                          ({
+                              ...item,
+                              preTicked: false,
+                          }) as ReviewCandidate,
                   )
-                : caught;
-            // Retried by the queue when worth it: the run waits for it.
-            const retrying = attempt < maxAttempts && isRetryableError(error);
-            await setStatus(
-                run.id,
-                retrying ? "queued" : "failed",
-                retrying
-                    ? {}
-                    : {
-                          errorCode:
-                              error instanceof AppError
-                                  ? error.code
-                                  : ErrorCode.INTERNAL_ERROR,
-                          finishedAt: new Date(),
-                      },
-            );
-            throw error;
+                : validated.items;
+            const stats = counts(items, {
+                ...baseStats,
+                ...(fenceAttempt > 1
+                    ? { fence_retries: fenceAttempt - 1 }
+                    : {}),
+                ...Object.fromEntries(
+                    Object.entries(validated.dropped).map(([reason, n]) => [
+                        `dropped_${reason}`,
+                        n ?? 0,
+                    ]),
+                ),
+            });
+            const outcome = await db.transaction(async (tx) => {
+                await tx
+                    .select({ id: recordings.id })
+                    .from(recordings)
+                    .where(eq(recordings.id, run.recordingId))
+                    .for("share");
+                // Speaker answers are written under the transcript held
+                // for update: holding it for share keeps them still.
+                const [current] = await tx
+                    .select({ revision: transcriptions.revision })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.id, run.transcriptionId))
+                    .for("share");
+                const [still] = await tx
+                    .select({ status: learnRuns.status })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, run.id))
+                    .for("update");
+                if (!current || still?.status !== "running") {
+                    return { status: "cancelled" as const, items: 0 };
+                }
+                const finish = (
+                    status: "ready" | "finished" | "superseded" | "cancelled",
+                ) =>
+                    tx
+                        .update(learnRuns)
+                        .set({
+                            status,
+                            path,
+                            provider,
+                            model,
+                            // Merged: the MCP route counts its tool
+                            // calls on the same row.
+                            stats: sql`coalesce(${learnRuns.stats}, '{}'::jsonb) || ${JSON.stringify(stats)}::jsonb`,
+                            finishedAt: status === "ready" ? null : new Date(),
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(learnRuns.id, run.id));
+                if (
+                    validated.superseded ||
+                    current.revision !== run.transcriptRevision
+                ) {
+                    await finish("superseded");
+                    return { status: "superseded" as const, items: 0 };
+                }
+                if (!(await mayStillRun(run, orgUserId, tx))) {
+                    await finish("cancelled");
+                    return { status: "cancelled" as const, items: 0 };
+                }
+                if (
+                    !lastAttempt &&
+                    (await fenceOf(tx, run, orgUserId, { lock: true })) !==
+                        fence
+                ) {
+                    return { status: "stale" as const, items: 0 };
+                }
+                if (items.length > 0) {
+                    await tx.insert(learnReviewItems).values(
+                        items.map((item) => ({
+                            runId: run.id,
+                            userId: run.scopeUserId,
+                            kind: item.kind,
+                            fingerprintHmac: learnFingerprintHmac(
+                                item.fingerprint,
+                            ),
+                            payload: encryptJsonField(item.payload),
+                            preTicked: item.preTicked,
+                            dependsOnLabel:
+                                "dependsOnLabel" in item
+                                    ? (item.dependsOnLabel ?? null)
+                                    : null,
+                        })),
+                    );
+                }
+                // An empty run says "nothing new found" and counts as
+                // finished.
+                const status =
+                    items.length > 0
+                        ? ("ready" as const)
+                        : ("finished" as const);
+                await finish(status);
+                return { status, items: items.length };
+            });
+            if (outcome.status === "stale") continue;
+            return { status: outcome.status, items: outcome.items };
         }
-    },
-};
+    } catch (caught) {
+        // Final for Learn (lookups spent, no usable answer): no retry.
+        const error = isFinalLearnError(caught)
+            ? new AppError(
+                  ErrorCode.AI_PROVIDER_API_ERROR,
+                  caught instanceof Error ? caught.message : "Learn failed",
+                  502,
+              )
+            : caught;
+        // Retried by the queue when worth it: the run waits for it.
+        const retrying = attempt < maxAttempts && isRetryableError(error);
+        await setStatus(
+            run.id,
+            retrying ? "queued" : "failed",
+            retrying
+                ? {}
+                : {
+                      errorCode:
+                          error instanceof AppError
+                              ? error.code
+                              : ErrorCode.INTERNAL_ERROR,
+                      finishedAt: new Date(),
+                  },
+        );
+        throw error;
+    }
+}

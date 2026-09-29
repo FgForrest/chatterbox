@@ -364,6 +364,10 @@ export const recordings = pgTable(
         // from storage at delete time; this row is retained only as a marker
         // keyed by plaudFileId. See issue #56.
         deletedAt: timestamp("deleted_at"),
+        // Automatic Learn holds the title, summary and topics back until its
+        // review is done, and at most until this time (Task 5.5); null when
+        // nothing is held.
+        summaryDueAt: timestamp("summary_due_at"),
         // Retention markers. Set by the retention sweep
         // (src/lib/retention/worker.ts) when it removes one kind of data
         // from a recording that has aged past the user's retention period.
@@ -2145,6 +2149,9 @@ export const userSettings = pgTable("user_settings", {
     summaryPrompt: jsonb("summary_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // Topic detection: queued after a transcript with timings is written.
     autoDetectTopics: boolean("auto_detect_topics").notNull().default(false),
+    // Automatic Learn after a transcript with timings (offered where
+    // LEARN_AUTO is set); the title, summary and topics wait for its review.
+    autoLearn: boolean("auto_learn").notNull().default(false),
     topicPrompt: jsonb("topic_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // AI output language (applies to summaries, AI-generated titles and topics).
     // null or "auto" => match transcript language (default behavior).

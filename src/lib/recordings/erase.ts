@@ -246,7 +246,13 @@ export async function eraseLocalArtifact(
                 tx,
                 userId,
                 recordingId,
-                ["transcription", "summary", "topics", "learn.run"],
+                [
+                    "transcription",
+                    "summary",
+                    "topics",
+                    "learn.run",
+                    "title.generate",
+                ],
                 now,
             );
             // A Learn run on the Organization view reads the same

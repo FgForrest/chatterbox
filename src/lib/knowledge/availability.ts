@@ -36,6 +36,14 @@ export async function isLearnAvailableFor(userId: string): Promise<boolean> {
     return pickEnhancementCredential(configured) !== undefined;
 }
 
+/**
+ * Automatic Learn is offered here: Learn is, and the operator turned it on
+ * (`LEARN_AUTO`) once the evaluation's thresholds were met.
+ */
+export function isAutoLearnOffered(): boolean {
+    return isLearnDeploymentAvailable() && env.LEARN_AUTO === true;
+}
+
 /** Names can be matched by meaning too: an embedding service is configured. */
 export function isEmbeddingAvailable(): boolean {
     return isLearnDeploymentAvailable() && env.EMBEDDING_BASE_URL !== undefined;

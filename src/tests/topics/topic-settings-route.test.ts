@@ -7,6 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeTopicPromptConfig } from "@/lib/topics/topic-presets";
 
+// The route says whether automatic Learn is offered here.
+vi.mock("@/lib/knowledge/availability", () => ({
+    isAutoLearnOffered: () => false,
+}));
+
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),

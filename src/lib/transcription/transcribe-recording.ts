@@ -4,12 +4,10 @@ import { db } from "@/db";
 import {
     aiEnhancements,
     apiCredentials,
-    plaudConnections,
     recordings,
     transcriptions,
     userSettings,
 } from "@/db/schema";
-import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
@@ -20,7 +18,6 @@ import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
 import {
     exportRecordingSidecarsIfEnabled,
-    refreshExistingRecordingSidecars,
     removeRecordingSidecar,
 } from "@/lib/export/document-sidecars";
 import {
@@ -31,17 +28,13 @@ import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
+import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
-import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
-import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import {
-    storeGeneratedTitle,
-    titleStillGenerated,
-} from "@/lib/recordings/generated-title";
+import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -52,7 +45,7 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 import { buildAudioFile } from "@/lib/transcription/audio-file";
 import { chatTranscribe } from "@/lib/transcription/chat-transcribe";
@@ -813,89 +806,27 @@ async function transcribeRecordingInner(
             );
         }
 
-        if (autoGenerateTitle && transcriptionText.trim()) {
+        // Automatic Learn holds the title, summary and topics back until
+        // its review is done (72 h at most), so they are made from the
+        // transcript as corrected; `transcription.completed` then fires
+        // without the title, which follows as `recording.updated`.
+        const heldForLearn =
+            !orgView &&
+            (await holdForAutoLearn({
+                userId,
+                recordingId,
+                timed: Boolean(turns?.length),
+            }));
+
+        if (!heldForLearn && autoGenerateTitle && transcriptionText.trim()) {
             try {
-                const generatedTitle = await generateTitleFromTranscription(
+                await applyGeneratedTitle({
                     userId,
-                    transcriptionText,
-                );
-
-                // Not stored when a person has set a title, and then
-                // nothing below runs.
-                const retitled = generatedTitle
-                    ? await storeGeneratedTitle(
-                          userId,
-                          recordingId,
-                          generatedTitle,
-                      )
-                    : false;
-
-                if (generatedTitle && retitled) {
-                    // The export was planned under the old title above;
-                    // plan again so its directory follows the rename now.
-                    await refreshExistingRecordingSidecars(userId, recordingId);
-
-                    if (syncTitleToPlaud) {
-                        try {
-                            const [connection] = await db
-                                .select()
-                                .from(plaudConnections)
-                                .where(eq(plaudConnections.userId, userId))
-                                .limit(1);
-
-                            if (connection) {
-                                const plaudClient = await createPlaudClient(
-                                    connection.bearerToken,
-                                    connection.apiBase,
-                                    connection.workspaceId,
-                                );
-                                // A person may have renamed it since the
-                                // title was stored. Their title stays
-                                // here, so Plaud must not get this one.
-                                if (
-                                    await titleStillGenerated(
-                                        userId,
-                                        recordingId,
-                                    )
-                                ) {
-                                    await plaudClient.updateFilename(
-                                        recording.plaudFileId,
-                                        generatedTitle,
-                                    );
-                                }
-                                // Backfill workspaceId if newly resolved.
-                                // Always scope user-owned UPDATEs by userId
-                                // even when filtering by id (per AGENTS.md).
-                                const resolved = plaudClient.workspaceId;
-                                if (
-                                    resolved &&
-                                    resolved !== connection.workspaceId
-                                ) {
-                                    await db
-                                        .update(plaudConnections)
-                                        .set({ workspaceId: resolved })
-                                        .where(
-                                            and(
-                                                eq(
-                                                    plaudConnections.id,
-                                                    connection.id,
-                                                ),
-                                                eq(
-                                                    plaudConnections.userId,
-                                                    userId,
-                                                ),
-                                            ),
-                                        );
-                                }
-                            }
-                        } catch (error) {
-                            console.error(
-                                "Failed to sync title to Plaud:",
-                                error,
-                            );
-                        }
-                    }
-                }
+                    recordingId,
+                    text: transcriptionText,
+                    plaudFileId: recording.plaudFileId,
+                    syncTitleToPlaud,
+                });
             } catch (error) {
                 console.error("Failed to generate title:", error);
             }
@@ -917,68 +848,12 @@ async function transcribeRecordingInner(
         // Topics need the timings only some providers report. Queued like the
         // summary, and like it not after a run on the Organization view,
         // where the organization account detects them by hand.
-        if (!orgView && turns?.length) {
+        if (!heldForLearn && !orgView && turns?.length) {
             await queueAutoTopics(userId, recordingId, "riffado");
         }
 
-        if (autoSummarize) {
-            // Per-user hourly cap on auto-summary calls. Cheap defense
-            // against runaway provider cost if a sync replays N
-            // recordings or the user toggles auto-summarize on with an
-            // expensive model. The manual "Generate summary" button is
-            // not throttled -- the user is in the loop there.
-            const rateLimit = await consumeRateLimitBucket(
-                `auto-summary:user:${userId}`,
-                {
-                    limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-                    windowMs: 60 * 60 * 1000,
-                },
-            );
-
-            if (!rateLimit.allowed) {
-                console.warn(
-                    `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
-                );
-                await emitEvent("summary.failed", userId, recordingId, {
-                    error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
-                });
-            } else {
-                // Queued rather than run inline. This is the unattended path
-                // -- a sync can trigger a dozen of these with nobody
-                // watching -- and inline it inherited the lifetime of
-                // whatever process happened to be transcribing: a container
-                // upgrade partway through left a recording that simply never
-                // got a summary, with nothing to say why or to try again.
-                //
-                // `summary.completed` and `summary.failed` now come from the
-                // job handler, which keeps their meaning intact: the event
-                // still fires after the summary is written and readable,
-                // just from the worker rather than from here. What changes is
-                // that this function no longer waits for it.
-                try {
-                    await enqueueSummaryJob({
-                        userId,
-                        recordingId,
-                        presetId: autoSummarizePreset ?? undefined,
-                        trigger: "auto",
-                    });
-                } catch (error) {
-                    // Only a failure to QUEUE reaches here, which means the
-                    // database refused the insert -- the summary itself has
-                    // not been attempted yet. Never roll back the transcript
-                    // over it: the user wants the transcript regardless.
-                    console.error(
-                        `Could not queue auto-summary for recording ${recordingId}:`,
-                        error,
-                    );
-                    await emitEvent("summary.failed", userId, recordingId, {
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                    });
-                }
-            }
+        if (!heldForLearn && autoSummarize) {
+            await queueAutoSummary(userId, recordingId, autoSummarizePreset);
         }
 
         return {

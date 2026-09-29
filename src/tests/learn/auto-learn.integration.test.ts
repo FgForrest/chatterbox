@@ -1,0 +1,419 @@
+/**
+ * Automatic Learn holding the title, summary and topics back (Task 5.5),
+ * against a real PostgreSQL: when it holds, what releases it, and that it
+ * releases once.
+ *
+ * Skipped unless `TEST_DATABASE_URL` points at a PostgreSQL the harness may
+ * create scratch databases on.
+ */
+
+import { and, eq } from "drizzle-orm";
+import {
+    afterAll,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    vi,
+} from "vitest";
+import {
+    aiEnhancements,
+    apiCredentials,
+    asyncJobs,
+    learnRuns,
+    recordings,
+    transcriptions,
+    userSettings,
+    users,
+} from "@/db/schema";
+import {
+    createMigratedTestDatabase,
+    getTestDatabaseUrl,
+    type TestPostgresDatabase,
+} from "@/tests/integration/postgres";
+
+const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+    const ref: { current: Record<PropertyKey, unknown> | null } = {
+        current: null,
+    };
+    const proxy = new Proxy(
+        {},
+        {
+            get: (_target, property: string | symbol) => {
+                const current = ref.current;
+                if (!current) {
+                    throw new Error("test database was not initialized");
+                }
+                const value = current[property];
+                return typeof value === "function"
+                    ? value.bind(current)
+                    : value;
+            },
+        },
+    );
+    return {
+        dbProxy: proxy,
+        dbRef: ref,
+        mockEnv: {
+            IS_HOSTED: false,
+            LEARN_AUTO: true as boolean | undefined,
+            SELF_HOST_MODE: "shared",
+            ORG_ACCOUNT_EMAIL: "org@example.test",
+            ORG_ACCOUNT_PASSWORD: "organization-password",
+            ENCRYPTION_KEY:
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+            DATABASE_URL: "postgres://unused",
+            AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20,
+        },
+    };
+});
+
+vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
+vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerEvent: vi.fn().mockResolvedValue(undefined),
+    captureServerException: vi.fn(),
+}));
+vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/webhooks/emit", () => ({
+    emitEvent: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/ai/generate-title", () => ({
+    generateTitleFromTranscription: vi.fn().mockResolvedValue("Held title"),
+}));
+vi.mock("@/lib/export/document-sidecars", () => ({
+    refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { encrypt } from "@/lib/encryption";
+import {
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
+import {
+    AUTO_LEARN_HOLD_MS,
+    holdForAutoLearn,
+    releaseAutoLearnHold,
+    sweepAutoLearnHolds,
+} from "@/lib/learn/auto-learn";
+import { ensureOrgAccount } from "@/lib/org/account";
+import { titleJobHandler } from "@/lib/recordings/title-job-handler";
+import { emitEvent } from "@/lib/webhooks/emit";
+
+const testDatabaseUrl = getTestDatabaseUrl();
+const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
+
+const OWNER = "user-owner";
+const REC = "rec-auto";
+
+describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
+    let database: TestPostgresDatabase | null = null;
+    let riffadoId = "";
+    let plaudId = "";
+
+    function db() {
+        if (!database) throw new Error("test database was not initialized");
+        return database.db;
+    }
+
+    beforeAll(async () => {
+        database = await createMigratedTestDatabase(
+            testDatabaseUrl ?? "",
+            "auto_learn",
+        );
+        dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
+    }, 120_000);
+
+    afterAll(async () => {
+        dbRef.current = null;
+        await database?.dispose();
+    }, 30_000);
+
+    beforeEach(async () => {
+        mockEnv.LEARN_AUTO = true;
+        await db().delete(users);
+        await db().delete(asyncJobs);
+        await db().insert(users).values({ id: OWNER, email: "o@example.test" });
+        await ensureOrgAccount();
+        await db().insert(userSettings).values({
+            userId: OWNER,
+            autoLearn: true,
+            autoSummarize: true,
+            autoDetectTopics: true,
+            autoGenerateTitle: true,
+        });
+        await db()
+            .insert(apiCredentials)
+            .values({
+                userId: OWNER,
+                provider: "OpenAI",
+                apiKey: encrypt("sk-test"),
+                defaultModel: "gpt-test",
+                isDefaultEnhancement: true,
+            });
+        await db()
+            .insert(recordings)
+            .values({
+                id: REC,
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: "plaud-1",
+                filename: encryptText("Weekly"),
+                duration: 5_000,
+                startTime: new Date("2026-09-01T10:00:00Z"),
+                endTime: new Date("2026-09-01T10:00:05Z"),
+                filesize: 11,
+                fileMd5: "0".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/rec.mp3`,
+                plaudVersion: "1",
+            });
+        const turns = [
+            { speaker: "speaker_0", startMs: 0, endMs: 5_000, text: "Ahoj." },
+        ];
+        const inserted = await db()
+            .insert(transcriptions)
+            .values(
+                (["riffado", "plaud"] as const).map((source) => ({
+                    recordingId: REC,
+                    userId: OWNER,
+                    text: encryptText("Ahoj."),
+                    turns: encryptJsonField(turns),
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                    source,
+                })),
+            )
+            .returning({
+                id: transcriptions.id,
+                source: transcriptions.source,
+            });
+        riffadoId = inserted.find((row) => row.source === "riffado")?.id ?? "";
+        plaudId = inserted.find((row) => row.source === "plaud")?.id ?? "";
+    });
+
+    const dueAt = async () =>
+        (
+            await db()
+                .select({ at: recordings.summaryDueAt })
+                .from(recordings)
+                .where(eq(recordings.id, REC))
+        )[0]?.at ?? null;
+
+    const kinds = async () =>
+        (
+            await db()
+                .select({ kind: asyncJobs.kind })
+                .from(asyncJobs)
+                .where(eq(asyncJobs.userId, OWNER))
+        )
+            .map((row) => row.kind)
+            .sort();
+
+    function run(
+        status: "queued" | "running" | "ready" | "finished" | "failed",
+        transcriptionId = riffadoId,
+    ) {
+        return db()
+            .insert(learnRuns)
+            .values({
+                userId: OWNER,
+                scopeUserId: OWNER,
+                recordingId: REC,
+                transcriptionId,
+                view: "private",
+                actorUserId: OWNER,
+                trigger: "auto",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status,
+            })
+            .returning({ id: learnRuns.id })
+            .then((rows) => rows[0]?.id ?? "");
+    }
+
+    const setStatus = (id: string, status: "finished" | "failed") =>
+        db().update(learnRuns).set({ status }).where(eq(learnRuns.id, id));
+
+    const hold = () =>
+        db()
+            .update(recordings)
+            .set({ summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS) })
+            .where(eq(recordings.id, REC));
+
+    it("holds the title, summary and topics and starts Learn, queuing nothing else", async () => {
+        const before = Date.now();
+
+        expect(
+            await holdForAutoLearn({
+                userId: OWNER,
+                recordingId: REC,
+                timed: true,
+            }),
+        ).toBe(true);
+
+        const due = await dueAt();
+        expect(due?.getTime()).toBeGreaterThanOrEqual(
+            before + AUTO_LEARN_HOLD_MS - 1_000,
+        );
+        // No phantom summary, title or topics job: only the run's.
+        expect(await kinds()).toEqual(["learn.run"]);
+        const runs = await db()
+            .select({ trigger: learnRuns.trigger, status: learnRuns.status })
+            .from(learnRuns);
+        expect(runs).toEqual([{ trigger: "auto", status: "queued" }]);
+    });
+
+    it("holds nothing when the person, the operator or the transcript does not allow it", async () => {
+        const tryHold = (timed = true) =>
+            holdForAutoLearn({ userId: OWNER, recordingId: REC, timed });
+
+        expect(await tryHold(false)).toBe(false);
+        mockEnv.LEARN_AUTO = undefined;
+        expect(await tryHold()).toBe(false);
+        mockEnv.LEARN_AUTO = true;
+        await db()
+            .update(userSettings)
+            .set({ autoLearn: false })
+            .where(eq(userSettings.userId, OWNER));
+        expect(await tryHold()).toBe(false);
+
+        expect(await dueAt()).toBeNull();
+        expect(await kinds()).toEqual([]);
+    });
+
+    it("waits while a run is queued or awaits review, and releases once when the last review is done", async () => {
+        await hold();
+        const ready = await run("ready");
+
+        expect(await releaseAutoLearnHold(REC)).toBe(false);
+        expect(await dueAt()).not.toBeNull();
+
+        await setStatus(ready, "finished");
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+        expect(await dueAt()).toBeNull();
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+
+        // Released already: nothing is queued twice.
+        expect(await releaseAutoLearnHold(REC)).toBe(false);
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
+    it("releases when the run failed", async () => {
+        await hold();
+        const queued = await run("queued");
+        expect(await releaseAutoLearnHold(REC)).toBe(false);
+
+        await setStatus(queued, "failed");
+
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+    });
+
+    it("with two transcripts, waits for both reviews", async () => {
+        await hold();
+        const riffado = await run("ready", riffadoId);
+        const plaud = await run("ready", plaudId);
+
+        await setStatus(riffado, "finished");
+        expect(await releaseAutoLearnHold(REC)).toBe(false);
+
+        await setStatus(plaud, "finished");
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+    });
+
+    it("releases when the time is up, even with a review still waiting", async () => {
+        await hold();
+        await run("ready");
+
+        expect(await sweepAutoLearnHolds(new Date())).toBe(0);
+        expect(
+            await sweepAutoLearnHolds(
+                new Date(Date.now() + AUTO_LEARN_HOLD_MS + 60_000),
+            ),
+        ).toBe(1);
+        expect(await dueAt()).toBeNull();
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
+    it("keeps a summary the person made while it waited", async () => {
+        await hold();
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                summary: encryptText("Their own summary."),
+                provider: "openai",
+                model: "gpt-test",
+                source: "riffado",
+            });
+
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+
+        expect(await kinds()).toEqual(["title.generate", "topics"]);
+        const summaries = await db()
+            .select({ id: aiEnhancements.id })
+            .from(aiEnhancements)
+            .where(
+                and(
+                    eq(aiEnhancements.recordingId, REC),
+                    eq(aiEnhancements.userId, OWNER),
+                ),
+            );
+        expect(summaries).toHaveLength(1);
+    });
+
+    describe("the title job", () => {
+        const runTitle = () =>
+            titleJobHandler.run({
+                jobId: "job-1",
+                userId: OWNER,
+                payload: { recordingId: REC },
+                attempt: 1,
+                maxAttempts: 3,
+                signal: new AbortController().signal,
+                reportProgress: vi.fn(),
+            } as unknown as Parameters<typeof titleJobHandler.run>[0]);
+        const title = async () =>
+            decryptText(
+                (
+                    await db()
+                        .select({ filename: recordings.filename })
+                        .from(recordings)
+                        .where(eq(recordings.id, REC))
+                )[0]?.filename ?? "",
+            );
+
+        it("names the recording from its transcript and says so with recording.updated", async () => {
+            vi.mocked(emitEvent).mockClear();
+
+            expect(await runTitle()).toEqual({ retitled: true });
+
+            expect(await title()).toBe("Held title");
+            expect(emitEvent).toHaveBeenCalledWith(
+                "recording.updated",
+                OWNER,
+                REC,
+            );
+        });
+
+        it("keeps a title the person set while it waited", async () => {
+            await db()
+                .update(recordings)
+                .set({
+                    filename: encryptText("Their name"),
+                    titleEditedAt: new Date(),
+                })
+                .where(eq(recordings.id, REC));
+            vi.mocked(emitEvent).mockClear();
+
+            expect(await runTitle()).toEqual({ retitled: false });
+
+            expect(await title()).toBe("Their name");
+            expect(emitEvent).not.toHaveBeenCalled();
+        });
+    });
+});

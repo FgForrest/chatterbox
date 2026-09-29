@@ -47,6 +47,7 @@ import {
     proposePhraseInTx,
     vocabularyVisibleTo,
 } from "@/lib/knowledge/vocabulary";
+import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
@@ -409,6 +410,18 @@ export async function finishReview(
     const orgUserId = await sharingOrgUserId();
     const latest = await latestRun(access, source);
     if (!latest || latest.status !== "ready") throw reviewNotFound();
+    const finished = await finishInTx(latest, actorUserId, orgUserId, versions);
+    // The last review done releases what automatic Learn held back.
+    await releaseAutoLearnHold(access.recordingId);
+    return finished;
+}
+
+function finishInTx(
+    latest: NonNullable<Awaited<ReturnType<typeof latestRun>>>,
+    actorUserId: string,
+    orgUserId: Awaited<ReturnType<typeof sharingOrgUserId>>,
+    versions: Record<string, number>,
+): Promise<FinishedReview> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
         const version = {
