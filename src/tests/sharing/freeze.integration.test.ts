@@ -486,7 +486,8 @@ describeWithDatabase(
         it("lets an organization account's run that outlives the withdrawal write nothing", async () => {
             await share();
             const { unshareRecording } = await import("@/lib/folders/folders");
-            provider.during = () => unshareRecording(OWNER, REC);
+            provider.during = () =>
+                unshareRecording(OWNER, REC, { withdraw: true });
 
             const error = await runJob(orgUserId, "org", "manual").then(
                 () => null,
@@ -516,7 +517,7 @@ describeWithDatabase(
             const { unshareRecording } = await import("@/lib/folders/folders");
             // Withdrawn and shared again while the provider ran.
             provider.during = async () => {
-                await unshareRecording(OWNER, REC);
+                await unshareRecording(OWNER, REC, { withdraw: true });
                 await share();
             };
 
@@ -591,7 +592,7 @@ describeWithDatabase(
             expect(await textOf(OWNER, "plaud")).toBeNull();
 
             const { unshareRecording } = await import("@/lib/folders/folders");
-            await unshareRecording(OWNER, REC);
+            await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await plaudImport()).toEqual({ committed: true });
             expect(await textOf(OWNER, "plaud")).toBe("From Plaud.");
         });
@@ -670,7 +671,7 @@ describeWithDatabase(
 
             // Withdrawn, the recording is the owner's to change again.
             const { unshareRecording } = await import("@/lib/folders/folders");
-            await unshareRecording(OWNER, REC);
+            await unshareRecording(OWNER, REC, { withdraw: true });
             expect(await offer()).toBe(1);
         });
     },

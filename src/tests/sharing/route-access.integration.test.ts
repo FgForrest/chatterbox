@@ -395,7 +395,10 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                         leaveFolder,
                         MEMBER,
                         `/api/recordings/${REC}/folders`,
-                        { method: "DELETE", ...json({ organization: true }) },
+                        {
+                            method: "DELETE",
+                            ...json({ organization: true, withdraw: true }),
+                        },
                     )
                 ).status,
             ).toBe(403);
@@ -594,7 +597,10 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                         leaveFolder,
                         OWNER,
                         `/api/recordings/${REC}/folders`,
-                        { method: "DELETE", ...json({ organization: true }) },
+                        {
+                            method: "DELETE",
+                            ...json({ organization: true, withdraw: true }),
+                        },
                     )
                 ).status,
             ).toBe(200);

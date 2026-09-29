@@ -586,7 +586,7 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
             "Janovi",
         );
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         expect(
             await db()

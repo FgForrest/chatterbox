@@ -489,7 +489,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
             (await listCorrections(OWNER, transcriptId)).map((c) => c.id),
         ).toEqual([curators]);
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         const back = await listCorrections(OWNER, transcriptId);
         expect(back.map((c) => [c.heard, c.targetPersonId])).toEqual([
@@ -541,7 +541,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
 
         expect((await alone()).length).toBeGreaterThan(0);
         expect(await batched()).toEqual(await alone());
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
         expect(await batched()).toEqual(await alone());
 
         await db()

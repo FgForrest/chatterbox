@@ -483,7 +483,8 @@ describeWithDatabase(
             });
 
             // Withdrawn after the organization account opened the view.
-            hooks.beforeChange = () => unshareRecording(OWNER, REC);
+            hooks.beforeChange = () =>
+                unshareRecording(OWNER, REC, { withdraw: true });
             const late = await put(orgUserId, seen, {
                 label: "speaker_0",
                 unknown: true,

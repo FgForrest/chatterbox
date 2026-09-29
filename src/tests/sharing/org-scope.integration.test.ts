@@ -712,7 +712,10 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 }),
                 403,
             );
-            await expectStatus(unshareRecording(BOB, "rec-a"), 403);
+            await expectStatus(
+                unshareRecording(BOB, "rec-a", { withdraw: true }),
+                403,
+            );
             expect((await resolveRecordingAccess(BOB, "rec-a"))?.role).toBe(
                 "member",
             );
@@ -747,7 +750,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     payload: { recordingId: "rec-a", view: "org" },
                 });
 
-            await unshareRecording(ALICE, "rec-a");
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
 
             const rows = await db()
                 .select()
@@ -807,7 +810,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 403,
             );
             // Withdrawing is still the owner's right.
-            await unshareRecording(ALICE, "rec-a");
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
         });
 
@@ -845,7 +848,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     folderId: root,
                 });
                 const [unshared] = await Promise.allSettled([
-                    unshareRecording(ALICE, "rec-a"),
+                    unshareRecording(ALICE, "rec-a", { withdraw: true }),
                     moveRecordingBetweenFolders({
                         userId: BOB,
                         recordingId: "rec-a",
@@ -1155,7 +1158,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
         it("gates and publishes the names again when shared again", async () => {
             const { transcript } = await answeredMeeting();
             await share();
-            await unshareRecording(ALICE, "rec-a");
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
 
             // The owner's again, to change: a private person on it now.
             const petr = await person("Petr");

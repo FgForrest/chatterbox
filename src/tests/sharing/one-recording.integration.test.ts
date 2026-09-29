@@ -332,7 +332,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
 
     it("gives the owner back what is left after a withdrawal, to change again", async () => {
         await share();
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         expect(
             (await call(deleteSummaryRoute, orgUserId, { method: "DELETE" }))
@@ -385,7 +385,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             } as unknown as Parameters<typeof topicsJobHandler.run>[0]),
         ).toEqual({ skipped: "shared" });
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
         const renamed = await call(patchRecordingRoute, OWNER, {
             method: "PATCH",
             path: "",
@@ -417,7 +417,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             404,
         );
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
         const [row] = await db()
             .select({
                 filename: recordings.filename,
@@ -573,11 +573,19 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         expect(withdrawn.status).toBe(200);
         expect(await resolveRecordingAccess(orgUserId, REC)).toBeNull();
 
-        // And the whole tree at once, shared again.
+        // And the whole tree at once, shared again: confirmed the same way.
         await share();
-        expect((await remove(orgUserId, { organization: true })).status).toBe(
-            200,
-        );
+        const unconfirmedAll = await remove(orgUserId, { organization: true });
+        expect(unconfirmedAll.status).toBe(409);
+        await expect(unconfirmedAll.json()).resolves.toMatchObject({
+            code: "WITHDRAW_UNCONFIRMED",
+        });
+        expect(await resolveRecordingAccess(orgUserId, REC)).not.toBeNull();
+        expect((await remove(OWNER, { organization: true })).status).toBe(409);
+        expect(
+            (await remove(orgUserId, { organization: true, withdraw: true }))
+                .status,
+        ).toBe(200);
         expect(await resolveRecordingAccess(orgUserId, REC)).toBeNull();
     });
 
@@ -589,7 +597,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
             call(deleteFolderRoute, user, {
                 method: "DELETE",
                 path: "folders",
-                body: { organization: true },
+                body: { organization: true, withdraw: true },
             });
 
         expect((await remove(orgUserId)).status).toBe(404);
@@ -663,7 +671,7 @@ describeWithDatabase("a shared recording is one recording (PostgreSQL)", () => {
         });
         expect(await store(orgUserId)).toEqual({ committed: true });
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
         expect(await store(orgUserId)).toEqual({
             committed: false,
             reason: "withdrawn",

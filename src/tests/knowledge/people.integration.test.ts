@@ -706,7 +706,7 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
         });
 
         it("shows every source of the owner's transcript in the Organization view", async () => {
-            await unshareRecording(ALICE, REC);
+            await unshareRecording(ALICE, REC, { withdraw: true });
             const [plaud] = await db()
                 .insert(transcriptions)
                 .values({

@@ -275,7 +275,7 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
 
     it("reaps nothing of a recording the Organization no longer has", async () => {
         const policy = await orgPolicy({ transcript: 30 });
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         expect(
             await listReapCandidates(policy, new Date(), 10, orgUserId),
@@ -283,7 +283,7 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
     });
 
     it("applies the owner's policy at once after a withdrawal", async () => {
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         const [candidate] = await listReapCandidates(
             ownerAll30,
@@ -303,7 +303,7 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
     });
 
     it("leaves a recording shared after the sweep chose it", async () => {
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
         const [candidate] = await listReapCandidates(
             ownerAll30,
             new Date(),

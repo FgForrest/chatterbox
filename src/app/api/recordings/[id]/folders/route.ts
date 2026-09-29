@@ -68,9 +68,10 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 /**
  * Take a recording out of a folder, or with `{ "organization": true }` out of
  * the whole Organization tree. Out of Organization folders: its owner or the
- * organization account; taking it out of its last Organization folder needs
- * `{ "withdraw": true }` (409 WITHDRAW_UNCONFIRMED otherwise), sent once the
- * owner's retention warning was seen (`withdraw-preview`).
+ * organization account; taking it out of its last Organization folder, or
+ * out of the whole tree, needs `{ "withdraw": true }` (409
+ * WITHDRAW_UNCONFIRMED otherwise), sent once the owner's retention warning
+ * was seen (`withdraw-preview`).
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -81,7 +82,9 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         body !== null &&
         (body as { organization?: unknown }).organization === true
     ) {
-        await unshareRecording(session.user.id, id);
+        await unshareRecording(session.user.id, id, {
+            withdraw: (body as { withdraw?: unknown }).withdraw === true,
+        });
         return NextResponse.json({ shared: false });
     }
     await removeRecordingFromFolder({

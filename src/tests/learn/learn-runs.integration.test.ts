@@ -367,7 +367,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         });
         await db().delete(transcriptions);
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         expect(await db().select().from(learnDismissals)).toEqual([]);
     });
@@ -411,7 +411,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 payload: encryptJsonField({ secret: "what the curator found" }),
             });
 
-        await unshareRecording(OWNER, REC);
+        await unshareRecording(OWNER, REC, { withdraw: true });
 
         expect(await statusOf(orgs)).toBeUndefined();
         expect(await db().select().from(learnReviewItems)).toEqual([]);
@@ -1777,7 +1777,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         knowledgeStore().invalidateAll();
         const withdrawMidRequest = () => {
             afterAuthorize.current = async () => {
-                await unshareRecording(OWNER, REC);
+                await unshareRecording(OWNER, REC, { withdraw: true });
             };
         };
 

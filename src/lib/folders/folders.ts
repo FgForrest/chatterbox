@@ -1044,11 +1044,15 @@ export async function removeRecordingFromFolder(input: {
 
 /**
  * Remove a recording from the whole Organization tree: its owner, or the
- * organization account (a withdrawal from the Organization's side).
+ * organization account (a withdrawal from the Organization's side). Like
+ * removing its last Organization folder, it needs `withdraw` (409
+ * WITHDRAW_UNCONFIRMED otherwise), sent once the owner's retention warning
+ * was seen: an API client is asked as the app is.
  */
 export async function unshareRecording(
     userId: string,
     recordingId: string,
+    { withdraw = false }: { withdraw?: boolean } = {},
 ): Promise<void> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
@@ -1060,6 +1064,13 @@ export async function unshareRecording(
         if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
             if (userId === orgUserId) throw notSharedForCurator();
             return false;
+        }
+        if (!withdraw) {
+            throw new AppError(
+                ErrorCode.WITHDRAW_UNCONFIRMED,
+                "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
+                409,
+            );
         }
         await bumpScopeInTx(
             tx,
