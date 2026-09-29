@@ -128,3 +128,43 @@ describe("after a review is finished", () => {
         await waitFor(() => expect(screen.queryByText("1")).toBeNull());
     });
 });
+
+describe("Learn in the panel", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
+
+    it("is not offered on a transcript whose turns carry no times", () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json({ speakers: [] })),
+        );
+        render(
+            <TranscriptionPanel
+                recording={{
+                    id: "rec-1",
+                    filename: "Kickoff",
+                    duration: 5_000,
+                    filesize: 1,
+                    startTime: new Date(0).toISOString(),
+                    deviceSn: "local",
+                }}
+                transcripts={[
+                    {
+                        source: "plaud",
+                        text: "Máme tu Tavesy.",
+                        provider: "plaud",
+                        model: "plaud-native",
+                        turns: [{ ...TURNS[0], startMs: 0, endMs: 0 }],
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(
+            screen.queryByRole("button", { name: "finish the review" }),
+        ).toBeNull();
+    });
+});

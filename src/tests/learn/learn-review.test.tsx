@@ -338,4 +338,32 @@ describe("LearnReview", () => {
             ),
         );
     });
+
+    it("follows a run it found learning until its review is ready", async () => {
+        let calls = 0;
+        const fetch = vi.fn(async () => {
+            calls++;
+            return Response.json(
+                calls < 3
+                    ? {
+                          ...READY,
+                          run: { id: "run-1", status: "running" },
+                          items: [],
+                      }
+                    : READY,
+            );
+        });
+        vi.stubGlobal("fetch", fetch);
+        render(
+            <LearnReview
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                pollMs={5}
+            />,
+        );
+        expect(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        ).toBeTruthy();
+    });
 });

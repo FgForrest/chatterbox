@@ -69,6 +69,7 @@ export function LearnReview({
     onSeek,
     onFinished,
     onMarks,
+    pollMs = POLL_MS,
 }: {
     recordingId: string;
     view?: RecordingView;
@@ -79,6 +80,8 @@ export function LearnReview({
     onFinished?: () => void;
     /** The ready review's proposals, for the transcript to show in place. */
     onMarks?: (marks: LearnMarks | null) => void;
+    /** How often a run found learning is looked at again. */
+    pollMs?: number;
 }) {
     const i18n = useExtracted();
     const [state, setState] = useState<ReviewState | null>(null);
@@ -110,6 +113,17 @@ export function LearnReview({
     useEffect(() => {
         void load();
     }, [load]);
+
+    // A run this page did not start (another tab, a reload while it ran)
+    // is followed here until it is ready or ends.
+    const learningElsewhere =
+        !running &&
+        (state?.run?.status === "queued" || state?.run?.status === "running");
+    useEffect(() => {
+        if (!learningElsewhere) return;
+        const timer = setTimeout(() => void load(), pollMs);
+        return () => clearTimeout(timer);
+    }, [learningElsewhere, load, pollMs, state]);
 
     const learn = async () => {
         setRunning(true);

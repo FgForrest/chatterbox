@@ -42,6 +42,7 @@ import {
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import {
     inferSummarySpeakerNumberOffset,
@@ -271,7 +272,8 @@ export function TranscriptionPanel({
     // Learn reads timed turns, on a transcript the viewer may change: the
     // owner's on the private view, the organization account's on the
     // Organization view (the server decides whether Learn is available).
-    const canLearn = canDetectTopics;
+    const canLearn =
+        canDetectTopics && !isUntimed(activeTranscript?.turns ?? []);
     const {
         topics,
         detecting: detectingTopics,
@@ -742,9 +744,9 @@ export function TranscriptionPanel({
                                 )}
                                 {canLearn && activeTranscript && (
                                     <LearnReview
-                                        // Another recording, view or source
-                                        // is another review.
-                                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}`}
+                                        // Another recording, view, source
+                                        // or revision is another review.
+                                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
                                         recordingId={recording.id}
                                         view={view}
                                         source={
