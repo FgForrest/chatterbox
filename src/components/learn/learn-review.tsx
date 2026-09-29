@@ -8,6 +8,7 @@ import {
     type LearnMarks,
     learnMarksFrom,
 } from "@/components/learn/learn-marks";
+import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -230,6 +231,7 @@ export function LearnReview({
             }
             setOpen(false);
             await load();
+            announceLearnReviewsChanged();
             onFinished?.();
         } finally {
             setFinishing(false);

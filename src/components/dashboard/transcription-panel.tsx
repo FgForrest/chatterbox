@@ -286,6 +286,13 @@ export function TranscriptionPanel({
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
     // The ready review's proposals, shown in the transcript it was made on.
     const [learnMarks, setLearnMarks] = useState<LearnMarks | null>(null);
+    // Reviews finished here: a review names speakers without a new
+    // revision, so the speaker tags mount afresh to read them again.
+    const [reviewsFinished, setReviewsFinished] = useState(0);
+    const handleReviewFinished = useCallback(() => {
+        setReviewsFinished((count) => count + 1);
+        onTranscriptStale?.();
+    }, [onTranscriptStale]);
     const handleSelectTopic = (index: number) => {
         const topic = topics?.[index];
         if (!topic) return;
@@ -588,7 +595,7 @@ export function TranscriptionPanel({
                             // another transcript to name: mount afresh, so
                             // nothing of the last one's state, or its late
                             // answers, reaches this one.
-                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
                             recordingId={recording.id}
                             source={activeTranscript.source}
                             speakers={speakerTags}
@@ -654,7 +661,7 @@ export function TranscriptionPanel({
                                         }
                                         turns={activeTranscript.turns ?? []}
                                         onSeek={onSeekToTurn}
-                                        onFinished={onTranscriptStale}
+                                        onFinished={handleReviewFinished}
                                         onMarks={setLearnMarks}
                                     />
                                 )}
