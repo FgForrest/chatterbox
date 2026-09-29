@@ -54,22 +54,31 @@ export interface RenderedTurn extends TranscriptTurn {
 
 /**
  * Each turn's corrections that still stand where they were made, in
- * order; one overlapping an earlier one is left out.
+ * reading order. They are placed in the order given, so one given earlier
+ * wins over one overlapping it (callers give the confirmed ones first).
  */
 function standingByTurn(
     turns: readonly TranscriptTurn[],
     corrections: readonly OverlayCorrection[],
 ): Map<number, OverlayCorrection[]> {
     const byTurn = new Map<number, OverlayCorrection[]>();
-    const ordered = [...corrections]
-        .filter((correction) => anchorMatches(correction, turns))
-        .sort((a, b) => a.turnIndex - b.turnIndex || a.charStart - b.charStart);
-    for (const correction of ordered) {
+    for (const correction of corrections) {
+        if (!anchorMatches(correction, turns)) continue;
         const held = byTurn.get(correction.turnIndex) ?? [];
-        const last = held.at(-1);
-        if (last && correction.charStart < last.charEnd) continue;
+        if (
+            held.some(
+                (other) =>
+                    correction.charStart < other.charEnd &&
+                    other.charStart < correction.charEnd,
+            )
+        ) {
+            continue;
+        }
         held.push(correction);
         byTurn.set(correction.turnIndex, held);
+    }
+    for (const held of byTurn.values()) {
+        held.sort((a, b) => a.charStart - b.charStart);
     }
     return byTurn;
 }

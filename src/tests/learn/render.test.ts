@@ -197,3 +197,21 @@ describe("anchors", () => {
         ).toBe("A😀B");
     });
 });
+
+describe("overlapping corrections", () => {
+    it("keep the one given first, even when another starts earlier", () => {
+        const turns = [
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 1_000,
+                text: "máme tu Tavesy dnes",
+            },
+        ];
+        const confirmed = correct(0, 8, "Tavesy", "Tavesi");
+        const pending = correct(0, 5, "tu Tavesy", "u Tavesiů");
+        expect(renderTurnsForLlm(turns, [confirmed, pending])[0]?.text).toBe(
+            "máme tu Tavesi dnes",
+        );
+    });
+});

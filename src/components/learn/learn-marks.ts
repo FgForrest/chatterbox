@@ -6,6 +6,7 @@
  * an unticked one stays shown, as the proposal it still is.
  */
 
+import { anchorMatches } from "@/lib/knowledge/correction-anchors";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { OverlayCorrection, RenderedSegment } from "@/lib/learn/render";
 
@@ -175,9 +176,11 @@ export function turnPieces(
     // Confirmed corrections first: what is applied wins over a proposal.
     for (const correction of corrections) {
         if (correction.turnIndex !== turnIndex) continue;
+        // Its words still there, and whole characters of them.
         if (
-            text.slice(correction.charStart, correction.charEnd) !==
-            correction.heard
+            !anchorMatches({ ...correction, turnIndex: 0 }, [
+                { speaker: "", startMs: 0, endMs: 0, text },
+            ])
         ) {
             continue;
         }

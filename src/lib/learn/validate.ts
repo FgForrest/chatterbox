@@ -106,6 +106,11 @@ export interface LearnRunFrame {
      * replaces.
      */
     currentFacts?: ReadonlyMap<string, { factId: string; object: LearnObject }>;
+    /**
+     * Where the transcript already carries a confirmed correction (in the
+     * run's view): nothing is proposed on those words again.
+     */
+    corrected?: readonly AnchorPosition[];
     /** Items a person dismissed on this recording, as `fingerprintKey` gives them. */
     dismissed: ReadonlySet<string>;
     /** How a fingerprint is stored (a keyed HMAC); as is by default. */
@@ -350,7 +355,7 @@ export function validateLearnOutput(
     }
 
     // Corrections: exact anchors, in scope, grouped per target and words.
-    const taken: AnchorPosition[] = [];
+    const taken: AnchorPosition[] = [...(frame.corrected ?? [])];
     const groups = new Map<
         string,
         Extract<ReviewCandidate, { kind: "correction" }>

@@ -38,6 +38,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { listCorrections } from "@/lib/knowledge/corrections";
 import { nodeKey } from "@/lib/knowledge/fact-rules";
 import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -374,6 +375,15 @@ async function frameFor(
         knownFacts,
         foreignFacts,
         currentFacts,
+        // The words that already carry a confirmed correction, as everyone
+        // reading the transcript in its view sees them.
+        corrected: (await listCorrections(run.userId, run.transcriptionId)).map(
+            ({ turnIndex, charStart, charEnd }) => ({
+                turnIndex,
+                charStart,
+                charEnd,
+            }),
+        ),
         dismissed: new Set(dismissed.map((row) => row.hmac)),
         fingerprintKey: learnFingerprintHmac,
         literalKey,

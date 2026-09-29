@@ -799,6 +799,31 @@ describe("validateLearnOutput", () => {
             });
         });
 
+        it("proposes nothing on words a confirmed correction already covers", () => {
+            const first = at(0, "Tavesy");
+            const { items, dropped } = validateLearnOutput(
+                output({ corrections: [correctTavesi(0), correctTavesi(1)] }),
+                frame({
+                    corrected: [
+                        {
+                            turnIndex: 0,
+                            charStart: first.charStart,
+                            charEnd: first.charEnd,
+                        },
+                    ],
+                }),
+            );
+            expect(dropped.overlapping).toBe(1);
+            expect(items).toEqual([
+                expect.objectContaining({
+                    kind: "correction",
+                    payload: expect.objectContaining({
+                        anchors: [expect.objectContaining({ turnIndex: 1 })],
+                    }),
+                }),
+            ]);
+        });
+
         it("drops a fact another scope knows, instead of copying it into this one", () => {
             const { items, dropped } = validateLearnOutput(
                 output({
