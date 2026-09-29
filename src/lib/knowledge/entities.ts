@@ -596,6 +596,23 @@ export async function mergeEntities(
     });
 }
 
+/**
+ * Fold `loserId` into `winnerId`, two live entities of one owner, as
+ * `mergeEntities` does: a type merged into another leaving an owner with
+ * two of one name. Callers take the Organization-people lock first.
+ */
+export async function foldEntityInTx(
+    tx: Tx,
+    winnerId: string,
+    loserId: string,
+): Promise<void> {
+    const keep = await readEntityRow(tx, winnerId);
+    const loser = await readEntityRow(tx, loserId);
+    if (!keep || !loser) return;
+    await mergeEntitiesInTx(tx, winnerId, loserId);
+    await mergeDescriptionInTx(tx, keep, loser, winnerId);
+}
+
 /** Where a merged-away entity's description goes; see `mergeEntities`. */
 async function mergeDescriptionInTx(
     tx: Tx,

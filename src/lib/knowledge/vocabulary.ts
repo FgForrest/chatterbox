@@ -14,6 +14,7 @@
  */
 
 import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { foldEntityInTx } from "@/lib/knowledge/entities";
 import {
     deleteFactsInTx,
     deleteFactsNamingInTx,
@@ -384,7 +386,10 @@ async function assertEntityTypesUsable(
                 ),
                 eq(knowledgeEntityTypes.status, "active"),
             ),
-        );
+        )
+        // Held until the new type is in: a merge or delete taking one of
+        // them waits, then finds the new type relating it.
+        .for("share");
     const found = new Set(rows.map((row) => row.key));
     if (keys.some((key) => !found.has(key))) {
         throw new AppError(
@@ -876,8 +881,270 @@ export async function deleteOwnType(
 }
 
 /**
+ * What a merge of `from` into `into` changes beyond their keys, per owner:
+ * of a relation type, the facts `into` does not take, which go; of an
+ * entity type, the entities an owner already has of `into` under the same
+ * name (`folds`: the one that goes, and the one it joins).
+ */
+type MergePlan =
+    | { kind: "relation"; dropping: Map<string, string[]> }
+    | {
+          kind: "entity";
+          folds: { userId: string; loserId: string; winnerId: string }[];
+      };
+
+async function planTypeMergeInTx(
+    tx: Tx,
+    kind: TypeKind,
+    from: string,
+    into: string,
+): Promise<MergePlan> {
+    if (kind === "relation") {
+        const owners = await tx
+            .selectDistinct({ userId: knowledgeFacts.userId })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.relationKey, from));
+        const dropping = new Map<string, string[]>();
+        for (const { userId } of owners) {
+            dropping.set(
+                userId,
+                await factsNotFittingInTx(tx, {
+                    userId,
+                    relationKey: from,
+                    shapeKey: into,
+                }),
+            );
+        }
+        return { kind, dropping };
+    }
+    const same = alias(knowledgeEntities, "same");
+    const folds = await tx
+        .select({
+            userId: knowledgeEntities.userId,
+            loserId: knowledgeEntities.id,
+            winnerId: same.id,
+        })
+        .from(knowledgeEntities)
+        .innerJoin(
+            same,
+            and(
+                eq(same.userId, knowledgeEntities.userId),
+                eq(same.nameHmac, knowledgeEntities.nameHmac),
+                eq(same.typeKey, into),
+                isNull(same.mergedIntoId),
+            ),
+        )
+        .where(
+            and(
+                eq(knowledgeEntities.typeKey, from),
+                isNull(knowledgeEntities.mergedIntoId),
+            ),
+        );
+    return { kind, folds };
+}
+
+/** How many of the owner's own things a merge changes (`mergeOwnTypes`). */
+function mergeCountOf(plan: MergePlan, userId: string): number {
+    return plan.kind === "relation"
+        ? (plan.dropping.get(userId)?.length ?? 0)
+        : plan.folds.filter((fold) => fold.userId === userId).length;
+}
+
+/**
+ * `from`, the owner's own active type, and `into`, another of the kind that
+ * is theirs or the core's; 404 otherwise, as for a type they do not have.
+ * Locked in id order when `lock`.
+ */
+async function mergeableTypesInTx(
+    tx: Tx,
+    userId: string,
+    kind: TypeKind,
+    from: string,
+    into: string,
+    lock: boolean,
+): Promise<void> {
+    if (from === into) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A type cannot be merged into itself",
+            400,
+            { field: "into" },
+        );
+    }
+    const table = tableOf(kind);
+    const query = tx
+        .select({ key: table.key, userId: table.userId })
+        .from(table)
+        .where(
+            and(
+                inArray(table.key, [from, into]),
+                or(eq(table.userId, userId), isNull(table.userId)),
+                eq(table.status, "active"),
+            ),
+        )
+        .orderBy(asc(table.id));
+    const rows = lock ? await query.for("update") : await query;
+    const fromRow = rows.find((row) => row.key === from);
+    if (fromRow?.userId !== userId || !rows.some((row) => row.key === into)) {
+        throw typeNotFound();
+    }
+}
+
+/**
+ * How many of the account's own things merging `from` into `into` changes:
+ * the number `mergeOwnTypes` asks to be confirmed.
+ */
+export async function typeMergeCount(
+    userId: string,
+    kind: TypeKind,
+    from: string,
+    into: string,
+): Promise<number> {
+    return db.transaction(async (tx) => {
+        await mergeableTypesInTx(tx, userId, kind, from, into, false);
+        return mergeCountOf(
+            await planTypeMergeInTx(tx, kind, from, into),
+            userId,
+        );
+    });
+}
+
+/**
+ * Merge one of the account's own types (`from`) into another of the same
+ * kind, its own or a core one (`into`): whatever used `from` uses `into`,
+ * and `from` goes. The curator tidies the types shares adopted this way
+ * (Johnny, 2026-09-29).
+ *
+ * Of a relation type, every account's facts of it move to `into`,
+ * combined where they then say the same; those `into` does not take go.
+ * Of an entity type, every account's entities of it take `into`, an
+ * entity joining one of `into` its owner has under the same name (as
+ * merging two entities does), and the relation types relating `from`
+ * relate `into` instead. Types adopted as `from` are adopted as `into`.
+ *
+ * `confirmCount` must be what `typeMergeCount` showed: the account's own
+ * facts that go, or its own entities that join another; any other number
+ * is refused (409, `details.count`). As on deleting, members' are not
+ * counted, so the curator never learns how much members know privately.
+ *
+ * Locks as deleting does: the Organization-people lock, both type rows
+ * (in id order) and the relation types relating `from`, the recordings
+ * whose corrections or evidence move, then the vocabulary's version and
+ * the scopes.
+ */
+export async function mergeOwnTypes(
+    userId: string,
+    kind: TypeKind,
+    from: string,
+    into: string,
+    confirmCount: number,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        await lockOrgPeople(tx);
+        await mergeableTypesInTx(tx, userId, kind, from, into, true);
+        const relating =
+            kind === "entity"
+                ? await tx
+                      .select({
+                          id: knowledgeRelationTypes.id,
+                          subjectTypes: knowledgeRelationTypes.subjectTypes,
+                          objectTypes: knowledgeRelationTypes.objectTypes,
+                      })
+                      .from(knowledgeRelationTypes)
+                      .where(
+                          sql`${knowledgeRelationTypes.subjectTypes} ? ${from} or ${knowledgeRelationTypes.objectTypes} ? ${from}`,
+                      )
+                      .orderBy(asc(knowledgeRelationTypes.id))
+                      .for("update")
+                : [];
+        const plan = await planTypeMergeInTx(tx, kind, from, into);
+        const count = mergeCountOf(plan, userId);
+        if (count !== confirmCount) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The number of things this merge changes has changed",
+                409,
+                { count },
+            );
+        }
+        const scopes = await scopesUsingTypeInTx(tx, kind, from);
+        scopes.add(userId);
+
+        if (plan.kind === "relation") {
+            const facts = await tx
+                .select({ id: knowledgeFacts.id })
+                .from(knowledgeFacts)
+                .where(eq(knowledgeFacts.relationKey, from));
+            await lockRecordingsNaming(tx, {
+                factIds: facts.map((row) => row.id),
+            });
+            for (const [owner, ids] of plan.dropping) {
+                await deleteFactsInTx(tx, ids);
+                await rekeyRelationInTx(tx, { userId: owner, from, to: into });
+            }
+        } else {
+            const entities = await tx
+                .select({ id: knowledgeEntities.id })
+                .from(knowledgeEntities)
+                .where(eq(knowledgeEntities.typeKey, from));
+            const entityIds = [
+                ...entities.map((row) => row.id),
+                ...plan.folds.map((fold) => fold.winnerId),
+            ];
+            await lockRecordingsNaming(tx, { entityIds });
+            for (const scope of await scopesNamingInTx(tx, { entityIds })) {
+                scopes.add(scope);
+            }
+            for (const fold of plan.folds) {
+                await foldEntityInTx(tx, fold.winnerId, fold.loserId);
+            }
+            // Tombstones too, so nothing is left of a type that is gone.
+            await tx
+                .update(knowledgeEntities)
+                .set({ typeKey: into, updatedAt: new Date() })
+                .where(eq(knowledgeEntities.typeKey, from));
+            const retyped = (keys: readonly string[]) => [
+                ...new Set(keys.map((key) => (key === from ? into : key))),
+            ];
+            for (const relation of relating) {
+                await tx
+                    .update(knowledgeRelationTypes)
+                    .set({
+                        subjectTypes: retyped(relation.subjectTypes),
+                        objectTypes: retyped(relation.objectTypes),
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(knowledgeRelationTypes.id, relation.id));
+            }
+        }
+
+        const table = tableOf(kind);
+        const adopters = await tx
+            .update(table)
+            .set({ adoptedAsKey: into, updatedAt: new Date() })
+            .where(eq(table.adoptedAsKey, from))
+            .returning({ userId: table.userId });
+        for (const adopter of adopters) {
+            if (adopter.userId) scopes.add(adopter.userId);
+        }
+        if (kind === "relation") {
+            await tx
+                .update(knowledgeVocabularyProposals)
+                .set({ adoptedAsKey: into, updatedAt: new Date() })
+                .where(eq(knowledgeVocabularyProposals.adoptedAsKey, from));
+        }
+        await tx
+            .delete(table)
+            .where(and(eq(table.userId, userId), eq(table.key, from)));
+        await bumpVocabularyVersionInTx(tx);
+        await bumpScopeInTx(tx, scopes);
+    });
+}
+
+/**
  * The ids of `userId`'s facts of `relationKey` that the relation type
- * `shapeKey` (theirs) does not take (`relationFits`).
+ * `shapeKey` (theirs, the Organization's or the core's) does not take
+ * (`relationFits`).
  */
 async function factsNotFittingInTx(
     tx: Tx,
@@ -896,8 +1163,12 @@ async function factsNotFittingInTx(
         .from(knowledgeRelationTypes)
         .where(
             and(
-                eq(knowledgeRelationTypes.userId, userId),
                 eq(knowledgeRelationTypes.key, shapeKey),
+                or(
+                    eq(knowledgeRelationTypes.userId, userId),
+                    isNull(knowledgeRelationTypes.userId),
+                    orgOwnedCondition(knowledgeRelationTypes.userId),
+                ),
             ),
         )
         .limit(1);
@@ -1049,6 +1320,9 @@ export async function adoptPhrase(
 ): Promise<string> {
     if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
     return db.transaction(async (tx) => {
+        // A merge of an entity type the new one relates takes the type rows
+        // in the other order: one waits for the other here.
+        await lockOrgPeople(tx);
         const [proposal] = await tx
             .select({
                 phrase: knowledgeVocabularyProposals.phrase,
