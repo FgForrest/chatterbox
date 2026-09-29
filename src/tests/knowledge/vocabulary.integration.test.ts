@@ -86,6 +86,8 @@ import {
     createOrgType,
     createPrivateType,
     deleteOwnType,
+    keepAdoptedType,
+    listOwnTypes,
     listVocabularyProposals,
     proposePhrase,
     renameOwnType,
@@ -490,6 +492,73 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
             .from(knowledgeEntities);
         expect(left.map((row) => row.id)).toEqual([alices]);
         expect(left.map((row) => row.id)).not.toContain(bobs);
+    });
+
+    it("lists an account's own types for it to tend, those a share adopted first, until kept or renamed", async () => {
+        const venue = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "venue",
+        });
+        await createEntity(orgUserId, { typeKey: venue, name: "Hall A" });
+        const fromShare = async (label: string) => {
+            const key = await createOrgType(orgUserId, {
+                kind: "relation",
+                label,
+                subjectTypes: ["person"],
+                objectTypes: ["project"],
+                objectKind: "entity",
+                cardinality: "many",
+            });
+            await db()
+                .update(knowledgeRelationTypes)
+                .set({ adoptedFromShare: true })
+                .where(eq(knowledgeRelationTypes.key, key));
+            return key;
+        };
+        const sponsors = await fromShare("sponsors");
+        const funds = await fromShare("funds");
+
+        expect(await listOwnTypes(orgUserId)).toEqual([
+            {
+                kind: "relation",
+                key: funds,
+                label: "funds",
+                adoptedFromShare: true,
+                uses: 0,
+                shape: {
+                    subjectTypes: ["person"],
+                    objectTypes: ["project"],
+                    objectKind: "entity",
+                    cardinality: "many",
+                },
+            },
+            expect.objectContaining({ key: sponsors, adoptedFromShare: true }),
+            {
+                kind: "entity",
+                key: venue,
+                label: "venue",
+                adoptedFromShare: false,
+                uses: 1,
+            },
+        ]);
+        // Alice sees her own only.
+        expect(await listOwnTypes(ALICE)).toEqual([]);
+
+        await keepAdoptedType(orgUserId, "relation", sponsors);
+        await renameOwnType(orgUserId, "relation", funds, "finances");
+        expect(
+            (await listOwnTypes(orgUserId)).map((type) => [
+                type.label,
+                type.adoptedFromShare,
+            ]),
+        ).toEqual([
+            ["finances", false],
+            ["sponsors", false],
+            ["venue", false],
+        ]);
+        expect(
+            await refusal(keepAdoptedType(ALICE, "relation", sponsors)),
+        ).toMatchObject({ statusCode: 404 });
     });
 
     it("stops counting a suggestion when its account goes, and drops it with the last", async () => {

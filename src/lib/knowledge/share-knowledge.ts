@@ -9,12 +9,13 @@
  *   heard-as forms they taught to the Organization's scope, and states the
  *   owner's facts said there in the Organization's scope too, with
  *   Organization evidence beside the owner's. What names a private person
- *   or entity promotes them first. What cannot be shared stays private and
- *   is counted, and publishes nothing, not even whom it names: a private
- *   relation or entity type the Organization has not adopted, a relation
- *   the people or entities do not fit once promoted, or a single-valued
- *   fact the Organization already knows otherwise (the Organization's
- *   knowledge is not overwritten by a share).
+ *   or entity promotes them first, and the owner's private types it needs
+ *   are adopted (`adoptTypesForShareInTx`). What cannot be shared stays
+ *   private and is counted, and publishes nothing, not even whom it names:
+ *   a relation the people or entities do not fit once promoted, a type
+ *   whose name the deny list refuses now, or a single-valued fact the
+ *   Organization already knows otherwise (the Organization's knowledge is
+ *   not overwritten by a share).
  * - **Withdrawal** takes back everything the Organization derived from the
  *   recording: its evidence there goes, and a fact of its left without any
  *   is pruned. The corrections on the transcripts, and the heard-as forms

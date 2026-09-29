@@ -577,6 +577,8 @@ export async function renameOwnType(
             .set({
                 label: encryptText(label),
                 labelHmac,
+                // Named by its owner now, so no longer only as a share made it.
+                adoptedFromShare: false,
                 updatedAt: new Date(),
             })
             .where(eq(table.id, id));
@@ -586,6 +588,110 @@ export async function renameOwnType(
             userId,
             ...(await scopesUsingTypeInTx(tx, kind, key)),
         ]);
+    });
+}
+
+/** One of an account's own types, as it tends them (`listOwnTypes`). */
+export type OwnType = {
+    key: string;
+    label: string;
+    /** Made by a share from a member's type, not yet kept, renamed or merged. */
+    adoptedFromShare: boolean;
+    /** The account's own entities of it, or facts with it. */
+    uses: number;
+} & (
+    | { kind: "entity" }
+    | {
+          kind: "relation";
+          shape: {
+              subjectTypes: string[];
+              objectTypes: string[];
+              objectKind: "entity" | "literal";
+              cardinality: "one" | "many";
+          };
+      }
+);
+
+/**
+ * The account's own active types (a member's private ones, the
+ * Organization's for its account), those a share adopted first, then by
+ * name, each with how much of its own knowledge uses it.
+ */
+export async function listOwnTypes(userId: string): Promise<OwnType[]> {
+    const entityRows = await db
+        .select({
+            key: knowledgeEntityTypes.key,
+            label: knowledgeEntityTypes.label,
+            adoptedFromShare: knowledgeEntityTypes.adoptedFromShare,
+            uses: sql<number>`(select count(*)::int from ${knowledgeEntities} where ${knowledgeEntities.userId} = ${userId} and ${knowledgeEntities.typeKey} = ${knowledgeEntityTypes.key})`,
+        })
+        .from(knowledgeEntityTypes)
+        .where(
+            and(
+                eq(knowledgeEntityTypes.userId, userId),
+                eq(knowledgeEntityTypes.status, "active"),
+            ),
+        );
+    const relationRows = await db
+        .select({
+            key: knowledgeRelationTypes.key,
+            label: knowledgeRelationTypes.label,
+            adoptedFromShare: knowledgeRelationTypes.adoptedFromShare,
+            subjectTypes: knowledgeRelationTypes.subjectTypes,
+            objectTypes: knowledgeRelationTypes.objectTypes,
+            objectKind: knowledgeRelationTypes.objectKind,
+            cardinality: knowledgeRelationTypes.cardinality,
+            uses: sql<number>`(select count(*)::int from ${knowledgeFacts} where ${knowledgeFacts.userId} = ${userId} and ${knowledgeFacts.relationKey} = ${knowledgeRelationTypes.key})`,
+        })
+        .from(knowledgeRelationTypes)
+        .where(
+            and(
+                eq(knowledgeRelationTypes.userId, userId),
+                eq(knowledgeRelationTypes.status, "active"),
+            ),
+        );
+    const types: OwnType[] = [
+        ...entityRows.map((row) => ({
+            kind: "entity" as const,
+            key: row.key,
+            label: decryptText(row.label),
+            adoptedFromShare: row.adoptedFromShare,
+            uses: row.uses,
+        })),
+        ...relationRows.map((row) => ({
+            kind: "relation" as const,
+            key: row.key,
+            label: decryptText(row.label),
+            adoptedFromShare: row.adoptedFromShare,
+            uses: row.uses,
+            shape: {
+                subjectTypes: row.subjectTypes,
+                objectTypes: row.objectTypes,
+                objectKind: row.objectKind,
+                cardinality: row.cardinality,
+            },
+        })),
+    ];
+    return types.sort(
+        (a, b) =>
+            Number(b.adoptedFromShare) - Number(a.adoptedFromShare) ||
+            a.label.localeCompare(b.label),
+    );
+}
+
+/** Keep a type a share adopted as it is: it is no longer marked. */
+export async function keepAdoptedType(
+    userId: string,
+    kind: TypeKind,
+    key: string,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        const { id } = await lockOwnType(tx, kind, userId, key);
+        const table = tableOf(kind);
+        await tx
+            .update(table)
+            .set({ adoptedFromShare: false, updatedAt: new Date() })
+            .where(eq(table.id, id));
     });
 }
 
