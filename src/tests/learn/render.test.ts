@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { anchorMatches } from "@/lib/knowledge/correction-anchors";
 import {
     correctedTimeline,
     flattenTurns,
@@ -160,5 +161,39 @@ describe("the corrected timeline", () => {
     it("maps nothing where nothing was corrected", () => {
         const toHeard = correctedTimeline(TURNS, []);
         expect(toHeard(0, 0.5)).toBe(0.5);
+    });
+});
+
+describe("anchors", () => {
+    it("never split a character written as two UTF-16 units", () => {
+        const turns = [
+            { speaker: "speaker_0", startMs: 0, endMs: 1_000, text: "A😀B" },
+        ];
+        const at = (charStart: number, charEnd: number) =>
+            anchorMatches(
+                {
+                    turnIndex: 0,
+                    charStart,
+                    charEnd,
+                    heard: "A😀B".slice(charStart, charEnd),
+                },
+                turns,
+            );
+        expect(at(1, 2)).toBe(false);
+        expect(at(2, 4)).toBe(false);
+        expect(at(1, 3)).toBe(true);
+        expect(
+            renderTurnsForLlm(turns, [
+                {
+                    turnIndex: 0,
+                    charStart: 1,
+                    charEnd: 2,
+                    heard: "\ud83d",
+                    kind: "correct",
+                    replacement: "X",
+                    meaning: "X",
+                },
+            ])[0]?.text,
+        ).toBe("A😀B");
     });
 });

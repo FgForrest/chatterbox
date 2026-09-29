@@ -40,7 +40,25 @@ export function anchorMatches(
         text !== undefined &&
         anchor.charStart >= 0 &&
         anchor.charStart < anchor.charEnd &&
+        !splitsCharacter(text, anchor.charStart) &&
+        !splitsCharacter(text, anchor.charEnd) &&
         text.slice(anchor.charStart, anchor.charEnd) === anchor.heard
+    );
+}
+
+/**
+ * Whether an offset falls between the two UTF-16 units of one character
+ * (an emoji, say): text cut there is no longer text.
+ */
+function splitsCharacter(text: string, offset: number): boolean {
+    if (offset <= 0 || offset >= text.length) return false;
+    const before = text.charCodeAt(offset - 1);
+    const after = text.charCodeAt(offset);
+    return (
+        before >= 0xd800 &&
+        before <= 0xdbff &&
+        after >= 0xdc00 &&
+        after <= 0xdfff
     );
 }
 
