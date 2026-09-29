@@ -7,6 +7,7 @@
 
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { isHeldForLearn } from "@/lib/learn/hold";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
     parseTopicsJobPayload,
@@ -26,6 +27,14 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     parsePayload: parseTopicsJobPayload,
 
     async run({ payload, userId, reportProgress }): Promise<JobResult> {
+        // As for automatic summaries: the hold's release detects them.
+        if (
+            payload.trigger !== "manual" &&
+            payload.view !== "org" &&
+            (await isHeldForLearn(payload.recordingId))
+        ) {
+            return { skipped: "held" };
+        }
         let result: Awaited<ReturnType<typeof generateTopicsForTranscript>>;
         try {
             result = await generateTopicsForTranscript(

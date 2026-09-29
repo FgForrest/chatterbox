@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
+import { apiCredentials, users } from "@/db/schema";
 import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
@@ -74,6 +74,14 @@ export const PUT = apiHandler(async (request: Request) => {
     }
 
     await db.transaction(async (tx) => {
+        // One at a time per user: two requests at once would each clear
+        // nothing and mark their own (the unique index would refuse the
+        // second instead of letting the last one win).
+        await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, session.user.id))
+            .for("update");
         await tx
             .update(apiCredentials)
             .set({ isDefaultLearn: false })

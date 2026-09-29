@@ -113,6 +113,34 @@ export interface EnqueueJobResult {
  * catching a unique violation: Postgres logs every violation as an ERROR,
  * and a click that joins a running job is not one.
  */
+/**
+ * Queue a job in the caller's transaction, so it exists exactly when what
+ * it follows from commits. An active job of the same kind and subject
+ * already does the work: nothing is inserted then, and false returned.
+ */
+export async function enqueueJobInTx(
+    tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+    input: EnqueueJobInput,
+): Promise<boolean> {
+    const [row] = await tx
+        .insert(asyncJobs)
+        .values({
+            userId: input.userId,
+            kind: input.kind,
+            subjectId: input.subjectId ?? null,
+            priority: input.priority ?? 0,
+            payload: input.payload ?? {},
+            maxAttempts: input.maxAttempts ?? 3,
+            nextAttemptAt: new Date(Date.now() + (input.delayMs ?? 0)),
+        })
+        .onConflictDoNothing({
+            target: [asyncJobs.kind, asyncJobs.subjectId],
+            where: IS_ACTIVE,
+        })
+        .returning({ id: asyncJobs.id });
+    return row !== undefined;
+}
+
 export async function enqueueJob(
     input: EnqueueJobInput,
 ): Promise<EnqueueJobResult> {

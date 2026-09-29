@@ -11,7 +11,9 @@
  *   (`recheckEvidenceInTx`).
  *
  * - Learn runs not yet finished read the old text: superseded, so their
- *   review cannot be finished and offers a rerun.
+ *   review cannot be finished and offers a rerun; and a hold automatic
+ *   Learn kept on the recording's title, summary and topics for the old
+ *   Riffado transcript goes: the new one's transcription decides.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -22,6 +24,10 @@ import { recheckCorrectionsInTx } from "@/lib/knowledge/correction-recheck";
 import { recheckEvidenceInTx } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import type { SpeakerVersion } from "@/lib/knowledge/speaker-label-rules";
+import {
+    clearAutoLearnHoldInTx,
+    riffadoRecordingOfInTx,
+} from "@/lib/learn/hold";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -54,6 +60,8 @@ export async function transcriptRewrittenInTx(
                 inArray(learnRuns.status, ["queued", "running", "ready"]),
             ),
         );
+    const held = await riffadoRecordingOfInTx(tx, args.transcriptionId);
+    if (held) await clearAutoLearnHoldInTx(tx, held);
     // Once, after both: the knowledge of every scope the rewrite touched.
     await bumpScopeInTx(tx, [...corrected, ...evidenced]);
 }

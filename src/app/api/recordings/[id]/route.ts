@@ -399,6 +399,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                         "summary",
                         "topics",
                         "learn.run",
+                        "title.generate",
+                        "learn.release",
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
@@ -460,7 +462,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         // only want to emit `recording.deleted` for the winning request.
         const tombstoned = await tx
             .update(recordings)
-            .set({ deletedAt: now, updatedAt: now })
+            // Nothing waits for Learn on a deleted recording.
+            .set({ deletedAt: now, updatedAt: now, summaryDueAt: null })
             .where(
                 and(
                     eq(recordings.id, id),

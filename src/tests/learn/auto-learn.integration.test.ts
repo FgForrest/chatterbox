@@ -96,11 +96,13 @@ import {
 import {
     AUTO_LEARN_HOLD_MS,
     holdForAutoLearn,
+    learnReleaseJobHandler,
     releaseAutoLearnHold,
     sweepAutoLearnHolds,
 } from "@/lib/learn/auto-learn";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import { emitEvent } from "@/lib/webhooks/emit";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -235,6 +237,20 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             .then((rows) => rows[0]?.id ?? "");
     }
 
+    /** Run the queued release job, as the worker would. */
+    const runRelease = async () => {
+        await learnReleaseJobHandler.run({
+            jobId: "job-release",
+            userId: OWNER,
+            payload: { recordingId: REC },
+            attempt: 1,
+            maxAttempts: 5,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        } as unknown as Parameters<typeof learnReleaseJobHandler.run>[0]);
+        await db().delete(asyncJobs).where(eq(asyncJobs.kind, "learn.release"));
+    };
+
     const setStatus = (id: string, status: "finished" | "failed") =>
         db().update(learnRuns).set({ status }).where(eq(learnRuns.id, id));
 
@@ -295,10 +311,14 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await setStatus(ready, "finished");
         expect(await releaseAutoLearnHold(REC)).toBe(true);
         expect(await dueAt()).toBeNull();
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        // Cleared and queued in one transaction: one durable job.
+        expect(await kinds()).toEqual(["learn.release"]);
 
         // Released already: nothing is queued twice.
         expect(await releaseAutoLearnHold(REC)).toBe(false);
+        expect(await kinds()).toEqual(["learn.release"]);
+
+        await runRelease();
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
     });
 
@@ -335,7 +355,72 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             ),
         ).toBe(1);
         expect(await dueAt()).toBeNull();
-        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        expect(await kinds()).toEqual(["learn.release"]);
+    });
+
+    it("never lets an expired sweep release a hold that was renewed", async () => {
+        await hold();
+        const later = new Date(Date.now() + AUTO_LEARN_HOLD_MS + 60_000);
+        // Renewed after the sweep read it as due.
+        expect(
+            await releaseAutoLearnHold(REC, {
+                expired: true,
+                now: new Date(Date.now() + 60_000),
+            }),
+        ).toBe(false);
+        expect(await dueAt()).not.toBeNull();
+        expect(
+            await releaseAutoLearnHold(REC, { expired: true, now: later }),
+        ).toBe(true);
+    });
+
+    it("releases when the run's job died, however its row reads", async () => {
+        await hold();
+        const [job] = await db()
+            .insert(asyncJobs)
+            .values({
+                userId: OWNER,
+                kind: "learn.run",
+                subjectId: "other",
+                status: "failed",
+            })
+            .returning({ id: asyncJobs.id });
+        const dead = await run("running");
+        await db()
+            .update(learnRuns)
+            .set({ jobId: job?.id ?? "" })
+            .where(eq(learnRuns.id, dead));
+
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+    });
+
+    it("drops the hold when a new Riffado transcript is written, not a Plaud one", async () => {
+        await hold();
+        const rewrite = (source: "riffado" | "plaud") =>
+            upsertTranscription({
+                userId: OWNER,
+                recordingId: REC,
+                text: "Ahoj všem.",
+                detectedLanguage: "cs",
+                source,
+                provider: "openai",
+                model: "gpt-4o-transcribe-diarize",
+                turns: [
+                    {
+                        speaker: "speaker_0",
+                        startMs: 0,
+                        endMs: 5_000,
+                        text: "Ahoj všem.",
+                    },
+                ],
+            });
+
+        await rewrite("plaud");
+        expect(await dueAt()).not.toBeNull();
+        await rewrite("riffado");
+        expect(await dueAt()).toBeNull();
+        // Nothing queued: that transcription makes its own, or holds again.
+        expect(await kinds()).toEqual([]);
     });
 
     it("keeps a summary the person made while it waited", async () => {
@@ -352,6 +437,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             });
 
         expect(await releaseAutoLearnHold(REC)).toBe(true);
+        await runRelease();
 
         expect(await kinds()).toEqual(["title.generate", "topics"]);
         const summaries = await db()
@@ -398,6 +484,12 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 OWNER,
                 REC,
             );
+        });
+
+        it("waits while a newer hold is on the recording", async () => {
+            await hold();
+            expect(await runTitle()).toEqual({ skipped: "held" });
+            expect(await title()).toBe("Weekly");
         });
 
         it("keeps a title the person set while it waited", async () => {

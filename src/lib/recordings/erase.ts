@@ -252,6 +252,7 @@ export async function eraseLocalArtifact(
                     "topics",
                     "learn.run",
                     "title.generate",
+                    "learn.release",
                 ],
                 now,
             );
@@ -292,7 +293,12 @@ export async function eraseLocalArtifact(
             await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
             await tx
                 .update(recordings)
-                .set({ transcriptReapedAt: now, updatedAt: now })
+                // No transcript left for what waited for Learn.
+                .set({
+                    transcriptReapedAt: now,
+                    updatedAt: now,
+                    summaryDueAt: null,
+                })
                 .where(
                     and(
                         eq(recordings.id, recordingId),

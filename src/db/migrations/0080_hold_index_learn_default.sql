@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "api_credentials_one_learn_default" ON "api_credentials" USING btree ("user_id") WHERE "api_credentials"."is_default_learn";--> statement-breakpoint
+CREATE INDEX "recordings_summary_due_at_idx" ON "recordings" USING btree ("summary_due_at") WHERE "recordings"."summary_due_at" is not null;

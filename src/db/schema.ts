@@ -406,6 +406,10 @@ export const recordings = pgTable(
     (table) => ({
         // Index for querying recordings by user (most common query)
         userIdIdx: index("recordings_user_id_idx").on(table.userId),
+        // The automatic Learn sweep reads only the few held recordings.
+        summaryDueIdx: index("recordings_summary_due_at_idx")
+            .on(table.summaryDueAt)
+            .where(sql`${table.summaryDueAt} is not null`),
         // Index for sync operations - looking up by plaudFileId
         plaudFileIdIdx: index("recordings_plaud_file_id_idx").on(
             table.plaudFileId,
@@ -1965,7 +1969,12 @@ export const apiCredentials = pgTable("api_credentials", {
     isDefaultLearn: boolean("is_default_learn").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => ({
+    // One provider for Learn per user at most.
+    oneLearnDefault: uniqueIndex("api_credentials_one_learn_default")
+        .on(table.userId)
+        .where(sql`${table.isDefaultLearn}`),
+}));
 
 // User Settings
 export const userSettings = pgTable("user_settings", {

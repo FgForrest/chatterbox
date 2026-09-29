@@ -47,6 +47,12 @@ import {
     relationFits,
 } from "@/lib/knowledge/fact-rules";
 import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
+import {
+    heardIsFirstNameOnly,
+    heardIsTheName,
+    moreThanFirstName,
+    nameWords,
+} from "@/lib/learn/name-match";
 import type {
     LearnCorrection,
     LearnFact,
@@ -137,6 +143,7 @@ export type DropReason =
     | "dismissed"
     | "knownElsewhere"
     | "conflicting"
+    | "firstNameOnly"
     | "budget";
 
 interface AnchorPosition {
@@ -470,6 +477,31 @@ export function validateLearnOutput(
             drop("outOfScope");
             return null;
         }
+        const person =
+            "personId" in correction.target
+                ? frame.people.get(correction.target.personId)
+                : undefined;
+        // A person named by their first name alone is a guess among
+        // everyone of that name (the meeting may hold someone nobody
+        // knows): not proposed, as a link or as a rewrite.
+        if (person && heardIsFirstNameOnly(correction.heard, person)) {
+            drop("firstNameOnly");
+            return null;
+        }
+        // Linking the name itself, as said, tells nobody anything.
+        const name =
+            person?.name ??
+            ("entityId" in correction.target
+                ? frame.entities.get(correction.target.entityId)?.name
+                : undefined);
+        if (
+            correction.kind === "link" &&
+            name !== undefined &&
+            heardIsTheName(correction.heard, name)
+        ) {
+            drop("unchanged");
+            return null;
+        }
         if (
             correction.kind === "correct" &&
             (!correction.replacement ||
@@ -781,33 +813,17 @@ export function validateLearnOutput(
 /** Turns either side of an evidence turn searched for the rest of a name. */
 const NAME_RADIUS = 3;
 
-/** Letters only, lower case, without diacritics: how names are compared. */
-function nameWords(text: string): string[] {
-    return text
-        .normalize("NFKD")
-        .replace(/\p{M}/gu, "")
-        .toLowerCase()
-        .split(/[^\p{L}\p{N}]+/u)
-        .filter(Boolean);
-}
-
 /**
- * Whether more than a first name backs a speaker: the person's surname (any
- * word of the name after the first) or a nickname of theirs, said within
- * `NAME_RADIUS` turns of the evidence. Czech inflects names ("Bednářovi"),
- * so a word matches on its first letters.
+ * Whether more than a first name backs a speaker: the person's surname or
+ * a nickname of theirs, said within `NAME_RADIUS` turns of the evidence
+ * (`moreThanFirstName`: Czech inflection, no titles or initials, a one-word
+ * name counts as a first name).
  */
 export function fullNameNear(
     person: { name: string; aliases?: readonly string[] },
     turns: readonly TranscriptTurn[],
     evidenceMs: readonly number[],
 ): boolean {
-    const rest = nameWords(person.name).slice(1);
-    const aliases = (person.aliases ?? []).map((alias) =>
-        nameWords(alias).join(" "),
-    );
-    // A one-word name is all there is to hear.
-    if (rest.length === 0) return true;
     const near = new Set<number>();
     for (const ms of evidenceMs) {
         let at = 0;
@@ -825,32 +841,10 @@ export function fullNameNear(
             near.add(index);
         }
     }
-    const stem = (word: string) => word.slice(0, Math.max(4, word.length - 2));
-    for (const index of near) {
-        const words = nameWords(turns[index]?.text ?? "");
-        const text = words.join(" ");
-        if (
-            rest.some((part) =>
-                words.some((word) => word.startsWith(stem(part))),
-            )
-        ) {
-            return true;
-        }
-        if (
-            aliases.some(
-                (alias) =>
-                    alias &&
-                    (` ${text} `.includes(` ${alias} `) ||
-                        (!alias.includes(" ") &&
-                            words.some((word) =>
-                                word.startsWith(stem(alias)),
-                            ))),
-            )
-        ) {
-            return true;
-        }
-    }
-    return false;
+    const words = [...near].flatMap((index) =>
+        nameWords(turns[index]?.text ?? ""),
+    );
+    return moreThanFirstName(words, person);
 }
 
 function factFingerprint(

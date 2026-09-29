@@ -5,18 +5,28 @@
  * itself, and the recording's title, summary and topics are held back
  * (`recordings.summaryDueAt`) so they are made from the transcript as the
  * person's review corrects it. The hold is released, once, when:
- * - no Learn run on the recording is queued, running or waiting for its
- *   review (the review finished, the run found nothing, failed, or was
- *   cancelled or superseded with no successor); or
+ * - no Learn run on the recording's private view is open (`learnRunOpen`:
+ *   ready for review, or queued or running with its job alive): the review
+ *   finished, the run found nothing, failed, died, or was cancelled or
+ *   superseded with no successor; or
  * - `summaryDueAt` passed (72 h): nobody reviewed, and the rest goes on
  *   without them.
- * Releasing queues the title job, topics and the automatic summary as the
- * person's settings ask then. With automatic Learn off, nothing here runs:
- * the title follows the transcription as before.
+ * A new Riffado transcript clears the hold in the transaction that writes
+ * it (`transcriptRewrittenInTx`): that transcription makes its own title,
+ * summary and topics, or holds them again. Erasing the transcript or
+ * deleting the recording clears it too.
+ *
+ * Releasing clears the hold and queues one `learn.release` job in the same
+ * transaction, so what waited is never lost to a crash between the two;
+ * that job queues the title job, topics and the automatic summary as the
+ * person's settings ask then, retried until it has. The jobs it queues
+ * check again that no newer hold began (`isHeldForLearn`). With automatic
+ * Learn off, nothing here runs: the title follows the transcription.
  */
 
-import { and, eq, inArray, isNotNull, lte, notExists, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lte, notExists } from "drizzle-orm";
 import { db } from "@/db";
+import { enqueueJobInTx } from "@/db/queries/async-jobs";
 import {
     aiEnhancements,
     learnRuns,
@@ -24,11 +34,18 @@ import {
     userSettings,
 } from "@/db/schema";
 import { env } from "@/lib/env";
+import { nudge } from "@/lib/jobs/nudge";
+import {
+    InvalidJobPayloadError,
+    type JobHandler,
+    type JobResult,
+} from "@/lib/jobs/types";
 import {
     isAutoLearnOffered,
     isLearnAvailableFor,
 } from "@/lib/knowledge/availability";
-import { startLearnRun } from "@/lib/learn/learn-job";
+import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
+import { learnRunOpen } from "@/lib/learn/learn-open";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
@@ -38,8 +55,7 @@ import { queueAutoTopics } from "@/lib/topics/topics-job";
 /** How long the title, summary and topics wait for Learn's review. */
 export const AUTO_LEARN_HOLD_MS = 72 * 60 * 60 * 1000;
 
-/** Runs that still hold a recording back: not done, or awaiting review. */
-const UNSETTLED = ["queued", "running", "ready"] as const;
+export const LEARN_RELEASE_JOB_KIND = "learn.release";
 
 /**
  * After a transcript with timings was written on the private view: start
@@ -75,17 +91,6 @@ export async function holdForAutoLearn(input: {
         );
         if (!rateLimit.allowed) return false;
 
-        // Held before the run exists: a run that settles at once finds the
-        // hold to release.
-        await db
-            .update(recordings)
-            .set({ summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS) })
-            .where(
-                and(
-                    eq(recordings.id, recordingId),
-                    eq(recordings.userId, userId),
-                ),
-            );
         try {
             await startLearnRun({
                 access: { ...access, view: "private", contentUserId: userId },
@@ -98,62 +103,87 @@ export async function holdForAutoLearn(input: {
                 `Automatic Learn could not start for recording ${recordingId}:`,
                 error,
             );
-            await clearHold(recordingId);
             return false;
         }
+        // Held once the run exists, so nothing between the two can find
+        // the hold with no run to wait for. A run that settled before the
+        // hold was set found no hold to release: checked here instead.
+        const [held] = await db
+            .update(recordings)
+            .set({ summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS) })
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .returning({ id: recordings.id });
+        if (!held) return false;
+        await releaseAutoLearnHold(recordingId);
         return true;
     } catch (error) {
         console.error(
             `Automatic Learn skipped for recording ${recordingId}:`,
             error,
         );
-        await clearHold(recordingId).catch(() => undefined);
         return false;
     }
 }
 
-async function clearHold(recordingId: string): Promise<void> {
-    await db
-        .update(recordings)
-        .set({ summaryDueAt: null })
-        .where(eq(recordings.id, recordingId));
-}
-
 /**
- * Release a recording's hold when nothing holds it any more (`expired`:
- * whatever still does), and queue what waited. Exactly once: the hold is
- * cleared in the same statement that checks it. Returns whether it
- * released. Never throws.
+ * Release a recording's hold when no run on its private view is open
+ * (`expired`: when its time is up, whatever is open). Exactly once: the
+ * hold is cleared by the statement that checks it, and the release job is
+ * queued in the same transaction. Returns whether it released. Never
+ * throws.
  */
 export async function releaseAutoLearnHold(
     recordingId: string,
-    { expired = false }: { expired?: boolean } = {},
+    {
+        expired = false,
+        now = new Date(),
+    }: { expired?: boolean; now?: Date } = {},
 ): Promise<boolean> {
     try {
-        const unsettled = db
+        if (!expired) await settleDeadLearnRuns(recordingId);
+        const open = db
             .select({ id: learnRuns.id })
             .from(learnRuns)
             .where(
                 and(
                     eq(learnRuns.recordingId, recordingId),
                     eq(learnRuns.view, "private"),
-                    inArray(learnRuns.status, [...UNSETTLED]),
+                    learnRunOpen(),
                 ),
             );
-        const [released] = await db
-            .update(recordings)
-            .set({ summaryDueAt: null })
-            .where(
-                and(
-                    eq(recordings.id, recordingId),
-                    isNotNull(recordings.summaryDueAt),
-                    expired ? sql`true` : notExists(unsettled),
-                ),
-            )
-            .returning({ userId: recordings.userId });
-        if (!released) return false;
-        await queueReleased(released.userId, recordingId);
-        return true;
+        const released = await db.transaction(async (tx) => {
+            const [row] = await tx
+                .update(recordings)
+                .set({ summaryDueAt: null })
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        isNotNull(recordings.summaryDueAt),
+                        // A renewed hold is not the one whose time was up.
+                        expired
+                            ? lte(recordings.summaryDueAt, now)
+                            : notExists(open),
+                    ),
+                )
+                .returning({ userId: recordings.userId });
+            if (!row) return false;
+            await enqueueJobInTx(tx, {
+                userId: row.userId,
+                kind: LEARN_RELEASE_JOB_KIND,
+                subjectId: recordingId,
+                maxAttempts: 5,
+                payload: { recordingId },
+            });
+            return true;
+        });
+        if (released) nudge();
+        return released;
     } catch (error) {
         console.error(
             `Could not release what waited for Learn on recording ${recordingId}:`,
@@ -167,7 +197,19 @@ export async function releaseAutoLearnHold(
 async function queueReleased(
     userId: string,
     recordingId: string,
-): Promise<void> {
+): Promise<JobResult> {
+    const [recording] = await db
+        .select({ id: recordings.id })
+        .from(recordings)
+        .where(
+            and(
+                eq(recordings.id, recordingId),
+                eq(recordings.userId, userId),
+                isNull(recordings.deletedAt),
+            ),
+        )
+        .limit(1);
+    if (!recording) return { skipped: "gone" };
     const [settings] = await db
         .select({
             autoGenerateTitle: userSettings.autoGenerateTitle,
@@ -177,13 +219,11 @@ async function queueReleased(
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
         .limit(1);
+    const queued: string[] = [];
+    // A failure here fails the job, which is retried: nothing is lost.
     if (settings?.autoGenerateTitle ?? true) {
-        await enqueueTitleJob(userId, recordingId).catch((error) =>
-            console.error(
-                `Could not queue the title of recording ${recordingId}:`,
-                error,
-            ),
-        );
+        await enqueueTitleJob(userId, recordingId);
+        queued.push("title");
     }
     await queueAutoTopics(userId, recordingId, "riffado");
     if (settings?.autoSummarize) {
@@ -205,9 +245,33 @@ async function queueReleased(
                 recordingId,
                 settings.autoSummarizePreset ?? null,
             );
+            queued.push("summary");
         }
     }
+    return { queued };
 }
+
+export interface LearnReleasePayload {
+    recordingId: string;
+}
+
+export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
+    kind: LEARN_RELEASE_JOB_KIND,
+    concurrency: 2,
+    maxAttempts: 5,
+    timeoutMs: 60_000,
+    backoff: { baseMs: 10_000, maxMs: 5 * 60_000, jitter: 0.3 },
+    parsePayload(raw) {
+        if (typeof raw.recordingId !== "string" || !raw.recordingId) {
+            throw new InvalidJobPayloadError(
+                LEARN_RELEASE_JOB_KIND,
+                "recordingId",
+            );
+        }
+        return { recordingId: raw.recordingId };
+    },
+    run: ({ userId, payload }) => queueReleased(userId, payload.recordingId),
+};
 
 /** Release the holds whose time is up, a batch at a time. */
 export async function sweepAutoLearnHolds(
@@ -226,7 +290,9 @@ export async function sweepAutoLearnHolds(
         .limit(limit);
     let released = 0;
     for (const { id } of due) {
-        if (await releaseAutoLearnHold(id, { expired: true })) released++;
+        if (await releaseAutoLearnHold(id, { expired: true, now })) {
+            released++;
+        }
     }
     return released;
 }

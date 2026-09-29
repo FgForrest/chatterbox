@@ -303,7 +303,13 @@ describe("PUT / DELETE /providers/default-learn", () => {
     it("clears the previous one and marks the new one in one transaction", async () => {
         queueSelect([{ id: "cred-1", provider: "Claude Code" }]);
         const updates: unknown[] = [];
+        const locked = vi.fn().mockResolvedValue([{ id: "user-1" }]);
         const tx = {
+            select: vi.fn().mockReturnValue({
+                from: vi.fn().mockReturnValue({
+                    where: vi.fn().mockReturnValue({ for: locked }),
+                }),
+            }),
             update: vi.fn().mockReturnValue({
                 set: vi.fn((values: unknown) => {
                     updates.push(values);
@@ -320,6 +326,8 @@ describe("PUT / DELETE /providers/default-learn", () => {
         );
 
         expect(response.status).toBe(200);
+        // Serialized per user before anything is cleared.
+        expect(locked).toHaveBeenCalledWith("update");
         expect(updates).toEqual([
             { isDefaultLearn: false },
             expect.objectContaining({ isDefaultLearn: true }),

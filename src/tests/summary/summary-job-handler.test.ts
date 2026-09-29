@@ -19,6 +19,9 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 // The handler shares its constants and payload parser with the enqueue side,
 // which owns a database client. Nothing here queues anything.
 vi.mock("@/db", () => ({ db: {} }));
+vi.mock("@/lib/learn/hold", () => ({
+    isHeldForLearn: vi.fn().mockResolvedValue(false),
+}));
 vi.mock("@/lib/summary/generate-summary", () => ({
     generateSummaryForRecording: vi.fn(),
 }));

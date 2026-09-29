@@ -20,6 +20,7 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { isHeldForLearn } from "@/lib/learn/hold";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { generateSummaryForRecording } from "./generate-summary";
@@ -55,6 +56,16 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
         reportProgress,
     }): Promise<JobResult> {
         const orgView = payload.view === "org";
+        // An automatic summary queued before automatic Learn held the
+        // recording again: the hold's release makes it, from the reviewed
+        // transcript.
+        if (
+            payload.trigger !== "manual" &&
+            !orgView &&
+            (await isHeldForLearn(payload.recordingId))
+        ) {
+            return { skipped: "held" };
+        }
         try {
             // The owner's erase marker governs only the owner's rows; the
             // Organization view is re-authorized inside the run instead.

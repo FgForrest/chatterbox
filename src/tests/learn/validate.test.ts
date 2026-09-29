@@ -325,6 +325,40 @@ describe("validateLearnOutput", () => {
     });
 
     describe("corrections", () => {
+        it("proposes no person by a first name alone, and no link to a name said as it is", () => {
+            const { items, dropped } = validateLearnOutput(
+                output({
+                    corrections: [
+                        // "Honzo" is not how Jan is written: kept.
+                        {
+                            ...at(2, "Honzo"),
+                            kind: "link",
+                            target: { personId: "p-jan" },
+                            replacement: null,
+                        },
+                        // "Jan" alone could be anyone called Jan.
+                        {
+                            ...at(1, "Jan"),
+                            kind: "link",
+                            target: { personId: "p-jan" },
+                            replacement: null,
+                        },
+                        {
+                            ...at(1, "Orion"),
+                            kind: "link",
+                            target: { entityId: "e-orion" },
+                            replacement: null,
+                        },
+                    ],
+                }),
+                frame(),
+            );
+            expect(items.map((item) => item.payload)).toEqual([
+                expect.objectContaining({ heard: "Honzo" }),
+            ]);
+            expect(dropped).toMatchObject({ firstNameOnly: 1, unchanged: 1 });
+        });
+
         it("groups a correction heard several times into one item per target", () => {
             const { items } = validateLearnOutput(
                 output({

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { recordings, transcriptions, userSettings } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { isHeldForLearn } from "@/lib/learn/hold";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import {
     parseTitleJobPayload,
@@ -24,6 +25,10 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
     parsePayload: parseTitleJobPayload,
 
     async run({ userId, payload }): Promise<JobResult> {
+        // A newer transcript is held for Learn: its release titles it.
+        if (await isHeldForLearn(payload.recordingId)) {
+            return { skipped: "held" };
+        }
         const [recording] = await db
             .select({ plaudFileId: recordings.plaudFileId })
             .from(recordings)
