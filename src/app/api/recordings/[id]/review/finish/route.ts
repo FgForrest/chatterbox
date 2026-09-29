@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import { finishReview, requestedReviewSource } from "@/lib/learn/review";
+import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -32,12 +33,19 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                   ),
               )
             : {};
-    return NextResponse.json(
-        await finishReview(access, actorUserId, {
-            versions,
-            source: requestedReviewSource(request),
-        }),
-    );
+    const finished = await finishReview(access, actorUserId, {
+        versions,
+        source: requestedReviewSource(request),
+    });
+    // What it applied may change what a summary read.
+    if (finished.status === "finished" && finished.applied > 0) {
+        await refreshSummaryAfterCorrections({
+            ownerUserId: access.ownerUserId,
+            recordingId: id,
+            view: access.view,
+        });
+    }
+    return NextResponse.json(finished);
 });
 
 /**

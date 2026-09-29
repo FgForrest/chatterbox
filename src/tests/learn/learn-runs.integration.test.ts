@@ -31,6 +31,7 @@ import {
     transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
+    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -70,6 +71,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+            AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20,
         },
     };
 });
@@ -1295,6 +1297,69 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     },
                 );
                 expect((await summary()).stale).toBe(true);
+                // Auto-summarize is off: nothing is summarized again.
+                expect(
+                    await db()
+                        .select()
+                        .from(asyncJobs)
+                        .where(eq(asyncJobs.kind, "summary")),
+                ).toEqual([]);
+            });
+
+            it("summarizes again when the corrections change and auto-summarize is on", async () => {
+                await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as { items: { id: string; kind: string }[] };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: { versions: { [id]: 1, [phrase]: 0 } },
+                });
+                createCompletion.mockReset();
+                reply({
+                    summary: "Tavesi came.",
+                    keyPoints: [],
+                    actionItems: [],
+                });
+                await generateSummaryForRecording(OWNER, REC);
+                const summaryJobs = () =>
+                    db()
+                        .select()
+                        .from(asyncJobs)
+                        .where(eq(asyncJobs.kind, "summary"));
+                const undoLast = async () => {
+                    const [correction] = await db()
+                        .select({ id: transcriptCorrections.id })
+                        .from(transcriptCorrections);
+                    await route(
+                        deleteCorrectionRoute,
+                        OWNER,
+                        `corrections/${correction?.id}`,
+                        {
+                            method: "DELETE",
+                            params: { correctionId: correction?.id ?? "" },
+                        },
+                    );
+                };
+
+                await db().insert(userSettings).values({
+                    userId: OWNER,
+                    autoSummarize: true,
+                });
+                await undoLast();
+                expect(await summaryJobs()).toMatchObject([
+                    { userId: OWNER, status: "pending" },
+                ]);
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {

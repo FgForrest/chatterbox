@@ -5,6 +5,7 @@ import { transcriptCorrections, transcriptions } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { revertCorrection } from "@/lib/knowledge/corrections";
+import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -56,6 +57,11 @@ export const DELETE = apiHandler<CorrectionContext>(
             actorUserId: session.user.id,
             orgUserId: await sharingOrgUserId(),
             correctionId,
+        });
+        await refreshSummaryAfterCorrections({
+            ownerUserId: access.ownerUserId,
+            recordingId: id,
+            view,
         });
         return NextResponse.json({ ok: true });
     },
