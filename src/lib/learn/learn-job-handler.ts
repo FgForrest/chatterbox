@@ -55,11 +55,13 @@ import {
 } from "@/lib/learn/learn-job";
 import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
+import { type LearnBridgeChat, runBridgePass } from "@/lib/learn/run-bridge";
 import {
     type LearnChat,
     type LearnRelationChoice,
     runFallbackPass,
 } from "@/lib/learn/run-fallback";
+import { issueLearnRunToken } from "@/lib/learn/run-token";
 import { findEntities, type LearnToolContext } from "@/lib/learn/tools";
 import {
     currentFactKey,
@@ -125,7 +127,12 @@ async function setStatus(
 async function chatFor(
     actorUserId: string,
     signal: AbortSignal,
-): Promise<{ chat: LearnChat; provider: string; model: string }> {
+): Promise<{
+    chat: LearnChat;
+    bridge: LearnBridgeChat;
+    provider: string;
+    model: string;
+}> {
     const configured = await db
         .select()
         .from(apiCredentials)
@@ -143,9 +150,51 @@ async function chatFor(
         baseURL: credentials.baseUrl || undefined,
     });
     const model = enhancementChatModel(credentials);
+    const retried = <T>(run: () => Promise<T>) =>
+        retryWithBackoff({
+            attempts: CALL_RETRY_ATTEMPTS,
+            baseMs: 1_500,
+            maxMs: 15_000,
+            jitter: 0.5,
+            isRetryable: isRetryableError,
+            run: async () => {
+                signal.throwIfAborted();
+                return run();
+            },
+        });
     return {
         provider: credentials.provider,
         model,
+        // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
+        // the answer's JSON Schema, and this run's token for Riffado's
+        // tools. Unknown fields travel in the body as they are.
+        bridge: {
+            complete: ({ system, user, schema, mcp, maxTokens }) =>
+                retried(async () => {
+                    const response = await openai.chat.completions.create(
+                        {
+                            ...buildChatCompletionParams({
+                                model,
+                                messages: [
+                                    { role: "system", content: system },
+                                    { role: "user", content: user },
+                                ],
+                                temperature: 0.1,
+                                maxTokens,
+                            }),
+                            response_format: {
+                                type: "json_schema",
+                                json_schema: { name: "learn_output", schema },
+                            },
+                            ...(mcp ? { riffado_mcp: mcp } : {}),
+                        } as Parameters<
+                            typeof openai.chat.completions.create
+                        >[0] & { stream?: false },
+                        { signal },
+                    );
+                    return response.choices[0]?.message?.content?.trim() || "";
+                }),
+        },
         chat: {
             complete: (messages, maxTokens) =>
                 retryWithBackoff({
@@ -528,30 +577,42 @@ async function runLearnJob({
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
-        const { chat, provider, model } = await chatFor(
+        const { chat, bridge, provider, model } = await chatFor(
             run.actorUserId ?? "",
             signal,
         );
-        // Path 1 (the bridge, with tools) lands with Task 3.6; until
-        // then every run takes the fallback, and says so.
+        // Path 1: the bridge's CLI looks things up itself over MCP;
+        // anything else takes the fallback, which looks up for it.
         const path = chooseLearnPath(
             { provider },
             { mcpUrl: env.LEARN_MCP_URL },
         );
+        const unnamedLabels = labels.filter(
+            (label) => !frameBefore.answeredLabels.has(label),
+        );
         reportProgress({ phase: "reading" });
-        const pass = await runFallbackPass({
-            chat,
-            lookup: {
-                findEntities: (query) => findEntities(tools, query),
-            },
-            turns,
-            language: transcript.detectedLanguage,
-            relations,
-            unnamedLabels: labels.filter(
-                (label) => !frameBefore.answeredLabels.has(label),
-            ),
-            signal,
-        });
+        const pass =
+            path === "bridge"
+                ? await runBridgePass({
+                      chat: bridge,
+                      token: issueLearnRunToken(run.id),
+                      turns,
+                      language: transcript.detectedLanguage,
+                      relations,
+                      unnamedLabels,
+                      signal,
+                  })
+                : await runFallbackPass({
+                      chat,
+                      lookup: {
+                          findEntities: (query) => findEntities(tools, query),
+                      },
+                      turns,
+                      language: transcript.detectedLanguage,
+                      relations,
+                      unnamedLabels,
+                      signal,
+                  });
         reportProgress({ phase: "checking" });
 
         // Validated against the knowledge as it is now; written under the

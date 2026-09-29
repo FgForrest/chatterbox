@@ -18,15 +18,24 @@ describe("chooseLearnPath", () => {
         }
     });
 
-    it("takes the fallback for any other provider, and for all until the bridge path is built", () => {
+    it("takes the fallback for any other provider, and for all when the bridge path is off", () => {
         expect(
             chooseLearnPath(
                 { provider: "OpenAI" },
                 { mcpUrl, bridgeReady: true },
             ),
         ).toBe("fallback");
-        expect(chooseLearnPath({ provider: "Claude Code" }, { mcpUrl })).toBe(
-            "fallback",
+        expect(
+            chooseLearnPath(
+                { provider: "Claude Code" },
+                { mcpUrl, bridgeReady: false },
+            ),
+        ).toBe("fallback");
+    });
+
+    it("is built: the bridge presets take it by default where the MCP URL is set", () => {
+        expect(chooseLearnPath({ provider: "Codex" }, { mcpUrl })).toBe(
+            "bridge",
         );
     });
 });

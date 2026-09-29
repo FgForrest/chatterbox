@@ -37,13 +37,17 @@ describe("name matching, as Czech says names", () => {
         ).toBe(false);
         // Titles and initials are not surnames.
         expect(
-            moreThanFirstName(words("Ing. Jan tady"), { name: "Ing. Jan Novák" }),
+            moreThanFirstName(words("Ing. Jan tady"), {
+                name: "Ing. Jan Novák",
+            }),
         ).toBe(false);
         expect(
             moreThanFirstName(words("John F. here"), { name: "John F. Smith" }),
         ).toBe(false);
         // A one-word name is a first name alone, unless a nickname is heard.
-        expect(moreThanFirstName(words("Jan tady"), { name: "Jan" })).toBe(false);
+        expect(moreThanFirstName(words("Jan tady"), { name: "Jan" })).toBe(
+            false,
+        );
         expect(
             moreThanFirstName(words("Jo, Vonďo, pošli"), {
                 name: "Michal Vondra",
@@ -73,8 +77,13 @@ describe("name matching, as Czech says names", () => {
         expect(heardIsFirstNameOnly("Michalem Bednářem", michal)).toBe(false);
         expect(heardIsFirstNameOnly("Bednář", michal)).toBe(false);
         expect(
-            heardIsFirstNameOnly("Vonďo", { name: "Michal Vondra", aliases: ["Vonďa"] }),
+            heardIsFirstNameOnly("Vonďo", {
+                name: "Michal Vondra",
+                aliases: ["Vonďa"],
+            }),
         ).toBe(false);
-        expect(heardIsFirstNameOnly("Honzo", { name: "Jan Novotný" })).toBe(false);
+        expect(heardIsFirstNameOnly("Honzo", { name: "Jan Novotný" })).toBe(
+            false,
+        );
     });
 });

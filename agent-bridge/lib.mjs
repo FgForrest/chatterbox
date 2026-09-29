@@ -374,6 +374,16 @@ export function redact(text, secrets) {
  * CLAUDE_LOCKDOWN_ARGS and CODEX_LOCKDOWN_ARGS). `extraArgs` come after
  * those flags, so an operator can still override them -- and should not.
  */
+/**
+ * @param {string} backend
+ * @param {string} model
+ * @param {string[]} [extraArgs]
+ * @param {string} [codexOutPath]
+ * @param {{
+ *   mcp?: { tools: string[]; configPath?: string; url?: string } | null;
+ *   schema?: { json?: string; path?: string } | null;
+ * }} [learn] Learn's tools and answer schema (see `parseLearnRequest`).
+ */
 export function buildArgs(
     backend,
     model,
@@ -408,7 +418,7 @@ export function buildArgs(
                   "--allowedTools",
                   ...names,
                   "--mcp-config",
-                  mcp.configPath,
+                  String(mcp.configPath),
               ]
             : ["--tools", ""];
         return [
@@ -417,7 +427,7 @@ export function buildArgs(
             "json",
             ...toolArgs,
             ...CLAUDE_LOCKDOWN_ARGS,
-            ...(schema ? ["--json-schema", schema.json] : []),
+            ...(schema?.json ? ["--json-schema", schema.json] : []),
             ...modelArgs,
             ...extraArgs,
         ];
@@ -442,12 +452,12 @@ export function buildArgs(
             ...(mcp
                 ? [
                       "-c",
-                      `mcp_servers.${MCP_SERVER}.url=${JSON.stringify(mcp.url)}`,
+                      `mcp_servers.${MCP_SERVER}.url=${JSON.stringify(String(mcp.url))}`,
                       "-c",
                       `mcp_servers.${MCP_SERVER}.bearer_token_env_var="${MCP_TOKEN_ENV}"`,
                   ]
                 : []),
-            ...(schema ? ["--output-schema", schema.path] : []),
+            ...(schema?.path ? ["--output-schema", schema.path] : []),
             "--output-last-message",
             codexOutPath,
             ...modelArgs,

@@ -671,6 +671,68 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 .where(eq(transcriptions.id, transcriptId));
         });
 
+        it("takes the bridge path for a bridge provider: one call, this run's token and the schema, validated the same", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            await db()
+                .update(apiCredentials)
+                .set({
+                    provider: "Claude Code",
+                    defaultModel: "claude-opus-5-5",
+                })
+                .where(eq(apiCredentials.userId, OWNER));
+            (mockEnv as Record<string, unknown>).LEARN_MCP_URL =
+                "http://app:3000/api/mcp/learn";
+            try {
+                const { runId } = (await (await learn(OWNER)).json()) as {
+                    runId: string;
+                };
+                reply({
+                    speakers: [],
+                    corrections: [
+                        {
+                            turnIndex: 0,
+                            charStart: 0,
+                            charEnd: 1,
+                            heard: "Tavesy",
+                            kind: "correct",
+                            target: { entityId: tavesi },
+                            replacement: "Tavesi",
+                        },
+                    ],
+                    facts: [],
+                    relationPhrases: [],
+                });
+
+                await expect(runJob(runId)).resolves.toMatchObject({
+                    status: "ready",
+                    items: 1,
+                });
+                expect(createCompletion).toHaveBeenCalledTimes(1);
+                const body = createCompletion.mock.calls[0]?.[0] as {
+                    model: string;
+                    response_format: { type: string };
+                    riffado_mcp: { token: string; tools: string[] };
+                };
+                expect(body.model).toBe("claude-opus-5-5");
+                expect(body.response_format.type).toBe("json_schema");
+                expect(body.riffado_mcp.tools).toEqual([
+                    "find_entities",
+                    "get_entity",
+                    "find_facts",
+                ]);
+                expect(body.riffado_mcp.token).toMatch(
+                    new RegExp(`^lr1\\.${runId}\\.`),
+                );
+            } finally {
+                (mockEnv as Record<string, unknown>).LEARN_MCP_URL = undefined;
+            }
+        });
+
         it("stores what holds as review items, encrypted, and is ready for review", async () => {
             const tavesi = (
                 await createEntity(OWNER, {

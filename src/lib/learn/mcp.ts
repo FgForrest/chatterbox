@@ -12,6 +12,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { learnRuns } from "@/db/schema";
 import { readBoundedJson } from "@/lib/http/bounded-json";
+import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import {
     findEntities,
     findFacts,
@@ -20,7 +21,7 @@ import {
 } from "@/lib/learn/tools";
 
 /** Lookups one run may make over MCP. */
-export const MCP_TOOL_BUDGET = 60;
+export const MCP_TOOL_BUDGET = 160;
 /** The largest request body read; a tool call needs a few hundred bytes. */
 export const MCP_MAX_BODY_BYTES = 64 * 1024;
 const MAX_ID_LENGTH = 200;
@@ -49,51 +50,7 @@ export type JsonRpcResponse =
           error: { code: number; message: string };
       };
 
-export const LEARN_MCP_TOOLS = [
-    {
-        name: "find_entities",
-        description:
-            "Find the people, organizations, projects, products, terms and other things the knowledge base knows that a word or phrase from the transcript may name, best first, with why each matched.",
-        inputSchema: {
-            type: "object",
-            properties: {
-                text: {
-                    type: "string",
-                    description: "The words as written in the transcript.",
-                },
-                type: {
-                    type: "string",
-                    description:
-                        "Optional: `person`, or an entity type key, to narrow the search.",
-                },
-            },
-            required: ["text"],
-            additionalProperties: false,
-        },
-    },
-    {
-        name: "get_entity",
-        description:
-            "One person or thing the knowledge base knows, by id: its name, type, description and other names.",
-        inputSchema: {
-            type: "object",
-            properties: { id: { type: "string" } },
-            required: ["id"],
-            additionalProperties: false,
-        },
-    },
-    {
-        name: "find_facts",
-        description:
-            "The current facts the knowledge base holds about one person or thing, by id.",
-        inputSchema: {
-            type: "object",
-            properties: { id: { type: "string" } },
-            required: ["id"],
-            additionalProperties: false,
-        },
-    },
-] as const;
+export { LEARN_MCP_TOOLS };
 
 /** An id JSON-RPC allows, short enough to echo back. */
 function isId(value: unknown): boolean {

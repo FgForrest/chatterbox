@@ -485,7 +485,7 @@ describe("agent-bridge", () => {
      * the tool names.
      */
     describe("Learn requests", () => {
-        const URL = "http://app:3000/api/learn/mcp";
+        const URL = "http://app:3000/api/mcp/learn";
         const schema = {
             type: "object",
             properties: { speakers: { type: "array" } },

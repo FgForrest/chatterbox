@@ -58,7 +58,7 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
 /**
  * The one URL of Riffado's read-only knowledge tools (MCP) a Learn request
- * may have the CLI call, e.g. `http://app:3000/api/learn/mcp`. Unset, no
+ * may have the CLI call, e.g. `http://app:3000/api/mcp/learn`. Unset, no
  * request can use tools. Requests never supply a URL.
  */
 const LEARN_MCP_URL = (process.env.BRIDGE_LEARN_MCP_URL || "").trim();

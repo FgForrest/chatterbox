@@ -289,14 +289,14 @@ Riffado's Learn reads a transcript and proposes speaker names, corrections and f
 
 The token is in the child's environment only: never in argv or a file, redacted from error text, never logged. It names one Learn run, expires, and works only while that run is running. The temp files go when the request ends. Verified with Claude Code 2.1.284 and Codex 0.155.1 (Spike 0.1, and a round trip through this bridge to a probe MCP server).
 
-The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/learn/mcp`. Set `LEARN_MCP_URL` to the same value on the app, which is what tells Riffado to use it.
+The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, which is what tells Riffado to use it.
 
 ## Configuration
 
 | Variable | Default | Notes |
 |---|---|---|
 | `BRIDGE_TOKEN` | *(required)* | Bearer token. The bridge refuses to start without it. |
-| `BRIDGE_LEARN_MCP_URL` | — | The one URL of Riffado's knowledge tools a Learn request may use, e.g. `http://app:3000/api/learn/mcp`. Unset, requests cannot use tools. |
+| `BRIDGE_LEARN_MCP_URL` | — | The one URL of Riffado's knowledge tools a Learn request may use, e.g. `http://app:3000/api/mcp/learn`. Unset, requests cannot use tools. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | From `claude setup-token`. Optional if you logged in interactively. |
 | `BRIDGE_MAX_CONCURRENCY` | `1` | Each request spawns a model session drawing on the same rolling window as your interactive coding. |
 | `BRIDGE_TIMEOUT_MS` | `300000` | Per request. The child is SIGKILLed on expiry. |

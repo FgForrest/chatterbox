@@ -13,11 +13,8 @@ export type LearnPath = "bridge" | "fallback";
 /** Presets that run a CLI through the agent bridge. */
 const BRIDGE_PRESETS = new Set(["Claude Code", "Codex"]);
 
-/**
- * The bridge path waits for Spike 0.1 (its flags and token mechanism,
- * tried on the pinned CLIs) and Task 3.6.
- */
-export const BRIDGE_PATH_READY = false;
+/** The bridge path is built (Task 3.6, on Spike 0.1's flags). */
+export const BRIDGE_PATH_READY = true;
 
 export function chooseLearnPath(
     credentials: { provider: string },

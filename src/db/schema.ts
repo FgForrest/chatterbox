@@ -1942,39 +1942,43 @@ export const aiEnhancements = pgTable(
 );
 
 // API Credentials (encrypted)
-export const apiCredentials = pgTable("api_credentials", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    userId: text("user_id")
-        .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
-    provider: varchar("provider", { length: 100 }).notNull(), // e.g., 'openai', 'groq', 'together-ai'
-    // Encrypted API key
-    apiKey: text("api_key").notNull(),
-    // Optional custom base URL (for OpenAI-compatible APIs)
-    baseUrl: text("base_url"), // e.g., 'https://api.groq.com/openai/v1'
-    // Default model for this provider
-    defaultModel: varchar("default_model", { length: 100 }),
-    // Whether this is the default provider for transcription/enhancement
-    isDefaultTranscription: boolean("is_default_transcription")
-        .notNull()
-        .default(false),
-    isDefaultEnhancement: boolean("is_default_enhancement")
-        .notNull()
-        .default(false),
-    // The provider Learn runs on, where it should differ from the
-    // enhancement default (a stronger model for learning, say). None
-    // marked: Learn uses the enhancement default.
-    isDefaultLearn: boolean("is_default_learn").notNull().default(false),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (table) => ({
-    // One provider for Learn per user at most.
-    oneLearnDefault: uniqueIndex("api_credentials_one_learn_default")
-        .on(table.userId)
-        .where(sql`${table.isDefaultLearn}`),
-}));
+export const apiCredentials = pgTable(
+    "api_credentials",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        provider: varchar("provider", { length: 100 }).notNull(), // e.g., 'openai', 'groq', 'together-ai'
+        // Encrypted API key
+        apiKey: text("api_key").notNull(),
+        // Optional custom base URL (for OpenAI-compatible APIs)
+        baseUrl: text("base_url"), // e.g., 'https://api.groq.com/openai/v1'
+        // Default model for this provider
+        defaultModel: varchar("default_model", { length: 100 }),
+        // Whether this is the default provider for transcription/enhancement
+        isDefaultTranscription: boolean("is_default_transcription")
+            .notNull()
+            .default(false),
+        isDefaultEnhancement: boolean("is_default_enhancement")
+            .notNull()
+            .default(false),
+        // The provider Learn runs on, where it should differ from the
+        // enhancement default (a stronger model for learning, say). None
+        // marked: Learn uses the enhancement default.
+        isDefaultLearn: boolean("is_default_learn").notNull().default(false),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        // One provider for Learn per user at most.
+        oneLearnDefault: uniqueIndex("api_credentials_one_learn_default")
+            .on(table.userId)
+            .where(sql`${table.isDefaultLearn}`),
+    }),
+);
 
 // User Settings
 export const userSettings = pgTable("user_settings", {
