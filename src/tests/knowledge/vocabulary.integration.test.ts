@@ -92,8 +92,10 @@ import {
     keepAdoptedType,
     listOwnTypes,
     listVocabularyProposals,
+    mapPhrase,
     mergeOwnTypes,
     proposePhrase,
+    rejectPhrase,
     renameOwnType,
     seedCoreVocabulary,
     typeMergeCount,
@@ -371,6 +373,58 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         expect(alices?.refused).toBeNull();
         const [adopted] = await listVocabularyProposals(orgUserId);
         expect(adopted?.status).toBe("adopted");
+    });
+
+    it("maps a suggested phrase to a relation the Organization has, for private types of that name", async () => {
+        const alicesKey = await createPrivateType(ALICE, worksWith);
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+        const coaches = await createOrgType(orgUserId, {
+            ...worksWith,
+            label: "coaches",
+        });
+
+        // Only the organization account, only a relation the Organization
+        // or the core has.
+        expect(
+            await refusal(mapPhrase(ALICE, proposal?.id ?? "", coaches)),
+        ).toMatchObject({ statusCode: 403 });
+        expect(
+            await refusal(mapPhrase(orgUserId, proposal?.id ?? "", alicesKey)),
+        ).toMatchObject({ statusCode: 404 });
+
+        await mapPhrase(orgUserId, proposal?.id ?? "", coaches);
+
+        expect(
+            (await vocabularyVisibleTo(ALICE)).relationTypes.find(
+                (r) => r.key === alicesKey,
+            )?.adoptedAsKey,
+        ).toBe(coaches);
+        const [mapped] = await listVocabularyProposals(orgUserId);
+        expect(mapped?.status).toBe("adopted");
+        // Decided: nothing more to do with it.
+        expect(
+            await refusal(mapPhrase(orgUserId, proposal?.id ?? "", "leads")),
+        ).toMatchObject({ statusCode: 404 });
+    });
+
+    it("rejects a suggested phrase, which members' types keep as theirs", async () => {
+        const alicesKey = await createPrivateType(ALICE, worksWith);
+        await proposePhrase(ALICE, "mentors");
+        const [proposal] = await listVocabularyProposals(orgUserId);
+        expect(
+            await refusal(rejectPhrase(ALICE, proposal?.id ?? "")),
+        ).toMatchObject({ statusCode: 403 });
+
+        await rejectPhrase(orgUserId, proposal?.id ?? "");
+
+        const [rejected] = await listVocabularyProposals(orgUserId);
+        expect(rejected?.status).toBe("rejected");
+        expect(
+            (await vocabularyVisibleTo(ALICE)).relationTypes.find(
+                (r) => r.key === alicesKey,
+            )?.adoptedAsKey,
+        ).toBeNull();
     });
 
     it("gives members their adopted type back, with their facts, when the Organization deletes it", async () => {

@@ -91,6 +91,7 @@ vi.mock("@/lib/auth-server", async () => {
     };
 });
 
+import { POST as decideProposalRoute } from "@/app/api/knowledge/proposals/[id]/route";
 import {
     DELETE as deleteTypeRoute,
     GET as mergeCountRoute,
@@ -101,6 +102,8 @@ import { createEntity } from "@/lib/knowledge/entities";
 import {
     createPrivateType,
     listOwnTypes,
+    listVocabularyProposals,
+    proposePhrase,
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
 import { ensureOrgAccount } from "@/lib/org/account";
@@ -175,6 +178,66 @@ describeWithDatabase("the vocabulary routes (PostgreSQL)", () => {
             ]);
         await ensureOrgAccount();
         await seedCoreVocabulary();
+    });
+
+    it("lets the organization account create, map or reject what members suggested, and nobody else", async () => {
+        const orgUserId = (await ensureOrgAccount()) ?? "";
+        for (const phrase of ["mentors", "coaches", "blames"]) {
+            await proposePhrase(ALICE, phrase);
+        }
+        const byPhrase = new Map(
+            (await listVocabularyProposals(orgUserId)).map((row) => [
+                row.phrase,
+                row.id,
+            ]),
+        );
+        const decide = (user: string, phrase: string, body: unknown) => {
+            const id = byPhrase.get(phrase) ?? "";
+            const headers = new Headers({ "content-type": "application/json" });
+            headers.set("x-test-user", user);
+            return (decideProposalRoute as Handler)(
+                new Request(`http://localhost/api/knowledge/proposals/${id}`, {
+                    method: "POST",
+                    headers,
+                    body: JSON.stringify(body),
+                }),
+                { params: Promise.resolve({ id }) },
+            );
+        };
+
+        expect(
+            (await decide(ALICE, "blames", { action: "reject" })).status,
+        ).toBe(403);
+        expect(
+            (await decide(orgUserId, "blames", { action: "promote" })).status,
+        ).toBe(400);
+
+        const created = await decide(orgUserId, "mentors", {
+            action: "create",
+            spec: {
+                subjectTypes: ["person"],
+                objectTypes: ["person"],
+                objectKind: "entity",
+                cardinality: "many",
+            },
+        });
+        expect(created.status).toBe(200);
+        expect(
+            (
+                await decide(orgUserId, "coaches", {
+                    action: "map",
+                    key: "leads",
+                })
+            ).status,
+        ).toBe(200);
+        expect(
+            (await decide(orgUserId, "blames", { action: "reject" })).status,
+        ).toBe(200);
+        expect(
+            (await listVocabularyProposals(orgUserId))
+                .map((row) => `${row.phrase}:${row.status}`)
+                .sort(),
+        ).toEqual(["blames:rejected", "coaches:adopted", "mentors:adopted"]);
     });
 
     it("renames, keeps, merges and deletes the caller's own types", async () => {

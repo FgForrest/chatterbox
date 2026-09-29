@@ -1592,6 +1592,129 @@ export async function adoptPhrase(
 }
 
 /**
+ * Map a suggested phrase to a relation the Organization or the core
+ * already has (Phase 6): members' private relation types of that name
+ * record it (`adoptedAsKey`), as adopting the phrase as a new type does,
+ * and the suggestion is decided. 404 for a suggestion no longer open, or
+ * a key that is not an Organization or core relation.
+ */
+export async function mapPhrase(
+    actorUserId: string,
+    proposalId: string,
+    key: string,
+): Promise<void> {
+    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    await db.transaction(async (tx) => {
+        await lockOrgPeople(tx);
+        const [proposal] = await tx
+            .select({
+                phrase: knowledgeVocabularyProposals.phrase,
+                status: knowledgeVocabularyProposals.status,
+            })
+            .from(knowledgeVocabularyProposals)
+            .where(eq(knowledgeVocabularyProposals.id, proposalId))
+            .for("update")
+            .limit(1);
+        if (!proposal || proposal.status !== "open") {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Suggestion not found",
+                404,
+            );
+        }
+        const [target] = await tx
+            .select({ key: knowledgeRelationTypes.key })
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.key, key),
+                    or(
+                        isNull(knowledgeRelationTypes.userId),
+                        orgOwnedCondition(knowledgeRelationTypes.userId),
+                    ),
+                ),
+            )
+            .for("share")
+            .limit(1);
+        if (!target) {
+            throw new AppError(ErrorCode.NOT_FOUND, "Relation not found", 404);
+        }
+        const labelHmac = domainLookupHash(
+            LABEL_DOMAIN.relation,
+            cleanLabel(decryptText(proposal.phrase)),
+        );
+        const adopters = await tx
+            .select({
+                id: knowledgeRelationTypes.id,
+                userId: knowledgeRelationTypes.userId,
+            })
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.labelHmac, labelHmac),
+                    sql`${knowledgeRelationTypes.userId} is not null`,
+                    sql`not ${orgOwnedCondition(knowledgeRelationTypes.userId)}`,
+                ),
+            )
+            .orderBy(asc(knowledgeRelationTypes.id))
+            .for("update");
+        await tx
+            .update(knowledgeVocabularyProposals)
+            .set({
+                status: "adopted",
+                adoptedAsKey: key,
+                updatedAt: new Date(),
+            })
+            .where(eq(knowledgeVocabularyProposals.id, proposalId));
+        if (adopters.length > 0) {
+            await tx
+                .update(knowledgeRelationTypes)
+                .set({
+                    adoptedAsKey: key,
+                    adoptionRefusedAt: null,
+                    adoptionRefusedAs: null,
+                    updatedAt: new Date(),
+                })
+                .where(
+                    inArray(
+                        knowledgeRelationTypes.id,
+                        adopters.map((row) => row.id),
+                    ),
+                );
+            await bumpVocabularyVersionInTx(tx);
+        }
+        await bumpScopeInTx(tx, [
+            actorUserId,
+            ...adopters.map((row) => row.userId),
+        ]);
+    });
+}
+
+/**
+ * Decline a suggested phrase: members keep their types of that name as
+ * their own. 404 for a suggestion no longer open.
+ */
+export async function rejectPhrase(
+    actorUserId: string,
+    proposalId: string,
+): Promise<void> {
+    if (!(await isOrgAccount(actorUserId))) throw organizationOnly();
+    const [rejected] = await db
+        .update(knowledgeVocabularyProposals)
+        .set({ status: "rejected", updatedAt: new Date() })
+        .where(
+            and(
+                eq(knowledgeVocabularyProposals.id, proposalId),
+                eq(knowledgeVocabularyProposals.status, "open"),
+            ),
+        )
+        .returning({ id: knowledgeVocabularyProposals.id });
+    if (!rejected) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Suggestion not found", 404);
+    }
+}
+
+/**
  * The owner's private types a share needs, adopted by the Organization
  * (Johnny, 2026-09-29), so what the share names is published rather than
  * left private: the entity types of the entities it names, the relation
