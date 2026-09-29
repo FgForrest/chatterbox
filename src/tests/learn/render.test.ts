@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+    correctedTimeline,
     flattenTurns,
     type OverlayCorrection,
     renderTurnsForLlm,
     renderTurnsForPeople,
 } from "@/lib/learn/render";
+import { buildTimeMarks } from "@/lib/topics/timeline";
 
 const TURNS = [
     {
@@ -125,5 +127,38 @@ describe("renderings", () => {
         expect(
             renderTurnsForPeople(TURNS, []).map((turn) => turn.segments),
         ).toEqual([[{ text: TURNS[0]?.text }], [{ text: TURNS[1]?.text }]]);
+    });
+});
+
+describe("the corrected timeline", () => {
+    it("keeps a long turn's inner marks where the audio has them", () => {
+        const heard =
+            "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa said this first. Then a second sentence of about equal length. And a third one closes it now.";
+        const stored = [
+            { speaker: "speaker_0", startMs: 0, endMs: 120_000, text: heard },
+        ];
+        const corrections: OverlayCorrection[] = [
+            {
+                turnIndex: 0,
+                charStart: 0,
+                charEnd: 30,
+                heard: heard.slice(0, 30),
+                kind: "correct",
+                replacement: "B",
+                meaning: "B",
+            },
+        ];
+        const corrected = renderTurnsForLlm(stored, corrections);
+        const asHeard = buildTimeMarks(stored).map((mark) => mark.ms);
+        const read = buildTimeMarks(corrected, {
+            toHeard: correctedTimeline(stored, corrections),
+        });
+        expect(read.map((mark) => mark.ms)).toEqual(asHeard);
+        expect(read[0]?.text).toContain("B said this first.");
+    });
+
+    it("maps nothing where nothing was corrected", () => {
+        const toHeard = correctedTimeline(TURNS, []);
+        expect(toHeard(0, 0.5)).toBe(0.5);
     });
 });

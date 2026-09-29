@@ -135,14 +135,72 @@ export function renderTurnsForLlm(
     turns: readonly TranscriptTurn[],
     corrections: readonly OverlayCorrection[],
 ): TranscriptTurn[] {
-    return render(turns, corrections, (correction) =>
-        correction.kind === "correct" && correction.replacement !== null
-            ? correction.replacement
-            : `${correction.heard} [= ${correction.meaning}]`,
-    ).map(({ segments: _segments, ...turn }) => turn);
+    return render(turns, corrections, llmShown).map(
+        ({ segments: _segments, ...turn }) => turn,
+    );
 }
 
 /** Turns as one text, the way the transcript is stored. */
 export function flattenTurns(turns: readonly TranscriptTurn[]): string {
     return renderTurnsAsText(turns);
+}
+
+/** How the model's rendering shows a correction's words. */
+function llmShown(correction: OverlayCorrection): string {
+    return correction.kind === "correct" && correction.replacement !== null
+        ? correction.replacement
+        : `${correction.heard} [= ${correction.meaning}]`;
+}
+
+/**
+ * Where a place in a turn of the model's rendering was in the turn as
+ * heard, both as a fraction of the turn's text: a replacement changes the
+ * text's length but not the audio's, so what is placed in time by its
+ * position in a turn (topics' inner marks) is placed by the words as
+ * heard. Identity for a turn nothing corrected.
+ */
+export function correctedTimeline(
+    turns: readonly TranscriptTurn[],
+    corrections: readonly OverlayCorrection[],
+): (turnIndex: number, fraction: number) => number {
+    const byTurn = standingByTurn(turns, corrections);
+    // Per corrected turn: pieces of [length as heard, length as read].
+    const pieces = new Map<number, [number, number][]>();
+    for (const [turnIndex, standing] of byTurn) {
+        const text = turns[turnIndex]?.text ?? "";
+        const parts: [number, number][] = [];
+        let at = 0;
+        for (const correction of standing) {
+            const before = correction.charStart - at;
+            if (before > 0) parts.push([before, before]);
+            parts.push([
+                correction.charEnd - correction.charStart,
+                llmShown(correction).length,
+            ]);
+            at = correction.charEnd;
+        }
+        if (at < text.length) parts.push([text.length - at, text.length - at]);
+        pieces.set(turnIndex, parts);
+    }
+    return (turnIndex, fraction) => {
+        const parts = pieces.get(turnIndex);
+        if (!parts) return fraction;
+        const heardLength = parts.reduce((sum, [heard]) => sum + heard, 0);
+        const readLength = parts.reduce((sum, [, read]) => sum + read, 0);
+        if (heardLength === 0 || readLength === 0) return fraction;
+        let read = fraction * readLength;
+        let heard = 0;
+        for (const [heardPart, readPart] of parts) {
+            if (read <= readPart) {
+                return (
+                    (heard +
+                        (readPart === 0 ? 0 : (read / readPart) * heardPart)) /
+                    heardLength
+                );
+            }
+            read -= readPart;
+            heard += heardPart;
+        }
+        return 1;
+    };
 }

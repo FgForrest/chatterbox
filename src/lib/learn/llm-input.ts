@@ -19,6 +19,7 @@ import { env } from "@/lib/env";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import {
+    correctedTimeline,
     flattenTurns,
     type OverlayCorrection,
     renderTurnsForLlm,
@@ -233,14 +234,14 @@ export async function modelInput(transcript: {
     text: string;
     turns: TranscriptTurn[] | null;
     fingerprint: string | null;
+    /** Where a place in a corrected turn was as heard (`correctedTimeline`). */
+    toHeard?: (turnIndex: number, fraction: number) => number;
 }> {
     const stored = decryptText(transcript.text) ?? "";
     const turns = readTranscriptTurns(transcript);
     if (!turns?.length) return { text: stored, turns: null, fingerprint: null };
-    const rendered = renderTurnsForLlm(
-        turns,
-        await correctionOverlay(transcript, { turns }),
-    );
+    const overlay = await correctionOverlay(transcript, { turns });
+    const rendered = renderTurnsForLlm(turns, overlay);
     const corrected = rendered.some(
         (turn, index) => turn.text !== turns[index]?.text,
     );
@@ -248,5 +249,6 @@ export async function modelInput(transcript: {
         text: corrected ? flattenTurns(rendered) : stored,
         turns: rendered,
         fingerprint: llmInputFingerprint(rendered),
+        toHeard: correctedTimeline(turns, overlay),
     };
 }

@@ -49,7 +49,19 @@ const SENTENCE_BREAK = /(?<=[.!?…]["'”»)\]]*)\s+/u;
  * interpolated by character position -- speech rate is not constant, so they
  * can be a few seconds off, which is close enough to start listening.
  */
-export function buildTimeMarks(turns: readonly TranscriptTurn[]): TimeMark[] {
+export function buildTimeMarks(
+    turns: readonly TranscriptTurn[],
+    {
+        toHeard = (_turnIndex: number, fraction: number) => fraction,
+    }: {
+        /**
+         * For corrected turns: where a fraction of a turn's text was in the
+         * turn as heard (`correctedTimeline`), which is what the audio's
+         * times follow.
+         */
+        toHeard?: (turnIndex: number, fraction: number) => number;
+    } = {},
+): TimeMark[] {
     const marks: TimeMark[] = [];
 
     turns.forEach((turn, turnIndex) => {
@@ -68,7 +80,8 @@ export function buildTimeMarks(turns: readonly TranscriptTurn[]): TimeMark[] {
         let chunk: { ms: number; text: string } | null = null;
         for (const sentence of sentences) {
             const ms =
-                turn.startMs + Math.round((offset / text.length) * duration);
+                turn.startMs +
+                Math.round(toHeard(turnIndex, offset / text.length) * duration);
             offset += sentence.length + 1;
             if (chunk && ms - chunk.ms < MIN_MARK_SPACING_MS) {
                 chunk.text = `${chunk.text} ${sentence}`;

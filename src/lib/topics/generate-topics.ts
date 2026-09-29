@@ -209,7 +209,8 @@ export async function generateTopicsForTranscript(
     // fingerprint of that kept with the topics.
     const input = await modelInput(transcript);
     const readTurns = input.turns ?? turns;
-    const marks = buildTimeMarks(readTurns);
+    // Inner marks follow the words as heard, which the audio's times do.
+    const marks = buildTimeMarks(readTurns, { toHeard: input.toHeard });
     const endMs = Math.max(...readTurns.map((turn) => turn.endMs));
     const windows = splitIntoWindows(marks, WINDOW_CHARS, WINDOW_OVERLAP_CHARS);
 
