@@ -21,6 +21,8 @@ import {
 } from "@/lib/transcription/turns";
 
 export interface OverlayCorrection {
+    /** The stored correction's id, where there is one (to undo it). */
+    id?: string;
     turnIndex: number;
     /** UTF-16 offsets into the turn's text. */
     charStart: number;
@@ -38,6 +40,7 @@ export interface RenderedSegment {
     text: string;
     /** Set on the words a correction changed or explained. */
     correction?: {
+        id?: string;
         kind: "correct" | "link";
         heard: string;
         meaning: string;
@@ -85,6 +88,7 @@ function segmentsOf(
         segments.push({
             text: shown(correction),
             correction: {
+                ...(correction.id ? { id: correction.id } : {}),
                 kind: correction.kind,
                 heard: correction.heard,
                 meaning: correction.meaning,

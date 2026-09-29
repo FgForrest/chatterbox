@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
@@ -40,11 +41,13 @@ import {
     type SummarySource,
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
+import { getApiErrorMessage } from "@/lib/api-errors";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import {
     inferSummarySpeakerNumberOffset,
     type SpeakerAttributions,
 } from "@/lib/knowledge/speaker-references";
+import type { OverlayCorrection } from "@/lib/learn/render";
 import { withRecordingView } from "@/lib/sharing/view";
 import { describeMultiPass } from "@/lib/summary/multi-pass";
 import { formatElapsed } from "@/lib/summary/progress-stream";
@@ -293,6 +296,82 @@ export function TranscriptionPanel({
         setReviewsFinished((count) => count + 1);
         onTranscriptStale?.();
     }, [onTranscriptStale]);
+
+    // The transcript's corrections, read edited by default. Only a Plaud or
+    // Riffado transcript with stored turns has any; a mix has none.
+    const correctionSource =
+        (activeTranscript?.source === "plaud" ||
+            activeTranscript?.source === "riffado") &&
+        (activeTranscript.turns?.length ?? 0) > 0
+            ? activeTranscript.source
+            : null;
+    const correctionsUrl = correctionSource
+        ? withRecordingView(
+              `/api/recordings/${recording.id}/corrections?source=${correctionSource}`,
+              view,
+          )
+        : null;
+    const [correctionsState, setCorrectionsState] = useState<{
+        url: string;
+        list: OverlayCorrection[];
+        canUndo: boolean;
+    } | null>(null);
+    const [correctionsRead, setCorrectionsRead] = useState(0);
+    const [showOriginal, setShowOriginal] = useState(false);
+    useEffect(() => {
+        if (!correctionsUrl) return;
+        // Read again after a review or an undo changed them.
+        void reviewsFinished;
+        void correctionsRead;
+        let cancelled = false;
+        fetch(correctionsUrl)
+            .then((response) => (response.ok ? response.json() : null))
+            .then(
+                (
+                    body: {
+                        corrections?: OverlayCorrection[];
+                        canUndo?: boolean;
+                    } | null,
+                ) => {
+                    if (cancelled) return;
+                    setCorrectionsState({
+                        url: correctionsUrl,
+                        list: body?.corrections ?? [],
+                        canUndo: body?.canUndo === true,
+                    });
+                },
+            )
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [correctionsUrl, reviewsFinished, correctionsRead]);
+    const shownCorrections =
+        correctionsState && correctionsState.url === correctionsUrl
+            ? correctionsState
+            : null;
+    const undoCorrection = useCallback(
+        async (correctionId: string) => {
+            const response = await fetch(
+                withRecordingView(
+                    `/api/recordings/${recording.id}/corrections/${correctionId}`,
+                    view,
+                ),
+                { method: "DELETE" },
+            );
+            if (!response.ok) {
+                toast.error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("Could not undo the correction"),
+                    ),
+                );
+            }
+            setCorrectionsRead((count) => count + 1);
+            onTranscriptStale?.();
+        },
+        [recording.id, view, i18n, onTranscriptStale],
+    );
     const handleSelectTopic = (index: number) => {
         const topic = topics?.[index];
         if (!topic) return;
@@ -647,6 +726,20 @@ export function TranscriptionPanel({
                                     onSelect={handleSelectTopic}
                                     getPlaybackMs={getPlaybackMs}
                                 />
+                                {(shownCorrections?.list.length ?? 0) > 0 && (
+                                    <button
+                                        type="button"
+                                        aria-pressed={showOriginal}
+                                        onClick={() =>
+                                            setShowOriginal(!showOriginal)
+                                        }
+                                        className="text-sm font-medium transition-colors hover:text-primary"
+                                    >
+                                        {showOriginal
+                                            ? i18n("Show edited")
+                                            : i18n("Show original")}
+                                    </button>
+                                )}
                                 {canLearn && activeTranscript && (
                                     <LearnReview
                                         // Another recording, view or source
@@ -688,6 +781,21 @@ export function TranscriptionPanel({
                                             }
                                             // A mix is not the transcript
                                             // Learn read.
+                                            corrections={
+                                                shownCorrections &&
+                                                !showOriginal
+                                                    ? {
+                                                          list: shownCorrections.list,
+                                                          canUndo:
+                                                              shownCorrections.canUndo &&
+                                                              !readOnly,
+                                                          onUndo: (id) =>
+                                                              void undoCorrection(
+                                                                  id,
+                                                              ),
+                                                      }
+                                                    : null
+                                            }
                                             learnMarks={
                                                 canLearn &&
                                                 activeTranscript.source !==

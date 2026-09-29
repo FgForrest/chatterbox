@@ -3,13 +3,18 @@
 import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { Fragment, useMemo } from "react";
-import {
-    type LearnCorrectionMark,
-    type LearnMarks,
-    markedSegments,
+import { CorrectedText } from "@/components/learn/corrected-text";
+import type {
+    LearnCorrectionMark,
+    LearnMarks,
 } from "@/components/learn/learn-marks";
+import { MarkedText } from "@/components/learn/marked-text";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
+import {
+    type OverlayCorrection,
+    renderTurnsForPeople,
+} from "@/lib/learn/render";
 import {
     containingTurnIndex,
     formatClock,
@@ -65,6 +70,16 @@ export interface TranscriptViewProps {
      * unticked in the review from here.
      */
     learnMarks?: LearnMarks | null;
+    /**
+     * The transcript's corrections, applied as people read them (absent
+     * or null: the text as heard). In a turn with review marks, the marks
+     * are shown instead.
+     */
+    corrections?: {
+        list: readonly OverlayCorrection[];
+        canUndo: boolean;
+        onUndo?: (correctionId: string) => void;
+    } | null;
 }
 
 interface RenderableTurn {
@@ -108,8 +123,17 @@ export function TranscriptView({
     topics,
     highlightedTopic = null,
     learnMarks = null,
+    corrections = null,
 }: TranscriptViewProps) {
     const i18n = useExtracted();
+    // Corrections are anchored to stored turns too.
+    const corrected = useMemo(
+        () =>
+            corrections?.list.length && storedTurns?.length
+                ? renderTurnsForPeople(storedTurns, corrections.list)
+                : null,
+        [corrections, storedTurns],
+    );
     // Marks are anchored to stored turns; a transcript without them has none.
     const marksByTurn = useMemo(() => {
         const byTurn = new Map<number, LearnCorrectionMark[]>();
@@ -338,75 +362,24 @@ export function TranscriptView({
                             <p
                                 className={`text-sm whitespace-pre-wrap leading-relaxed ${turn.label ? "pl-3.5" : ""}`}
                             >
-                                {marksByTurn.has(index) && learnMarks
-                                    ? markedSegments(
-                                          turn.text,
-                                          marksByTurn.get(index) ?? [],
-                                      ).map((segment, segmentIndex) =>
-                                          segment.mark ? (
-                                              <button
-                                                  // Segments are fixed by the text and its marks.
-                                                  // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                  key={segmentIndex}
-                                                  type="button"
-                                                  className={`rounded-sm underline decoration-amber-500 decoration-2 underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${segment.mark.ticked ? "bg-amber-500/15" : "decoration-dotted"}`}
-                                                  aria-pressed={
-                                                      segment.mark.ticked
-                                                  }
-                                                  title={i18n(
-                                                      "Learn suggests {suggestion}. Applied when you finish the review.",
-                                                      {
-                                                          suggestion:
-                                                              segment.mark
-                                                                  .suggestion,
-                                                      },
-                                                  )}
-                                                  aria-label={
-                                                      segment.mark.ticked
-                                                          ? i18n(
-                                                                "{heard} → {suggestion}, ticked in the review: untick",
-                                                                {
-                                                                    heard: segment.text,
-                                                                    suggestion:
-                                                                        segment
-                                                                            .mark
-                                                                            .suggestion,
-                                                                },
-                                                            )
-                                                          : i18n(
-                                                                "{heard} → {suggestion}: accept in the review",
-                                                                {
-                                                                    heard: segment.text,
-                                                                    suggestion:
-                                                                        segment
-                                                                            .mark
-                                                                            .suggestion,
-                                                                },
-                                                            )
-                                                  }
-                                                  onClick={() => {
-                                                      const mark =
-                                                          segment.mark as LearnCorrectionMark;
-                                                      learnMarks.decide(
-                                                          mark.itemId,
-                                                          mark.ticked
-                                                              ? "rejected"
-                                                              : "accepted",
-                                                      );
-                                                  }}
-                                              >
-                                                  {segment.text}
-                                              </button>
-                                          ) : (
-                                              <Fragment
-                                                  // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                  key={segmentIndex}
-                                              >
-                                                  {segment.text}
-                                              </Fragment>
-                                          ),
-                                      )
-                                    : turn.text}
+                                {marksByTurn.has(index) && learnMarks ? (
+                                    <MarkedText
+                                        text={turn.text}
+                                        marks={marksByTurn.get(index) ?? []}
+                                        decide={learnMarks.decide}
+                                    />
+                                ) : corrected?.[index] ? (
+                                    <CorrectedText
+                                        segments={corrected[index].segments}
+                                        onUndo={
+                                            corrections?.canUndo
+                                                ? corrections.onUndo
+                                                : undefined
+                                        }
+                                    />
+                                ) : (
+                                    turn.text
+                                )}
                             </p>
                         </div>
                     </Fragment>

@@ -144,6 +144,8 @@ vi.mock("@/lib/auth-server", async () => {
 });
 
 import { GET as getPending } from "@/app/api/learn/pending/route";
+import { DELETE as deleteCorrectionRoute } from "@/app/api/recordings/[id]/corrections/[correctionId]/route";
+import { GET as getCorrectionsRoute } from "@/app/api/recordings/[id]/corrections/route";
 import {
     GET as getLearnRoute,
     POST as postLearnRoute,
@@ -1087,6 +1089,91 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 expect(finished?.turns[0]?.text).toBe(
                     "Dobrý den, máme tu Tavesi.",
                 );
+            });
+
+            it("lists a transcript's corrections with what they mean, and undoes one for whoever may change it", async () => {
+                const { tavesi } = await readyRun();
+                const { items } = (await (
+                    await route(getReviewRoute, OWNER, "review")
+                ).json()) as {
+                    items: { id: string; kind: string }[];
+                };
+                const id =
+                    items.find((item) => item.kind === "correction")?.id ?? "";
+                const phrase =
+                    items.find((item) => item.kind === "relation_phrase")?.id ??
+                    "";
+                await route(patchItemRoute, OWNER, `review/items/${id}`, {
+                    method: "PATCH",
+                    body: { decision: "accepted", version: 0, choice: null },
+                    params: { itemId: id },
+                });
+                await route(postFinishRoute, OWNER, "review/finish", {
+                    method: "POST",
+                    body: { versions: { [id]: 1, [phrase]: 0 } },
+                });
+
+                const listed = await route(
+                    getCorrectionsRoute,
+                    OWNER,
+                    "corrections?source=riffado",
+                );
+                expect(listed.status).toBe(200);
+                const body = (await listed.json()) as {
+                    transcriptionId: string;
+                    canUndo: boolean;
+                    corrections: {
+                        id: string;
+                        turnIndex: number;
+                        charStart: number;
+                        heard: string;
+                        kind: string;
+                        replacement: string | null;
+                        meaning: string;
+                    }[];
+                };
+                expect(body).toMatchObject({
+                    transcriptionId: transcriptId,
+                    canUndo: true,
+                    corrections: [
+                        {
+                            turnIndex: 0,
+                            charStart: 19,
+                            heard: "Tavesy",
+                            kind: "correct",
+                            replacement: "Tavesi",
+                            meaning: "Tavesi",
+                        },
+                    ],
+                });
+                expect(tavesi).toBeTruthy();
+                expect(
+                    (
+                        await route(
+                            getCorrectionsRoute,
+                            BOB,
+                            "corrections?source=riffado",
+                        )
+                    ).status,
+                ).toBe(404);
+
+                const correctionId = body.corrections[0]?.id ?? "";
+                const undo = (user: string) =>
+                    route(
+                        deleteCorrectionRoute,
+                        user,
+                        `corrections/${correctionId}`,
+                        {
+                            method: "DELETE",
+                            params: { correctionId },
+                        },
+                    );
+                expect((await undo(BOB)).status).toBe(404);
+                expect((await undo(OWNER)).status).toBe(200);
+                expect(await db().select().from(transcriptCorrections)).toEqual(
+                    [],
+                );
+                expect((await undo(OWNER)).status).toBe(404);
             });
 
             it("supersedes instead of finishing when the transcript changed", async () => {
