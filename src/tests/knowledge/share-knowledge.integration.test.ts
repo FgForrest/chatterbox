@@ -517,11 +517,15 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect((await orgTypes()).map((type) => type.label)).toEqual([
             "partners with",
         ]);
+        // Taken back, not refused: the curator never saw it.
         const [supplier] = await db()
-            .select({ adoptedAsKey: knowledgeEntityTypes.adoptedAsKey })
+            .select({
+                adoptedAsKey: knowledgeEntityTypes.adoptedAsKey,
+                refused: knowledgeEntityTypes.adoptionRefusedAt,
+            })
             .from(knowledgeEntityTypes)
             .where(eq(knowledgeEntityTypes.userId, OWNER));
-        expect(supplier?.adoptedAsKey).toBeNull();
+        expect(supplier).toEqual({ adoptedAsKey: null, refused: null });
     });
 
     it("does not overwrite what the Organization knows of a single-valued relation", async () => {
@@ -629,7 +633,8 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(orgEvidence).toEqual([{ factId: slaMeans }]);
     });
 
-    it("adopts again, under its own name, a type whose adoption the Organization deleted", async () => {
+    /** "mentors", adopted as the Organization's "coaches", which the curator deleted. */
+    async function refusedMentors() {
         const mentors = await createPrivateType(OWNER, {
             kind: "relation",
             label: "mentors",
@@ -664,21 +669,102 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
             .set({ adoptedAsKey: coaches })
             .where(eq(knowledgeRelationTypes.key, mentors));
         await deleteOwnType(orgUserId, "relation", coaches, 0);
+        return mentors;
+    }
+
+    const orgFacts = () =>
+        db()
+            .select({ relationKey: knowledgeFacts.relationKey })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, orgUserId));
+
+    it("adopts no more a type whose adoption the curator deleted: what uses it stays private", async () => {
+        const mentors = await refusedMentors();
 
         await share();
 
-        expect(await orgTypes()).toContainEqual({
+        expect((await orgTypes()).map((type) => type.label)).not.toContain(
+            "mentors",
+        );
+        expect(await orgFacts()).toEqual([]);
+        expect(await owners(people, pavel)).toBe(OWNER);
+        const [own] = await db()
+            .select({
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                refused: knowledgeRelationTypes.adoptionRefusedAt,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        expect(own?.adoptedAsKey).toBeNull();
+        expect(own?.refused).toBeInstanceOf(Date);
+    });
+
+    it("adopts a refused type as the Organization's of its name, once it has one", async () => {
+        const mentors = await refusedMentors();
+        const orgMentors = await createOrgType(orgUserId, {
             kind: "relation",
             label: "mentors",
-            fromShare: true,
+            subjectTypes: ["person"],
+            objectTypes: ["person"],
+            objectKind: "entity",
+            cardinality: "many",
         });
-        expect(
-            await db()
-                .select({ id: knowledgeFacts.id })
-                .from(knowledgeFacts)
-                .where(eq(knowledgeFacts.userId, orgUserId)),
-        ).toHaveLength(1);
-        expect(await owners(people, pavel)).toBe(orgUserId);
+
+        await share();
+
+        expect(await orgFacts()).toEqual([{ relationKey: orgMentors }]);
+        const [own] = await db()
+            .select({
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                refused: knowledgeRelationTypes.adoptionRefusedAt,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, mentors));
+        expect(own).toEqual({ adoptedAsKey: orgMentors, refused: null });
+    });
+
+    it("keeps an entity of a refused type private, and what relates it", async () => {
+        const [ownSupplier] = await db()
+            .select({ key: knowledgeEntityTypes.key })
+            .from(knowledgeEntityTypes)
+            .where(eq(knowledgeEntityTypes.userId, OWNER));
+        const supplies = await createPrivateType(OWNER, {
+            kind: "relation",
+            label: "supplies",
+            subjectTypes: [ownSupplier?.key ?? ""],
+            objectTypes: ["project"],
+            objectKind: "entity",
+            cardinality: "many",
+        });
+        const orgSupplier = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "Supplier",
+        });
+        await db()
+            .update(knowledgeEntityTypes)
+            .set({ adoptedAsKey: orgSupplier })
+            .where(eq(knowledgeEntityTypes.key, ownSupplier?.key ?? ""));
+        await deleteOwnType(orgUserId, "entity", orgSupplier, 0);
+        const toAcme = await correct("Akme", { entityId: acme }, OWNER, "Acme");
+        await confirmFactFromRecording({
+            subject: { entityId: acme },
+            relationKey: supplies,
+            object: { entityId: orion },
+            ownerUserId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            startMs: 0,
+            endMs: 12_000,
+        });
+
+        await share();
+
+        expect(await owners(knowledgeEntities, acme)).toBe(OWNER);
+        expect(await scopeOf(toAcme)).toBe(OWNER);
+        expect(await orgFacts()).toEqual([]);
+        expect(await orgTypes()).toEqual([]);
     });
 
     it("uses the Organization's type of the same name and shape, and names a copy of another shape apart", async () => {

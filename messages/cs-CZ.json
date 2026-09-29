@@ -1101,6 +1101,7 @@
   "uFu6e0": "{count, plural, =0 {Žádný fakt ho nepoužívá.} one {# fakt s ním uvedený bude smazán.} few {# fakta s ním uvedená budou smazána.} other {# faktů s ním uvedených bude smazáno.}}",
   "_RGYV_": "Smažou se i vlastní záznamy členů tohoto druhu.",
   "mM_ezM": "Členům, jejichž vlastní typ byl převzat jako tento, se jejich typ vrátí; jejich ostatní fakta s ním zaniknou.",
+  "nvPPCG": "Sdílení už typy těchto členů nepřevezme: co je používá, zůstane soukromé, dokud Organizace nebude mít typ toho názvu znovu.",
   "3tj6a9": "Typ se nepodařilo smazat",
   "ATv_L-": "Přihlásit se přes Plaud",
   "FUgPfA": "Kód z emailu",

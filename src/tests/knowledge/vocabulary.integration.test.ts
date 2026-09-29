@@ -333,6 +333,12 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
 
     it("counts a suggested phrase once per user, and adopts it for private types of that name", async () => {
         const alicesKey = await createPrivateType(ALICE, worksWith);
+        // Refused once (the curator deleted its adoption): adopting the
+        // name takes it all the same.
+        await db()
+            .update(knowledgeRelationTypes)
+            .set({ adoptionRefusedAt: new Date() })
+            .where(eq(knowledgeRelationTypes.key, alicesKey));
         await proposePhrase(ALICE, "mentors");
         await proposePhrase(ALICE, "  Mentors ");
         await proposePhrase(BOB, "mentors");
@@ -358,6 +364,11 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
                 (r) => r.key === alicesKey,
             )?.adoptedAsKey,
         ).toBe(key);
+        const [alices] = await db()
+            .select({ refused: knowledgeRelationTypes.adoptionRefusedAt })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, alicesKey));
+        expect(alices?.refused).toBeNull();
         const [adopted] = await listVocabularyProposals(orgUserId);
         expect(adopted?.status).toBe("adopted");
     });
@@ -435,6 +446,12 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
                 (r) => r.key === alicesKey,
             )?.adoptedAsKey,
         ).toBeNull();
+        // The curator refused it: a share adopts hers no more.
+        const [refused] = await db()
+            .select({ refused: knowledgeRelationTypes.adoptionRefusedAt })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.key, alicesKey));
+        expect(refused?.refused).toBeInstanceOf(Date);
         expect(await factsOf(BOB)).toEqual([]);
     });
 
@@ -719,7 +736,7 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         expect(relations.map((row) => row.key)).not.toContain(tinkers);
     });
 
-    it("adopts again, whole, what a share needs after the curator deleted an entity type it adopted", async () => {
+    it("keeps private what relates an entity type the curator deleted, and adopts it whole once the Organization has that type again", async () => {
         const venue = await createPrivateType(ALICE, {
             kind: "entity",
             label: "venue",
@@ -776,9 +793,22 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         await deleteOwnType(orgUserId, "entity", first.venue ?? "", 0);
         await adopt();
 
+        // Refused: neither the type nor the relation relating it is copied.
+        expect(await adoptions()).toEqual({
+            venue: null,
+            hosts: null,
+            hostsRelates: null,
+        });
+
+        const orgVenue = await createOrgType(orgUserId, {
+            kind: "entity",
+            label: "venue",
+        });
+        await adopt();
+
         const second = await adoptions();
-        expect(second.venue).not.toBe(first.venue);
-        expect(second.hostsRelates).toEqual([second.venue]);
+        expect(second.venue).toBe(orgVenue);
+        expect(second.hostsRelates).toEqual([orgVenue]);
     });
 
     it("reuses a numbered copy a share made for another member's relation of the same name and shape", async () => {

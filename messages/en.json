@@ -1101,6 +1101,7 @@
   "uFu6e0": "{count, plural, =0 {No fact uses it.} one {# fact stated with it will be deleted.} other {# facts stated with it will be deleted.}}",
   "_RGYV_": "Members' own entities of this kind go too.",
   "mM_ezM": "Members get back their own type where theirs was adopted as this one; their other facts with it go.",
+  "nvPPCG": "Shares no longer bring those members' types in: what uses them stays private until the Organization has a type of that name again.",
   "3tj6a9": "Could not delete this type",
   "ATv_L-": "Sign in with Plaud",
   "FUgPfA": "Email code",

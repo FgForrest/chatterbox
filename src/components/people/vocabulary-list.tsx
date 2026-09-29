@@ -419,7 +419,11 @@ export function VocabularyList({
                                       )
                                     : i18n(
                                           "Members get back their own type where theirs was adopted as this one; their other facts with it go.",
-                                      ))}
+                                      ))}{" "}
+                            {organization &&
+                                i18n(
+                                    "Shares no longer bring those members' types in: what uses them stays private until the Organization has a type of that name again.",
+                                )}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>

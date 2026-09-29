@@ -814,9 +814,16 @@ export async function deleteOwnType(
         }
         if (organization) {
             const table = tableOf(kind);
+            // The curator refused the members' types adopted as it: a share
+            // adopts them no more (`adoptTypesForShareInTx`).
+            const now = new Date();
             const adopters = await tx
                 .update(table)
-                .set({ adoptedAsKey: null, updatedAt: new Date() })
+                .set({
+                    adoptedAsKey: null,
+                    adoptionRefusedAt: now,
+                    updatedAt: now,
+                })
                 .where(
                     and(
                         eq(table.adoptedAsKey, key),
@@ -1274,6 +1281,7 @@ export async function mergeOwnTypes(
                 .update(table)
                 .set({
                     adoptedAsKey: rows.from.adoptedAsKey,
+                    adoptionRefusedAt: null,
                     updatedAt: new Date(),
                 })
                 .where(and(eq(table.userId, userId), eq(table.key, into)));
@@ -1526,7 +1534,11 @@ export async function adoptPhrase(
         if (adopters.length > 0) {
             await tx
                 .update(knowledgeRelationTypes)
-                .set({ adoptedAsKey: key, updatedAt: new Date() })
+                .set({
+                    adoptedAsKey: key,
+                    adoptionRefusedAt: null,
+                    updatedAt: new Date(),
+                })
                 .where(
                     inArray(
                         knowledgeRelationTypes.id,
@@ -1553,7 +1565,10 @@ export async function adoptPhrase(
  * (`adoptedFromShare`), named apart ("supplies (2)") where its name is
  * taken by a type of another shape. The owner's type records it
  * (`adoptedAsKey`), as a manual adoption does. A type already adopted as
- * one the Organization still has stays as it is.
+ * one the Organization still has stays as it is. One whose adoption the
+ * curator deleted (`adoptionRefusedAt`) is copied no more: it stays
+ * private, with what uses it, until the Organization has a type of its
+ * name (and shape) again, which it then takes (Johnny, 2026-09-29).
  *
  * Inside the share's transaction, under the Organization-people lock: the
  * owner's type rows first, then the vocabulary's version, as renaming or
@@ -1669,6 +1684,8 @@ export async function adoptTypesForShareInTx(
         }
         const label = decryptText(type.label);
         let key = await sharedTypeNamed(tx, "entity", type.labelHmac);
+        // Refused, it stays private until the Organization has its name.
+        if (!key && type.adoptionRefusedAt) continue;
         if (!key) {
             key = await insertAdoptedTypeInTx(tx, {
                 kind: "entity",
@@ -1682,7 +1699,11 @@ export async function adoptTypesForShareInTx(
         if (!key) continue;
         await tx
             .update(knowledgeEntityTypes)
-            .set({ adoptedAsKey: key, updatedAt: new Date() })
+            .set({
+                adoptedAsKey: key,
+                adoptionRefusedAt: null,
+                updatedAt: new Date(),
+            })
             .where(eq(knowledgeEntityTypes.id, type.id));
         asShared.set(type.key, key);
         changed = true;
@@ -1705,6 +1726,7 @@ export async function adoptTypesForShareInTx(
         if (unshared) continue;
         const label = decryptText(type.label);
         let key = await sharedRelationOfShape(tx, label, shape);
+        if (!key && type.adoptionRefusedAt) continue;
         if (!key) {
             key = await insertAdoptedTypeInTx(tx, {
                 kind: "relation",
@@ -1720,7 +1742,11 @@ export async function adoptTypesForShareInTx(
         if (!key) continue;
         await tx
             .update(knowledgeRelationTypes)
-            .set({ adoptedAsKey: key, updatedAt: new Date() })
+            .set({
+                adoptedAsKey: key,
+                adoptionRefusedAt: null,
+                updatedAt: new Date(),
+            })
             .where(eq(knowledgeRelationTypes.id, type.id));
         changed = true;
     }

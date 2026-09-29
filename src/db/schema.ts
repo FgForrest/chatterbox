@@ -1081,6 +1081,10 @@ export const knowledgeEntityTypes = pgTable(
         adoptedFromShare: boolean("adopted_from_share")
             .notNull()
             .default(false),
+        // Set on a member's type when the curator deleted the Organization
+        // type it was adopted as (Johnny, 2026-09-29): a share adopts it no
+        // more, until the Organization has a type of its name again.
+        adoptionRefusedAt: timestamp("adoption_refused_at"),
         createdByUserId: text("created_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
@@ -1139,6 +1143,7 @@ export const knowledgeRelationTypes = pgTable(
         adoptedFromShare: boolean("adopted_from_share")
             .notNull()
             .default(false),
+        adoptionRefusedAt: timestamp("adoption_refused_at"),
         createdByUserId: text("created_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
