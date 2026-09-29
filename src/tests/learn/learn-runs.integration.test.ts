@@ -171,6 +171,7 @@ import { llmRendering } from "@/lib/learn/llm-input";
 import {
     pendingReviewCount,
     recordingsNeedingReview,
+    reviewQueue,
 } from "@/lib/learn/pending";
 import { ensureOrgAccount } from "@/lib/org/account";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -1261,6 +1262,33 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 );
             });
         });
+    });
+
+    it("lists the reviews waiting, naming only recordings the viewer may see now", async () => {
+        await run("private", "ready");
+        expect(await reviewQueue(OWNER, false)).toMatchObject([
+            { id: REC, filename: "Weekly" },
+        ]);
+        // An Organization run on a recording no longer shared (a
+        // withdrawal landing between two reads).
+        await db().delete(learnRuns);
+        await run("org", "ready");
+        expect(await reviewQueue(orgUserId, true)).toEqual([]);
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: orgUserId,
+                recordingId: REC,
+                folderId: root?.id ?? "",
+            });
+        expect(await reviewQueue(orgUserId, true)).toMatchObject([
+            { id: REC, filename: "Weekly" },
+        ]);
+        expect(await reviewQueue(BOB, false)).toEqual([]);
     });
 
     it("counts the reviews waiting for each: the owner's own, the Organization's for its account", async () => {

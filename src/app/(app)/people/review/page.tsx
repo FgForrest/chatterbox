@@ -1,14 +1,10 @@
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { getExtracted } from "next-intl/server";
-import { db } from "@/db";
-import { recordings } from "@/db/schema";
 import { requireAuth } from "@/lib/auth-server";
-import { decryptText } from "@/lib/encryption/fields";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listVocabularyProposals } from "@/lib/knowledge/vocabulary";
-import { recordingsNeedingReview } from "@/lib/learn/pending";
+import { reviewQueue } from "@/lib/learn/pending";
 import { isOrgAccount } from "@/lib/org/config";
 
 export const dynamic = "force-dynamic";
@@ -24,29 +20,9 @@ export default async function ReviewQueuePage() {
     const session = await requireAuth();
     const i18n = await getExtracted();
     const organization = await isOrgAccount(session.user.id);
-    const ids = isLearnDeploymentAvailable()
-        ? [...(await recordingsNeedingReview(session.user.id, organization))]
+    const rows = isLearnDeploymentAvailable()
+        ? await reviewQueue(session.user.id, organization)
         : [];
-    const rows =
-        ids.length > 0
-            ? await db
-                  .select({
-                      id: recordings.id,
-                      filename: recordings.filename,
-                      startTime: recordings.startTime,
-                  })
-                  .from(recordings)
-                  .where(
-                      and(
-                          inArray(recordings.id, ids),
-                          isNull(recordings.deletedAt),
-                          organization
-                              ? undefined
-                              : eq(recordings.userId, session.user.id),
-                      ),
-                  )
-                  .orderBy(desc(recordings.startTime))
-            : [];
     const phrases = organization
         ? await listVocabularyProposals(session.user.id)
         : [];
@@ -75,7 +51,7 @@ export default async function ReviewQueuePage() {
                                 className="flex items-center justify-between gap-4 p-3 text-sm"
                             >
                                 <span className="min-w-0 truncate">
-                                    {decryptText(row.filename)}
+                                    {row.filename}
                                 </span>
                                 {organization ? (
                                     <Link
