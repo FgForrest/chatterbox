@@ -23,6 +23,7 @@ import {
     learnDismissals,
     learnReviewItems,
     learnRuns,
+    transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
@@ -110,20 +111,39 @@ function reviewNotFound(): AppError {
     return new AppError(ErrorCode.NOT_FOUND, "Nothing to review", 404);
 }
 
-/** The run a review is about: the latest in the recording's view. */
-async function latestRun(access: RecordingViewContext) {
-    const [run] = await db
-        .select()
+/** Which of a recording's transcripts a review is about. */
+export type ReviewSource = "plaud" | "riffado";
+
+/** `?source=` of a review request; absent means any transcript. */
+export function requestedReviewSource(
+    request: Request,
+): ReviewSource | undefined {
+    const source = new URL(request.url).searchParams.get("source");
+    return source === "plaud" || source === "riffado" ? source : undefined;
+}
+
+/**
+ * The run a review is about: the latest in the recording's view, on the
+ * transcript of `source` when one is given (each transcript has its own).
+ */
+async function latestRun(access: RecordingViewContext, source?: ReviewSource) {
+    const [row] = await db
+        .select({ run: learnRuns })
         .from(learnRuns)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.id, learnRuns.transcriptionId),
+        )
         .where(
             and(
                 eq(learnRuns.recordingId, access.recordingId),
                 eq(learnRuns.view, access.view),
+                source ? eq(transcriptions.source, source) : undefined,
             ),
         )
         .orderBy(desc(learnRuns.createdAt))
         .limit(1);
-    return run ?? null;
+    return row?.run ?? null;
 }
 
 function idsIn(value: unknown, into: Set<string>): void {
@@ -147,10 +167,11 @@ function idsIn(value: unknown, into: Set<string>): void {
 /** The latest run in the view and, when it is ready, what it proposed. */
 export async function loadReview(
     access: RecordingViewContext,
+    source?: ReviewSource,
 ): Promise<ReviewView> {
     // A run whose job died reads as failed, not as learning forever.
     await settleDeadLearnRuns(access.recordingId);
-    const run = await latestRun(access);
+    const run = await latestRun(access, source);
     if (!run) {
         return { run: null, items: [], names: {}, types: {}, relations: {} };
     }
@@ -266,8 +287,9 @@ export async function decideReviewItem(
         version: number;
         choice?: unknown;
     },
+    source?: ReviewSource,
 ): Promise<{ version: number }> {
-    const latest = await latestRun(access);
+    const latest = await latestRun(access, source);
     if (!latest || latest.status !== "ready") throw reviewNotFound();
     // Under the run held for share: a finish holds it for update, so a
     // draft either lands before it (and is applied) or finds it finished.
@@ -344,10 +366,13 @@ export interface FinishedReview {
 export async function finishReview(
     access: RecordingViewContext,
     actorUserId: string,
-    { versions = {} }: { versions?: Record<string, number> } = {},
+    {
+        versions = {},
+        source,
+    }: { versions?: Record<string, number>; source?: ReviewSource } = {},
 ): Promise<FinishedReview> {
     const orgUserId = await sharingOrgUserId();
-    const latest = await latestRun(access);
+    const latest = await latestRun(access, source);
     if (!latest || latest.status !== "ready") throw reviewNotFound();
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);

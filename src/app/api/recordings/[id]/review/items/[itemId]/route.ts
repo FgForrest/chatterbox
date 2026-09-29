@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { decideReviewItem } from "@/lib/learn/review";
+import { decideReviewItem, requestedReviewSource } from "@/lib/learn/review";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -41,11 +41,16 @@ export const PATCH = apiHandler<ItemContext>(async (request, context) => {
         );
     }
     return NextResponse.json(
-        await decideReviewItem(access, itemId, {
-            decision,
-            version: body.version,
-            choice: body.choice,
-        }),
+        await decideReviewItem(
+            access,
+            itemId,
+            {
+                decision,
+                version: body.version,
+                choice: body.choice,
+            },
+            requestedReviewSource(request),
+        ),
     );
 });
 

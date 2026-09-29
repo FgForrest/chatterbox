@@ -704,4 +704,46 @@ describeWithDatabase("finishing a Learn review (PostgreSQL)", () => {
             .where(eq(transcriptSpeakers.label, "speaker_1"));
         expect(speaker?.personId).toBe(petr);
     });
+
+    it("keeps a review to its transcript: the other source's panel sees none", async () => {
+        const [plaud] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: OWNER,
+                text: encryptText("Plaud text."),
+                turns: encryptJsonField(TURNS),
+                provider: "plaud",
+                model: "plaud-native",
+                source: "plaud",
+            })
+            .returning({ id: transcriptions.id });
+        const [run] = await db()
+            .insert(learnRuns)
+            .values({
+                userId: OWNER,
+                scopeUserId: OWNER,
+                recordingId: REC,
+                transcriptionId: plaud?.id ?? "",
+                view: "private",
+                actorUserId: OWNER,
+                trigger: "manual",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status: "ready",
+            })
+            .returning({ id: learnRuns.id });
+        const review = async (source: string) =>
+            (await (
+                await getReviewRoute(
+                    new Request(
+                        `http://localhost/api/recordings/${REC}/review?source=${source}`,
+                        { headers: { "x-test-user": OWNER } },
+                    ),
+                    { params: Promise.resolve({ id: REC }) },
+                )
+            ).json()) as { run: { id: string } | null };
+        expect((await review("plaud")).run?.id).toBe(run?.id);
+        expect((await review("riffado")).run).toBeNull();
+    });
 });

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
-import { finishReview } from "@/lib/learn/review";
+import { finishReview, requestedReviewSource } from "@/lib/learn/review";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -33,7 +33,10 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
               )
             : {};
     return NextResponse.json(
-        await finishReview(access, actorUserId, { versions }),
+        await finishReview(access, actorUserId, {
+            versions,
+            source: requestedReviewSource(request),
+        }),
     );
 });
 

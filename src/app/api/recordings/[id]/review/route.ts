@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
-import { loadReview } from "@/lib/learn/review";
+import { loadReview, requestedReviewSource } from "@/lib/learn/review";
 import {
     requestedRecordingView,
     requireRecordingView,
@@ -16,7 +16,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { access, actorUserId } = await authorizeLearn(request, id);
     return NextResponse.json({
-        ...(await loadReview(access)),
+        ...(await loadReview(access, requestedReviewSource(request))),
         // Whether this actor can run Learn at all (self-hosted, with a chat
         // provider): the page offers it only then.
         available: await isLearnAvailableFor(actorUserId),

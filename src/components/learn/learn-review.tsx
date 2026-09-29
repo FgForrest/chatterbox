@@ -88,10 +88,14 @@ export function LearnReview({
     // it applies is what the person ticked.
     const [saving, setSaving] = useState(0);
 
+    // Each transcript has its own review.
     const url = useCallback(
         (path: string) =>
-            withRecordingView(`/api/recordings/${recordingId}/${path}`, view),
-        [recordingId, view],
+            withRecordingView(
+                `/api/recordings/${recordingId}/${path}?source=${source}`,
+                view,
+            ),
+        [recordingId, view, source],
     );
 
     const load = useCallback(async () => {

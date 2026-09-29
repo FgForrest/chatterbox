@@ -85,7 +85,7 @@ describe("LearnReview", () => {
 
     it("offers nothing where Learn is not available", async () => {
         const fetch = respond({
-            "GET /api/recordings/rec-1/review": {
+            "GET /api/recordings/rec-1/review?source=riffado": {
                 run: null,
                 items: [],
                 names: {},
@@ -103,16 +103,18 @@ describe("LearnReview", () => {
 
     it("opens the review with its two defaults, keeps a decision, and finishes with the versions shown", async () => {
         const fetch = respond({
-            "GET /api/recordings/rec-1/review?view=org": READY,
-            "PATCH /api/recordings/rec-1/review/items/i-fact?view=org": {
-                version: 1,
-            },
-            "POST /api/recordings/rec-1/review/finish?view=org": {
-                status: "finished",
-                applied: 2,
-                dismissed: 0,
-                skipped: [],
-            },
+            "GET /api/recordings/rec-1/review?source=riffado&view=org": READY,
+            "PATCH /api/recordings/rec-1/review/items/i-fact?source=riffado&view=org":
+                {
+                    version: 1,
+                },
+            "POST /api/recordings/rec-1/review/finish?source=riffado&view=org":
+                {
+                    status: "finished",
+                    applied: 2,
+                    dismissed: 0,
+                    skipped: [],
+                },
         });
         const onFinished = vi.fn();
         render(
@@ -140,7 +142,7 @@ describe("LearnReview", () => {
         fireEvent.click(fact);
         await waitFor(() =>
             expect(fetch).toHaveBeenCalledWith(
-                "/api/recordings/rec-1/review/items/i-fact?view=org",
+                "/api/recordings/rec-1/review/items/i-fact?source=riffado&view=org",
                 expect.objectContaining({
                     method: "PATCH",
                     body: JSON.stringify({
@@ -156,7 +158,7 @@ describe("LearnReview", () => {
         fireEvent.click(screen.getByRole("button", { name: "Finish review" }));
         await waitFor(() => expect(onFinished).toHaveBeenCalled());
         expect(fetch).toHaveBeenCalledWith(
-            "/api/recordings/rec-1/review/finish?view=org",
+            "/api/recordings/rec-1/review/finish?source=riffado&view=org",
             expect.objectContaining({
                 body: JSON.stringify({
                     versions: { "i-correction": 0, "i-fact": 1 },
@@ -167,10 +169,11 @@ describe("LearnReview", () => {
 
     it("hands its proposals to the transcript, and a tick there is kept like one here", async () => {
         const fetch = respond({
-            "GET /api/recordings/rec-1/review": READY,
-            "PATCH /api/recordings/rec-1/review/items/i-correction": {
-                version: 1,
-            },
+            "GET /api/recordings/rec-1/review?source=riffado": READY,
+            "PATCH /api/recordings/rec-1/review/items/i-correction?source=riffado":
+                {
+                    version: 1,
+                },
         });
         const onMarks = vi.fn();
         const { unmount } = render(
@@ -196,7 +199,7 @@ describe("LearnReview", () => {
         onMarks.mock.lastCall?.[0].decide("i-correction", "rejected");
         await waitFor(() =>
             expect(fetch).toHaveBeenCalledWith(
-                "/api/recordings/rec-1/review/items/i-correction",
+                "/api/recordings/rec-1/review/items/i-correction?source=riffado",
                 expect.objectContaining({
                     method: "PATCH",
                     body: JSON.stringify({
@@ -228,7 +231,7 @@ describe("LearnReview", () => {
             ...overrides,
         });
         const fetch = respond({
-            "GET /api/recordings/rec-1/review": {
+            "GET /api/recordings/rec-1/review?source=riffado": {
                 ...READY,
                 names: { ...READY.names, "e-acme": "Acme" },
                 items: [
@@ -261,9 +264,10 @@ describe("LearnReview", () => {
                     }),
                 ],
             },
-            "PATCH /api/recordings/rec-1/review/items/i-speaker": {
-                version: 1,
-            },
+            "PATCH /api/recordings/rec-1/review/items/i-speaker?source=riffado":
+                {
+                    version: 1,
+                },
         });
         render(
             <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
