@@ -17,6 +17,8 @@ import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
     apiCredentials,
+    knowledgeScopeGenerations,
+    knowledgeVocabularyVersion,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -41,11 +43,7 @@ import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { readableScopes } from "@/lib/knowledge/scope";
-import { readScopeGenerations } from "@/lib/knowledge/scope-generation";
-import {
-    vocabularyVersion,
-    vocabularyVisibleTo,
-} from "@/lib/knowledge/vocabulary";
+import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { isFinalLearnError } from "@/lib/learn/errors";
 import {
     LEARN_JOB_KIND,
@@ -203,6 +201,7 @@ async function fenceOf(
     executor: Executor,
     run: RunRow,
     orgUserId: string | null,
+    { lock = false }: { lock?: boolean } = {},
 ): Promise<string> {
     const scopes = readableScopes(
         {
@@ -212,7 +211,26 @@ async function fenceOf(
         },
         orgUserId,
     );
-    const generations = await readScopeGenerations(executor, scopes);
+    // Under the write, the counters are held for share: a change that has
+    // bumped them and not yet committed is waited for, and then seen.
+    // Writers bump them last, so nothing they hold waits on the run.
+    const generations = new Map(scopes.map((scope) => [scope, 0]));
+    const counted = executor
+        .select({
+            userId: knowledgeScopeGenerations.userId,
+            generation: knowledgeScopeGenerations.generation,
+        })
+        .from(knowledgeScopeGenerations)
+        .where(inArray(knowledgeScopeGenerations.userId, scopes))
+        .orderBy(asc(knowledgeScopeGenerations.userId));
+    for (const row of await (lock ? counted.for("share") : counted)) {
+        generations.set(row.userId, row.generation);
+    }
+    const versioned = executor
+        .select({ version: knowledgeVocabularyVersion.version })
+        .from(knowledgeVocabularyVersion)
+        .where(eq(knowledgeVocabularyVersion.id, 1));
+    const [vocabulary] = await (lock ? versioned.for("share") : versioned);
     const answered = await executor
         .select({
             label: transcriptSpeakers.label,
@@ -235,7 +253,7 @@ async function fenceOf(
         .orderBy(asc(learnDismissals.fingerprintHmac));
     return JSON.stringify([
         [...generations.entries()].sort(),
-        await vocabularyVersion(executor),
+        vocabulary?.version ?? 0,
         answered,
         dismissed.map((row) => row.hmac),
     ]);
@@ -576,7 +594,8 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
                     }
                     if (
                         !lastAttempt &&
-                        (await fenceOf(tx, run, orgUserId)) !== fence
+                        (await fenceOf(tx, run, orgUserId, { lock: true })) !==
+                            fence
                     ) {
                         return { status: "stale" as const, items: 0 };
                     }

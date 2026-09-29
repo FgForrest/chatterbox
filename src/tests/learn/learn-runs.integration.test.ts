@@ -164,6 +164,7 @@ import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import { llmRendering } from "@/lib/learn/llm-input";
@@ -750,6 +751,67 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 tool_calls: 3,
                 fence_retries: 1,
                 dropped_outOfScope: 1,
+            });
+        });
+
+        it("waits for a change about to commit before it writes, and validates again", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            let writer: Promise<unknown> = Promise.resolve();
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            createCompletion.mockImplementationOnce(async () => {
+                // A change that has bumped its scope, and commits only
+                // after the run's final transaction read the generations.
+                beforeVocabulary.current = async () => {
+                    let bumped = () => {};
+                    const didBump = new Promise<void>((resolve) => {
+                        bumped = resolve;
+                    });
+                    writer = db().transaction(async (tx) => {
+                        await bumpScopeInTx(tx, [OWNER]);
+                        bumped();
+                        await new Promise((resolve) =>
+                            setTimeout(resolve, 300),
+                        );
+                    });
+                    await didBump;
+                };
+                return {
+                    choices: [
+                        {
+                            message: {
+                                content: JSON.stringify({
+                                    speakers: [],
+                                    corrections: [
+                                        {
+                                            turnIndex: 0,
+                                            charStart: 19,
+                                            charEnd: 25,
+                                            heard: "Tavesy",
+                                            kind: "correct",
+                                            target: { entityId: tavesi },
+                                            replacement: "Tavesi",
+                                        },
+                                    ],
+                                    facts: [],
+                                    relationPhrases: [],
+                                }),
+                            },
+                        },
+                    ],
+                };
+            });
+            await runJob(runId);
+            await writer;
+            expect((await statusAndStats(runId))?.stats).toMatchObject({
+                fence_retries: 1,
             });
         });
 
