@@ -80,20 +80,17 @@ export function sameWords(a: string, b: string): boolean {
     );
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 /**
- * Whether an offset falls between the two UTF-16 units of one character
- * (an emoji, say): text cut there is no longer text.
+ * Whether an offset falls inside one character as a reader sees it: between
+ * the two UTF-16 units of an emoji, a letter and its accent written apart,
+ * the halves of a flag, or the people of a family emoji. Text cut there is
+ * no longer the text: a replacement would take the accent over, say.
  */
 function splitsCharacter(text: string, offset: number): boolean {
     if (offset <= 0 || offset >= text.length) return false;
-    const before = text.charCodeAt(offset - 1);
-    const after = text.charCodeAt(offset);
-    return (
-        before >= 0xd800 &&
-        before <= 0xdbff &&
-        after >= 0xdc00 &&
-        after <= 0xdfff
-    );
+    return graphemes.segment(text).containing(offset)?.index !== offset;
 }
 
 /** Whether two positions cover some of the same characters. */

@@ -165,7 +165,9 @@ function windowsOf(
     return windows;
 }
 
-const WORD_CHAR = /[\p{L}\p{N}]/u;
+// Marks and joiners belong to the letter before them: "Cafe" is not a
+// whole word in "Cafe\u0301".
+const WORD_CHAR = /[\p{L}\p{N}\p{M}\u200c\u200d]/u;
 
 /** Where `heard` stands in `text` as a whole word (not inside another). */
 function wholeWordsAt(text: string, heard: string): number[] {

@@ -280,6 +280,33 @@ describe("runFallbackPass", () => {
             expect(at(22)).toEqual([25]);
         });
 
+        it("takes no word whose accent is written after it for the word without", () => {
+            const turns = [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 5_000,
+                    text: "Cafe\u0301 a Cafe dnes.",
+                },
+            ];
+            expect(
+                anchorCorrections(
+                    [
+                        {
+                            turnIndex: 0,
+                            charStart: 0,
+                            charEnd: 4,
+                            heard: "Cafe",
+                            kind: "link",
+                            target: { entityId: "e-cafe" },
+                            replacement: null,
+                        },
+                    ],
+                    turns,
+                ).map((correction) => correction.charStart),
+            ).toEqual([8]);
+        });
+
         it("goes on with what it found once the run's lookups are spent", async () => {
             let left = 1;
             const lookup = {

@@ -224,6 +224,31 @@ describe("anchors", () => {
     });
 });
 
+describe("anchors, as a reader sees characters", () => {
+    it("never split a letter from its accent, a flag, or a family", () => {
+        const at = (text: string, charStart: number, charEnd: number) =>
+            anchorMatches(
+                {
+                    turnIndex: 0,
+                    charStart,
+                    charEnd,
+                    heard: text.slice(charStart, charEnd),
+                },
+                [{ speaker: "speaker_0", startMs: 0, endMs: 1_000, text }],
+            );
+        // "e" without the accent written after it.
+        expect(at("e\u0301clair", 0, 1)).toBe(false);
+        expect(at("e\u0301clair", 0, 2)).toBe(true);
+        // One regional indicator of the Czech flag.
+        expect(at("a\u{1F1E8}\u{1F1FF}b", 1, 3)).toBe(false);
+        expect(at("a\u{1F1E8}\u{1F1FF}b", 1, 5)).toBe(true);
+        // One person of a family joined by zero-width joiners.
+        const family = "a\u{1F469}\u200d\u{1F467}b";
+        expect(at(family, 1, 3)).toBe(false);
+        expect(at(family, 1, 6)).toBe(true);
+    });
+});
+
 describe("overlapping corrections", () => {
     it("keep the one given first, even when another starts earlier", () => {
         const turns = [
