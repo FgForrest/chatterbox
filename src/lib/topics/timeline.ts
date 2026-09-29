@@ -97,14 +97,19 @@ export function buildTimeMarks(
         }
 
         let chunk: { ms: number; text: string } | null = null;
-        for (const { text: sentence, at } of sentencesOf(turn.text)) {
+        for (const [index, { text: sentence, at }] of sentencesOf(
+            turn.text,
+        ).entries()) {
             // Placed by where it starts in the turn's text as it is, which
-            // is what `toHeard` maps; only what is shown is tidied.
+            // is what `toHeard` maps; only what is shown is tidied. The
+            // first is the turn's start, whatever space leads its text.
             const ms =
-                turn.startMs +
-                Math.round(
-                    toHeard(turnIndex, at / turn.text.length) * duration,
-                );
+                index === 0
+                    ? turn.startMs
+                    : turn.startMs +
+                      Math.round(
+                          toHeard(turnIndex, at / turn.text.length) * duration,
+                      );
             if (chunk && ms - chunk.ms < MIN_MARK_SPACING_MS) {
                 chunk.text = `${chunk.text} ${sentence}`;
                 continue;

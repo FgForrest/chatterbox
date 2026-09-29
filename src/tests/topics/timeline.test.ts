@@ -68,6 +68,13 @@ describe("buildTimeMarks", () => {
         ]);
     });
 
+    it("marks a long turn at its start even when its text begins with spaces", () => {
+        const text = `      First sentence here. ${"Filler words go on. ".repeat(6)}`;
+        const marks = buildTimeMarks([turn("speaker_0", 10, 80, text)]);
+        expect(marks[0]?.ms).toBe(10_000);
+        expect(marks[0]?.text.startsWith("First sentence here.")).toBe(true);
+    });
+
     it("keeps marks inside a long turn at least 15 s apart", () => {
         const text = Array.from({ length: 20 }, () => "Krátká věta.").join(" ");
         const marks = buildTimeMarks([turn("", 0, 100, text)]);
