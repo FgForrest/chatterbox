@@ -9,6 +9,7 @@ import {
     learnMarksFrom,
 } from "@/components/learn/learn-marks";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
+import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -84,6 +85,8 @@ export function LearnReview({
     const [open, setOpen] = useState(false);
     const [running, setRunning] = useState(false);
     const [finishing, setFinishing] = useState(false);
+    // The speaker item someone else is being picked for.
+    const [picking, setPicking] = useState<ItemView | null>(null);
     // Drafts on their way to the server: Finish waits for them, so what
     // it applies is what the person ticked.
     const [saving, setSaving] = useState(0);
@@ -379,9 +382,25 @@ export function LearnReview({
                                     evidenceMs: number[];
                                     reason: string;
                                 };
-                                const person = payload.personId
-                                    ? state?.names[payload.personId]
-                                    : null;
+                                const choice = item.choice;
+                                const unknown = Boolean(
+                                    choice && "unknown" in choice,
+                                );
+                                // Whom the person chose, else whom Learn
+                                // proposed; the review names every id in a
+                                // choice once it is kept.
+                                const person = unknown
+                                    ? i18n("unknown")
+                                    : choice &&
+                                        typeof choice.personId === "string"
+                                      ? (state?.names[choice.personId] ?? "?")
+                                      : choice &&
+                                          typeof choice.displayName === "string"
+                                        ? choice.displayName
+                                        : payload.personId
+                                          ? (state?.names[payload.personId] ??
+                                            null)
+                                          : null;
                                 return (
                                     <div
                                         key={item.id}
@@ -393,12 +412,54 @@ export function LearnReview({
                                                 label: payload.label,
                                                 name: person ?? "?",
                                             }),
+                                            // Nobody to accept yet.
+                                            person === null,
                                         )}
                                         <div className="min-w-0 space-y-0.5">
-                                            <div>
-                                                {payload.label} →{" "}
-                                                {person ??
-                                                    i18n("someone unknown")}
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span>
+                                                    {payload.label} →{" "}
+                                                    {person ?? "?"}
+                                                </span>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-6 px-2 text-xs"
+                                                    disabled={finishing}
+                                                    onClick={() =>
+                                                        setPicking(item)
+                                                    }
+                                                >
+                                                    {i18n("Someone else…")}
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant={
+                                                        unknown
+                                                            ? "default"
+                                                            : "outline"
+                                                    }
+                                                    className="h-6 px-2 text-xs"
+                                                    aria-pressed={unknown}
+                                                    disabled={finishing}
+                                                    onClick={() =>
+                                                        void (unknown
+                                                            ? decide(
+                                                                  item,
+                                                                  "rejected",
+                                                                  null,
+                                                              )
+                                                            : decide(
+                                                                  item,
+                                                                  "accepted",
+                                                                  {
+                                                                      unknown: true,
+                                                                  },
+                                                              ))
+                                                    }
+                                                >
+                                                    {i18n("Unknown")}
+                                                </Button>
                                             </div>
                                             <div className="text-xs text-muted-foreground">
                                                 {payload.reason}{" "}
@@ -578,6 +639,23 @@ export function LearnReview({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            {picking && (
+                <SpeakerPicker
+                    label={(picking.payload as { label: string }).label}
+                    organizationOnly={view === "org"}
+                    onPick={async (chosen) => {
+                        await decide(picking, "accepted", chosen);
+                        // Names the person picked.
+                        await load();
+                        return true;
+                    }}
+                    onMarkUnknown={async () => {
+                        await decide(picking, "accepted", { unknown: true });
+                        return true;
+                    }}
+                    onClose={() => setPicking(null)}
+                />
+            )}
         </>
     );
 }

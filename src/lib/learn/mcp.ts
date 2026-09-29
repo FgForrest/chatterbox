@@ -11,6 +11,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { learnRuns } from "@/db/schema";
+import { readBoundedJson } from "@/lib/http/bounded-json";
 import {
     findEntities,
     findFacts,
@@ -114,38 +115,11 @@ function isRequest(value: unknown): value is JsonRpcRequest {
     );
 }
 
-/**
- * The request's JSON body, read no further than `MCP_MAX_BODY_BYTES`
- * whatever its length header says; `tooLarge` past that, and `undefined`
- * for a body that is not JSON.
- */
-export async function readMcpBody(
+/** The request's JSON body, read no further than `MCP_MAX_BODY_BYTES`. */
+export function readMcpBody(
     request: Request,
-): Promise<{ tooLarge: true } | { tooLarge: false; body: unknown }> {
-    const declared = Number(request.headers.get("content-length"));
-    if (declared > MCP_MAX_BODY_BYTES) return { tooLarge: true };
-    if (!request.body) return { tooLarge: false, body: undefined };
-    const reader = request.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let size = 0;
-    for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > MCP_MAX_BODY_BYTES) {
-            await reader.cancel().catch(() => {});
-            return { tooLarge: true };
-        }
-        chunks.push(value);
-    }
-    try {
-        return {
-            tooLarge: false,
-            body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
-        };
-    } catch {
-        return { tooLarge: false, body: undefined };
-    }
+): ReturnType<typeof readBoundedJson> {
+    return readBoundedJson(request, MCP_MAX_BODY_BYTES);
 }
 
 /** Spend one lookup of the run's, atomically; false when none is left. */

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { readBoundedJson } from "@/lib/http/bounded-json";
 import { decideReviewItem, requestedReviewSource } from "@/lib/learn/review";
 import {
     requestedRecordingView,
@@ -10,6 +11,9 @@ import { assertMayChange } from "@/lib/sharing/writer";
 
 type ItemContext = { params: Promise<{ id: string; itemId: string }> };
 
+/** A draft is a decision and a small choice; nothing near this. */
+const MAX_DRAFT_BYTES = 16 * 1024;
+
 /**
  * Keep a draft decision on one review item: `{decision, version, choice?}`,
  * `decision` one of `accepted`, `rejected` or null (the default again).
@@ -18,7 +22,11 @@ type ItemContext = { params: Promise<{ id: string; itemId: string }> };
 export const PATCH = apiHandler<ItemContext>(async (request, context) => {
     const { id, itemId } = await (context as ItemContext).params;
     const { access } = await authorizeLearn(request, id);
-    const body = (await request.json().catch(() => null)) as {
+    const read = await readBoundedJson(request, MAX_DRAFT_BYTES);
+    if (read.tooLarge) {
+        throw new AppError(ErrorCode.INVALID_INPUT, "Request too large", 413);
+    }
+    const body = (read.body ?? null) as {
         decision?: unknown;
         version?: unknown;
         choice?: unknown;

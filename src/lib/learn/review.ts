@@ -57,6 +57,7 @@ type ItemKind = ReviewCandidate["kind"];
 /** What a person chose along with a decision, where the kind needs one. */
 export type ReviewChoice =
     | { personId: string }
+    | { displayName: string }
     | { unknown: true }
     | { action: "create"; spec: Extract<NewTypeSpec, { kind: "relation" }> }
     | { action: "suggest" };
@@ -225,26 +226,45 @@ export async function loadReview(
     return { run: summary, items, names, types, relations };
 }
 
+const MAX_ID_LENGTH = 64;
+const MAX_NAME_LENGTH = 200;
+const MAX_TYPES = 20;
+
+/** A string with something in it, and not too much. */
+function short(value: unknown, max: number): value is string {
+    return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
 function validChoice(kind: ItemKind, choice: unknown): ReviewChoice | null {
     if (choice === null || choice === undefined) return null;
     if (typeof choice !== "object") return invalidChoice();
     const value = choice as Record<string, unknown>;
     if (kind === "speaker") {
         if (value.unknown === true) return { unknown: true };
-        if (typeof value.personId === "string" && value.personId) {
+        if (short(value.personId, MAX_ID_LENGTH)) {
             return { personId: value.personId };
+        }
+        // Someone new, created and named when the review is finished.
+        if (typeof value.displayName === "string") {
+            const displayName = value.displayName.trim();
+            if (short(displayName, MAX_NAME_LENGTH)) return { displayName };
         }
         return invalidChoice();
     }
     if (kind === "relation_phrase") {
         if (value.action === "suggest") return { action: "suggest" };
         const spec = value.spec as Record<string, unknown> | undefined;
+        const types = (list: unknown): list is string[] =>
+            Array.isArray(list) &&
+            list.length <= MAX_TYPES &&
+            list.every((type) => short(type, MAX_ID_LENGTH));
         if (
             value.action === "create" &&
             spec &&
             typeof spec.label === "string" &&
-            Array.isArray(spec.subjectTypes) &&
-            Array.isArray(spec.objectTypes) &&
+            short(spec.label.trim(), MAX_NAME_LENGTH) &&
+            types(spec.subjectTypes) &&
+            types(spec.objectTypes) &&
             (spec.objectKind === "entity" || spec.objectKind === "literal") &&
             (spec.cardinality === "one" || spec.cardinality === "many")
         ) {
@@ -252,9 +272,9 @@ function validChoice(kind: ItemKind, choice: unknown): ReviewChoice | null {
                 action: "create",
                 spec: {
                     kind: "relation",
-                    label: spec.label,
-                    subjectTypes: spec.subjectTypes.map(String),
-                    objectTypes: spec.objectTypes.map(String),
+                    label: spec.label.trim(),
+                    subjectTypes: spec.subjectTypes,
+                    objectTypes: spec.objectTypes,
                     objectKind: spec.objectKind,
                     cardinality: spec.cardinality,
                 },
@@ -476,9 +496,11 @@ export async function finishReview(
                     ? { kind: "unknown" }
                     : choice && "personId" in choice
                       ? { kind: "name", personId: choice.personId }
-                      : payload.personId
-                        ? { kind: "name", personId: payload.personId }
-                        : null;
+                      : choice && "displayName" in choice
+                        ? { kind: "name", displayName: choice.displayName }
+                        : payload.personId
+                          ? { kind: "name", personId: payload.personId }
+                          : null;
             if (!answer) {
                 skipped.push({ itemId: item.id, reason: "Nobody chosen" });
                 continue;

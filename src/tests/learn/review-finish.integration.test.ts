@@ -746,4 +746,119 @@ describeWithDatabase("finishing a Learn review (PostgreSQL)", () => {
         expect((await review("plaud")).run?.id).toBe(run?.id);
         expect((await review("riffado")).run).toBeNull();
     });
+
+    const patch = (itemId: string, body: string) =>
+        patchItemRoute(
+            new Request(
+                `http://localhost/api/recordings/${REC}/review/items/${itemId}`,
+                {
+                    method: "PATCH",
+                    headers: {
+                        "content-type": "application/json",
+                        "x-test-user": OWNER,
+                    },
+                    body,
+                },
+            ),
+            { params: Promise.resolve({ id: REC, itemId }) },
+        );
+
+    it("names a speaker someone new, as chosen in the review", async () => {
+        await readyRun([
+            {
+                kind: "speaker",
+                payload: {
+                    label: "speaker_1",
+                    personId: null,
+                    evidenceMs: [5000],
+                    reason: "x",
+                },
+            },
+        ]);
+        const [item] = await db().select().from(learnReviewItems);
+        const kept = await patch(
+            item?.id ?? "",
+            JSON.stringify({
+                decision: "accepted",
+                version: 0,
+                choice: { displayName: "  Petra Malá " },
+            }),
+        );
+        expect(kept.status).toBe(200);
+        expect((await finish()).body).toMatchObject({ applied: 1 });
+        const [speaker] = await db()
+            .select()
+            .from(transcriptSpeakers)
+            .where(eq(transcriptSpeakers.label, "speaker_1"));
+        expect(speaker?.status).toBe("confirmed");
+        expect(speaker?.personId).toBeTruthy();
+    });
+
+    it("bounds what a draft may carry", async () => {
+        const { jan } = await janAndOrion();
+        await readyRun([
+            {
+                kind: "speaker",
+                payload: {
+                    label: "speaker_1",
+                    personId: jan,
+                    evidenceMs: [5000],
+                    reason: "x",
+                },
+            },
+            {
+                kind: "relation_phrase",
+                payload: {
+                    phrase: "vede",
+                    subject: { personId: jan },
+                    objectKind: "literal",
+                    startMs: 5000,
+                    endMs: 10000,
+                    count: 1,
+                },
+            },
+        ]);
+        const items = await db().select().from(learnReviewItems);
+        const speaker = items.find((item) => item.kind === "speaker");
+        const phrase = items.find((item) => item.kind === "relation_phrase");
+        const tooLongName = await patch(
+            speaker?.id ?? "",
+            JSON.stringify({
+                decision: "accepted",
+                version: 0,
+                choice: { displayName: "x".repeat(201) },
+            }),
+        );
+        expect(tooLongName.status).toBe(400);
+        const tooManyTypes = await patch(
+            phrase?.id ?? "",
+            JSON.stringify({
+                decision: "accepted",
+                version: 0,
+                choice: {
+                    action: "create",
+                    spec: {
+                        label: "vede",
+                        subjectTypes: Array.from(
+                            { length: 21 },
+                            () => "person",
+                        ),
+                        objectTypes: [],
+                        objectKind: "literal",
+                        cardinality: "many",
+                    },
+                },
+            }),
+        );
+        expect(tooManyTypes.status).toBe(400);
+        const huge = await patch(
+            speaker?.id ?? "",
+            JSON.stringify({
+                decision: "accepted",
+                version: 0,
+                padding: "x".repeat(20_000),
+            }),
+        );
+        expect(huge.status).toBe(413);
+    });
 });

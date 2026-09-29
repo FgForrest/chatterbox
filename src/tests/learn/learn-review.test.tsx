@@ -286,4 +286,56 @@ describe("LearnReview", () => {
         await waitFor(() => expect(fact.disabled).toBe(false));
         expect(fetch).toHaveBeenCalled();
     });
+
+    it("answers a speaker nobody was proposed for: unknown, or someone else", async () => {
+        const nobody = {
+            id: "i-nobody",
+            kind: "speaker",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                label: "speaker_2",
+                personId: null,
+                evidenceMs: [],
+                reason: "",
+            },
+        };
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [nobody],
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-nobody?source=riffado":
+                { version: 1 },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (1)" }),
+        );
+        const accept = screen.getByRole("checkbox", {
+            name: "Accept speaker_2 as ?",
+        }) as HTMLInputElement;
+        expect(accept.disabled).toBe(true);
+        expect(
+            screen.getByRole("button", { name: "Someone else…" }),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Unknown" }));
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/items/i-nobody?source=riffado",
+                expect.objectContaining({
+                    body: JSON.stringify({
+                        decision: "accepted",
+                        version: 0,
+                        choice: { unknown: true },
+                    }),
+                }),
+            ),
+        );
+    });
 });
