@@ -220,6 +220,11 @@ export async function getRecordingMarkdownDocument(
     source?: string,
     /** Rendering for the Organization view: name Organization people only. */
     orgPeopleOnly = false,
+    /**
+     * The sharing state the reader was authorized in; its corrections are
+     * read only in that state (see `correctionOverlay`).
+     */
+    sharedAs?: boolean,
 ): Promise<RecordingMarkdownDocument | null> {
     const [recording] = await db
         .select()
@@ -243,6 +248,7 @@ export async function getRecordingMarkdownDocument(
         recording.storagePath,
         source,
         orgPeopleOnly,
+        sharedAs,
     );
 }
 
@@ -254,6 +260,7 @@ async function renderRecordingMarkdownDocument(
     storagePath: string,
     source?: string,
     orgPeopleOnly = false,
+    sharedAs?: boolean,
 ): Promise<RecordingMarkdownDocument | null> {
     if (kind === "transcript") {
         const projection = await loadSidecarProjectionContext(
@@ -279,7 +286,7 @@ async function renderRecordingMarkdownDocument(
                 recordingId: recording.id,
                 revision: primary.revision,
             },
-            { pending: false },
+            { pending: false, sharedAs },
         );
         const text = projectTranscript(
             {

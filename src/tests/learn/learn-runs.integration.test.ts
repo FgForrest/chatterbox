@@ -127,6 +127,27 @@ vi.mock("@/lib/storage/factory", () => ({
     }),
 }));
 
+// Runs once, right after a request was authorized: a change landing there.
+const { afterAuthorize } = vi.hoisted(() => ({
+    afterAuthorize: { current: null as null | (() => Promise<void>) },
+}));
+vi.mock("@/lib/sharing/access", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/sharing/access")>();
+    return {
+        ...actual,
+        requireRecordingView: async (
+            ...args: Parameters<typeof actual.requireRecordingView>
+        ) => {
+            const access = await actual.requireRecordingView(...args);
+            const hook = afterAuthorize.current;
+            afterAuthorize.current = null;
+            if (hook) await hook();
+            return access;
+        },
+    };
+});
+
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -153,6 +174,7 @@ import {
     GET as getLearnRoute,
     POST as postLearnRoute,
 } from "@/app/api/recordings/[id]/learn/route";
+import { GET as getMarkdownRoute } from "@/app/api/recordings/[id]/markdown/[kind]/route";
 import { POST as postFinishRoute } from "@/app/api/recordings/[id]/review/finish/route";
 import { PATCH as patchItemRoute } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
 import { GET as getReviewRoute } from "@/app/api/recordings/[id]/review/route";
@@ -167,11 +189,13 @@ import {
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { getRecordingMarkdownDocument } from "@/lib/export/document-sidecars";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
+import { acceptCorrection } from "@/lib/knowledge/corrections";
 import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import {
     bumpVocabularyVersionInTx,
+    createPrivateType,
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
 import { learnJobHandler } from "@/lib/learn/learn-job-handler";
@@ -1702,6 +1726,71 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             { id: REC, filename: "Weekly" },
         ]);
         expect(await reviewQueue(BOB, false)).toEqual([]);
+    });
+
+    it("hands a member none of the owner's private corrections when a withdrawal lands mid-request", async () => {
+        await db()
+            .update(transcriptions)
+            .set({
+                turns: encryptJsonField([
+                    {
+                        speaker: "speaker_0",
+                        startMs: 0,
+                        endMs: 5_000,
+                        text: "Dobrý den, máme tu Tavesy.",
+                    },
+                ]),
+            })
+            .where(eq(transcriptions.id, transcriptId));
+        const typeKey = await createPrivateType(OWNER, {
+            kind: "entity",
+            label: "Secret project",
+        });
+        const secret = (
+            await createEntity(OWNER, { typeKey, name: "Project Nightjar" })
+        ).id;
+        await acceptCorrection({
+            userId: OWNER,
+            transcriptionId: transcriptId,
+            revision: 0,
+            actorUserId: OWNER,
+            orgUserId,
+            anchor: {
+                turnIndex: 0,
+                charStart: 19,
+                charEnd: 25,
+                heard: "Tavesy",
+            },
+            kind: "correct",
+            target: { entityId: secret },
+            replacement: "Nightjar-Private",
+        });
+        const [root] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId));
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: REC,
+            folderId: root?.id ?? "",
+        });
+        knowledgeStore().invalidateAll();
+        const withdrawMidRequest = () => {
+            afterAuthorize.current = async () => {
+                await unshareRecording(OWNER, REC);
+            };
+        };
+
+        withdrawMidRequest();
+        const markdown = await getMarkdownRoute(
+            new Request(
+                `http://localhost/api/recordings/${REC}/markdown/transcript?view=org&source=riffado`,
+                { headers: { "x-test-user": BOB } },
+            ),
+            { params: Promise.resolve({ id: REC, kind: "transcript" }) },
+        );
+        expect(await markdown.text()).not.toContain("Nightjar");
+        expect(markdown.status).toBe(404);
     });
 
     it("counts the reviews waiting for each: the owner's own, the Organization's for its account", async () => {

@@ -13,9 +13,15 @@
 import { createHmac, hkdfSync } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { learnReviewItems, learnRuns, transcriptions } from "@/db/schema";
+import {
+    learnReviewItems,
+    learnRuns,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import {
@@ -79,6 +85,7 @@ export async function correctionOverlay(
     {
         pending = true,
         turns,
+        sharedAs,
     }: {
         pending?: boolean;
         /**
@@ -87,13 +94,60 @@ export async function correctionOverlay(
          * as finishing the review applies them.
          */
         turns?: readonly TranscriptTurn[] | null;
+        /**
+         * The sharing state a reader was authorized in. Given, the
+         * corrections are read under the recording held for share, and
+         * only in that state (404 otherwise): a withdrawal landing
+         * meanwhile must not hand the owner's private corrections to
+         * whoever read the Organization's.
+         */
+        sharedAs?: boolean;
     } = {},
 ): Promise<OverlayCorrection[]> {
     const orgUserId = await sharingOrgUserId();
-    const shared =
-        orgUserId !== null &&
-        (await isRecordingShared(transcript.recordingId, orgUserId));
-    const confirmed = await listCorrections(transcript.userId, transcript.id);
+    const { shared, confirmed } =
+        sharedAs === undefined
+            ? {
+                  shared:
+                      orgUserId !== null &&
+                      (await isRecordingShared(
+                          transcript.recordingId,
+                          orgUserId,
+                      )),
+                  confirmed: await listCorrections(
+                      transcript.userId,
+                      transcript.id,
+                  ),
+              }
+            : await db.transaction(async (tx) => {
+                  await tx
+                      .select({ id: recordings.id })
+                      .from(recordings)
+                      .where(eq(recordings.id, transcript.recordingId))
+                      .for("share");
+                  const sharedNow =
+                      orgUserId !== null &&
+                      (await isRecordingShared(
+                          transcript.recordingId,
+                          orgUserId,
+                          tx,
+                      ));
+                  if (sharedNow !== sharedAs) {
+                      throw new AppError(
+                          ErrorCode.RECORDING_NOT_FOUND,
+                          "Recording not found",
+                          404,
+                      );
+                  }
+                  return {
+                      shared: sharedNow,
+                      confirmed: await listCorrections(
+                          transcript.userId,
+                          transcript.id,
+                          tx,
+                      ),
+                  };
+              });
     const [run] = !pending
         ? []
         : await db
