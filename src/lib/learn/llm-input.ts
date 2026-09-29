@@ -75,7 +75,18 @@ export async function correctionOverlay(
         recordingId: string;
         revision: number;
     },
-    { pending = true }: { pending?: boolean } = {},
+    {
+        pending = true,
+        turns,
+    }: {
+        pending?: boolean;
+        /**
+         * The transcript's turns: a review item groups its occurrences
+         * by their words in any case, and each is read at its own words,
+         * as finishing the review applies them.
+         */
+        turns?: readonly TranscriptTurn[] | null;
+    } = {},
 ): Promise<OverlayCorrection[]> {
     const orgUserId = await sharingOrgUserId();
     const shared =
@@ -154,9 +165,18 @@ export async function correctionOverlay(
         const meaning = names.get(targetId);
         if (meaning === undefined) continue;
         for (const anchor of payload.anchors) {
+            const words = turns?.[anchor.turnIndex]?.text.slice(
+                anchor.charStart,
+                anchor.charEnd,
+            );
             overlay.push({
                 ...anchor,
-                heard: payload.heard,
+                heard:
+                    words !== undefined &&
+                    words.toLocaleLowerCase() ===
+                        payload.heard.toLocaleLowerCase()
+                        ? words
+                        : payload.heard,
                 kind: payload.kind,
                 replacement:
                     payload.kind === "correct" ? payload.replacement : null,
@@ -186,7 +206,7 @@ export async function llmRendering(transcriptionId: string): Promise<{
     if (!stored?.length) return null;
     const turns = renderTurnsForLlm(
         stored,
-        await correctionOverlay(transcript),
+        await correctionOverlay(transcript, { turns: stored }),
     );
     return {
         turns,
@@ -219,7 +239,7 @@ export async function modelInput(transcript: {
     if (!turns?.length) return { text: stored, turns: null, fingerprint: null };
     const rendered = renderTurnsForLlm(
         turns,
-        await correctionOverlay(transcript),
+        await correctionOverlay(transcript, { turns }),
     );
     const corrected = rendered.some(
         (turn, index) => turn.text !== turns[index]?.text,

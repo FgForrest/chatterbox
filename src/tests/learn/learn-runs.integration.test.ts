@@ -181,7 +181,9 @@ import {
     recordingsNeedingReview,
     reviewQueue,
 } from "@/lib/learn/pending";
+import { finishReview } from "@/lib/learn/review";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { requireRecordingView } from "@/lib/sharing/access";
 import type { StorageProvider } from "@/lib/storage/types";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -952,6 +954,68 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             expect((await statusAndStats(runId))?.stats).toMatchObject({
                 fence_retries: 2,
             });
+        });
+
+        it("reads a ticked correction at every occurrence, whatever its case, as finishing applies it", async () => {
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Dobrý den, máme tu Tavesy a tavesy znovu.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            const correction = (charStart: number, heard: string) => ({
+                turnIndex: 0,
+                charStart,
+                charEnd: charStart + 6,
+                heard,
+                kind: "correct",
+                target: { entityId: tavesi },
+                replacement: "Tavesi",
+            });
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            reply({
+                speakers: [],
+                corrections: [
+                    correction(19, "Tavesy"),
+                    correction(28, "tavesy"),
+                ],
+                facts: [],
+                relationPhrases: [],
+            });
+            await runJob(runId);
+            const [item] = await db().select().from(learnReviewItems);
+            await db()
+                .update(learnReviewItems)
+                .set({ decision: "accepted", version: 1 })
+                .where(eq(learnReviewItems.id, item?.id ?? ""));
+            const during = await llmRendering(transcriptId);
+            expect(during?.text).toBe(
+                "speaker_0: Dobrý den, máme tu Tavesi a Tavesi znovu.",
+            );
+            await finishReview(
+                await requireRecordingView(OWNER, REC, "private"),
+                OWNER,
+                { versions: { [item?.id ?? ""]: 1 } },
+            );
+            expect((await llmRendering(transcriptId))?.fingerprint).toBe(
+                during?.fingerprint,
+            );
         });
 
         it("keeps the status a rewrite set while a provider call was out, when that call then fails", async () => {
