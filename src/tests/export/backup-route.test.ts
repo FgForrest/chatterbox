@@ -87,8 +87,34 @@ describe("POST /api/backup cooldown", () => {
         expect(queriesMock.createExportJob).toHaveBeenCalledWith("user-1");
     });
 
-    it("still hands back a backup being built, self-hosted too", async () => {
+    it("builds a new archive on hosted once a day has passed", async () => {
+        envMock.IS_HOSTED = true;
+        queriesMock.getRecentCompletedExportJobForUser.mockResolvedValue({
+            ...finishedAnHourAgo,
+            completedAt: new Date(Date.now() - 25 * HOUR_MS),
+        });
+
+        const { status, body } = await post();
+
+        expect(status).toBe(202);
+        expect(body.job.id).toBe("job-new");
+    });
+
+    it("does not even look for a finished archive on a self-hosted instance", async () => {
         envMock.IS_HOSTED = false;
+
+        await post();
+
+        expect(
+            queriesMock.getRecentCompletedExportJobForUser,
+        ).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ["hosted", true],
+        ["self-hosted", false],
+    ])("still hands back a backup being built (%s)", async (_mode, hosted) => {
+        envMock.IS_HOSTED = hosted;
         queriesMock.getActiveExportJobForUser.mockResolvedValue(
             job({ id: "job-running", status: "processing" }),
         );
