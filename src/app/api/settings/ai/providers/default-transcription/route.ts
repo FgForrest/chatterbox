@@ -77,7 +77,7 @@ export const PUT = apiHandler(async (request: Request) => {
         if (isEnhancementOnlyProvider(provider.provider)) {
             throw new AppError(
                 ErrorCode.INVALID_INPUT,
-                `${provider.provider} runs AI enhancements but cannot transcribe. Pick another provider for transcription.`,
+                `${provider.provider} writes summaries but cannot transcribe. Pick another provider for transcription.`,
                 400,
                 { field: "providerId" },
             );

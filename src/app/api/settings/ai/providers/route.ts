@@ -35,9 +35,10 @@ export const POST = apiHandler(async (request: Request) => {
         defaultModel,
         isDefaultTranscription,
         isDefaultEnhancement,
+        copyKeyFrom,
     } = await request.json();
 
-    if (!provider || !apiKey) {
+    if (!provider || (!apiKey && !copyKeyFrom)) {
         throw new AppError(
             ErrorCode.MISSING_REQUIRED_FIELD,
             "Provider and API key are required",
@@ -45,10 +46,48 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
+    // Duplicating a provider: the new row takes the stored key of one the
+    // user already has, so a second Claude Code or Codex model needs no
+    // fresh token. The key stays encrypted end to end -- the ciphertext is
+    // copied, never decrypted, and never reaches the browser. It must come
+    // from the same provider: a key is only meaningful to its own vendor.
+    let copiedKey: string | null = null;
+    if (!apiKey && copyKeyFrom) {
+        const [source] = await db
+            .select({
+                provider: apiCredentials.provider,
+                apiKey: apiCredentials.apiKey,
+            })
+            .from(apiCredentials)
+            .where(
+                and(
+                    eq(apiCredentials.id, String(copyKeyFrom)),
+                    eq(apiCredentials.userId, session.user.id),
+                ),
+            )
+            .limit(1);
+        if (!source) {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "The provider to duplicate no longer exists",
+                404,
+            );
+        }
+        if (source.provider !== provider) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                `A duplicate keeps its provider: ${source.provider}'s key cannot be used for ${provider}.`,
+                400,
+                { field: "provider" },
+            );
+        }
+        copiedKey = source.apiKey;
+    }
+
     if (isDefaultEnhancement && isTranscriptionOnlyProvider(provider)) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `${provider} transcribes but cannot run AI enhancements. Pick another provider for summaries.`,
+            `${provider} transcribes but cannot write summaries. Pick another provider for summaries.`,
             400,
             { field: "isDefaultEnhancement" },
         );
@@ -57,7 +96,7 @@ export const POST = apiHandler(async (request: Request) => {
     if (isDefaultTranscription && isEnhancementOnlyProvider(provider)) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `${provider} runs AI enhancements but cannot transcribe. Pick another provider for transcription.`,
+            `${provider} writes summaries but cannot transcribe. Pick another provider for transcription.`,
             400,
             { field: "isDefaultTranscription" },
         );
@@ -75,8 +114,8 @@ export const POST = apiHandler(async (request: Request) => {
         });
     }
 
-    // Encrypt the API key
-    const encryptedKey = encrypt(apiKey);
+    // Encrypt the API key; a duplicate's is already encrypted
+    const encryptedKey = copiedKey ?? encrypt(apiKey);
 
     // Use a transaction to ensure atomic update of default providers
     const [newProvider] = await db.transaction(async (tx) => {
@@ -140,6 +179,7 @@ export const POST = apiHandler(async (request: Request) => {
             provider,
             has_custom_base_url: Boolean(baseUrl),
             is_default_transcription: Boolean(isDefaultTranscription),
+            duplicated: copiedKey !== null,
         },
     });
 

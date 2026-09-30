@@ -48,6 +48,14 @@ interface EditProviderDialogProps {
      * also rejects them on save.
      */
     isHosted?: boolean;
+    /**
+     * `duplicate` opens the same form seeded from `provider` but saves a
+     * new row that reuses the original's stored key -- a second Claude
+     * Code or Codex model without issuing another token. The provider is
+     * fixed (the key belongs to it) and no role is carried over, so the
+     * copy takes nothing away from the original until the user says so.
+     */
+    mode?: "edit" | "duplicate";
 }
 
 export function EditProviderDialog({
@@ -56,8 +64,10 @@ export function EditProviderDialog({
     provider,
     onSuccess,
     isHosted = false,
+    mode = "edit",
 }: EditProviderDialogProps) {
     const i18n = useExtracted();
+    const duplicating = mode === "duplicate";
     const visiblePresets = getVisiblePresets({ isHosted });
     // Legacy case: a hosted user has an existing LM Studio / Ollama provider
     // (added before hosted enforcement, or imported). Keep their currently
@@ -82,8 +92,12 @@ export function EditProviderDialog({
             setProviderName(provider.provider);
             setBaseUrl(provider.baseUrl || "");
             setDefaultModel(provider.defaultModel || "");
-            setIsDefaultTranscription(provider.isDefaultTranscription);
-            setIsDefaultEnhancement(provider.isDefaultEnhancement);
+            setIsDefaultTranscription(
+                duplicating ? false : provider.isDefaultTranscription,
+            );
+            setIsDefaultEnhancement(
+                duplicating ? false : provider.isDefaultEnhancement,
+            );
             setApiKey("");
         } else if (!open) {
             setProviderName("");
@@ -93,22 +107,7 @@ export function EditProviderDialog({
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
         }
-    }, [open, provider]);
-
-    const handleProviderChange = (value: string) => {
-        setProviderName(value);
-        const preset = findPreset(value);
-        if (preset) {
-            setBaseUrl(preset.baseUrl);
-            setDefaultModel(preset.defaultModel);
-            if (preset.transcriptionOnly) {
-                setIsDefaultEnhancement(false);
-            }
-            if (preset.enhancementOnly) {
-                setIsDefaultTranscription(false);
-            }
-        }
-    };
+    }, [open, provider, duplicating]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -146,21 +145,39 @@ export function EditProviderDialog({
                 updateData.apiKey = apiKey;
             }
 
-            const response = await fetch(
-                `/api/settings/ai/providers/${provider.id}`,
-                {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(updateData),
-                },
-            );
+            const response = duplicating
+                ? await fetch("/api/settings/ai/providers", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                          ...updateData,
+                          provider: provider.provider,
+                          copyKeyFrom: provider.id,
+                      }),
+                  })
+                : await fetch(`/api/settings/ai/providers/${provider.id}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(updateData),
+                  });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || "Failed to update provider");
+                const error = await response.json().catch(() => ({}));
+                throw new Error(
+                    error.error ||
+                        (duplicating
+                            ? "Failed to duplicate provider"
+                            : "Failed to update provider"),
+                );
             }
 
-            toast.success(i18n("AI provider updated successfully"));
+            toast.success(
+                duplicating
+                    ? i18n("Copy of {provider} added", {
+                          provider: provider.provider,
+                      })
+                    : i18n("AI provider updated successfully"),
+            );
             onSuccess();
             onOpenChange(false);
 
@@ -191,17 +208,26 @@ export function EditProviderDialog({
         <Dialog open={open} onOpenChange={onOpenChange} key={provider.id}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle>{i18n("Edit AI Provider")}</DialogTitle>
+                    <DialogTitle>
+                        {duplicating
+                            ? i18n("Duplicate AI Provider")
+                            : i18n("Edit AI Provider")}
+                    </DialogTitle>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
                         <Label>{i18n("Provider")}</Label>
-                        <Select
-                            value={providerName}
-                            onValueChange={handleProviderChange}
-                            disabled={isLoading}
-                        >
+                        {/*
+                         * Read-only. The provider is what the stored key
+                         * belongs to, and the update route never changes
+                         * it: switching here once reset the base URL and
+                         * model to another preset's, saved those, and
+                         * silently kept the old provider name -- a Claude
+                         * Code row running Codex's model. Another provider
+                         * is another row: add one, or duplicate this one.
+                         */}
+                        <Select value={providerName} disabled>
                             <SelectTrigger>
                                 <SelectValue
                                     placeholder={i18n("Select a provider")}
@@ -257,9 +283,13 @@ export function EditProviderDialog({
                             // the stored key and an empty box looks like
                             // data loss. It is not: a blank field leaves
                             // the saved key untouched (PATCH route).
-                            placeholder={i18n(
-                                "Leave blank to keep the current key",
-                            )}
+                            placeholder={
+                                duplicating
+                                    ? i18n("Leave blank to reuse the same key")
+                                    : i18n(
+                                          "Leave blank to keep the current key",
+                                      )
+                            }
                             value={apiKey}
                             onChange={(e) => setApiKey(e.target.value)}
                             disabled={isLoading}
@@ -268,9 +298,13 @@ export function EditProviderDialog({
                         <div className="text-xs text-muted-foreground flex items-center gap-2">
                             <Shield className="size-3.5 shrink-0" />
                             <span>
-                                {i18n(
-                                    "For security, the saved API key is never shown. Leave this blank to keep your current key, or enter a new key to replace it.",
-                                )}
+                                {duplicating
+                                    ? i18n(
+                                          "The copy reuses the saved key of the provider you duplicated, without showing it. Enter a key only to give the copy a different one.",
+                                      )
+                                    : i18n(
+                                          "For security, the saved API key is never shown. Leave this blank to keep your current key, or enter a new key to replace it.",
+                                      )}
                             </span>
                         </div>
                     </div>
@@ -351,7 +385,7 @@ export function EditProviderDialog({
                                 }
                                 disabled={isLoading || transcriptionOnly}
                             />
-                            <span>{i18n("Use for AI enhancements")}</span>
+                            <span>{i18n("Use for summaries")}</span>
                         </label>
                         {transcriptionOnly && (
                             <p className="text-xs text-muted-foreground">
@@ -385,9 +419,13 @@ export function EditProviderDialog({
                             disabled={isLoading}
                             className="flex-1"
                         >
-                            {isLoading
-                                ? i18n("Updating...")
-                                : i18n("Update Provider")}
+                            {duplicating
+                                ? isLoading
+                                    ? i18n("Adding...")
+                                    : i18n("Add Copy")
+                                : isLoading
+                                  ? i18n("Updating...")
+                                  : i18n("Update Provider")}
                         </MetalButton>
                     </div>
                 </form>

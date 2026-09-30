@@ -50,7 +50,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     ) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `${existing.provider} transcribes but cannot run AI enhancements. Pick another provider for summaries.`,
+            `${existing.provider} transcribes but cannot write summaries. Pick another provider for summaries.`,
             400,
             { field: "isDefaultEnhancement" },
         );
@@ -62,7 +62,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     ) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `${existing.provider} runs AI enhancements but cannot transcribe. Pick another provider for transcription.`,
+            `${existing.provider} writes summaries but cannot transcribe. Pick another provider for transcription.`,
             400,
             { field: "isDefaultTranscription" },
         );
