@@ -36,7 +36,7 @@ describe("summary speaker references", () => {
         );
 
         const link = screen.getByRole("link", { name: "Jane Doe" });
-        expect(link.getAttribute("href")).toBe("/people/person-1");
+        expect(link.getAttribute("href")).toBe("/almanac/person-1");
         expect(markdown).toBe("[Speaker 0](#speaker-0) approved the proposal.");
     });
 
@@ -53,7 +53,7 @@ describe("summary speaker references", () => {
         );
 
         const link = screen.getByRole("link", { name: "Jane Doe" });
-        expect(link.getAttribute("href")).toBe("/people/person-1");
+        expect(link.getAttribute("href")).toBe("/almanac/person-1");
         expect(markdown).toBe("Speaker 0 approved the proposal.");
         expect(canonicalizeSummarySpeakerReferences(markdown)).toBe(
             "[Speaker 0](#speaker-0) approved the proposal.",

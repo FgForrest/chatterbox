@@ -1,9 +1,43 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { KnownFacts, OtherNames } from "@/components/people/known-facts";
 import type { PageRelation } from "@/lib/knowledge/fact-page";
+
+const refresh = vi.fn();
+vi.mock("next/navigation", () => ({
+    useRouter: () => ({ refresh, push: vi.fn() }),
+}));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+const EDITING = {
+    subject: { kind: "person" as const, id: "jan", typeKey: "person" },
+    relations: [
+        {
+            key: "leads",
+            label: "leads",
+            subjectTypes: ["person"],
+            objectTypes: ["project"],
+            objectKind: "entity" as const,
+            cardinality: "many" as const,
+        },
+    ],
+    typeLabels: { project: "Project" },
+    ownScope: "personal" as const,
+};
+
+function respond(status = 200, body: unknown = {}) {
+    const fetch = vi.fn(async () => Response.json(body, { status }));
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
+}
 
 const relations: PageRelation[] = [
     {
@@ -62,10 +96,10 @@ describe("KnownFacts", () => {
         ).toBeDefined();
         expect(
             screen.getByRole("link", { name: /Orion/ }).getAttribute("href"),
-        ).toBe("/people/entities/orion");
+        ).toBe("/almanac/things/orion");
         expect(
             screen.getByRole("link", { name: /Pavel/ }).getAttribute("href"),
-        ).toBe("/people/pavel");
+        ).toBe("/almanac/pavel");
     });
 
     it("counts the recordings a fact was said in, and links to each moment", () => {
@@ -108,5 +142,86 @@ describe("OtherNames", () => {
     it("shows nothing without other names", () => {
         const { container } = render(<OtherNames names={[]} />);
         expect(container.textContent).toBe("");
+    });
+});
+
+describe("editing what is known", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+        refresh.mockClear();
+    });
+
+    it("lets the viewer change and erase their own facts, not the Organization's", async () => {
+        const fetch = respond();
+        render(
+            <KnownFacts name="Jan" relations={relations} editing={EDITING} />,
+        );
+        // f-1 is the Organization's; f-2 (object side) is the viewer's own.
+        expect(
+            screen.getAllByRole("button", { name: "Erase fact" }),
+        ).toHaveLength(1);
+        // Only a fact the page is the subject of is changed here.
+        expect(
+            screen.queryByRole("button", { name: "Change fact" }),
+        ).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Erase fact" }));
+        fireEvent.click(screen.getByRole("button", { name: "Erase" }));
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith("/api/knowledge/facts/f-2", {
+                method: "DELETE",
+            }),
+        );
+        await waitFor(() => expect(refresh).toHaveBeenCalled());
+    });
+
+    it("offers a fact to be added, even when nothing is known yet", () => {
+        render(<KnownFacts name="Jan" relations={[]} editing={EDITING} />);
+        expect(
+            screen.getByRole("button", { name: "Add a fact" }),
+        ).toBeDefined();
+    });
+
+    it("adds a nickname, and takes back only the viewer's own", async () => {
+        const fetch = respond(201, { id: "a-2" });
+        render(
+            <OtherNames
+                names={[
+                    {
+                        id: "a-1",
+                        text: "Honza",
+                        kind: "alias",
+                        scope: "personal",
+                    },
+                    { id: "a-org", text: "JN", kind: "alias", scope: "org" },
+                ]}
+                editing={{ target: { personId: "jan" }, ownScope: "personal" }}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: "Remove Honza" }),
+        ).toBeDefined();
+        expect(screen.queryByRole("button", { name: "Remove JN" })).toBeNull();
+        fireEvent.click(screen.getByRole("button", { name: "Add a nickname" }));
+        fireEvent.change(
+            screen.getByRole("textbox", { name: "New nickname" }),
+            {
+                target: { value: "Jeník" },
+            },
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/knowledge/aliases",
+                expect.objectContaining({
+                    method: "POST",
+                    body: JSON.stringify({
+                        target: { personId: "jan" },
+                        text: "Jeník",
+                    }),
+                }),
+            ),
+        );
+        await waitFor(() => expect(refresh).toHaveBeenCalled());
     });
 });

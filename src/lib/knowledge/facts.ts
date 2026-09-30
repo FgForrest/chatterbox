@@ -47,6 +47,7 @@ import {
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
+import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -479,6 +480,26 @@ async function assertSpeakerInFact(
 }
 
 /**
+ * Refuse a fact typed by hand about a person whose text names a denied
+ * topic (health, family, personality, performance, demographics), as a
+ * type's name is refused: the same word list, no model. What a term means
+ * is not about anyone ("Key Performance Indicator"), so only facts about
+ * people are screened.
+ */
+function assertTextAllowed(subject: KnowledgeTarget, object: FactObject): void {
+    if (!("personId" in subject) || !("literal" in object)) return;
+    const denied = deniedTopicOf(object.literal);
+    if (denied) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Knowledge about people's health, family, personality, performance or demographics is not kept",
+            400,
+            { field: "object", deniedTopic: denied.id },
+        );
+    }
+}
+
+/**
  * State a fact by hand, in the actor's own scope: the organization
  * account's are the Organization's. It needs no evidence and never decays.
  */
@@ -486,6 +507,7 @@ export async function confirmManualFact(
     actorUserId: string,
     args: FactArgs,
 ): Promise<string> {
+    assertTextAllowed(args.subject, args.object);
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
         const factId = await confirmFactInTx(tx, {
@@ -571,6 +593,57 @@ export async function deleteFact(
         if (!own) throw factNotFound();
         await deleteFactsInTx(tx, [factId]);
         await bumpScopeInTx(tx, [actorUserId]);
+    });
+}
+
+/**
+ * Change what a fact of the actor's own scope says: a manual fact with
+ * `object` takes its place and it is erased, in one transaction. On a
+ * single-valued relation it must still be the current value (409 with
+ * `details.currentFactId` otherwise). Returns the fact now stating it.
+ */
+export async function replaceFact(
+    actorUserId: string,
+    factId: string,
+    object: FactObject,
+): Promise<string> {
+    return db.transaction(async (tx) => {
+        // Exclusive, as deleteFact: the old fact goes.
+        await lockOrgPeople(tx);
+        const ownFact = and(
+            eq(knowledgeFacts.id, factId),
+            eq(knowledgeFacts.userId, actorUserId),
+        );
+        const [mine] = await tx
+            .select({ id: knowledgeFacts.id })
+            .from(knowledgeFacts)
+            .where(ownFact);
+        if (!mine) throw factNotFound();
+        await lockRecordingsNaming(tx, { factIds: [factId] });
+        const [old] = await tx
+            .select({
+                subjectPersonId: knowledgeFacts.subjectPersonId,
+                subjectEntityId: knowledgeFacts.subjectEntityId,
+                relationKey: knowledgeFacts.relationKey,
+            })
+            .from(knowledgeFacts)
+            .where(ownFact)
+            .for("update");
+        if (!old) throw factNotFound();
+        const subject = nodeOf(old.subjectPersonId, old.subjectEntityId);
+        assertTextAllowed(subject, object);
+        const replacement = await confirmFactInTx(tx, {
+            scopeUserId: actorUserId,
+            actorUserId,
+            origin: "manual",
+            subject,
+            relationKey: old.relationKey,
+            object,
+            expectedCurrentFactId: factId,
+        });
+        if (replacement !== factId) await deleteFactsInTx(tx, [factId]);
+        await bumpScopeInTx(tx, [actorUserId]);
+        return replacement;
     });
 }
 

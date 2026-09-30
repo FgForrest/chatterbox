@@ -11,7 +11,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo, useState } from "react";
-import { KnownFacts, OtherNames } from "@/components/people/known-facts";
+import {
+    type FactEditing,
+    KnownFacts,
+    type OtherName,
+    OtherNames,
+} from "@/components/people/known-facts";
 import { PersonActions } from "@/components/people/person-actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +52,9 @@ export interface PersonDetailProps {
     /** What is known about them that the viewer may read (`factsForPage`). */
     facts?: PageRelation[];
     /** Their other names the viewer may see. */
-    otherNames?: { text: string; kind: "alias" | "heard_as" }[];
+    otherNames?: OtherName[];
+    /** What the viewer may add and change among their facts and names. */
+    editing?: FactEditing;
 }
 
 export function PersonDetail({
@@ -56,6 +63,7 @@ export function PersonDetail({
     canManage = true,
     facts,
     otherNames = [],
+    editing,
 }: PersonDetailProps) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -65,7 +73,7 @@ export function PersonDetail({
     // One recording can hold two transcripts -- the user's own and a Plaud
     // import -- and the same person can be attributed in both, so the overlay
     // answers twice for one appearance. This page lists recordings, so each
-    // is shown, keyed and counted once, which is also how `/people` counts.
+    // is shown, keyed and counted once, which is also how `/almanac` counts.
     const heard = useMemo(() => {
         const byRecording = new Map<string, PersonAppearance>();
         for (const appearance of appearances) {
@@ -81,7 +89,7 @@ export function PersonDetail({
             method: "DELETE",
         });
         if (response.ok) {
-            router.push("/people");
+            router.push("/almanac");
             router.refresh();
         }
     }
@@ -89,7 +97,7 @@ export function PersonDetail({
     return (
         <div className="space-y-8 pb-12">
             <Link
-                href="/people"
+                href="/almanac"
                 className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
                 <ArrowLeft className="size-4" /> {i18n("People")}
@@ -159,7 +167,15 @@ export function PersonDetail({
                 </p>
             )}
 
-            <OtherNames names={otherNames} />
+            <OtherNames
+                names={otherNames}
+                editing={
+                    editing && {
+                        target: { personId: person.id },
+                        ownScope: editing.ownScope,
+                    }
+                }
+            />
 
             {person.notes && (
                 <section className="space-y-2">
@@ -177,7 +193,11 @@ export function PersonDetail({
                     <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                         {i18n("What is known")}
                     </h2>
-                    <KnownFacts name={person.displayName} relations={facts} />
+                    <KnownFacts
+                        name={person.displayName}
+                        relations={facts}
+                        editing={editing}
+                    />
                 </section>
             )}
 

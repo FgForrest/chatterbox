@@ -189,7 +189,7 @@ export function LearnResults({
                             )}
                         </p>
                         <Link
-                            href="/people"
+                            href="/almanac/things"
                             className="font-medium text-primary hover:underline"
                         >
                             {i18n("Add people and things")}

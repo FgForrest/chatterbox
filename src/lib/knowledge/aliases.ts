@@ -160,23 +160,10 @@ export async function addAlias(
     target: KnowledgeTarget,
     text: string,
 ): Promise<string> {
-    const clean = cleanText(text);
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const resolved = await resolveTargetInTx(tx, actorUserId, target);
-        const [row] = await tx
-            .insert(knowledgeAliases)
-            .values({
-                userId: actorUserId,
-                ...targetColumns(resolved),
-                kind: "alias",
-                text: encryptText(clean),
-                textHmac: domainLookupHash(TEXT_DOMAIN, clean),
-                createdByUserId: actorUserId,
-            })
-            .onConflictDoNothing()
-            .returning({ id: knowledgeAliases.id });
-        if (!row) {
+        const id = await addAliasInTx(tx, actorUserId, target, text);
+        if (!id) {
             throw new AppError(
                 ErrorCode.CONFLICT,
                 "They already have that name",
@@ -185,8 +172,36 @@ export async function addAlias(
             );
         }
         await bumpScopeInTx(tx, [actorUserId]);
-        return row.id;
+        return id;
     });
+}
+
+/**
+ * `addAlias` inside a caller's transaction, which holds the
+ * Organization-people lock (shared suffices) and bumps the actor's scope.
+ * Null when the actor already gave them that name.
+ */
+export async function addAliasInTx(
+    tx: Tx,
+    actorUserId: string,
+    target: KnowledgeTarget,
+    text: string,
+): Promise<string | null> {
+    const clean = cleanText(text);
+    const resolved = await resolveTargetInTx(tx, actorUserId, target);
+    const [row] = await tx
+        .insert(knowledgeAliases)
+        .values({
+            userId: actorUserId,
+            ...targetColumns(resolved),
+            kind: "alias",
+            text: encryptText(clean),
+            textHmac: domainLookupHash(TEXT_DOMAIN, clean),
+            createdByUserId: actorUserId,
+        })
+        .onConflictDoNothing()
+        .returning({ id: knowledgeAliases.id });
+    return row?.id ?? null;
 }
 
 /**

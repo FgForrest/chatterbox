@@ -1,4 +1,3 @@
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { SuggestedRelations } from "@/components/people/suggested-relations";
@@ -46,23 +45,7 @@ export default async function ReviewQueuePage() {
         .map((type) => ({ key: type.key, label: type.label }));
 
     return (
-        <div className="container mx-auto max-w-3xl space-y-8 px-4 py-6">
-            <div className="flex items-center justify-between gap-4">
-                <Link
-                    href="/people"
-                    className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-                >
-                    <ArrowLeft className="size-4" /> {i18n("People")}
-                </Link>
-                <Link
-                    href="/people/vocabulary"
-                    className="text-sm text-primary hover:underline"
-                >
-                    {organization
-                        ? i18n("Organization vocabulary")
-                        : i18n("Your vocabulary")}
-                </Link>
-            </div>
+        <div className="mx-auto max-w-3xl space-y-8">
             <section className="space-y-3">
                 <h1 className="text-xl font-semibold">
                     {i18n("Waiting for review")}

@@ -666,7 +666,7 @@ describe("LearnReview", () => {
                 screen
                     .getByRole("link", { name: "Add people and things" })
                     .getAttribute("href"),
-            ).toBe("/people");
+            ).toBe("/almanac/things");
             expect(
                 screen.getByRole("button", { name: "Re-learn" }),
             ).toBeTruthy();

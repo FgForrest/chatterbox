@@ -19,6 +19,8 @@ import {
     knowledgeEntities,
     knowledgeEntityNotes,
     knowledgeEntityTypes,
+    knowledgeFacts,
+    knowledgeRelationTypes,
     transcriptCorrections,
     users,
 } from "@/db/schema";
@@ -26,6 +28,7 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
 import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
+import { relationFits } from "@/lib/knowledge/fact-rules";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeople,
@@ -274,31 +277,65 @@ export async function createEntity(
         description = null,
     }: { typeKey: string; name: string; description?: string | null },
 ): Promise<Entity> {
-    const clean = cleanName(name);
-    const cleanText = cleanDescription(description);
-    const nameHmac = nameHmacOf(clean);
     const id = await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
-        await assertTypeUsable(tx, actorUserId, typeKey);
-        const existing = await sameNamed(tx, actorUserId, typeKey, nameHmac);
-        if (existing) throw alreadyNamed(existing);
-        const [created] = await tx
-            .insert(knowledgeEntities)
-            .values({
-                userId: actorUserId,
-                typeKey,
-                name: encryptText(clean),
-                nameHmac,
-                description: cleanText ? encryptText(cleanText) : null,
-                createdByUserId: actorUserId,
-            })
-            .returning({ id: knowledgeEntities.id });
+        const created = await createEntityInTx(tx, actorUserId, {
+            typeKey,
+            name,
+            description,
+        });
         await bumpScopeInTx(tx, [actorUserId]);
-        return (created as { id: string }).id;
+        return created;
     });
     const entity = await getEntity(actorUserId, id);
     if (!entity) throw entityNotFound();
     return entity;
+}
+
+/**
+ * `createEntity` inside a caller's transaction, which holds the
+ * Organization-people lock and bumps the actor's scope. Returns the id.
+ */
+export async function createEntityInTx(
+    tx: Tx,
+    actorUserId: string,
+    {
+        typeKey,
+        name,
+        description = null,
+    }: { typeKey: string; name: string; description?: string | null },
+): Promise<string> {
+    const clean = cleanName(name);
+    const cleanText = cleanDescription(description);
+    const nameHmac = nameHmacOf(clean);
+    await assertTypeUsable(tx, actorUserId, typeKey);
+    const existing = await sameNamed(tx, actorUserId, typeKey, nameHmac);
+    if (existing) throw alreadyNamed(existing);
+    const [created] = await tx
+        .insert(knowledgeEntities)
+        .values({
+            userId: actorUserId,
+            typeKey,
+            name: encryptText(clean),
+            nameHmac,
+            description: cleanText ? encryptText(cleanText) : null,
+            createdByUserId: actorUserId,
+        })
+        .returning({ id: knowledgeEntities.id });
+    return (created as { id: string }).id;
+}
+
+/**
+ * The live entity of that name and type in `ownerUserId`'s scope, if any:
+ * how an import or a review finds a thing that exists already.
+ */
+export async function findEntityByNameInTx(
+    tx: Tx,
+    ownerUserId: string,
+    typeKey: string,
+    name: string,
+): Promise<string | null> {
+    return sameNamed(tx, ownerUserId, typeKey, nameHmacOf(cleanName(name)));
 }
 
 /** An entity by id, tombstones included, if `viewerUserId` may see it. */
@@ -356,24 +393,201 @@ export async function renameEntity(
     entityId: string,
     name: string,
 ): Promise<void> {
-    const clean = cleanName(name);
-    const nameHmac = nameHmacOf(clean);
+    await updateEntity(actorUserId, entityId, { name });
+}
+
+/**
+ * Give an entity the actor may change another type: a product that is
+ * really a project, say. 409 when that type already has one of its name,
+ * or when a current fact of the actor's own about it would no longer fit
+ * its relation (`details.factId`, `details.relationKey`): change or erase
+ * that fact first. Facts others keep about it are theirs, and stay.
+ */
+export async function retypeEntity(
+    actorUserId: string,
+    entityId: string,
+    typeKey: string,
+): Promise<void> {
+    await updateEntity(actorUserId, entityId, { typeKey });
+}
+
+/**
+ * Change an entity's name, type and description at once, all or nothing:
+ * `renameEntity`, `retypeEntity` and `describeEntity` in one transaction.
+ * A member's description of an Organization entity is their private
+ * notes; a name or type there is the organization account's (403).
+ */
+export async function updateEntity(
+    actorUserId: string,
+    entityId: string,
+    changes: { name?: string; typeKey?: string; description?: string | null },
+): Promise<void> {
+    const clean = changes.name === undefined ? null : cleanName(changes.name);
+    const cleanText =
+        changes.description === undefined
+            ? undefined
+            : cleanDescription(changes.description);
     await db.transaction(async (tx) => {
         await lockOrgPeople(tx);
-        const row = await requireManageable(tx, actorUserId, entityId);
+        const scopes = new Set<string>();
+        let row: EntityRow;
+        if (clean !== null || changes.typeKey !== undefined) {
+            row = await requireManageable(tx, actorUserId, entityId);
+        } else {
+            const read = await readEntityRow(tx, entityId);
+            if (
+                !read ||
+                (read.userId !== actorUserId && read.ownerRole !== "org")
+            ) {
+                throw entityNotFound();
+            }
+            row = read;
+        }
         if (row.mergedIntoId) throw entityNotFound();
-        const existing = await sameNamed(tx, row.userId, row.typeKey, nameHmac);
-        if (existing && existing !== entityId) throw alreadyNamed(existing);
-        await tx
-            .update(knowledgeEntities)
-            .set({ name: encryptText(clean), nameHmac, updatedAt: new Date() })
-            .where(eq(knowledgeEntities.id, entityId));
-        // A new name reads differently everywhere the entity is named.
-        await bumpScopeInTx(
-            tx,
-            await scopesNamingInTx(tx, { entityIds: [entityId] }),
-        );
+        const typeKey = changes.typeKey ?? row.typeKey;
+        const nameHmac = clean === null ? row.nameHmac : nameHmacOf(clean);
+        if (typeKey !== row.typeKey) {
+            await assertTypeUsable(tx, row.userId, typeKey);
+            const misfit = await factNotFittingInTx(
+                tx,
+                entityId,
+                typeKey,
+                actorUserId,
+            );
+            if (misfit) {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "A fact about it would no longer fit its relation",
+                    409,
+                    { field: "typeKey", ...misfit },
+                );
+            }
+        }
+        if (typeKey !== row.typeKey || nameHmac !== row.nameHmac) {
+            const existing = await sameNamed(tx, row.userId, typeKey, nameHmac);
+            if (existing && existing !== entityId) throw alreadyNamed(existing);
+        }
+        if (clean !== null || typeKey !== row.typeKey) {
+            await tx
+                .update(knowledgeEntities)
+                .set({
+                    ...(clean === null
+                        ? {}
+                        : { name: encryptText(clean), nameHmac }),
+                    typeKey,
+                    updatedAt: new Date(),
+                })
+                .where(eq(knowledgeEntities.id, entityId));
+            // Its merged-away records follow, so a merge into a stale id
+            // compares the type the entity has now.
+            if (typeKey !== row.typeKey) {
+                await tx
+                    .update(knowledgeEntities)
+                    .set({ typeKey, updatedAt: new Date() })
+                    .where(eq(knowledgeEntities.mergedIntoId, entityId));
+            }
+            // A new name or type reads differently everywhere it is named.
+            for (const scope of await scopesNamingInTx(tx, {
+                entityIds: [entityId],
+            })) {
+                scopes.add(scope);
+            }
+        }
+        if (cleanText !== undefined) {
+            await describeEntityInTx(tx, actorUserId, row, cleanText);
+            scopes.add(actorUserId);
+        }
+        await bumpScopeInTx(tx, scopes);
     });
+}
+
+/**
+ * The first current fact of `scopeUserId`'s naming `entityId` that its
+ * relation would refuse were the entity of type `typeKey`, or null when
+ * all would still fit. Other scopes' facts are not the actor's to fix.
+ */
+async function factNotFittingInTx(
+    tx: Tx,
+    entityId: string,
+    typeKey: string,
+    scopeUserId: string,
+): Promise<{ factId: string; relationKey: string } | null> {
+    const facts = await tx
+        .select({
+            id: knowledgeFacts.id,
+            userId: knowledgeFacts.userId,
+            relationKey: knowledgeFacts.relationKey,
+            subjectPersonId: knowledgeFacts.subjectPersonId,
+            subjectEntityId: knowledgeFacts.subjectEntityId,
+            objectPersonId: knowledgeFacts.objectPersonId,
+            objectEntityId: knowledgeFacts.objectEntityId,
+            objectLiteral: knowledgeFacts.objectLiteral,
+        })
+        .from(knowledgeFacts)
+        .where(
+            and(
+                eq(knowledgeFacts.userId, scopeUserId),
+                isNull(knowledgeFacts.replacedByFactId),
+                or(
+                    eq(knowledgeFacts.subjectEntityId, entityId),
+                    eq(knowledgeFacts.objectEntityId, entityId),
+                ),
+            ),
+        );
+    const typeOf = async (
+        personId: string | null,
+        otherEntityId: string | null,
+    ): Promise<string> => {
+        if (personId) return "person";
+        if (otherEntityId === entityId) return typeKey;
+        const [other] = await tx
+            .select({ typeKey: knowledgeEntities.typeKey })
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.id, otherEntityId ?? ""))
+            .limit(1);
+        return other?.typeKey ?? "";
+    };
+    for (const fact of facts) {
+        // The relation as the fact's scope reads it: core, the
+        // Organization's, or the scope's own.
+        const [relation] = await tx
+            .select({
+                subjectTypes: knowledgeRelationTypes.subjectTypes,
+                objectTypes: knowledgeRelationTypes.objectTypes,
+                objectKind: knowledgeRelationTypes.objectKind,
+            })
+            .from(knowledgeRelationTypes)
+            .where(
+                and(
+                    eq(knowledgeRelationTypes.key, fact.relationKey),
+                    or(
+                        isNull(knowledgeRelationTypes.userId),
+                        orgOwnedCondition(knowledgeRelationTypes.userId),
+                        eq(knowledgeRelationTypes.userId, fact.userId),
+                    ),
+                ),
+            )
+            .limit(1);
+        if (!relation) continue;
+        const fits = relationFits(
+            {
+                subjectTypes: relation.subjectTypes,
+                objectTypes: relation.objectTypes,
+                objectKind: relation.objectKind as "entity" | "literal",
+            },
+            await typeOf(fact.subjectPersonId, fact.subjectEntityId),
+            fact.objectLiteral
+                ? { literal: true }
+                : {
+                      type: await typeOf(
+                          fact.objectPersonId,
+                          fact.objectEntityId,
+                      ),
+                  },
+        );
+        if (!fits) return { factId: fact.id, relationKey: fact.relationKey };
+    }
+    return null;
 }
 
 /**
@@ -387,56 +601,52 @@ export async function describeEntity(
     entityId: string,
     description: string | null,
 ): Promise<void> {
-    const clean = cleanDescription(description);
-    await db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        const row = await readEntityRow(tx, entityId);
-        if (
-            !row ||
-            row.mergedIntoId ||
-            (row.userId !== actorUserId && row.ownerRole !== "org")
-        ) {
-            throw entityNotFound();
-        }
-        if (row.userId === actorUserId) {
-            await tx
-                .update(knowledgeEntities)
-                .set({
-                    description: clean ? encryptText(clean) : null,
-                    updatedAt: new Date(),
-                })
-                .where(eq(knowledgeEntities.id, entityId));
-            await bumpScopeInTx(tx, [actorUserId]);
-            return;
-        }
-        if (!clean) {
-            await tx
-                .delete(knowledgeEntityNotes)
-                .where(
-                    and(
-                        eq(knowledgeEntityNotes.entityId, entityId),
-                        eq(knowledgeEntityNotes.userId, actorUserId),
-                    ),
-                );
-            await bumpScopeInTx(tx, [actorUserId]);
-            return;
-        }
+    await updateEntity(actorUserId, entityId, { description });
+}
+
+/** `describeEntity` on a row the caller read under the lock. */
+async function describeEntityInTx(
+    tx: Tx,
+    actorUserId: string,
+    row: EntityRow,
+    clean: string | null,
+): Promise<void> {
+    const entityId = row.id;
+    if (row.userId === actorUserId) {
         await tx
-            .insert(knowledgeEntityNotes)
-            .values({
-                entityId,
-                userId: actorUserId,
-                notes: encryptText(clean),
+            .update(knowledgeEntities)
+            .set({
+                description: clean ? encryptText(clean) : null,
+                updatedAt: new Date(),
             })
-            .onConflictDoUpdate({
-                target: [
-                    knowledgeEntityNotes.entityId,
-                    knowledgeEntityNotes.userId,
-                ],
-                set: { notes: encryptText(clean), updatedAt: new Date() },
-            });
-        await bumpScopeInTx(tx, [actorUserId]);
-    });
+            .where(eq(knowledgeEntities.id, entityId));
+        return;
+    }
+    if (!clean) {
+        await tx
+            .delete(knowledgeEntityNotes)
+            .where(
+                and(
+                    eq(knowledgeEntityNotes.entityId, entityId),
+                    eq(knowledgeEntityNotes.userId, actorUserId),
+                ),
+            );
+        return;
+    }
+    await tx
+        .insert(knowledgeEntityNotes)
+        .values({
+            entityId,
+            userId: actorUserId,
+            notes: encryptText(clean),
+        })
+        .onConflictDoUpdate({
+            target: [
+                knowledgeEntityNotes.entityId,
+                knowledgeEntityNotes.userId,
+            ],
+            set: { notes: encryptText(clean), updatedAt: new Date() },
+        });
 }
 
 /** Add `notes` (ciphertext) after whatever `userId` already noted there. */

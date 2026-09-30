@@ -74,10 +74,10 @@ export default async function PeoplePage() {
     );
 
     return (
-        <div className="container mx-auto max-w-7xl px-4 py-6">
+        <div>
             {pendingReviews > 0 && (
                 <Link
-                    href="/people/review"
+                    href="/almanac/review"
                     className="mb-4 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 text-sm hover:bg-primary/10"
                 >
                     {i18n(
