@@ -20,7 +20,9 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { isHeldForLearn } from "@/lib/learn/hold";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { generateSummaryForRecording } from "./generate-summary";
 import {
@@ -49,11 +51,23 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
     async run({
         payload,
         userId,
+        jobId,
         attempt,
         maxAttempts,
         reportProgress,
     }): Promise<JobResult> {
         const orgView = payload.view === "org";
+        // An automatic summary queued before automatic Learn held the
+        // recording again: the hold's release makes it, from the reviewed
+        // transcript.
+        if (
+            payload.trigger !== "manual" &&
+            !orgView &&
+            (await isHeldForLearn(payload.recordingId))
+        ) {
+            return { skipped: "held" };
+        }
+        if (payload.rateLimited) await admitRateLimitedAutoSummary(userId);
         try {
             // The owner's erase marker governs only the owner's rows; the
             // Organization view is re-authorized inside the run instead.
@@ -80,20 +94,21 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     trigger: payload.trigger,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
+                    jobId,
                 },
             );
 
             // Emitted here rather than in the transcription pipeline, so the
             // event still means "the summary is written and readable" now
             // that the write happens on a worker instead of inline. Webhooks
-            // are the owner's integration, so the Organization view is silent.
-            if (!orgView) {
-                await emitEvent(
-                    "summary.completed",
-                    userId,
-                    payload.recordingId,
-                ).catch(() => {});
-            }
+            // are the owner's integration, and a shared recording is one
+            // recording: a summary made on the Organization view is the
+            // owner's too, as its transcription is.
+            await emitEvent(
+                "summary.completed",
+                result.ownerUserId,
+                payload.recordingId,
+            ).catch(() => {});
 
             return {
                 provider: result.provider,
@@ -103,6 +118,15 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                 ...(result.multiPass ? { multiPass: result.multiPass } : {}),
             };
         } catch (error) {
+            // Shared since it was queued: an automatic run has nothing to
+            // do, and nothing failed. A person who asked is told why.
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.RECORDING_SHARED &&
+                payload.trigger !== "manual"
+            ) {
+                return { skipped: "shared" };
+            }
             // Emit only when this failure is final. A `summary.failed` per
             // attempt would tell a subscriber the summary failed and then
             // have it succeed a minute later, which is worse for them than

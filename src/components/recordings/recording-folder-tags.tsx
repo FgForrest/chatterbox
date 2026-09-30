@@ -2,7 +2,20 @@
 
 import { Folder, FolderInput, FolderPlus, Users, X } from "lucide-react";
 import { useExtracted } from "next-intl";
+import { useState } from "react";
+import {
+    useWithdrawPreview,
+    WithdrawRetentionWarning,
+} from "@/components/recordings/withdraw-retention-warning";
 import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -22,13 +35,29 @@ interface RecordingFolderTagsProps {
     assignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
     onAdd: (recordingId: string, folderId: string) => Promise<void>;
-    onRemove: (recordingId: string, folderId: string) => Promise<void>;
+    /**
+     * `withdraw`: the owner confirmed that leaving the last Organization
+     * folder takes the recording out of the Organization. A removal the
+     * server finds to be that one without it rejects with an error whose
+     * `code` is `WITHDRAW_UNCONFIRMED`, and the confirmation opens.
+     */
+    onRemove: (
+        recordingId: string,
+        folderId: string,
+        withdraw?: boolean,
+    ) => Promise<void>;
     /**
      * Whether the viewer owns the recording. Only the owner files it in
      * Private folders or shares it with (and withdraws it from) the
      * Organization; anyone else may only move it within the Organization.
      */
     isOwn?: boolean;
+    /**
+     * Whether the viewer may take it out of Organization folders, down to
+     * withdrawing it: its owner, and the organization account on the
+     * Organization view, who confirms the owner's retention warning.
+     */
+    canWithdraw?: boolean;
     /** Show only Organization folders (the recording's Organization view). */
     organizationOnly?: boolean;
     onMove?: (
@@ -46,10 +75,22 @@ export function RecordingFolderTags({
     onAdd,
     onRemove,
     isOwn = true,
+    canWithdraw = isOwn,
     organizationOnly = false,
     onMove,
 }: RecordingFolderTagsProps) {
     const i18n = useExtracted();
+    // The Organization folder whose removal would withdraw the recording,
+    // while its owner confirms.
+    const [withdrawing, setWithdrawing] = useState<RecordingFolder | null>(
+        null,
+    );
+    // The owner asks on their own view, the organization account on the
+    // Organization's.
+    const preview = useWithdrawPreview(
+        withdrawing ? recordingId : null,
+        isOwn ? "private" : "org",
+    );
     const label = (folder: RecordingFolder) =>
         folder.parentId === null && folder.scope === "org"
             ? i18n("Organization")
@@ -100,12 +141,32 @@ export function RecordingFolderTags({
                         )}
                         {label(folder)}
                     </button>
-                    {isOwn && (
+                    {(isOwn || (canWithdraw && folder.scope === "org")) && (
                         <button
                             type="button"
                             onClick={() => {
+                                // Its last Organization folder: leaving it
+                                // withdraws the recording, which is
+                                // confirmed first.
+                                if (
+                                    folder.scope === "org" &&
+                                    assignedOrg.length === 1
+                                ) {
+                                    setWithdrawing(folder);
+                                    return;
+                                }
                                 void onRemove(recordingId, folder.id).catch(
-                                    () => {},
+                                    (error: unknown) => {
+                                        // It was the last one after all
+                                        // (another tab removed the other).
+                                        if (
+                                            (error as { code?: unknown })
+                                                ?.code ===
+                                            "WITHDRAW_UNCONFIRMED"
+                                        ) {
+                                            setWithdrawing(folder);
+                                        }
+                                    },
                                 );
                             }}
                             className="inline-flex h-full items-center border-l border-primary/15 px-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -220,6 +281,63 @@ export function RecordingFolderTags({
                     </DropdownMenuContent>
                 </DropdownMenu>
             )}
+            <Dialog
+                open={withdrawing !== null}
+                onOpenChange={(open) => {
+                    if (!open) setWithdrawing(null);
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {i18n(
+                                "Take this recording out of the Organization?",
+                            )}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {isOwn
+                                ? i18n(
+                                      "Colleagues will no longer see it. You get it back as the Organization left it, and can change it again.",
+                                  )
+                                : i18n(
+                                      "Colleagues will no longer see it. Its owner gets it back as the Organization left it.",
+                                  )}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {withdrawing && (
+                        <WithdrawRetentionWarning
+                            preview={preview}
+                            ofOwner={!isOwn}
+                        />
+                    )}
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setWithdrawing(null)}
+                        >
+                            {i18n("Cancel")}
+                        </Button>
+                        <Button
+                            // What the owner's retention will delete is
+                            // part of what is confirmed.
+                            disabled={preview.status === "loading"}
+                            onClick={() => {
+                                const folder = withdrawing;
+                                setWithdrawing(null);
+                                if (folder) {
+                                    void onRemove(
+                                        recordingId,
+                                        folder.id,
+                                        true,
+                                    ).catch(() => {});
+                                }
+                            }}
+                        >
+                            {i18n("Take out of the Organization")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </fieldset>
     );
 }

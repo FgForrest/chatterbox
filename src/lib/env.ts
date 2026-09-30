@@ -16,6 +16,16 @@ const optionalStrictBoolean = z
         return z.NEVER;
     });
 
+/** An absolute http(s) URL; `host:port` alone parses as a URL with a scheme. */
+function isHttpUrl(value: string): boolean {
+    try {
+        const { protocol } = new URL(value);
+        return protocol === "http:" || protocol === "https:";
+    } catch {
+        return false;
+    }
+}
+
 const baseEnvSchema = z.object({
     /** True for the Riffado-operated hosted instance; default false (self-host). */
     IS_HOSTED: z
@@ -127,6 +137,70 @@ const baseEnvSchema = z.object({
         .refine((val) => val === undefined || /^\d+$/.test(val), {
             message: "GOOGLE_CLOUD_PROJECT_NUMBER must be numeric",
         }),
+    /**
+     * Learn (self-host only). The embedding service, an OpenAI-compatible
+     * `embeddings` endpoint such as the compose `embeddings` service;
+     * unset, Learn matches names by their words only.
+     */
+    EMBEDDING_BASE_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "EMBEDDING_BASE_URL must be an http(s) URL",
+        }),
+    EMBEDDING_MODEL: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || "bge-m3"),
+    EMBEDDING_API_KEY: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /**
+     * How much memory, in MB, one process may hold of decrypted knowledge
+     * before it evicts the least recently used scopes.
+     */
+    KNOWLEDGE_MEMORY_MB: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? Number(val.trim()) : 256))
+        .refine((val) => Number.isInteger(val) && val >= 16 && val <= 16_384, {
+            message:
+                "KNOWLEDGE_MEMORY_MB must be a whole number from 16 to 16384",
+        }),
+    /**
+     * Offer automatic Learn (Task 5.5): after a transcript with timings,
+     * Learn runs by itself and the title, summary and topics wait for its
+     * review (72 h at most). Off until the evaluation's thresholds are met
+     * on this instance's recordings; the person still opts in per account.
+     */
+    LEARN_AUTO: optionalStrictBoolean,
+    /**
+     * This instance's agent bridge (its base URL, as a provider names it,
+     * e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex
+     * provider pointing exactly here takes Learn's bridge path and is sent
+     * a run's token for the knowledge tools.
+     */
+    LEARN_BRIDGE_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "LEARN_BRIDGE_URL must be an http(s) URL",
+        }),
+    /**
+     * The one URL of this app's read-only knowledge tools (MCP) the Learn
+     * bridge may call back; nothing else is reachable from it.
+     */
+    LEARN_MCP_URL: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "LEARN_MCP_URL must be an http(s) URL",
+        }),
+
     /**
      * Comma-separated Google Workspace domains whose accounts may connect.
      * Unset, any account the consent screen admits may.
@@ -874,6 +948,13 @@ function validateEnv(): Env {
             S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
             FILESYSTEM_EXPORT_ROOT: process.env.FILESYSTEM_EXPORT_ROOT,
             GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+            EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
+            EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
+            EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
+            LEARN_MCP_URL: process.env.LEARN_MCP_URL,
+            LEARN_AUTO: process.env.LEARN_AUTO,
+            LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
+            KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
             GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,
             GOOGLE_CLOUD_PROJECT_NUMBER:

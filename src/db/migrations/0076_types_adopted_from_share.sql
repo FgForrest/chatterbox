@@ -1,0 +1,2 @@
+ALTER TABLE "knowledge_entity_types" ADD COLUMN "adopted_from_share" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "knowledge_relation_types" ADD COLUMN "adopted_from_share" boolean DEFAULT false NOT NULL;

@@ -1,8 +1,23 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, recordings, transcriptions } from "@/db/schema";
+import {
+    aiEnhancements,
+    asyncJobs,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
-import { isRecordingShared } from "@/lib/sharing/shared";
+import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
+import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import {
+    stampNewTranscriptAudioInTx,
+    transcriptRewrittenInTx,
+} from "@/lib/knowledge/transcript-rewrite";
+import {
+    contentWriterRefusal,
+    sharingOrgUserId,
+    type WriterRefusal,
+} from "@/lib/sharing/writer";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /**
@@ -19,6 +34,7 @@ export type TranscriptSource = "riffado" | "plaud" | "mixed";
 export type EnhancementSource = "riffado" | "plaud";
 
 export interface UpsertTranscriptionArgs {
+    /** The recording's owner, who owns its content rows. */
     userId: string;
     recordingId: string;
     /** Plaintext transcript; this helper encrypts it at rest. */
@@ -37,13 +53,35 @@ export interface UpsertTranscriptionArgs {
     turns?: TranscriptTurn[];
     /** Permit an explicit user action to replace a deliberately erased transcript. */
     allowReaped?: boolean;
-    /** Owner of the recording when it differs from the row owner (Organization view). */
-    recordingOwnerId?: string;
-    /** Account whose provider produced the text; defaults to `userId`. */
+    /**
+     * The summary source made from the text this write replaces, deleted
+     * with it in the same transaction, so it never outlives its text nor
+     * goes after the writer lost the right to change the recording.
+     */
+    dropSummaryOnReplace?: EnhancementSource;
+    /**
+     * Who makes the change; defaults to `userId`. The organization account
+     * on a shared recording, the owner otherwise (see `writerRefusal`).
+     */
+    actorUserId?: string;
+    /** Account whose provider produced the text; defaults to the actor. */
     producedByUserId?: string;
+    /**
+     * The job this write finishes. Cancelled meanwhile (the recording was
+     * withdrawn, erased or deleted), it writes nothing, even if the
+     * recording is shared again by then.
+     */
+    /**
+     * The md5 of the audio this text was made from, as read when its
+     * transcription began (a sync may replace the audio meanwhile); the
+     * recording's current one by default.
+     */
+    audioMd5?: string | null;
+    jobId?: string;
 }
 
 export interface UpsertEnhancementArgs {
+    /** The recording's owner, who owns its content rows. */
     userId: string;
     recordingId: string;
     /** Transcript row this summary was generated from. */
@@ -68,24 +106,58 @@ export interface UpsertEnhancementArgs {
         passesUsed: number;
         merged: boolean;
     };
+    /**
+     * `llmInputFingerprint` of what the model read; null (or absent) for a
+     * summary nobody can tell stale, as an import. Written on every upsert.
+     */
+    inputFingerprint?: string | null;
     /** Permit an explicit user action to replace a deliberately erased summary. */
     allowReaped?: boolean;
-    /** Owner of the recording when it differs from the row owner (Organization view). */
-    recordingOwnerId?: string;
-    /** Account whose provider produced the summary; defaults to `userId`. */
+    /** Who makes the change; defaults to `userId`. See `UpsertTranscriptionArgs`. */
+    actorUserId?: string;
+    /** Account whose provider produced the summary; defaults to the actor. */
     producedByUserId?: string;
+    /** See `UpsertTranscriptionArgs.jobId`. */
+    jobId?: string;
 }
 
 /**
- * Result of a tombstone-aware upsert. `committed: false` means the recording
- * was soft-deleted mid-flight and nothing was written — callers should treat
- * that as a skip (e.g. RECORDING_DELETED), not a hard error.
+ * Result of a tombstone-aware upsert. `committed: false` means nothing was
+ * written — callers should treat that as a skip, not a hard error:
+ * - `reason: "shared"`: the recording is shared with the Organization and
+ *   only the organization account changes it (RECORDING_SHARED);
+ * - `reason: "withdrawn"`: an Organization change, and the recording is no
+ *   longer shared;
+ * - `reason: "cancelled"`: the job it finishes was cancelled meanwhile;
+ * - otherwise it was soft-deleted mid-flight or its content erased (e.g.
+ *   RECORDING_DELETED).
  */
 export interface UpsertResult {
     committed: boolean;
+    reason?: WriterRefusal | "cancelled";
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
+
+class WriterRefused {
+    constructor(readonly refusal: WriterRefusal | "cancelled") {}
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Whether the job a write finishes is still running. A cancellation marks
+ * it failed under the same recording lock, so this is the job's state as of
+ * that lock.
+ */
+async function jobStillRunning(tx: Tx, jobId: string): Promise<boolean> {
+    const [job] = await tx
+        .select({ status: asyncJobs.status })
+        .from(asyncJobs)
+        .where(eq(asyncJobs.id, jobId))
+        .limit(1);
+    return job?.status === "processing";
+}
 
 // Both upserts run inside a transaction that takes a row-level write lock
 // (`FOR UPDATE`) on the recording and re-checks the soft-delete tombstone, so
@@ -114,9 +186,10 @@ export async function upsertTranscription(
         turns,
         allowReaped = false,
     } = args;
-    const ownerId = args.recordingOwnerId ?? userId;
-    const orgView = ownerId !== userId;
-    const producedByUserId = args.producedByUserId ?? userId;
+    const actorUserId = args.actorUserId ?? userId;
+    const producedByUserId = args.producedByUserId ?? actorUserId;
+    // Before the transaction; see `sharingOrgUserId`.
+    const orgUserId = await sharingOrgUserId();
 
     try {
         await db.transaction(async (tx) => {
@@ -129,26 +202,42 @@ export async function upsertTranscription(
                 .where(
                     and(
                         eq(recordings.id, recordingId),
-                        eq(recordings.userId, ownerId),
+                        eq(recordings.userId, userId),
                     ),
                 )
                 .for("update")
                 .limit(1);
 
-            // The owner's retention marker describes the owner's rows; the
-            // Organization view is instead gated on still being shared, so a
-            // run that outlives an unshare writes nothing.
             if (
                 !stillActive ||
                 stillActive.deletedAt ||
-                (!orgView && stillActive.transcriptReapedAt && !allowReaped) ||
-                (orgView && !(await isRecordingShared(recordingId, userId, tx)))
+                (stillActive.transcriptReapedAt && !allowReaped)
             ) {
                 throw RECORDING_WRITE_BLOCKED;
             }
+            // From every writer: a provider run, a browser transcript, a
+            // Plaud import. Under the lock sharing and withdrawal take, so
+            // a run that began before either and ends after it writes
+            // nothing.
+            const refusal = await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId,
+                orgUserId,
+            });
+            if (refusal) throw new WriterRefused(refusal);
+            if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
+                throw new WriterRefused("cancelled");
+            }
 
             const [current] = await tx
-                .select({ id: transcriptions.id })
+                .select({
+                    id: transcriptions.id,
+                    text: transcriptions.text,
+                    turns: transcriptions.turns,
+                    source: transcriptions.source,
+                    model: transcriptions.model,
+                })
                 .from(transcriptions)
                 .where(
                     and(
@@ -172,12 +261,14 @@ export async function upsertTranscription(
                         turns: encryptedTurns,
                         // Anchored to the turns just replaced.
                         topics: null,
+                        topicsInputFingerprint: null,
                         detectedLanguage,
                         transcriptionType,
                         provider,
                         model,
                         source,
                         producedByUserId,
+                        revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
                         and(
@@ -185,6 +276,28 @@ export async function upsertTranscription(
                             eq(transcriptions.userId, userId),
                         ),
                     );
+                // What was said about the text just replaced.
+                await transcriptRewrittenInTx(tx, {
+                    userId,
+                    transcriptionId: current.id,
+                    previous: storedSpeakerVersion(current),
+                    next: speakerVersionOf({ source, model, text, turns }),
+                    audioMd5: args.audioMd5,
+                });
+                if (args.dropSummaryOnReplace) {
+                    await tx
+                        .delete(aiEnhancements)
+                        .where(
+                            and(
+                                eq(aiEnhancements.recordingId, recordingId),
+                                eq(aiEnhancements.userId, userId),
+                                eq(
+                                    aiEnhancements.source,
+                                    args.dropSummaryOnReplace,
+                                ),
+                            ),
+                        );
+                }
             } else {
                 await tx.insert(transcriptions).values({
                     recordingId,
@@ -192,6 +305,7 @@ export async function upsertTranscription(
                     text: encryptedText,
                     turns: encryptedTurns,
                     topics: null,
+                    topicsInputFingerprint: null,
                     detectedLanguage,
                     transcriptionType,
                     provider,
@@ -199,26 +313,34 @@ export async function upsertTranscription(
                     source,
                     producedByUserId,
                 });
+                // Which audio it was made from, for a later rewrite.
+                await stampNewTranscriptAudioInTx(tx, {
+                    recordingId,
+                    userId,
+                    source: source,
+                    audioMd5: args.audioMd5,
+                });
             }
 
-            if (!orgView) {
-                await tx
-                    .update(recordings)
-                    .set({
-                        updatedAt: new Date(),
-                        transcriptReapedAt: null,
-                    })
-                    .where(
-                        and(
-                            eq(recordings.id, recordingId),
-                            eq(recordings.userId, userId),
-                        ),
-                    );
-            }
+            await tx
+                .update(recordings)
+                .set({
+                    updatedAt: new Date(),
+                    transcriptReapedAt: null,
+                })
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, userId),
+                    ),
+                );
         });
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };
+        }
+        if (txError instanceof WriterRefused) {
+            return { committed: false, reason: txError.refusal };
         }
         throw txError;
     }
@@ -246,9 +368,10 @@ export async function upsertEnhancement(
         multiPass,
         allowReaped = false,
     } = args;
-    const ownerId = args.recordingOwnerId ?? userId;
-    const orgView = ownerId !== userId;
-    const producedByUserId = args.producedByUserId ?? userId;
+    const actorUserId = args.actorUserId ?? userId;
+    const producedByUserId = args.producedByUserId ?? actorUserId;
+    // Before the transaction; see `sharingOrgUserId`.
+    const orgUserId = await sharingOrgUserId();
 
     try {
         await db.transaction(async (tx) => {
@@ -261,7 +384,7 @@ export async function upsertEnhancement(
                 .where(
                     and(
                         eq(recordings.id, recordingId),
-                        eq(recordings.userId, ownerId),
+                        eq(recordings.userId, userId),
                     ),
                 )
                 .for("update")
@@ -270,10 +393,19 @@ export async function upsertEnhancement(
             if (
                 !stillActive ||
                 stillActive.deletedAt ||
-                (!orgView && stillActive.summaryReapedAt && !allowReaped) ||
-                (orgView && !(await isRecordingShared(recordingId, userId, tx)))
+                (stillActive.summaryReapedAt && !allowReaped)
             ) {
                 throw RECORDING_WRITE_BLOCKED;
+            }
+            const refusal = await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId,
+                orgUserId,
+            });
+            if (refusal) throw new WriterRefused(refusal);
+            if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
+                throw new WriterRefused("cancelled");
             }
 
             const [existing] = await tx
@@ -290,6 +422,7 @@ export async function upsertEnhancement(
 
             // Always written, NULL included -- see `multiPass` on the args.
             const multiPassColumns = {
+                inputFingerprint: args.inputFingerprint ?? null,
                 multiPassRounds: multiPass?.roundsRequested ?? null,
                 multiPassUsed: multiPass?.passesUsed ?? null,
                 multiPassMerged: multiPass?.merged ?? null,
@@ -335,24 +468,25 @@ export async function upsertEnhancement(
                 });
             }
 
-            if (!orgView) {
-                await tx
-                    .update(recordings)
-                    .set({
-                        updatedAt: new Date(),
-                        summaryReapedAt: null,
-                    })
-                    .where(
-                        and(
-                            eq(recordings.id, recordingId),
-                            eq(recordings.userId, userId),
-                        ),
-                    );
-            }
+            await tx
+                .update(recordings)
+                .set({
+                    updatedAt: new Date(),
+                    summaryReapedAt: null,
+                })
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, userId),
+                    ),
+                );
         });
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };
+        }
+        if (txError instanceof WriterRefused) {
+            return { committed: false, reason: txError.refusal };
         }
         throw txError;
     }

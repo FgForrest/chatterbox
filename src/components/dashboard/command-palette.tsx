@@ -20,6 +20,8 @@ import "@/components/dashboard/command-palette.css";
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
 }
 
@@ -88,7 +90,10 @@ export function CommandPalette({
         for (const r of visibleRecordings) {
             if (r.hasTranscript) continue;
             if (inFlightActions.get(r.id) === "transcribing") continue;
-            const snippet = transcriptSnippet(transcriptions.get(r.id)?.text);
+            const snippet = transcriptSnippet(
+                transcriptions.get(r.id)?.readText ??
+                    transcriptions.get(r.id)?.text,
+            );
             // Filter falsy parts before joining so the value doesn't
             // end in a trailing space when `snippet` is null. cmdk
             // trims values internally, so a trailing space would

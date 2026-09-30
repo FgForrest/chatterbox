@@ -9,14 +9,20 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
-import { assertOrgScopeWritable } from "@/lib/org/config";
+import { llmRendering } from "@/lib/learn/llm-input";
 import {
     recordingJobSubject,
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
 import { getJobVisibleTo } from "@/lib/sharing/jobs";
-import { orgContentChanged } from "@/lib/sharing/notify";
+import { notifyIfShared } from "@/lib/sharing/notify";
+import {
+    assertMayChange,
+    contentWriterRefusal,
+    recordingGone,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import type { MultiPassPhase } from "@/lib/summary/multi-pass";
 import {
     encodeStreamEvent,
@@ -93,7 +99,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     // exist should be a 404 on the spot, not a job that is queued, claimed and
     // then fails a second later with nobody having learned anything sooner.
     const access = await requireRecordingView(userId, id, view);
-    if (view === "org") assertOrgScopeWritable();
+    assertMayChange(access, userId);
 
     const { job } = await enqueueSummaryJob({
         userId,
@@ -338,14 +344,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
               }
             : undefined;
 
-    // The Organization view reads the organization's summaries once it has
-    // any, and the owner's until then (read-only, flagged as `fallback`).
-    let summaries = await readStoredSummaries(access.contentUserId, id);
-    let fallback = false;
-    if (summaries.length === 0 && access.contentUserId !== access.ownerUserId) {
-        summaries = await readStoredSummaries(access.ownerUserId, id);
-        fallback = summaries.length > 0;
-    }
+    const summaries = await readStoredSummaries(access.contentUserId, id);
     const availableSources = summaries.map((summary) => summary.source);
     const stored = summaries.find((summary) => summary.source === source);
 
@@ -354,7 +353,6 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             summary: null,
             source,
             availableSources,
-            fallback,
             activeJob: source === "riffado" ? activeJob : undefined,
         });
     }
@@ -369,11 +367,23 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         model: stored.model,
         multiPass: stored.multiPass,
         createdAt: stored.createdAt,
+        // Made from the transcript before its corrections changed: names
+        // or terms in it may be stale. Only when both fingerprints exist.
+        stale: await summaryIsStale(stored),
         availableSources,
-        fallback,
         activeJob: source === "riffado" ? activeJob : undefined,
     });
 });
+
+/** Whether the transcript as a model reads it moved on since the summary. */
+async function summaryIsStale(stored: {
+    inputFingerprint: string | null;
+    transcriptionId: string | null;
+}): Promise<boolean> {
+    if (!stored.inputFingerprint || !stored.transcriptionId) return false;
+    const current = await llmRendering(stored.transcriptionId);
+    return current !== null && current.fingerprint !== stored.inputFingerprint;
+}
 
 // DELETE - Remove summary
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
@@ -384,28 +394,35 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
 
-    if (view === "org") {
-        assertOrgScopeWritable();
-        await db
-            .delete(aiEnhancements)
-            .where(
-                and(
-                    eq(aiEnhancements.recordingId, id),
-                    eq(aiEnhancements.userId, access.contentUserId),
-                    eq(aiEnhancements.source, source),
-                ),
-            );
-        await orgContentChanged(id);
-        return NextResponse.json({ success: true });
-    }
+    assertMayChange(access, session.user.id);
+    const ownerUserId = access.ownerUserId;
 
     await db.transaction(async (tx) => {
+        // Under the lock sharing and withdrawal take, so the check below
+        // holds until this commits.
+        const [locked] = await tx
+            .select({ deletedAt: recordings.deletedAt })
+            .from(recordings)
+            .where(
+                and(eq(recordings.id, id), eq(recordings.userId, ownerUserId)),
+            )
+            .for("update")
+            .limit(1);
+        if (!locked || locked.deletedAt) throw recordingGone();
+        const refusal = await contentWriterRefusal(tx, {
+            recordingId: id,
+            ownerUserId,
+            actorUserId: session.user.id,
+            orgUserId: access.orgUserId,
+        });
+        if (refusal) throw writerRefusalError(refusal);
+
         const deleted = await tx
             .delete(aiEnhancements)
             .where(
                 and(
                     eq(aiEnhancements.recordingId, id),
-                    eq(aiEnhancements.userId, session.user.id),
+                    eq(aiEnhancements.userId, ownerUserId),
                     eq(aiEnhancements.source, source),
                 ),
             )
@@ -418,14 +435,15 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                 .where(
                     and(
                         eq(recordings.id, id),
-                        eq(recordings.userId, session.user.id),
+                        eq(recordings.userId, ownerUserId),
                         isNull(recordings.deletedAt),
                     ),
                 );
         }
     });
 
-    await removeRecordingSidecar(session.user.id, id, "summary", source);
+    await removeRecordingSidecar(ownerUserId, id, "summary", source);
+    await notifyIfShared(id);
 
     return NextResponse.json({ success: true });
 });

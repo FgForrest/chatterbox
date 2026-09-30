@@ -34,3 +34,22 @@ export function lookupHash(value: string): string {
 export function normalizeForLookup(value: string): string {
     return value.trim().toLowerCase();
 }
+
+/**
+ * `lookupHash` for one kind of value, so equal strings of different kinds
+ * (a relation type's label and an entity's name, say) never share a key.
+ * The domain is part of what is hashed, before the value.
+ *
+ * Also folds Unicode composition and runs of inner whitespace, which a
+ * typed label or name varies in; emails keep `lookupHash`.
+ */
+export function domainLookupHash(domain: string, value: string): string {
+    return createHmac("sha256", lookupSecret())
+        .update(`${domain}\u0000${normalizeLabelForLookup(value)}`)
+        .digest("hex");
+}
+
+/** `normalizeForLookup`, plus Unicode NFC and single inner spaces. */
+export function normalizeLabelForLookup(value: string): string {
+    return normalizeForLookup(value).normalize("NFC").replace(/\s+/g, " ");
+}

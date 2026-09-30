@@ -17,6 +17,7 @@ import {
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { EXPORT_FORMATS } from "@/lib/export/formats";
 import { isSupportedLocale } from "@/lib/i18n/config";
+import { isAutoLearnOffered } from "@/lib/knowledge/availability";
 import {
     clampRounds,
     MULTI_PASS_ROUNDS_DEFAULT,
@@ -100,6 +101,7 @@ const DEFAULT_SETTINGS = {
     autoGenerateTitle: true,
     syncTitleToPlaud: false,
     autoDetectTopics: false,
+    autoLearn: false,
     aiOutputLanguage: null,
     importPlaudContent: false,
     transcriptMode: "plaud_only" as const,
@@ -145,6 +147,7 @@ const SETTINGS_FIELDS = [
     "autoGenerateTitle",
     "syncTitleToPlaud",
     "autoDetectTopics",
+    "autoLearn",
     "aiOutputLanguage",
     "importPlaudContent",
     "transcriptMode",
@@ -233,6 +236,7 @@ export const GET = apiHandler(async (request: Request) => {
             ...DEFAULT_SETTINGS,
             titleGenerationPrompt: null,
             topicPrompt: null,
+            autoLearnOffered: isAutoLearnOffered(),
             barkPushUrl: null,
             barkPushUrlSet: false,
             userEmail,
@@ -242,6 +246,8 @@ export const GET = apiHandler(async (request: Request) => {
     }
 
     const settingsData = extractSettings(settings);
+    // The switch is shown only where automatic Learn is offered.
+    settingsData.autoLearnOffered = isAutoLearnOffered();
     if (settings.titleGenerationPrompt) {
         settingsData.titleGenerationPrompt = decryptJsonField(
             settings.titleGenerationPrompt,

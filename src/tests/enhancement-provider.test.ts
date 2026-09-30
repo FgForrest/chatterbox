@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { pickEnhancementCredential } from "@/lib/ai/enhancement-provider";
+import {
+    pickEnhancementCredential,
+    pickLearnCredential,
+} from "@/lib/ai/enhancement-provider";
 
 describe("pickEnhancementCredential", () => {
     it("prefers the enhancement default among providers that can summarize", () => {
@@ -48,5 +51,46 @@ describe("pickEnhancementCredential", () => {
 
     it("returns undefined for an empty list", () => {
         expect(pickEnhancementCredential([])).toBeUndefined();
+    });
+});
+
+describe("pickLearnCredential", () => {
+    it("prefers the provider marked for Learn over the enhancement default", () => {
+        const picked = pickLearnCredential([
+            {
+                id: "sonnet",
+                provider: "Claude Code",
+                isDefaultEnhancement: true,
+                isDefaultLearn: false,
+            },
+            {
+                id: "opus",
+                provider: "Claude Code",
+                isDefaultEnhancement: false,
+                isDefaultLearn: true,
+            },
+        ]);
+
+        expect(picked?.id).toBe("opus");
+    });
+
+    it("falls back to the enhancement choice when none is marked, or the marked one cannot chat", () => {
+        expect(
+            pickLearnCredential([
+                { id: "a", provider: "Groq", isDefaultEnhancement: false },
+                { id: "b", provider: "OpenAI", isDefaultEnhancement: true },
+            ])?.id,
+        ).toBe("b");
+        expect(
+            pickLearnCredential([
+                {
+                    id: "a",
+                    provider: "ElevenLabs",
+                    isDefaultEnhancement: false,
+                    isDefaultLearn: true,
+                },
+                { id: "b", provider: "OpenAI", isDefaultEnhancement: true },
+            ])?.id,
+        ).toBe("b");
     });
 });

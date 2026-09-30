@@ -14,6 +14,10 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// Which recordings a Learn review waits on is not what is tested here.
+vi.mock("@/lib/learn/pending", () => ({
+    recordingsNeedingReview: vi.fn(async () => new Set<string>()),
+}));
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
     isOrgScopeEnabled: () => false,
@@ -21,6 +25,11 @@ vi.mock("@/lib/org/config", () => ({
     assertOrgScopeWritable: () => {},
     isOrgAccount: async () => false,
     assertNotOrgAccount: async () => {},
+}));
+
+// The corrections the list reads the text with: none unless a test says.
+vi.mock("@/lib/learn/llm-input", () => ({
+    confirmedOverlays: vi.fn(async () => new Map()),
 }));
 
 vi.mock("@/db", () => ({ db: { select: vi.fn() } }));
@@ -75,6 +84,7 @@ import RecordingDetailPage from "@/app/(app)/recordings/[id]/page";
 import { toTranscriptList } from "@/components/dashboard/transcription-panel";
 import { db } from "@/db";
 import { transcriptions } from "@/db/schema";
+import { confirmedOverlays } from "@/lib/learn/llm-input";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 const TURNS: TranscriptTurn[] = [
@@ -191,6 +201,49 @@ describe("stored turns survive both SSR loaders", () => {
         const selected = projections[1] as Record<string, unknown>;
         expect(selected.turns).toBe(transcriptions.turns);
         expect(element.props.transcriptions.get("rec-1")?.turns).toEqual(TURNS);
+    });
+
+    it("passes the text as people read it, with its corrections, for the list", async () => {
+        (confirmedOverlays as Mock).mockResolvedValueOnce(
+            new Map([
+                [
+                    "tr-1",
+                    [
+                        {
+                            turnIndex: 0,
+                            charStart: 0,
+                            charEnd: 4,
+                            heard: "Ahoj",
+                            kind: "correct",
+                            replacement: "Nazdar",
+                            meaning: "Nazdar",
+                        },
+                    ],
+                ],
+            ]),
+        );
+        queueSelect([RECORDING_ROW]);
+        queueSelect([TRANSCRIPT_ROW]);
+        queueSelect([]);
+        queueSelect([]);
+        queueSelect([]);
+
+        const element = (await DashboardPage()) as {
+            props: {
+                transcriptions: Map<
+                    string,
+                    { text: string; readText?: string }
+                >;
+            };
+        };
+
+        expect(confirmedOverlays).toHaveBeenCalledWith({
+            ownerUserId: "user-1",
+        });
+        expect(element.props.transcriptions.get("rec-1")).toMatchObject({
+            text: DIARIZED_TEXT,
+            readText: "speaker_0: Nazdar.\nspeaker_1: Zdravím.",
+        });
     });
 
     it("passes turns from the single-recording loader", async () => {

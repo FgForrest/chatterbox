@@ -11,6 +11,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // `apiHandler` reaches posthog-server, which pulls the validated env and
 // demands DATABASE_URL. Out of scope for a route-shape test.
+// The route says whether automatic Learn is offered here.
+vi.mock("@/lib/knowledge/availability", () => ({
+    isAutoLearnOffered: () => false,
+}));
+
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),

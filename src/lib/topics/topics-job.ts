@@ -6,13 +6,21 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
+import {
+    type AsyncJobRow,
+    countRateLimitedJobs,
+    delayBehindBacklog,
+    type EnqueueJobResult,
+    enqueueJob,
+    getActiveJob,
+} from "@/db/queries/async-jobs";
 import { userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import { recordingJobSubject } from "@/lib/sharing/view";
+import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import type { TopicSource } from "./generate-topics";
 
 export const TOPICS_JOB_KIND = "topics";
@@ -30,6 +38,10 @@ export interface TopicsJobPayload {
     recordingId: string;
     source: TopicSource;
     trigger: "manual" | "auto";
+    /** Absent on the private view, which is every job queued before views. */
+    view?: RecordingView;
+    /** Put off by the hourly cap: it passes the cap when it starts. */
+    rateLimited?: true;
 }
 
 export function parseTopicsJobPayload(
@@ -48,10 +60,22 @@ export function parseTopicsJobPayload(
             'source must be "plaud" or "riffado"',
         );
     }
+    if (
+        raw.view !== undefined &&
+        raw.view !== "org" &&
+        raw.view !== "private"
+    ) {
+        throw new InvalidJobPayloadError(
+            TOPICS_JOB_KIND,
+            'view must be "private" or "org" when present',
+        );
+    }
     return {
         recordingId,
         source: raw.source,
         trigger: raw.trigger === "manual" ? "manual" : "auto",
+        ...(raw.view === "org" ? { view: "org" as const } : {}),
+        ...(raw.rateLimited === true ? { rateLimited: true as const } : {}),
     };
 }
 
@@ -65,15 +89,30 @@ export function parseTopicsJobPayload(
  * reporting the other transcript's topics.
  */
 export async function enqueueTopicsJob(input: {
+    /** The actor. On the private view, the recording's owner. */
     userId: string;
     recordingId: string;
     source: TopicSource;
     trigger: "manual" | "auto";
+    view?: RecordingView;
+    /** Not before this many ms from now (a rate limit's window). */
+    delayMs?: number;
+    /** Put off by the hourly cap; it passes the cap when it starts. */
+    rateLimited?: boolean;
 }): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
+        ...(input.delayMs ? { delayMs: input.delayMs } : {}),
+        // A click starts what a rate limit put off, not wait for it; the
+        // same transcript's only (the job is per recording).
+        ...(input.trigger === "manual"
+            ? { takeOverDelayed: { payload: { source: input.source } } }
+            : {}),
         userId: input.userId,
         kind: TOPICS_JOB_KIND,
-        subjectId: recordingJobSubject(input.recordingId, "private"),
+        subjectId: recordingJobSubject(
+            input.recordingId,
+            input.view ?? "private",
+        ),
         priority:
             input.trigger === "manual"
                 ? TOPICS_PRIORITY_MANUAL
@@ -83,6 +122,8 @@ export async function enqueueTopicsJob(input: {
             recordingId: input.recordingId,
             source: input.source,
             trigger: input.trigger,
+            ...(input.view === "org" ? { view: "org" } : {}),
+            ...(input.rateLimited ? { rateLimited: true } : {}),
         },
     });
     if (enqueued.created) nudge();
@@ -90,14 +131,38 @@ export async function enqueueTopicsJob(input: {
 }
 
 /**
+ * Automatic topics the hourly cap put off, about to start: they count
+ * against the cap now, or wait for the next window (`JobDeferredError`).
+ */
+export async function admitRateLimitedAutoTopics(
+    userId: string,
+): Promise<void> {
+    const rateLimit = await consumeRateLimitBucket(
+        `auto-topics:user:${userId}`,
+        {
+            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+            windowMs: 60 * 60 * 1000,
+        },
+    );
+    if (!rateLimit.allowed) {
+        throw new JobDeferredError(
+            Math.max(1_000, rateLimit.resetAt.getTime() - Date.now()),
+            "The hourly cap on automatic topics is still full",
+        );
+    }
+}
+
+/**
  * Queue topics after a transcript with timings was written, when the user
  * asked for that. Never throws: the transcript is what matters to whoever
- * wrote it, and topics can always be detected by hand.
+ * wrote it, and topics can always be detected by hand. `strict` (a job
+ * that retries until what it queues is queued) throws a failure to queue.
  */
 export async function queueAutoTopics(
     userId: string,
     recordingId: string,
     source: TopicSource,
+    { strict = false }: { strict?: boolean } = {},
 ): Promise<void> {
     try {
         const [settings] = await db
@@ -107,28 +172,75 @@ export async function queueAutoTopics(
             .limit(1);
         if (!settings?.autoDetectTopics) return;
 
+        // The job is per recording: one queued for this transcript is this
+        // one; one for the other transcript leaves no room for it until it
+        // finishes. What was held for Learn waits for it and is queued
+        // after it; unheld topics are left to a click. Looked at before the
+        // cap, which topics never queued must not spend.
+        const taken = (job: AsyncJobRow) => {
+            if (job.payload.source === source) return;
+            if (strict) {
+                throw new JobDeferredError(
+                    Math.max(60_000, job.nextAttemptAt.getTime() - Date.now()),
+                    "Topics are being detected on the recording's other transcript",
+                );
+            }
+            console.warn(
+                `Topics of recording ${recordingId} (${source}) not queued: the other transcript's job is queued`,
+            );
+        };
+        const queued = await getActiveJob(
+            TOPICS_JOB_KIND,
+            recordingJobSubject(recordingId, "private"),
+        );
+        if (queued) {
+            taken(queued);
+            return;
+        }
+
         // Same ceiling as auto-summary, in its own bucket: a sync replaying
         // many recordings must not run up a provider bill unattended.
-        const rateLimit = await consumeRateLimitBucket(
-            `auto-topics:user:${userId}`,
-            {
-                limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-                windowMs: 60 * 60 * 1000,
-            },
-        );
-        if (!rateLimit.allowed) {
+        const window = {
+            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+            windowMs: 60 * 60 * 1000,
+        };
+        // A backlog the cap put off means the cap is full: held work waits
+        // behind it in turn, the rest is dropped (see queueAutoSummary).
+        const backlog = await countRateLimitedJobs(userId, TOPICS_JOB_KIND);
+        let full: Date | null = backlog > 0 ? new Date() : null;
+        if (!full) {
+            const rateLimit = await consumeRateLimitBucket(
+                `auto-topics:user:${userId}`,
+                window,
+            );
+            if (!rateLimit.allowed) full = rateLimit.resetAt;
+        }
+        if (full && !strict) {
             console.warn(
                 `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
             );
             return;
         }
-        await enqueueTopicsJob({
+        const { job, created } = await enqueueTopicsJob({
             userId,
             recordingId,
             source,
             trigger: "auto",
+            ...(full
+                ? {
+                      rateLimited: true,
+                      delayMs: delayBehindBacklog({
+                          ...window,
+                          resetAt: full,
+                          backlog,
+                      }),
+                  }
+                : {}),
         });
+        // One queued since.
+        if (!created) taken(job);
     } catch (error) {
+        if (strict) throw error;
         console.error(
             `Could not queue topics for recording ${recordingId}:`,
             error,

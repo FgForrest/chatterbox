@@ -133,6 +133,35 @@ probe() {
     ' && ok "$label answered" || bad "$label failed"
 }
 
+# Learn asks for a JSON Schema: the answer must come back in that shape.
+schema_probe() {
+    local label="$1" model="$2"
+    step "schema: $label ($model)"
+    docker compose exec -T -e BRIDGE_TOKEN="$BRIDGE_TOKEN" -e PROBE_MODEL="$model" "$SERVICE" node -e '
+      const body = {
+        model: process.env.PROBE_MODEL,
+        messages: [{ role: "user", content: "Put the word ok in the field answer." }],
+        response_format: { type: "json_schema", json_schema: { name: "probe", schema: {
+          type: "object", properties: { answer: { type: "string" } },
+          required: ["answer"], additionalProperties: false } } },
+      };
+      fetch("http://127.0.0.1:8787/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + process.env.BRIDGE_TOKEN },
+        body: JSON.stringify(body),
+      })
+        .then(async (r) => {
+          const text = await r.text();
+          if (!r.ok) { console.error(text.slice(0, 800)); process.exit(1); }
+          const content = JSON.parse(text).choices?.[0]?.message?.content ?? "";
+          const parsed = JSON.parse(content);
+          if (typeof parsed.answer !== "string") { console.error("no answer field: " + content.slice(0, 200)); process.exit(1); }
+          console.log("   answered in the schema: " + content.slice(0, 80));
+        })
+        .catch((e) => { console.error(e.message); process.exit(1); });
+    ' && ok "$label keeps to a JSON Schema" || bad "$label did not answer in the schema"
+}
+
 # Reference point for the persistence check below: anything in the
 # session directories newer than this came from the round trips.
 SINCE="/tmp/agent-bridge-smoke.$$"
@@ -142,6 +171,8 @@ fi
 
 [ "$ONLY" = "codex" ]  || probe "Claude Code" "${CLAUDE_PROBE_MODEL:-claude-sonnet-5}"
 [ "$ONLY" = "claude" ] || probe "Codex" "${CODEX_PROBE_MODEL:-gpt-5.6-luna}"
+[ "$ONLY" = "codex" ]  || schema_probe "Claude Code" "${CLAUDE_PROBE_MODEL:-claude-sonnet-5}"
+[ "$ONLY" = "claude" ] || schema_probe "Codex" "${CODEX_PROBE_MODEL:-gpt-5.6-luna}"
 
 # The bridge runs both CLIs without session persistence. A transcript
 # landing here means the image predates that, or a flag stopped working.

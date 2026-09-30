@@ -79,6 +79,11 @@ export interface SummaryData {
         merged: boolean;
     };
     /**
+     * On GET: made from the transcript before its corrections changed, so
+     * names or terms in it may be stale.
+     */
+    stale?: boolean;
+    /**
      * Present on GET when a summary job for this recording is queued or
      * running -- started in another tab, by an automatic run after a sync, or
      * picked back up by a worker after a restart. Lets a freshly opened page
@@ -97,11 +102,6 @@ export interface SummaryData {
      * to the default prompt instead. Only present on POST responses.
      */
     promptFallback?: boolean;
-    /**
-     * Organization view only: the summary shown is the owner's, because the
-     * organization has not produced its own yet.
-     */
-    fallback?: boolean;
 }
 
 interface UseTranscriptionSummaryOptions {

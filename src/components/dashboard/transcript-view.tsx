@@ -1,8 +1,21 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { Fragment, useMemo } from "react";
+import { CorrectedText } from "@/components/learn/corrected-text";
+import {
+    type LearnCorrectionMark,
+    type LearnMarks,
+    turnPieces,
+} from "@/components/learn/learn-marks";
+import { MarkedText } from "@/components/learn/marked-text";
+import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
+import {
+    type OverlayCorrection,
+    renderTurnsForPeople,
+} from "@/lib/learn/render";
 import {
     containingTurnIndex,
     formatClock,
@@ -52,6 +65,22 @@ export interface TranscriptViewProps {
     topics?: TranscriptTopic[] | null;
     /** Topic to highlight briefly, after a jump to it. */
     highlightedTopic?: number | null;
+    /**
+     * A ready Learn review's proposals, shown in place for its reviewer:
+     * provisional speaker names and underlined corrections, each ticked or
+     * unticked in the review from here.
+     */
+    learnMarks?: LearnMarks | null;
+    /**
+     * The transcript's corrections, applied as people read them (absent
+     * or null: the text as heard). In a turn with review marks, the marks
+     * are shown instead.
+     */
+    corrections?: {
+        list: readonly OverlayCorrection[];
+        canUndo: boolean;
+        onUndo?: (correctionId: string) => void;
+    } | null;
 }
 
 interface RenderableTurn {
@@ -94,8 +123,30 @@ export function TranscriptView({
     onSeekToTurn,
     topics,
     highlightedTopic = null,
+    learnMarks = null,
+    corrections = null,
 }: TranscriptViewProps) {
     const i18n = useExtracted();
+    // Corrections are anchored to stored turns too.
+    const corrected = useMemo(
+        () =>
+            corrections?.list.length && storedTurns?.length
+                ? renderTurnsForPeople(storedTurns, corrections.list)
+                : null,
+        [corrections, storedTurns],
+    );
+    // Marks are anchored to stored turns; a transcript without them has none.
+    const marksByTurn = useMemo(() => {
+        const byTurn = new Map<number, LearnCorrectionMark[]>();
+        if (!learnMarks || !storedTurns?.length) return byTurn;
+        for (const mark of learnMarks.corrections) {
+            byTurn.set(mark.turnIndex, [
+                ...(byTurn.get(mark.turnIndex) ?? []),
+                mark,
+            ]);
+        }
+        return byTurn;
+    }, [learnMarks, storedTurns]);
     const turns = useMemo<RenderableTurn[] | null>(() => {
         if (storedTurns?.length) {
             return storedTurns.map((turn) => ({
@@ -138,6 +189,12 @@ export function TranscriptView({
     }
 
     const order = speakerOrder(turns);
+    // The accept button goes on a speaker's first turn only.
+    const firstTurnOf = new Map<string, number>();
+    turns.forEach((turn, index) => {
+        const key = speakerKey(turn.speaker);
+        if (!firstTurnOf.has(key)) firstTurnOf.set(key, index);
+    });
 
     return (
         <div className="space-y-4">
@@ -147,8 +204,16 @@ export function TranscriptView({
                     SPEAKER_STYLES[
                         (position === -1 ? 0 : position) % SPEAKER_STYLES.length
                     ];
+                const key = speakerKey(turn.speaker);
+                const confirmedName = speakerAttributions[key]?.name;
+                const proposed =
+                    confirmedName === undefined && storedTurns?.length
+                        ? learnMarks?.speakers[key]
+                        : undefined;
                 const displayName =
-                    speakerAttributions[turn.speaker]?.name ?? turn.label;
+                    confirmedName ??
+                    (proposed ? `${proposed.name}?` : turn.label);
+                const nameStyle = proposed ? "italic" : "";
                 const canSeek =
                     onSeekToTurn !== undefined &&
                     turn.startMs !== undefined &&
@@ -225,7 +290,7 @@ export function TranscriptView({
                                     {canSeek ? (
                                         <button
                                             type="button"
-                                            className={`rounded-sm text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${style.text}`}
+                                            className={`rounded-sm text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${style.text} ${nameStyle}`}
                                             onClick={() =>
                                                 onSeekToTurn(turn.startMs ?? 0)
                                             }
@@ -251,17 +316,108 @@ export function TranscriptView({
                                         </button>
                                     ) : (
                                         <span
-                                            className={`text-xs font-medium ${style.text}`}
+                                            className={`text-xs font-medium ${style.text} ${nameStyle}`}
                                         >
                                             {displayName}
                                         </span>
                                     )}
+                                    {proposed &&
+                                        learnMarks &&
+                                        firstTurnOf.get(key) === index && (
+                                            <button
+                                                type="button"
+                                                className={`inline-flex items-center gap-0.5 rounded-sm border px-1 text-[11px] leading-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${proposed.ticked ? "border-amber-500 bg-amber-500/15 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground hover:text-foreground"}`}
+                                                aria-pressed={proposed.ticked}
+                                                title={i18n(
+                                                    "Suggested by Learn. Applied when you finish the review.",
+                                                )}
+                                                aria-label={
+                                                    proposed.ticked
+                                                        ? i18n(
+                                                              "{name} is ticked for this speaker in the review: untick",
+                                                              {
+                                                                  name: proposed.name,
+                                                              },
+                                                          )
+                                                        : i18n(
+                                                              "Accept {name} for this speaker in the review",
+                                                              {
+                                                                  name: proposed.name,
+                                                              },
+                                                          )
+                                                }
+                                                onClick={() =>
+                                                    learnMarks.decide(
+                                                        proposed.itemId,
+                                                        proposed.ticked
+                                                            ? "rejected"
+                                                            : "accepted",
+                                                    )
+                                                }
+                                            >
+                                                <Check className="size-3" />
+                                            </button>
+                                        )}
                                 </div>
                             )}
                             <p
                                 className={`text-sm whitespace-pre-wrap leading-relaxed ${turn.label ? "pl-3.5" : ""}`}
                             >
-                                {turn.text}
+                                {marksByTurn.has(index) && learnMarks ? (
+                                    turnPieces(
+                                        turn.text,
+                                        index,
+                                        corrections?.list ?? [],
+                                        marksByTurn.get(index) ?? [],
+                                    ).map((piece, pieceIndex) =>
+                                        piece.mark ? (
+                                            <MarkedText
+                                                // Pieces are fixed by the text, its corrections and marks.
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                                text={piece.text}
+                                                marks={[
+                                                    {
+                                                        ...piece.mark,
+                                                        charStart: 0,
+                                                        charEnd:
+                                                            piece.text.length,
+                                                    },
+                                                ]}
+                                                decide={learnMarks.decide}
+                                            />
+                                        ) : piece.correction ? (
+                                            <CorrectedText
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                                segments={[piece]}
+                                                onUndo={
+                                                    corrections?.canUndo
+                                                        ? corrections.onUndo
+                                                        : undefined
+                                                }
+                                            />
+                                        ) : (
+                                            <Fragment
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={pieceIndex}
+                                            >
+                                                {piece.text}
+                                            </Fragment>
+                                        ),
+                                    )
+                                ) : corrected?.[index] ? (
+                                    <CorrectedText
+                                        segments={corrected[index].segments}
+                                        onUndo={
+                                            corrections?.canUndo
+                                                ? corrections.onUndo
+                                                : undefined
+                                        }
+                                    />
+                                ) : (
+                                    turn.text
+                                )}
                             </p>
                         </div>
                     </Fragment>

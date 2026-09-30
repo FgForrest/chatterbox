@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
-import { assertOrgScopeWritable } from "@/lib/org/config";
 import {
     recordingJobSubject,
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
+import { assertMayChange } from "@/lib/sharing/writer";
 import {
     enqueueTranscriptionJob,
     TRANSCRIPTION_JOB_KIND,
@@ -20,8 +20,10 @@ type IdContext = { params: Promise<{ id: string }> };
  * with upload and Plaud-sync auto-transcription, so concurrent triggers all
  * converge on the database's one-active-job constraint.
  *
- * `?view=org` transcribes the Organization view of a shared recording with
- * the caller's own provider; it never touches the owner's transcript.
+ * `?view=org` transcribes a shared recording on the Organization view, for
+ * the organization account only (403 for anyone else). A shared recording
+ * is one recording, the Organization's to change: its owner withdraws it
+ * before transcribing it again (409 RECORDING_SHARED).
  *
  * Request body (all optional):
  *   - `providerId`: use a specific configured provider instead of the
@@ -32,8 +34,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
-    await requireRecordingView(session.user.id, id, view);
-    if (view === "org") assertOrgScopeWritable();
+    const access = await requireRecordingView(session.user.id, id, view);
+    // The run checks again when it starts, and when it writes.
+    assertMayChange(access, session.user.id);
 
     const body = (await request.json().catch(() => ({}))) as Record<
         string,
@@ -43,10 +46,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         typeof body.providerId === "string" ? body.providerId : undefined;
     const model = typeof body.model === "string" ? body.model : undefined;
     const attributionSource =
-        view === "private" &&
-        (body.attributionSource === "riffado" ||
-            body.attributionSource === "plaud" ||
-            body.attributionSource === "mixed")
+        body.attributionSource === "riffado" ||
+        body.attributionSource === "plaud" ||
+        body.attributionSource === "mixed"
             ? body.attributionSource
             : undefined;
 

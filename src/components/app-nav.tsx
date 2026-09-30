@@ -4,7 +4,9 @@ import { Mic, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useExtracted } from "next-intl";
+import { useEffect, useState } from "react";
 import { WaveformLogo } from "@/components/icons/waveform-logo";
+import { onLearnReviewsChanged } from "@/components/learn/review-events";
 import { cn } from "@/lib/utils";
 
 /**
@@ -18,6 +20,28 @@ import { cn } from "@/lib/utils";
 export function AppNav({ className }: { className?: string }) {
     const i18n = useExtracted();
     const pathname = usePathname();
+    // Learn reviews waiting for the viewer: a badge on People, which lists
+    // them. Nothing shows where Learn is unavailable (the count is 0).
+    const [pendingReviews, setPendingReviews] = useState(0);
+    // Counted again when a review is finished.
+    useEffect(() => {
+        let cancelled = false;
+        const count = () =>
+            fetch("/api/learn/pending")
+                .then((response) =>
+                    response.ok ? response.json() : { count: 0 },
+                )
+                .then((body: { count?: number }) => {
+                    if (!cancelled) setPendingReviews(body.count ?? 0);
+                })
+                .catch(() => {});
+        void count();
+        const stop = onLearnReviewsChanged(() => void count());
+        return () => {
+            cancelled = true;
+            stop();
+        };
+    }, []);
     const sections = [
         { href: "/dashboard", label: i18n("Recordings"), icon: Mic },
         { href: "/people", label: i18n("People"), icon: UsersRound },
@@ -62,6 +86,18 @@ export function AppNav({ className }: { className?: string }) {
                             <span className="hidden sm:inline">
                                 {section.label}
                             </span>
+                            {section.href === "/people" &&
+                                pendingReviews > 0 && (
+                                    <span
+                                        className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+                                        title={i18n(
+                                            "{count, plural, one {# review waits} other {# reviews wait}}",
+                                            { count: pendingReviews },
+                                        )}
+                                    >
+                                        {pendingReviews}
+                                    </span>
+                                )}
                         </Link>
                     );
                 })}

@@ -19,6 +19,9 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 // The handler shares its constants and payload parser with the enqueue side,
 // which owns a database client. Nothing here queues anything.
 vi.mock("@/db", () => ({ db: {} }));
+vi.mock("@/lib/learn/hold", () => ({
+    isHeldForLearn: vi.fn().mockResolvedValue(false),
+}));
 vi.mock("@/lib/summary/generate-summary", () => ({
     generateSummaryForRecording: vi.fn(),
 }));
@@ -32,8 +35,14 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/rate-limit", () => ({
+    consumeRateLimitBucket: vi.fn(),
+}));
+vi.mock("@/lib/env", () => ({ env: { AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20 } }));
 
 import { AppError, ErrorCode } from "@/lib/errors";
+import { JobDeferredError } from "@/lib/jobs/retryable";
+import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
@@ -53,6 +62,7 @@ function context(overrides: Record<string, unknown> = {}) {
 }
 
 const generated = {
+    ownerUserId: "user-1",
     // Distinctive enough that finding it anywhere in the job's result means
     // it genuinely leaked, rather than colliding with a JSON key.
     summary: "CONFIDENTIAL_SUMMARY_PROSE",
@@ -141,6 +151,54 @@ describe("summaryJobHandler", () => {
                 trigger: "auto",
             }),
         );
+    });
+
+    it("puts off a summary the hourly cap put off while the cap is still full", async () => {
+        (consumeRateLimitBucket as Mock).mockResolvedValueOnce({
+            allowed: false,
+            resetAt: new Date(Date.now() + 20 * 60_000),
+        });
+
+        const run = summaryJobHandler.run(
+            context({
+                payload: {
+                    recordingId: "rec-1",
+                    trigger: "auto",
+                    rateLimited: true,
+                },
+            }),
+        );
+
+        await expect(run).rejects.toBeInstanceOf(JobDeferredError);
+        await expect(run).rejects.toMatchObject({
+            delayMs: expect.any(Number),
+        });
+        expect(generateSummaryForRecording).not.toHaveBeenCalled();
+        expect(emitEvent).not.toHaveBeenCalled();
+    });
+
+    it("runs a summary the cap put off once the cap lets it", async () => {
+        (consumeRateLimitBucket as Mock).mockResolvedValueOnce({
+            allowed: true,
+            resetAt: new Date(),
+        });
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+
+        await summaryJobHandler.run(
+            context({
+                payload: {
+                    recordingId: "rec-1",
+                    trigger: "auto",
+                    rateLimited: true,
+                },
+            }),
+        );
+
+        expect(consumeRateLimitBucket).toHaveBeenCalledWith(
+            "auto-summary:user:user-1",
+            expect.objectContaining({ windowMs: 60 * 60 * 1000 }),
+        );
+        expect(generateSummaryForRecording).toHaveBeenCalled();
     });
 
     it("does not regenerate an erased summary from an automatic job", async () => {

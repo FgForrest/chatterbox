@@ -3,6 +3,7 @@ import {
     type AnyPgColumn,
     bigint,
     boolean,
+    check,
     date,
     index,
     integer,
@@ -363,6 +364,10 @@ export const recordings = pgTable(
         // from storage at delete time; this row is retained only as a marker
         // keyed by plaudFileId. See issue #56.
         deletedAt: timestamp("deleted_at"),
+        // Automatic Learn holds the title, summary and topics back until its
+        // review is done, and at most until this time (Task 5.5); null when
+        // nothing is held.
+        summaryDueAt: timestamp("summary_due_at"),
         // Retention markers. Set by the retention sweep
         // (src/lib/retention/worker.ts) when it removes one kind of data
         // from a recording that has aged past the user's retention period.
@@ -383,16 +388,28 @@ export const recordings = pgTable(
         // retention worker runs in every app process, so this prevents two
         // processes from moving the same remote original concurrently.
         remoteRetentionClaimedAt: timestamp("remote_retention_claimed_at"),
-        // When the recording last left the Organization. The owner's audio
-        // retention waits a grace period after it, so withdrawing a recording
-        // colleagues relied on never deletes its audio the same hour.
+        // Deprecated and no longer read or written: the grace period it
+        // timed is gone (a shared recording's retention is the
+        // Organization's, and its owner's applies at once after a
+        // withdrawal). Kept so the release before still runs against this
+        // schema; drop it in a later release.
         unsharedAt: timestamp("unshared_at"),
+        // When a person last set the title. Null means the title is still a
+        // machine's (a Plaud filename, an upload's name, a generated one)
+        // and may be replaced by a generated title or Plaud's filename; set,
+        // it is never overwritten. Every title that existed before this
+        // column is treated as set by a person (migration 0060).
+        titleEditedAt: timestamp("title_edited_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
         // Index for querying recordings by user (most common query)
         userIdIdx: index("recordings_user_id_idx").on(table.userId),
+        // The automatic Learn sweep reads only the few held recordings.
+        summaryDueIdx: index("recordings_summary_due_at_idx")
+            .on(table.summaryDueAt)
+            .where(sql`${table.summaryDueAt} is not null`),
         // Index for sync operations - looking up by plaudFileId
         plaudFileIdIdx: index("recordings_plaud_file_id_idx").on(
             table.plaudFileId,
@@ -802,16 +819,29 @@ export const transcriptions = pgTable(
         // `StoredTopics`, see lib/topics/stored-topics.ts. Anchored to the
         // times in `turns`, so every write of the transcript rewrites it,
         // as NULL: topics never outlive the transcript they were read from.
-        // The Organization copy is the one writer that carries them, because
-        // it copies the transcript unchanged.
         topics: jsonb("topics"),
-        // Who ran the provider. Differs from `userId` on the Organization
-        // view of a shared recording, whose rows belong to the org account
-        // but are produced (and paid for) by whichever member clicked.
+        // `llmInputFingerprint` of the transcript the topics were detected
+        // on (its corrections applied); null before corrections existed.
+        topicsInputFingerprint: varchar("topics_input_fingerprint", {
+            length: 64,
+        }),
+        // Who ran the provider. Differs from `userId` when the organization
+        // account changes a shared recording: the rows stay the owner's, and
+        // the organization account produced (and paid for) them.
         producedByUserId: text("produced_by_user_id").references(
             () => users.id,
             { onDelete: "set null" },
         ),
+        // Goes up by one on every write of `text` or `turns`, so anything
+        // made from one version of the transcript (a speaker change, a Learn
+        // run) can tell it is looking at the version it was made on. Topics
+        // are not the transcript and leave it alone.
+        revision: integer("revision").notNull().default(0),
+        // The md5 of the audio this was made from (`recordings.fileMd5`
+        // when it was written). A rewrite over different audio (a Plaud
+        // recording trimmed and synced again) shifts the timeline: names
+        // are then carried only as suggestions. Null before it was kept.
+        audioMd5: varchar("audio_md5", { length: 32 }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
@@ -967,6 +997,15 @@ export const transcriptSpeakers = pgTable(
         // would put it outside the encrypted text and outlive the retention
         // sweep that deletes the transcript.
         evidenceStartMs: integer("evidence_start_ms"),
+        // A person looked and could not say who this is. Confirmed with no
+        // person, which is an answer; a row with neither is still open.
+        markedUnknown: boolean("marked_unknown").notNull().default(false),
+        // The human who confirmed this row. Null on machine rows, and on
+        // confirmed rows written before this column existed.
+        confirmedByUserId: text("confirmed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -978,6 +1017,874 @@ export const transcriptSpeakers = pgTable(
             table.personId,
         ),
         userIdIdx: index("transcript_speakers_user_id_idx").on(table.userId),
+    }),
+);
+
+// "This speaker is not that person", said by a human about one suggestion.
+//
+// Kept apart from `transcript_speakers` because a label holds one row: once
+// the next suggestion replaced the rejected one, the rejection would be
+// forgotten and the same wrong name could come back. Suggestions are
+// filtered against this table before they are written.
+export const transcriptSpeakerRejections = pgTable(
+    "transcript_speaker_rejections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        label: varchar("label", { length: 64 }).notNull(),
+        personId: text("person_id")
+            .notNull()
+            .references(() => people.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pairUnique: unique("transcript_speaker_rejections_pair_unique").on(
+            table.transcriptionId,
+            table.label,
+            table.personId,
+        ),
+        personIdx: index("transcript_speaker_rejections_person_id_idx").on(
+            table.personId,
+        ),
+        userIdIdx: index("transcript_speaker_rejections_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// Knowledge vocabulary: the kinds of things and relations facts are made of,
+// in three layers. Core rows (no owner) ship with the code; the organization
+// account's rows are the Organization's shared vocabulary; a user's rows are
+// their private vocabulary, visible and usable by them alone.
+//
+// Non-core keys are generated, never derived from the label: a key is stored
+// in the clear, and a private type's name is the user's to keep private.
+export const knowledgeEntityTypes = pgTable(
+    "knowledge_entity_types",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // Null for core types.
+        userId: text("user_id").references(() => users.id, {
+            onDelete: "cascade",
+        }),
+        key: varchar("key", { length: 64 }).notNull(),
+        // Encrypted; core labels are English source strings.
+        label: text("label").notNull(),
+        // `domainLookupHash("entity-type-label", label)`.
+        labelHmac: varchar("label_hmac", { length: 64 }).notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"active" | "retired">()
+            .notNull()
+            .default("active"),
+        // Set on a private type when the Organization adopted one of the
+        // same name: the user's later facts use the shared key.
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        // An Organization type a share made from a member's private one
+        // (Johnny, 2026-09-29): listed first for the curator, until they
+        // keep, rename or merge it.
+        adoptedFromShare: boolean("adopted_from_share")
+            .notNull()
+            .default(false),
+        // Set on a member's type when the curator deleted the Organization
+        // type it was adopted as (Johnny, 2026-09-29): a share adopts it no
+        // more, until the Organization has a type of its name, or of the
+        // deleted one's (`adoptionRefusedAs`, its `labelHmac`), again.
+        adoptionRefusedAt: timestamp("adoption_refused_at"),
+        adoptionRefusedAs: varchar("adoption_refused_as", { length: 64 }),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        ownerKeyUnique: unique("knowledge_entity_types_owner_key_unique")
+            .on(table.userId, table.key)
+            .nullsNotDistinct(),
+        ownerLabelUnique: unique("knowledge_entity_types_owner_label_unique")
+            .on(table.userId, table.labelHmac)
+            .nullsNotDistinct(),
+        createdByIdx: index("knowledge_entity_types_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        adoptedAsIdx: index("knowledge_entity_types_adopted_as_key_idx").on(
+            table.adoptedAsKey,
+        ),
+    }),
+);
+
+export const knowledgeRelationTypes = pgTable(
+    "knowledge_relation_types",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // Null for core relations.
+        userId: text("user_id").references(() => users.id, {
+            onDelete: "cascade",
+        }),
+        key: varchar("key", { length: 64 }).notNull(),
+        // Encrypted; core labels are English source strings.
+        label: text("label").notNull(),
+        // `domainLookupHash("relation-type-label", label)`.
+        labelHmac: varchar("label_hmac", { length: 64 }).notNull(),
+        // Entity type keys the subject and the object may have.
+        subjectTypes: jsonb("subject_types").$type<string[]>().notNull(),
+        objectTypes: jsonb("object_types").$type<string[]>().notNull(),
+        // `literal`: the object is text (a role, a definition), not an entity.
+        objectKind: varchar("object_kind", { length: 16 })
+            .$type<"entity" | "literal">()
+            .notNull(),
+        // `one`: a subject has at most one object at a time, so a new one
+        // replaces the old (asked, never silent).
+        cardinality: varchar("cardinality", { length: 8 })
+            .$type<"one" | "many">()
+            .notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"active" | "retired">()
+            .notNull()
+            .default("active"),
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        // As on entity types.
+        adoptedFromShare: boolean("adopted_from_share")
+            .notNull()
+            .default(false),
+        adoptionRefusedAt: timestamp("adoption_refused_at"),
+        adoptionRefusedAs: varchar("adoption_refused_as", { length: 64 }),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        ownerKeyUnique: unique("knowledge_relation_types_owner_key_unique")
+            .on(table.userId, table.key)
+            .nullsNotDistinct(),
+        ownerLabelUnique: unique("knowledge_relation_types_owner_label_unique")
+            .on(table.userId, table.labelHmac)
+            .nullsNotDistinct(),
+        createdByIdx: index(
+            "knowledge_relation_types_created_by_user_id_idx",
+        ).on(table.createdByUserId),
+        adoptedAsIdx: index("knowledge_relation_types_adopted_as_key_idx").on(
+            table.adoptedAsKey,
+        ),
+    }),
+);
+
+// Relation phrases users suggested to the Organization. Only the phrase
+// travels (encrypted), counted once per suggesting user; nothing of the
+// facts it came from.
+export const knowledgeVocabularyProposals = pgTable(
+    "knowledge_vocabulary_proposals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        phrase: text("phrase").notNull(),
+        // `domainLookupHash("vocabulary-phrase", phrase)`.
+        phraseHmac: varchar("phrase_hmac", { length: 64 }).notNull(),
+        // How many suggested it is counted from the votes, which go with
+        // their accounts.
+        status: varchar("status", { length: 16 })
+            .$type<"open" | "adopted" | "rejected">()
+            .notNull()
+            .default("open"),
+        // The Organization key it was adopted as.
+        adoptedAsKey: varchar("adopted_as_key", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        phraseUnique: unique("knowledge_vocabulary_proposals_phrase_unique").on(
+            table.phraseHmac,
+        ),
+    }),
+);
+
+// Who suggested which phrase: counts each user once, and lets a user's
+// archive and erasure find what they suggested.
+export const knowledgeVocabularyProposalVotes = pgTable(
+    "knowledge_vocabulary_proposal_votes",
+    {
+        proposalId: text("proposal_id")
+            .notNull()
+            .references(() => knowledgeVocabularyProposals.id, {
+                onDelete: "cascade",
+            }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.proposalId, table.userId] }),
+        userIdIdx: index("knowledge_vocabulary_proposal_votes_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// One counter for the whole vocabulary. A Learn run records the version it
+// was made with; a change of any type bumps it.
+export const knowledgeVocabularyVersion = pgTable(
+    "knowledge_vocabulary_version",
+    {
+        id: integer("id").primaryKey(),
+        version: integer("version").notNull().default(0),
+    },
+);
+
+// Organizations, teams, projects, products, terms, locations and documents
+// people talk about. A person is never one: people live in `people`.
+export const knowledgeEntities = pgTable(
+    "knowledge_entities",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The owner: a user, or the organization account for the
+        // Organization's.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // An entity type's key. Core keys are fixed and every other key is
+        // `u_` or `o_` plus a random id, so a key names one type; whether
+        // the owner may use it is checked on write.
+        typeKey: varchar("type_key", { length: 64 }).notNull(),
+        name: text("name").notNull(),
+        // `domainLookupHash("entity-name", name)`.
+        nameHmac: varchar("name_hmac", { length: 64 }).notNull(),
+        description: text("description"),
+        // Set on the losing side of a merge; no foreign key, as on people.
+        mergedIntoId: text("merged_into_id"),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        // One "Orion" project per scope; tombstones keep their name.
+        nameUnique: uniqueIndex("knowledge_entities_owner_type_name_unique")
+            .on(table.userId, table.typeKey, table.nameHmac)
+            .where(sql`${table.mergedIntoId} is null`),
+        mergedIntoIdx: index("knowledge_entities_merged_into_id_idx").on(
+            table.mergedIntoId,
+        ),
+        userIdIdx: index("knowledge_entities_user_id_idx").on(table.userId),
+        createdByIdx: index("knowledge_entities_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        typeKeyIdx: index("knowledge_entities_type_key_idx").on(table.typeKey),
+    }),
+);
+
+// A user's private description of an Organization entity, as
+// `person_notes` is of an Organization person.
+export const knowledgeEntityNotes = pgTable(
+    "knowledge_entity_notes",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        entityId: text("entity_id")
+            .notNull()
+            .references(() => knowledgeEntities.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // Encrypted, like `knowledge_entities.description`.
+        notes: text("notes").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        entityUserUnique: unique(
+            "knowledge_entity_notes_entity_id_user_id_unique",
+        ).on(table.entityId, table.userId),
+        userIdIdx: index("knowledge_entity_notes_user_id_idx").on(table.userId),
+    }),
+);
+
+// Other names of a person or an entity. `alias` lasts; `heard_as` is how a
+// transcription provider renders the name in one language, taught by the
+// correction that put it right, and goes with it.
+export const knowledgeAliases = pgTable(
+    "knowledge_aliases",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The scope: a user's nickname for an Organization person is
+        // theirs alone.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        personId: text("person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        entityId: text("entity_id").references(() => knowledgeEntities.id, {
+            onDelete: "cascade",
+        }),
+        kind: varchar("kind", { length: 8 })
+            .$type<"alias" | "heard_as">()
+            .notNull(),
+        text: text("text").notNull(),
+        // `domainLookupHash("alias", text)`.
+        textHmac: varchar("text_hmac", { length: 64 }).notNull(),
+        language: varchar("language", { length: 16 }),
+        provider: varchar("provider", { length: 64 }),
+        correctionId: text("correction_id").references(
+            (): AnyPgColumn => transcriptCorrections.id,
+            { onDelete: "cascade" },
+        ),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        aliasUnique: unique("knowledge_aliases_unique")
+            .on(
+                table.userId,
+                table.personId,
+                table.entityId,
+                table.kind,
+                table.textHmac,
+                table.correctionId,
+            )
+            .nullsNotDistinct(),
+        personIdx: index("knowledge_aliases_person_id_idx").on(table.personId),
+        entityIdx: index("knowledge_aliases_entity_id_idx").on(table.entityId),
+        correctionIdx: index("knowledge_aliases_correction_id_idx").on(
+            table.correctionId,
+        ),
+        oneTarget: check(
+            "knowledge_aliases_one_target_check",
+            sql`num_nonnulls(${table.personId}, ${table.entityId}) = 1`,
+        ),
+        kindCheck: check(
+            "knowledge_aliases_kind_check",
+            sql`${table.kind} in ('alias', 'heard_as')`,
+        ),
+        taughtBy: check(
+            "knowledge_aliases_heard_as_check",
+            sql`(${table.kind} = 'heard_as') = (${table.correctionId} is not null)`,
+        ),
+        createdByIdx: index("knowledge_aliases_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+    }),
+);
+
+// Corrections accepted on a transcript: an overlay, so the stored text
+// never changes and reverting deletes the row. Anchored to a turn and
+// character offsets of one revision; a rewrite of the transcript re-anchors
+// them (`recheckCorrectionsInTx`) or drops them.
+export const transcriptCorrections = pgTable(
+    "transcript_corrections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The scope that made it: the transcript's owner on a private
+        // recording, the organization account on a shared one.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        turnIndex: integer("turn_index").notNull(),
+        // UTF-16 offsets into the turn's text, as JavaScript slices it.
+        charStart: integer("char_start").notNull(),
+        charEnd: integer("char_end").notNull(),
+        heard: text("heard").notNull(),
+        // `domainLookupHash("correction-heard", heard)`.
+        heardHmac: varchar("heard_hmac", { length: 64 }).notNull(),
+        // `correct` replaces what was heard; `link` keeps it as spoken
+        // (a nickname, slang) and points at who or what it means.
+        kind: varchar("kind", { length: 8 })
+            .$type<"correct" | "link">()
+            .notNull(),
+        // A person or an entity (CHECK). Erasing either deletes the
+        // corrections targeting them.
+        targetPersonId: text("target_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        targetEntityId: text("target_entity_id").references(
+            (): AnyPgColumn => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        // In the transcript's language. Null on a link, which shows the
+        // target's current name.
+        replacement: text("replacement"),
+        // Accepted by default in a review not yet finished.
+        preTicked: boolean("pre_ticked").notNull().default(false),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        transcriptIdx: index("transcript_corrections_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        userIdIdx: index("transcript_corrections_user_id_idx").on(table.userId),
+        targetPersonIdx: index(
+            "transcript_corrections_target_person_id_idx",
+        ).on(table.targetPersonId),
+        targetEntityIdx: index(
+            "transcript_corrections_target_entity_id_idx",
+        ).on(table.targetEntityId),
+        oneTarget: check(
+            "transcript_corrections_one_target_check",
+            sql`num_nonnulls(${table.targetPersonId}, ${table.targetEntityId}) = 1`,
+        ),
+        replacementForCorrect: check(
+            "transcript_corrections_replacement_check",
+            sql`(${table.kind} = 'correct') = (${table.replacement} is not null)`,
+        ),
+        kindCheck: check(
+            "transcript_corrections_kind_check",
+            sql`${table.kind} in ('correct', 'link')`,
+        ),
+        spanCheck: check(
+            "transcript_corrections_span_check",
+            sql`${table.charStart} >= 0 and ${table.charStart} < ${table.charEnd}`,
+        ),
+        createdByIdx: index("transcript_corrections_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+    }),
+);
+
+// A confirmed fact: subject, relation, object. It lives in a scope (a
+// user's private layer, or the Organization's) and, unless a person
+// entered it by hand, lasts while evidence for it does.
+export const knowledgeFacts = pgTable(
+    "knowledge_facts",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        subjectPersonId: text("subject_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        subjectEntityId: text("subject_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        // A relation type's key; like entity type keys, one key names one
+        // type.
+        relationKey: varchar("relation_key", { length: 64 }).notNull(),
+        objectPersonId: text("object_person_id").references(() => people.id, {
+            onDelete: "cascade",
+        }),
+        objectEntityId: text("object_entity_id").references(
+            () => knowledgeEntities.id,
+            { onDelete: "cascade" },
+        ),
+        // Encrypted text, on relations whose object is text (a role).
+        objectLiteral: text("object_literal"),
+        // `p:<id>` or `e:<id>`; the object's may also be `l:` plus
+        // `domainLookupHash("fact-literal", literal)`.
+        subjectKey: varchar("subject_key", { length: 80 }).notNull(),
+        objectKey: varchar("object_key", { length: 80 }).notNull(),
+        origin: varchar("origin", { length: 16 })
+            .$type<"recording" | "manual">()
+            .notNull(),
+        // On a single-valued relation, the fact that took this one's place.
+        replacedByFactId: text("replaced_by_fact_id").references(
+            (): AnyPgColumn => knowledgeFacts.id,
+            { onDelete: "set null" },
+        ),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        factUnique: unique("knowledge_facts_unique").on(
+            table.userId,
+            table.subjectKey,
+            table.relationKey,
+            table.objectKey,
+        ),
+        subjectPersonIdx: index("knowledge_facts_subject_person_id_idx").on(
+            table.subjectPersonId,
+        ),
+        subjectEntityIdx: index("knowledge_facts_subject_entity_id_idx").on(
+            table.subjectEntityId,
+        ),
+        objectPersonIdx: index("knowledge_facts_object_person_id_idx").on(
+            table.objectPersonId,
+        ),
+        objectEntityIdx: index("knowledge_facts_object_entity_id_idx").on(
+            table.objectEntityId,
+        ),
+        replacedByIdx: index("knowledge_facts_replaced_by_fact_id_idx").on(
+            table.replacedByFactId,
+        ),
+        oneSubject: check(
+            "knowledge_facts_one_subject_check",
+            sql`num_nonnulls(${table.subjectPersonId}, ${table.subjectEntityId}) = 1`,
+        ),
+        oneObject: check(
+            "knowledge_facts_one_object_check",
+            sql`num_nonnulls(${table.objectPersonId}, ${table.objectEntityId}, ${table.objectLiteral}) = 1`,
+        ),
+        originCheck: check(
+            "knowledge_facts_origin_check",
+            sql`${table.origin} in ('recording', 'manual')`,
+        ),
+        createdByIdx: index("knowledge_facts_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        relationKeyIdx: index("knowledge_facts_relation_key_idx").on(
+            table.relationKey,
+        ),
+        subjectKeyIdx: index("knowledge_facts_subject_key_idx").on(
+            table.subjectKey,
+        ),
+        objectKeyIdx: index("knowledge_facts_object_key_idx").on(
+            table.objectKey,
+        ),
+    }),
+);
+
+// Where a fact was said: a stretch of one transcript's audio time, with the
+// words a person confirmed there. Goes with the transcript.
+export const knowledgeFactEvidence = pgTable(
+    "knowledge_fact_evidence",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The fact's scope.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        factId: text("fact_id")
+            .notNull()
+            .references(() => knowledgeFacts.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        startMs: integer("start_ms").notNull(),
+        endMs: integer("end_ms").notNull(),
+        // The label whose speaker the fact is about, when it is (`Speaker 1
+        // said "I lead Orion"`): renaming that speaker puts it to review.
+        speakerLabel: varchar("speaker_label", { length: 64 }),
+        dependsOnSpeaker: boolean("depends_on_speaker")
+            .notNull()
+            .default(false),
+        quote: text("quote").notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<"supported" | "wording_changed" | "speaker_changed">()
+            .notNull()
+            .default("supported"),
+        confirmedByUserId: text("confirmed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        confirmedAt: timestamp("confirmed_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        evidenceUnique: unique("knowledge_fact_evidence_unique").on(
+            table.factId,
+            table.transcriptionId,
+            table.startMs,
+            table.endMs,
+        ),
+        transcriptIdx: index("knowledge_fact_evidence_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        recordingIdx: index("knowledge_fact_evidence_recording_id_idx").on(
+            table.recordingId,
+        ),
+        userIdIdx: index("knowledge_fact_evidence_user_id_idx").on(
+            table.userId,
+        ),
+        statusCheck: check(
+            "knowledge_fact_evidence_status_check",
+            sql`${table.status} in ('supported', 'wording_changed', 'speaker_changed')`,
+        ),
+        rangeCheck: check(
+            "knowledge_fact_evidence_range_check",
+            sql`${table.startMs} >= 0 and ${table.startMs} <= ${table.endMs}`,
+        ),
+        confirmedByIdx: index(
+            "knowledge_fact_evidence_confirmed_by_user_id_idx",
+        ).on(table.confirmedByUserId),
+    }),
+);
+
+// One counter per knowledge scope (a user, or the organization account),
+// moved by every transaction that changes what the scope knows: a process
+// holding the scope in memory reloads it when the counter moved.
+export const knowledgeScopeGenerations = pgTable(
+    "knowledge_scope_generations",
+    {
+        userId: text("user_id")
+            .primaryKey()
+            .references(() => users.id, { onDelete: "cascade" }),
+        generation: bigint("generation", { mode: "number" })
+            .notNull()
+            .default(0),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+);
+
+// Meaning, as numbers: one vector per entity (its name, type and
+// description) or current fact ("subject relation object"), in its scope,
+// for one vector generation (the model and how the text was rendered).
+// Encrypted, and gone with what it was made from.
+export const knowledgeVectors = pgTable(
+    "knowledge_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        entityId: text("entity_id").references(() => knowledgeEntities.id, {
+            onDelete: "cascade",
+        }),
+        factId: text("fact_id").references(() => knowledgeFacts.id, {
+            onDelete: "cascade",
+        }),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        dim: integer("dim").notNull(),
+        // `encodeVector`, then encrypted.
+        vector: text("vector").notNull(),
+        // `domainLookupHash("vector-input", rendered text)`: an unchanged
+        // item is not embedded again.
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        // With its scope: after a promotion the Organization's vector of an
+        // entity is a row of its own beside the former owner's.
+        itemUnique: unique("knowledge_vectors_item_unique")
+            .on(
+                table.userId,
+                table.entityId,
+                table.factId,
+                table.vectorGeneration,
+            )
+            .nullsNotDistinct(),
+        entityIdx: index("knowledge_vectors_entity_id_idx").on(table.entityId),
+        userIdIdx: index("knowledge_vectors_user_id_idx").on(table.userId),
+        factIdx: index("knowledge_vectors_fact_id_idx").on(table.factId),
+        oneItem: check(
+            "knowledge_vectors_one_item_check",
+            sql`num_nonnulls(${table.entityId}, ${table.factId}) = 1`,
+        ),
+    }),
+);
+
+// Per scope: which vector generation is searched, and how far its vectors
+// are up to date (the scope generation they were last brought up to).
+export const knowledgeVectorState = pgTable("knowledge_vector_state", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => users.id, { onDelete: "cascade" }),
+    activeGeneration: varchar("active_generation", { length: 160 }),
+    embeddedAt: bigint("embedded_at", { mode: "number" }),
+    // Moved whenever the vectors change, so a process holding the scope in
+    // memory reloads them. Apart from the scope generation, which an
+    // embedding run must not move: that would queue the run again.
+    vectorVersion: integer("vector_version").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// One Learn pass over one transcript (Phase 3). `userId` is the recording's
+// owner, whose rows it reads; `scopeUserId` the scope it proposes knowledge
+// in: the owner's on a private recording, the Organization's on a shared
+// one. Only counts and provenance here: what it found is in its review
+// items, encrypted.
+export const learnRuns = pgTable(
+    "learn_runs",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        scopeUserId: text("scope_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 16 })
+            .$type<"private" | "org">()
+            .notNull(),
+        // Who asked: the owner, or the organization account.
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        trigger: varchar("trigger", { length: 16 })
+            .$type<"manual" | "auto">()
+            .notNull(),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        vocabularyVersion: integer("vocabulary_version").notNull(),
+        status: varchar("status", { length: 16 })
+            .$type<
+                | "queued"
+                | "running"
+                | "ready"
+                | "finished"
+                | "failed"
+                | "superseded"
+                | "cancelled"
+            >()
+            .notNull()
+            .default("queued"),
+        // How it ran: the bridge with tools, or the no-tools fallback.
+        path: varchar("path", { length: 16 }).$type<"bridge" | "fallback">(),
+        provider: varchar("provider", { length: 100 }),
+        model: varchar("model", { length: 100 }),
+        jobId: text("job_id"),
+        // Counts only (items kept per kind, drops per reason, tool calls).
+        stats: jsonb("stats").$type<Record<string, number>>(),
+        errorCode: varchar("error_code", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        startedAt: timestamp("started_at"),
+        finishedAt: timestamp("finished_at"),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        recordingIdx: index("learn_runs_recording_id_idx").on(
+            table.recordingId,
+        ),
+        transcriptionIdx: index("learn_runs_transcription_id_idx").on(
+            table.transcriptionId,
+        ),
+        userIdx: index("learn_runs_user_id_idx").on(table.userId),
+        scopeIdx: index("learn_runs_scope_user_id_idx").on(table.scopeUserId),
+        actorIdx: index("learn_runs_actor_user_id_idx").on(table.actorUserId),
+        statusCheck: check(
+            "learn_runs_status_check",
+            sql`${table.status} in ('queued', 'running', 'ready', 'finished', 'failed', 'superseded', 'cancelled')`,
+        ),
+        viewCheck: check(
+            "learn_runs_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+    }),
+);
+
+// What a run proposes, for a person to decide on. The payload (names,
+// heard words, quotes) is encrypted; the fingerprint is a keyed HMAC, so a
+// dismissal can be matched without storing what was dismissed.
+export const learnReviewItems = pgTable(
+    "learn_review_items",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        runId: text("run_id")
+            .notNull()
+            .references(() => learnRuns.id, { onDelete: "cascade" }),
+        // The run's scope.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 32 })
+            .$type<
+                | "speaker"
+                | "correction"
+                | "known_fact"
+                | "fact"
+                | "relation_phrase"
+            >()
+            .notNull(),
+        fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        payload: jsonb("payload").notNull(),
+        // The default the review opens with: yes unless the person says no.
+        preTicked: boolean("pre_ticked").notNull().default(false),
+        // The person's draft decision; null until they touch it.
+        decision: varchar("decision", { length: 16 }).$type<
+            "accepted" | "rejected"
+        >(),
+        // What they chose with it, encrypted: another person for a speaker,
+        // "create as my relation" (with its name and shape) or "suggest to
+        // the Organization" for a phrase.
+        choice: jsonb("choice"),
+        version: integer("version").notNull().default(0),
+        dependsOnLabel: varchar("depends_on_label", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        runIdx: index("learn_review_items_run_id_idx").on(table.runId),
+        userIdx: index("learn_review_items_user_id_idx").on(table.userId),
+        kindCheck: check(
+            "learn_review_items_kind_check",
+            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase')`,
+        ),
+    }),
+);
+
+// What a person said no to on a recording, so the next run there does not
+// propose it again (a manual run still may). A keyed HMAC of the item's
+// fingerprint, nothing readable.
+export const learnDismissals = pgTable(
+    "learn_dismissals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The scope the item was proposed in.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        unique: unique("learn_dismissals_unique").on(
+            table.userId,
+            table.recordingId,
+            table.fingerprintHmac,
+        ),
+        recordingIdx: index("learn_dismissals_recording_id_idx").on(
+            table.recordingId,
+        ),
     }),
 );
 
@@ -1015,6 +1922,10 @@ export const aiEnhancements = pgTable(
         // clean one, so without persisting it the user cannot tell that the
         // summary in front of them was built from two passes instead of
         // three. That distinction only matters after the fact.
+        // `llmInputFingerprint` of the transcript as the model read it (its
+        // corrections applied); null for a summary made before corrections
+        // existed, which never reads as stale.
+        inputFingerprint: varchar("input_fingerprint", { length: 64 }),
         multiPassRounds: integer("multi_pass_rounds"),
         multiPassUsed: integer("multi_pass_passes_used"),
         multiPassMerged: boolean("multi_pass_merged"),
@@ -1036,30 +1947,43 @@ export const aiEnhancements = pgTable(
 );
 
 // API Credentials (encrypted)
-export const apiCredentials = pgTable("api_credentials", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    userId: text("user_id")
-        .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
-    provider: varchar("provider", { length: 100 }).notNull(), // e.g., 'openai', 'groq', 'together-ai'
-    // Encrypted API key
-    apiKey: text("api_key").notNull(),
-    // Optional custom base URL (for OpenAI-compatible APIs)
-    baseUrl: text("base_url"), // e.g., 'https://api.groq.com/openai/v1'
-    // Default model for this provider
-    defaultModel: varchar("default_model", { length: 100 }),
-    // Whether this is the default provider for transcription/enhancement
-    isDefaultTranscription: boolean("is_default_transcription")
-        .notNull()
-        .default(false),
-    isDefaultEnhancement: boolean("is_default_enhancement")
-        .notNull()
-        .default(false),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const apiCredentials = pgTable(
+    "api_credentials",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        provider: varchar("provider", { length: 100 }).notNull(), // e.g., 'openai', 'groq', 'together-ai'
+        // Encrypted API key
+        apiKey: text("api_key").notNull(),
+        // Optional custom base URL (for OpenAI-compatible APIs)
+        baseUrl: text("base_url"), // e.g., 'https://api.groq.com/openai/v1'
+        // Default model for this provider
+        defaultModel: varchar("default_model", { length: 100 }),
+        // Whether this is the default provider for transcription/enhancement
+        isDefaultTranscription: boolean("is_default_transcription")
+            .notNull()
+            .default(false),
+        isDefaultEnhancement: boolean("is_default_enhancement")
+            .notNull()
+            .default(false),
+        // The provider Learn runs on, where it should differ from the
+        // enhancement default (a stronger model for learning, say). None
+        // marked: Learn uses the enhancement default.
+        isDefaultLearn: boolean("is_default_learn").notNull().default(false),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        // One provider for Learn per user at most.
+        oneLearnDefault: uniqueIndex("api_credentials_one_learn_default")
+            .on(table.userId)
+            .where(sql`${table.isDefaultLearn}`),
+    }),
+);
 
 // User Settings
 export const userSettings = pgTable("user_settings", {
@@ -1243,6 +2167,9 @@ export const userSettings = pgTable("user_settings", {
     summaryPrompt: jsonb("summary_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // Topic detection: queued after a transcript with timings is written.
     autoDetectTopics: boolean("auto_detect_topics").notNull().default(false),
+    // Automatic Learn after a transcript with timings (offered where
+    // LEARN_AUTO is set); the title, summary and topics wait for its review.
+    autoLearn: boolean("auto_learn").notNull().default(false),
     topicPrompt: jsonb("topic_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // AI output language (applies to summaries, AI-generated titles and topics).
     // null or "auto" => match transcript language (default behavior).

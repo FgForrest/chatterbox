@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, notInArray, or } from "drizzle-orm";
+import { and, eq, isNull, ne, not, notInArray, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
@@ -18,8 +18,10 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { type AppLocale, normalizeLocale } from "@/lib/i18n/config";
+import { audioReplacedInTx } from "@/lib/knowledge/transcript-rewrite";
 import { sendNewRecordingBarkNotification } from "@/lib/notifications/bark";
 import { sendNewRecordingEmail } from "@/lib/notifications/email";
+import { getOrgUserId } from "@/lib/org/config";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     findInlineContent,
@@ -35,6 +37,10 @@ import {
 } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
+import {
+    isRecordingShared,
+    sharedRecordingCondition,
+} from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
     claimAutoTranscribeIds,
@@ -95,6 +101,14 @@ interface SyncContext {
     notificationEmail: string | null;
     locale: AppLocale | null;
     barkPushUrl: string | null;
+    /**
+     * The organization account, or null without an Organization. A
+     * recording shared with it takes no Plaud transcript, no new Plaud
+     * version and no automatic transcription: only the organization account
+     * changes it until it is withdrawn, and the next sync after that fills
+     * the gap.
+     */
+    orgUserId: string | null;
 }
 
 /** A freshly-synced recording that Plaud may hold transcript/summary content
@@ -108,6 +122,8 @@ interface ImportCandidate {
     durationMs: number;
     transcriptSuppressed: boolean;
     summarySuppressed: boolean;
+    /** The audio Plaud listed with it, which its transcript is made from. */
+    audioMd5: string | null;
 }
 
 async function storagePathHeldByOtherRecording(
@@ -185,11 +201,12 @@ function buildImportCandidate(
         durationMs: plaudRecording.duration,
         transcriptSuppressed: suppression?.transcriptReapedAt != null,
         summarySuppressed: suppression?.summaryReapedAt != null,
+        audioMd5: plaudRecording.file_md5 ?? null,
     };
 }
 
 async function loadPlaudContentGaps(
-    userId: string,
+    { userId, orgUserId }: Pick<SyncContext, "userId" | "orgUserId">,
     recordingId: string,
     flags: {
         isTrans: boolean;
@@ -236,12 +253,30 @@ async function loadPlaudContentGaps(
         if (!existing) needsSummary = true;
     }
 
+    // Shared, the recording is not the owner's to change: Plaud's transcript
+    // would be refused, and its summary is imported only beside it.
+    // Neither is a gap, so nothing is fetched from Plaud for them; the
+    // first sync after an unshare finds both again.
+    if (
+        !hasPlaudTranscript &&
+        (needsTranscript || needsSummary) &&
+        orgUserId &&
+        (await isRecordingShared(recordingId, orgUserId))
+    ) {
+        return {
+            needsTranscript: false,
+            needsSummary: false,
+            hasPlaudTranscript,
+        };
+    }
+
     return { needsTranscript, needsSummary, hasPlaudTranscript };
 }
 
 async function hasUnseenPlaudContentGaps(
     userId: string,
     seenRecordingIds: Set<string>,
+    orgUserId: string | null,
 ): Promise<boolean> {
     const conditions = [
         eq(recordings.userId, userId),
@@ -255,6 +290,8 @@ async function hasUnseenPlaudContentGaps(
             and(isNull(aiEnhancements.id), isNull(recordings.summaryReapedAt)),
         ),
     ];
+    // Shared: no gap this sync may fill.
+    if (orgUserId) conditions.push(not(sharedRecordingCondition(orgUserId)));
     if (seenRecordingIds.size > 0) {
         conditions.push(notInArray(recordings.id, [...seenRecordingIds]));
     }
@@ -338,7 +375,7 @@ async function processRecording(
                 );
                 if (importCandidate) {
                     const gaps = await loadPlaudContentGaps(
-                        context.userId,
+                        context,
                         existingRecording.id,
                         {
                             isTrans: importCandidate.isTrans,
@@ -373,7 +410,7 @@ async function processRecording(
                 );
                 if (importCandidate) {
                     const gaps = await loadPlaudContentGaps(
-                        context.userId,
+                        context,
                         existingRecording.id,
                         {
                             isTrans: importCandidate.isTrans,
@@ -398,6 +435,18 @@ async function processRecording(
 
         // Tombstone: suppress resurrection of user-deleted recordings (#56).
         if (existingRecording?.deletedAt) {
+            return { status: "skipped" };
+        }
+
+        // Shared, the recording is the organization account's to change,
+        // and a new version from Plaud would replace the audio under the
+        // Organization's transcript. It waits: the version is not advanced,
+        // so the first sync after a withdrawal applies it.
+        if (
+            existingRecording &&
+            context.orgUserId &&
+            (await isRecordingShared(existingRecording.id, context.orgUserId))
+        ) {
             return { status: "skipped" };
         }
 
@@ -432,9 +481,18 @@ async function processRecording(
             recordingId,
         );
         const contentType = sniffed.contentType;
+        // A new version written over the audio a recording already serves
+        // is written only under its lock, once the recording is known to be
+        // still its owner's to change: a share landing during the download
+        // must not have its audio replaced. A fresh key serves nobody yet.
+        const overwrites =
+            existingRecording !== undefined &&
+            storageKey === existingRecording.storagePath;
         const [waveformPeaks] = await Promise.all([
             generateIngestWaveform(audioBuffer),
-            storage.uploadFile(storageKey, audioBuffer, contentType),
+            overwrites
+                ? Promise.resolve()
+                : storage.uploadFile(storageKey, audioBuffer, contentType),
         ]);
 
         const recordingData = {
@@ -469,7 +527,12 @@ async function processRecording(
             // tombstoned the row during the download/upload above.
             const updated = await db.transaction(async (tx) => {
                 const [locked] = await tx
-                    .select({ deletedAt: recordings.deletedAt })
+                    .select({
+                        deletedAt: recordings.deletedAt,
+                        titleEditedAt: recordings.titleEditedAt,
+                        filename: recordings.filename,
+                        fileMd5: recordings.fileMd5,
+                    })
                     .from(recordings)
                     .where(
                         and(
@@ -481,23 +544,71 @@ async function processRecording(
                     .limit(1);
 
                 if (!locked || locked.deletedAt) return false;
+                // Shared during the download: the version waits, as above.
+                if (
+                    context.orgUserId &&
+                    (await isRecordingShared(
+                        existingRecording.id,
+                        context.orgUserId,
+                        tx,
+                    ))
+                ) {
+                    return "shared" as const;
+                }
+                if (overwrites) {
+                    await storage.uploadFile(
+                        storageKey,
+                        audioBuffer,
+                        contentType,
+                    );
+                }
 
+                // A title a person set is kept over Plaud's filename. Read
+                // under the lock, so a rename committed during the download
+                // above still wins.
                 await tx
                     .update(recordings)
-                    .set({ ...recordingData, updatedAt: new Date() })
+                    .set({
+                        ...recordingData,
+                        filename: locked.titleEditedAt
+                            ? locked.filename
+                            : recordingData.filename,
+                        updatedAt: new Date(),
+                    })
                     .where(
                         and(
                             eq(recordings.id, existingRecording.id),
                             eq(recordings.userId, context.userId),
                         ),
                     );
+                // The transcripts it keeps were made from the old audio.
+                await audioReplacedInTx(tx, existingRecording.id, {
+                    from: locked.fileMd5,
+                    to: plaudRecording.file_md5,
+                });
                 return true;
             });
 
+            if (updated === "shared") {
+                // Its row still names the audio it had, which was not
+                // touched; a blob uploaded beside it is an orphan.
+                if (!overwrites) {
+                    try {
+                        await storage.deleteFile(storageKey);
+                    } catch (cleanupError) {
+                        console.error(
+                            `Failed to clean up storage object ${storageKey} of a shared recording:`,
+                            cleanupError,
+                        );
+                    }
+                }
+                return { status: "skipped" };
+            }
             if (!updated) {
-                // Best-effort cleanup of the orphaned blob.
+                // Best-effort cleanup of the orphaned blob, when one was
+                // written beside the recording's audio.
                 try {
-                    await storage.deleteFile(storageKey);
+                    if (!overwrites) await storage.deleteFile(storageKey);
                 } catch (cleanupError) {
                     console.error(
                         `Failed to clean up orphaned storage object ${storageKey} after concurrent delete:`,
@@ -757,6 +868,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 settings?.notificationEmail || user?.email || null,
             locale: normalizeLocale(user?.uiLocale),
             barkPushUrl: settings?.barkPushUrl || null,
+            orgUserId: await getOrgUserId(),
         };
 
         const plaudClient = await createPlaudClient(
@@ -843,6 +955,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                             !(await hasUnseenPlaudContentGaps(
                                 userId,
                                 seenRecordingIds,
+                                context.orgUserId,
                             ))
                         ) {
                             hasMore = false;
@@ -949,6 +1062,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             try {
                 retryIds = await listAutoTranscribeRetryIds(userId, {
                     transcriptMode: context.transcriptMode,
+                    excludeSharedWith: context.orgUserId,
                 });
             } catch (error) {
                 console.error("Auto-transcribe retry lookup failed:", error);
@@ -1055,7 +1169,7 @@ async function importPlaudContent(
         if (tokenDead) break;
         try {
             const gaps = await loadPlaudContentGaps(
-                context.userId,
+                context,
                 candidate.recordingId,
                 {
                     isTrans: candidate.isTrans,
@@ -1097,6 +1211,7 @@ async function importPlaudContent(
                         provider: "plaud",
                         model: "plaud-native",
                         turns,
+                        audioMd5: candidate.audioMd5,
                     });
                     if (committed) {
                         if (turns) {

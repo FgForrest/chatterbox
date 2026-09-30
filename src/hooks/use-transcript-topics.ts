@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
+import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
 
 /** How often a job that outlived its request is checked on. */
@@ -35,6 +36,7 @@ export function useTranscriptTopics(
     source: string | undefined,
     stored: TranscriptTopic[] | null | undefined,
     enabled: boolean,
+    view?: RecordingView,
 ) {
     const i18n = useExtracted();
     // `i18n` is a new function every render. The callbacks the mount check
@@ -80,7 +82,10 @@ export function useTranscriptTopics(
     const showStored = useCallback(
         async (topicSource: TopicSource, signal: AbortSignal) => {
             const response = await fetch(
-                `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                withRecordingView(
+                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                    view,
+                ),
                 { signal },
             );
             if (!response.ok) {
@@ -97,7 +102,7 @@ export function useTranscriptTopics(
             setDetected((current) => ({ ...current, [topicSource]: next }));
             toast.success(messagesRef.current.detected);
         },
-        [recordingId],
+        [recordingId, view],
     );
 
     /** Follows a job to its end and says how it went. */
@@ -145,7 +150,10 @@ export function useTranscriptTopics(
         let following: AbortController | null = null;
         (async () => {
             const response = await fetch(
-                `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                withRecordingView(
+                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                    view,
+                ),
                 { signal: probe.signal },
             );
             if (!response.ok || probe.signal.aborted) return;
@@ -169,7 +177,7 @@ export function useTranscriptTopics(
             probe.abort();
             following?.abort();
         };
-    }, [recordingId, source, enabled, restart, release, settle]);
+    }, [recordingId, source, enabled, view, restart, release, settle]);
 
     const detect = useCallback(async () => {
         if (!isTopicSource(source)) return;
@@ -180,7 +188,10 @@ export function useTranscriptTopics(
 
         try {
             const response = await fetch(
-                `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                withRecordingView(
+                    `/api/recordings/${recordingId}/topics?source=${topicSource}`,
+                    view,
+                ),
                 { method: "POST", signal },
             );
             if (!response.ok) {
@@ -203,7 +214,7 @@ export function useTranscriptTopics(
         } finally {
             release(controller);
         }
-    }, [recordingId, source, restart, release, settle]);
+    }, [recordingId, source, view, restart, release, settle]);
 
     return {
         topics,

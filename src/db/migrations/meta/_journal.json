@@ -407,6 +407,181 @@
       "when": 1790194729475,
       "tag": "0057_google_drive_export",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1790591405483,
+      "tag": "0058_transcript_speaker_answers",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790591870054,
+      "tag": "0059_transcript_revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790593442575,
+      "tag": "0060_protect_existing_titles",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1790593443733,
+      "tag": "0061_title_edited_at_no_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790597329184,
+      "tag": "0062_demote_copied_speaker_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1790598379027,
+      "tag": "0063_title_for_untranscribed",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1790599304211,
+      "tag": "0064_org_snapshot_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1790609067848,
+      "tag": "0065_drop_org_snapshot_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1790612332294,
+      "tag": "0066_merge_org_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1790614460339,
+      "tag": "0067_knowledge_vocabulary",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1790614774801,
+      "tag": "0068_transcript_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1790615806297,
+      "tag": "0069_knowledge_entities",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1790616541829,
+      "tag": "0070_knowledge_facts",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790617516674,
+      "tag": "0071_knowledge_scope_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790619953401,
+      "tag": "0072_knowledge_vectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790633379352,
+      "tag": "0073_knowledge_keys_and_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790637493544,
+      "tag": "0074_learn_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790642302042,
+      "tag": "0075_summary_input_fingerprints",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790660666411,
+      "tag": "0076_types_adopted_from_share",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790671060190,
+      "tag": "0077_types_adoption_refused",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790714363530,
+      "tag": "0078_credentials_default_learn",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1790714608924,
+      "tag": "0079_auto_learn_hold",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790715965353,
+      "tag": "0080_hold_index_learn_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1790716581560,
+      "tag": "0081_transcript_audio_md5",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790724223118,
+      "tag": "0082_backfill_transcript_audio_md5",
+      "breakpoints": true
     }
   ]
 }

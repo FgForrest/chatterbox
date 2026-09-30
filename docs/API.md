@@ -551,6 +551,10 @@ Supported events:
 - `transcription.completed`
 - `transcription.failed`
 
+With automatic Learn on, `transcription.completed` fires before the title is
+generated: the title, summary and topics wait for Learn's review (72 hours at
+most), and the new title follows as `recording.updated`.
+
 Riffado signs each request with HMAC-SHA256:
 
 ```http

@@ -69,6 +69,14 @@ services:
       GOOGLE_PICKER_API_KEY: ${GOOGLE_PICKER_API_KEY:-}
       GOOGLE_CLOUD_PROJECT_NUMBER: ${GOOGLE_CLOUD_PROJECT_NUMBER:-}
       GOOGLE_WORKSPACE_DOMAINS: ${GOOGLE_WORKSPACE_DOMAINS:-}
+      # Learn (optional; see docs/self-hosting/environment-variables)
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      LEARN_MCP_URL: ${LEARN_MCP_URL:-}
+      LEARN_AUTO: ${LEARN_AUTO:-}
+      LEARN_BRIDGE_URL: ${LEARN_BRIDGE_URL:-}
+      KNOWLEDGE_MEMORY_MB: ${KNOWLEDGE_MEMORY_MB:-}
 
       # SMTP (optional: password reset + email notifications)
       SMTP_HOST: ${SMTP_HOST:-}
@@ -115,6 +123,9 @@ services:
         CODEX_VERSION: ${CODEX_VERSION:-latest}
     container_name: riffado-agent-bridge
     restart: unless-stopped
+    # Reaps what a killed CLI leaves behind (npm's codex is a wrapper whose
+    # real binary outlives it by a moment); node as PID 1 would not.
+    init: true
     # Deliberately no `ports:`. The bridge spends your subscription, so
     # it is reachable only from other services on this compose network --
     # publishing it would expose that to the host and anything routed to
@@ -126,7 +137,10 @@ services:
       # writes a credential into the agent_creds volume below.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       BRIDGE_MAX_CONCURRENCY: ${BRIDGE_MAX_CONCURRENCY:-1}
-      BRIDGE_TIMEOUT_MS: ${BRIDGE_TIMEOUT_MS:-300000}
+      # Learn with tools can take several minutes on a long recording.
+      BRIDGE_TIMEOUT_MS: ${BRIDGE_TIMEOUT_MS:-900000}
+      # Learn's read-only knowledge tools on the app (see agent-bridge/README.md).
+      BRIDGE_LEARN_MCP_URL: ${LEARN_MCP_URL:-}
       CLAUDE_EXTRA_ARGS: ${CLAUDE_EXTRA_ARGS:-}
       CODEX_EXTRA_ARGS: ${CODEX_EXTRA_ARGS:-}
     volumes:
@@ -141,6 +155,50 @@ services:
       start_period: 10s
       retries: 3
 
+  # Optional. Embeddings for Learn: BAAI/bge-m3 served by Ollama on CPU,
+  # about 1.3 GB of memory with the model loaded (Spike 0.2). Opt in with
+  # `--profile learn`, then set in .env:
+  #   EMBEDDING_BASE_URL=http://embeddings:11434/v1
+  #   EMBEDDING_MODEL=bge-m3
+  # The first start downloads the model (1.2 GB) into the volume below.
+  embeddings:
+    profiles: ["learn"]
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+    container_name: riffado-embeddings
+    restart: unless-stopped
+    # Deliberately no `ports:`: only the app, by service name, needs it.
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+      # Keep the model loaded between runs instead of loading it (about a
+      # second) after five idle minutes.
+      OLLAMA_KEEP_ALIVE: ${EMBEDDING_KEEP_ALIVE:-24h}
+    # Serve, and pull the model once the server answers; a failed pull
+    # (offline) leaves the service unhealthy and Learn matching words only.
+    # An init process forwards `docker stop` to Ollama; if the server dies
+    # before it answers, the container exits and is restarted.
+    init: true
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        ollama serve & server=$$!;
+        until ollama list >/dev/null 2>&1; do kill -0 $$server 2>/dev/null || exit 1; sleep 1; done;
+        ollama pull "$$EMBEDDING_MODEL" || echo "could not pull the embedding model";
+        wait $$server
+    volumes:
+      - embeddings:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show \"$$EMBEDDING_MODEL\" >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5m
+      retries: 3
+
 volumes:
   pgdata:
     driver: local
@@ -149,4 +207,6 @@ volumes:
   agent_creds:
     driver: local
   storage:
+    driver: local
+  embeddings:
     driver: local

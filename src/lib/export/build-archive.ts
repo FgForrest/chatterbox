@@ -1,18 +1,32 @@
 import { PassThrough, type Readable, Transform } from "node:stream";
 import { ZipArchive } from "archiver";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    knowledgeAliases,
+    knowledgeEntities,
+    knowledgeEntityNotes,
+    knowledgeEntityTypes,
+    knowledgeFactEvidence,
+    knowledgeFacts,
+    knowledgeRelationTypes,
+    knowledgeVocabularyProposals,
+    knowledgeVocabularyProposalVotes,
+    learnReviewItems,
+    learnRuns,
     people,
     personNotes,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    transcriptCorrections,
     transcriptions,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { StorageProvider } from "@/lib/storage/types";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
@@ -230,8 +244,21 @@ export async function buildAndUploadExportArchive(input: {
         createdAt: string;
         userId: string;
         recordings: ManifestRecording[];
-        knowledge?: { people: number; attributions: number };
+        knowledge?: {
+            people: number;
+            attributions: number;
+            rejections: number;
+            corrections: number;
+        };
         organization?: { folders: number; assignments: number };
+        vocabulary?: {
+            entityTypes: number;
+            relationTypes: number;
+            suggestedPhrases: number;
+        };
+        entities?: { entities: number; aliases: number; notes: number };
+        facts?: { facts: number; evidence: number };
+        learn?: { runs: number; items: number };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -502,13 +529,20 @@ export async function buildAndUploadExportArchive(input: {
     // backup that restores recordings but loses who was speaking in them is
     // not a backup of this feature at all.
     const knowledge = await collectKnowledgeBase(userId);
-    if (knowledge.people.length > 0 || knowledge.attributions.length > 0) {
+    if (
+        knowledge.people.length > 0 ||
+        knowledge.attributions.length > 0 ||
+        knowledge.rejections.length > 0 ||
+        knowledge.corrections.length > 0
+    ) {
         archive.append(Buffer.from(JSON.stringify(knowledge, null, 2)), {
             name: "knowledge/people.json",
         });
         manifest.knowledge = {
             people: knowledge.people.length,
             attributions: knowledge.attributions.length,
+            rejections: knowledge.rejections.length,
+            corrections: knowledge.corrections.length,
         };
     }
 
@@ -523,6 +557,79 @@ export async function buildAndUploadExportArchive(input: {
         manifest.organization = {
             folders: organization.folders.length,
             assignments: organization.assignments.length,
+        };
+    }
+
+    // The user's own vocabulary, and the phrases they suggested to the
+    // Organization (only the phrase went there).
+    const vocabulary = await collectVocabulary(userId);
+    if (
+        vocabulary.entityTypes.length > 0 ||
+        vocabulary.relationTypes.length > 0 ||
+        vocabulary.suggestedPhrases.length > 0
+    ) {
+        archive.append(Buffer.from(JSON.stringify(vocabulary, null, 2)), {
+            name: "knowledge/vocabulary.json",
+        });
+        manifest.vocabulary = {
+            entityTypes: vocabulary.entityTypes.length,
+            relationTypes: vocabulary.relationTypes.length,
+            suggestedPhrases: vocabulary.suggestedPhrases.length,
+        };
+    }
+
+    // Entities, every name the user gave or taught, and their notes on the
+    // Organization's entities; the Organization's entities and people those
+    // point at come along, as referenced people do in `people.json`.
+    const entities = await collectEntities(
+        userId,
+        new Set(knowledge.people.map((person) => person.id)),
+    );
+    if (
+        entities.entities.length > 0 ||
+        entities.aliases.length > 0 ||
+        entities.notes.length > 0
+    ) {
+        archive.append(Buffer.from(JSON.stringify(entities, null, 2)), {
+            name: "knowledge/entities.json",
+        });
+        manifest.entities = {
+            entities: entities.entities.length,
+            aliases: entities.aliases.length,
+            notes: entities.notes.length,
+        };
+    }
+
+    // Facts and where they were said, with the quotes; the Organization's
+    // people and entities they name that the files above do not carry.
+    const facts = await collectFacts(userId, {
+        people: new Set([
+            ...knowledge.people.map((person) => person.id),
+            ...entities.people.map((person) => person.id),
+        ]),
+        entities: new Set(entities.entities.map((entity) => entity.id)),
+    });
+    if (facts.facts.length > 0) {
+        archive.append(Buffer.from(JSON.stringify(facts, null, 2)), {
+            name: "knowledge/facts.json",
+        });
+        manifest.facts = {
+            facts: facts.facts.length,
+            evidence: facts.evidence.length,
+        };
+    }
+
+    // The user's Learn runs and what they proposed, the decisions taken
+    // so far included. Dismissals are keyed hashes of this instance, which
+    // no restore could match, so they stay behind.
+    const learn = await collectLearn(userId);
+    if (learn.runs.length > 0) {
+        archive.append(Buffer.from(JSON.stringify(learn, null, 2)), {
+            name: "knowledge/learn.json",
+        });
+        manifest.learn = {
+            runs: learn.runs.length,
+            items: learn.items.length,
         };
     }
 
@@ -618,7 +725,44 @@ interface ArchivedKnowledgeBase {
         status: string;
         confidence: number | null;
         evidenceStartMs: number | null;
+        markedUnknown: boolean;
+        confirmedByUserId: string | null;
     }[];
+    /** "This speaker is not that person", as said by a human. */
+    rejections: {
+        transcriptionId: string;
+        label: string;
+        personId: string;
+        createdAt: string;
+    }[];
+    /** The overlay on the archived transcripts, whose text stays as heard. */
+    corrections: {
+        transcriptionId: string;
+        transcriptRevision: number;
+        turnIndex: number;
+        charStart: number;
+        charEnd: number;
+        heard: string;
+        kind: string;
+        targetPersonId: string | null;
+        targetEntityId: string | null;
+        replacement: string | null;
+        preTicked: boolean;
+        createdAt: string;
+    }[];
+}
+
+// The corrections a user's archive carries: their own, and the
+// Organization's on their own transcripts -- a recording they shared is
+// still theirs, and the overlay on it the Organization's while shared.
+function exportedCorrections(userId: string) {
+    return or(
+        eq(transcriptCorrections.userId, userId),
+        and(
+            orgOwnedCondition(transcriptCorrections.userId),
+            sql`${transcriptCorrections.transcriptionId} in (select ${transcriptions.id} from ${transcriptions} where ${transcriptions.userId} = ${userId})`,
+        ),
+    );
 }
 
 // The knowledge base for one user, decrypted for the archive.
@@ -637,29 +781,66 @@ async function collectKnowledgeBase(
         mergedIntoId: people.mergedIntoId,
         createdAt: people.createdAt,
     };
-    const [peopleRows, attributionRows] = await Promise.all([
-        db.select(personColumns).from(people).where(eq(people.userId, userId)),
-        db
-            .select({
-                transcriptionId: transcriptSpeakers.transcriptionId,
-                label: transcriptSpeakers.label,
-                personId: transcriptSpeakers.personId,
-                source: transcriptSpeakers.source,
-                status: transcriptSpeakers.status,
-                confidence: transcriptSpeakers.confidence,
-                evidenceStartMs: transcriptSpeakers.evidenceStartMs,
-            })
-            .from(transcriptSpeakers)
-            .where(eq(transcriptSpeakers.userId, userId)),
-    ]);
+    const [peopleRows, attributionRows, rejectionRows, correctionRows] =
+        await Promise.all([
+            db
+                .select(personColumns)
+                .from(people)
+                .where(eq(people.userId, userId)),
+            db
+                .select({
+                    transcriptionId: transcriptSpeakers.transcriptionId,
+                    label: transcriptSpeakers.label,
+                    personId: transcriptSpeakers.personId,
+                    source: transcriptSpeakers.source,
+                    status: transcriptSpeakers.status,
+                    confidence: transcriptSpeakers.confidence,
+                    evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+                    markedUnknown: transcriptSpeakers.markedUnknown,
+                    confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+                })
+                .from(transcriptSpeakers)
+                .where(eq(transcriptSpeakers.userId, userId)),
+            db
+                .select({
+                    transcriptionId:
+                        transcriptSpeakerRejections.transcriptionId,
+                    label: transcriptSpeakerRejections.label,
+                    personId: transcriptSpeakerRejections.personId,
+                    createdAt: transcriptSpeakerRejections.createdAt,
+                })
+                .from(transcriptSpeakerRejections)
+                .where(eq(transcriptSpeakerRejections.userId, userId)),
+            db
+                .select({
+                    transcriptionId: transcriptCorrections.transcriptionId,
+                    transcriptRevision:
+                        transcriptCorrections.transcriptRevision,
+                    turnIndex: transcriptCorrections.turnIndex,
+                    charStart: transcriptCorrections.charStart,
+                    charEnd: transcriptCorrections.charEnd,
+                    heard: transcriptCorrections.heard,
+                    kind: transcriptCorrections.kind,
+                    personId: transcriptCorrections.targetPersonId,
+                    targetEntityId: transcriptCorrections.targetEntityId,
+                    replacement: transcriptCorrections.replacement,
+                    preTicked: transcriptCorrections.preTicked,
+                    createdAt: transcriptCorrections.createdAt,
+                })
+                .from(transcriptCorrections)
+                .where(exportedCorrections(userId)),
+        ]);
 
     // Organization people the user's own transcripts name: a restore must
     // still know who spoke. They carry only this user's own notes.
     const own = new Set(peopleRows.map((row) => row.id));
     const sharedIds = [
         ...new Set(
-            attributionRows.flatMap((row) =>
-                row.personId && !own.has(row.personId) ? [row.personId] : [],
+            [...attributionRows, ...rejectionRows, ...correctionRows].flatMap(
+                (row) =>
+                    row.personId && !own.has(row.personId)
+                        ? [row.personId]
+                        : [],
             ),
         ),
     ];
@@ -711,5 +892,448 @@ async function collectKnowledgeBase(
             createdAt: row.createdAt.toISOString(),
         })),
         attributions: attributionRows,
+        rejections: rejectionRows.map((row) => ({
+            ...row,
+            createdAt: row.createdAt.toISOString(),
+        })),
+        corrections: correctionRows.map(({ personId, ...row }) => ({
+            ...row,
+            targetPersonId: personId,
+            heard: decryptText(row.heard),
+            replacement: row.replacement ? decryptText(row.replacement) : null,
+            createdAt: row.createdAt.toISOString(),
+        })),
+    };
+}
+
+interface ArchivedVocabulary {
+    entityTypes: {
+        key: string;
+        label: string;
+        adoptedAsKey: string | null;
+        createdAt: string;
+    }[];
+    relationTypes: {
+        key: string;
+        label: string;
+        subjectTypes: string[];
+        objectTypes: string[];
+        objectKind: string;
+        cardinality: string;
+        adoptedAsKey: string | null;
+        createdAt: string;
+    }[];
+    suggestedPhrases: { phrase: string; status: string }[];
+}
+
+// The user's private vocabulary, decrypted. The entity types it relates are
+// core keys, the user's own, or the Organization's, whose keys stay stable.
+async function collectVocabulary(userId: string): Promise<ArchivedVocabulary> {
+    const [entityRows, relationRows, phraseRows] = await Promise.all([
+        db
+            .select({
+                key: knowledgeEntityTypes.key,
+                label: knowledgeEntityTypes.label,
+                adoptedAsKey: knowledgeEntityTypes.adoptedAsKey,
+                createdAt: knowledgeEntityTypes.createdAt,
+            })
+            .from(knowledgeEntityTypes)
+            .where(eq(knowledgeEntityTypes.userId, userId)),
+        db
+            .select({
+                key: knowledgeRelationTypes.key,
+                label: knowledgeRelationTypes.label,
+                subjectTypes: knowledgeRelationTypes.subjectTypes,
+                objectTypes: knowledgeRelationTypes.objectTypes,
+                objectKind: knowledgeRelationTypes.objectKind,
+                cardinality: knowledgeRelationTypes.cardinality,
+                adoptedAsKey: knowledgeRelationTypes.adoptedAsKey,
+                createdAt: knowledgeRelationTypes.createdAt,
+            })
+            .from(knowledgeRelationTypes)
+            .where(eq(knowledgeRelationTypes.userId, userId)),
+        db
+            .select({
+                phrase: knowledgeVocabularyProposals.phrase,
+                status: knowledgeVocabularyProposals.status,
+            })
+            .from(knowledgeVocabularyProposalVotes)
+            .innerJoin(
+                knowledgeVocabularyProposals,
+                eq(
+                    knowledgeVocabularyProposals.id,
+                    knowledgeVocabularyProposalVotes.proposalId,
+                ),
+            )
+            .where(eq(knowledgeVocabularyProposalVotes.userId, userId)),
+    ]);
+    return {
+        entityTypes: entityRows.map((row) => ({
+            ...row,
+            label: decryptText(row.label),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        relationTypes: relationRows.map((row) => ({
+            ...row,
+            label: decryptText(row.label),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        suggestedPhrases: phraseRows.map((row) => ({
+            phrase: decryptText(row.phrase),
+            status: row.status,
+        })),
+    };
+}
+
+interface ArchivedEntities {
+    entities: {
+        id: string;
+        typeKey: string;
+        name: string;
+        description: string | null;
+        mergedIntoId: string | null;
+        /** An Organization entity the user's knowledge points at. */
+        organization: boolean;
+        createdAt: string;
+    }[];
+    aliases: {
+        personId: string | null;
+        entityId: string | null;
+        kind: string;
+        text: string;
+        language: string | null;
+        provider: string | null;
+        createdAt: string;
+    }[];
+    /** The user's private notes on Organization entities. */
+    notes: { entityId: string; notes: string }[];
+    /** Organization people the aliases name, when `people.json` has none. */
+    people: { id: string; displayName: string; mergedIntoId: string | null }[];
+}
+
+async function collectEntities(
+    userId: string,
+    archivedPeople: ReadonlySet<string>,
+): Promise<ArchivedEntities> {
+    const entityColumns = {
+        id: knowledgeEntities.id,
+        typeKey: knowledgeEntities.typeKey,
+        name: knowledgeEntities.name,
+        description: knowledgeEntities.description,
+        mergedIntoId: knowledgeEntities.mergedIntoId,
+        createdAt: knowledgeEntities.createdAt,
+    };
+    const [ownRows, aliasRows, noteRows, correctionRows] = await Promise.all([
+        db
+            .select(entityColumns)
+            .from(knowledgeEntities)
+            .where(eq(knowledgeEntities.userId, userId)),
+        db
+            .select({
+                personId: knowledgeAliases.personId,
+                entityId: knowledgeAliases.entityId,
+                kind: knowledgeAliases.kind,
+                text: knowledgeAliases.text,
+                language: knowledgeAliases.language,
+                provider: knowledgeAliases.provider,
+                createdAt: knowledgeAliases.createdAt,
+            })
+            .from(knowledgeAliases)
+            .where(eq(knowledgeAliases.userId, userId)),
+        db
+            .select({
+                entityId: knowledgeEntityNotes.entityId,
+                notes: knowledgeEntityNotes.notes,
+            })
+            .from(knowledgeEntityNotes)
+            .where(eq(knowledgeEntityNotes.userId, userId)),
+        db
+            .select({ entityId: transcriptCorrections.targetEntityId })
+            .from(transcriptCorrections)
+            .where(
+                and(
+                    exportedCorrections(userId),
+                    isNotNull(transcriptCorrections.targetEntityId),
+                ),
+            ),
+    ]);
+
+    const own = new Set(ownRows.map((row) => row.id));
+    const referencedIds = [
+        ...new Set(
+            [...aliasRows, ...noteRows, ...correctionRows].flatMap((row) =>
+                row.entityId && !own.has(row.entityId) ? [row.entityId] : [],
+            ),
+        ),
+    ];
+    const referencedRows =
+        referencedIds.length > 0
+            ? await db
+                  .select(entityColumns)
+                  .from(knowledgeEntities)
+                  .where(inArray(knowledgeEntities.id, referencedIds))
+            : [];
+    const personIds = [
+        ...new Set(
+            aliasRows.flatMap((row) =>
+                row.personId && !archivedPeople.has(row.personId)
+                    ? [row.personId]
+                    : [],
+            ),
+        ),
+    ];
+    const personRows =
+        personIds.length > 0
+            ? await db
+                  .select({
+                      id: people.id,
+                      displayName: people.displayName,
+                      mergedIntoId: people.mergedIntoId,
+                  })
+                  .from(people)
+                  .where(inArray(people.id, personIds))
+            : [];
+
+    const archived = (
+        row: (typeof ownRows)[number],
+        organization: boolean,
+    ) => ({
+        id: row.id,
+        typeKey: row.typeKey,
+        name: decryptText(row.name),
+        description: row.description ? decryptText(row.description) : null,
+        mergedIntoId: row.mergedIntoId,
+        organization,
+        createdAt: row.createdAt.toISOString(),
+    });
+    return {
+        entities: [
+            ...ownRows.map((row) => archived(row, false)),
+            ...referencedRows.map((row) => archived(row, true)),
+        ],
+        aliases: aliasRows.map((row) => ({
+            ...row,
+            text: decryptText(row.text),
+            createdAt: row.createdAt.toISOString(),
+        })),
+        notes: noteRows.map((row) => ({
+            entityId: row.entityId,
+            notes: decryptText(row.notes),
+        })),
+        people: personRows.map((row) => ({
+            ...row,
+            displayName: decryptText(row.displayName),
+        })),
+    };
+}
+
+interface ArchivedLearn {
+    runs: {
+        id: string;
+        recordingId: string;
+        transcriptionId: string;
+        view: string;
+        trigger: string;
+        status: string;
+        path: string | null;
+        provider: string | null;
+        model: string | null;
+        transcriptRevision: number;
+        stats: Record<string, number> | null;
+        createdAt: string;
+        finishedAt: string | null;
+    }[];
+    items: {
+        runId: string;
+        kind: string;
+        preTicked: boolean;
+        decision: string | null;
+        dependsOnLabel: string | null;
+        payload: unknown;
+    }[];
+}
+
+// The runs proposing knowledge in the user's own scope: on their private
+// recordings. The Organization's runs on a recording they shared are the
+// Organization's, and go when it is withdrawn.
+async function collectLearn(userId: string): Promise<ArchivedLearn> {
+    const runs = await db
+        .select({
+            id: learnRuns.id,
+            recordingId: learnRuns.recordingId,
+            transcriptionId: learnRuns.transcriptionId,
+            view: learnRuns.view,
+            trigger: learnRuns.trigger,
+            status: learnRuns.status,
+            path: learnRuns.path,
+            provider: learnRuns.provider,
+            model: learnRuns.model,
+            transcriptRevision: learnRuns.transcriptRevision,
+            stats: learnRuns.stats,
+            createdAt: learnRuns.createdAt,
+            finishedAt: learnRuns.finishedAt,
+        })
+        .from(learnRuns)
+        .where(eq(learnRuns.scopeUserId, userId));
+    const items =
+        runs.length > 0
+            ? await db
+                  .select({
+                      runId: learnReviewItems.runId,
+                      kind: learnReviewItems.kind,
+                      preTicked: learnReviewItems.preTicked,
+                      decision: learnReviewItems.decision,
+                      dependsOnLabel: learnReviewItems.dependsOnLabel,
+                      payload: learnReviewItems.payload,
+                  })
+                  .from(learnReviewItems)
+                  .where(
+                      inArray(
+                          learnReviewItems.runId,
+                          runs.map((run) => run.id),
+                      ),
+                  )
+            : [];
+    return {
+        runs: runs.map((run) => ({
+            ...run,
+            createdAt: run.createdAt.toISOString(),
+            finishedAt: run.finishedAt?.toISOString() ?? null,
+        })),
+        items: items.map((item) => ({
+            ...item,
+            payload: decryptJsonField(item.payload),
+        })),
+    };
+}
+
+interface ArchivedFacts {
+    facts: {
+        id: string;
+        subjectPersonId: string | null;
+        subjectEntityId: string | null;
+        relationKey: string;
+        objectPersonId: string | null;
+        objectEntityId: string | null;
+        objectLiteral: string | null;
+        origin: string;
+        replacedByFactId: string | null;
+        createdAt: string;
+    }[];
+    evidence: {
+        factId: string;
+        transcriptionId: string;
+        recordingId: string;
+        transcriptRevision: number;
+        startMs: number;
+        endMs: number;
+        speakerLabel: string | null;
+        dependsOnSpeaker: boolean;
+        quote: string;
+        status: string;
+        confirmedAt: string;
+    }[];
+    /** Organization people and entities the facts name, not archived elsewhere. */
+    people: { id: string; displayName: string; mergedIntoId: string | null }[];
+    entities: {
+        id: string;
+        typeKey: string;
+        name: string;
+        mergedIntoId: string | null;
+    }[];
+}
+
+async function collectFacts(
+    userId: string,
+    archived: { people: ReadonlySet<string>; entities: ReadonlySet<string> },
+): Promise<ArchivedFacts> {
+    const [factRows, evidenceRows] = await Promise.all([
+        db
+            .select({
+                id: knowledgeFacts.id,
+                subjectPersonId: knowledgeFacts.subjectPersonId,
+                subjectEntityId: knowledgeFacts.subjectEntityId,
+                relationKey: knowledgeFacts.relationKey,
+                objectPersonId: knowledgeFacts.objectPersonId,
+                objectEntityId: knowledgeFacts.objectEntityId,
+                objectLiteral: knowledgeFacts.objectLiteral,
+                origin: knowledgeFacts.origin,
+                replacedByFactId: knowledgeFacts.replacedByFactId,
+                createdAt: knowledgeFacts.createdAt,
+            })
+            .from(knowledgeFacts)
+            .where(eq(knowledgeFacts.userId, userId)),
+        db
+            .select({
+                factId: knowledgeFactEvidence.factId,
+                transcriptionId: knowledgeFactEvidence.transcriptionId,
+                recordingId: knowledgeFactEvidence.recordingId,
+                transcriptRevision: knowledgeFactEvidence.transcriptRevision,
+                startMs: knowledgeFactEvidence.startMs,
+                endMs: knowledgeFactEvidence.endMs,
+                speakerLabel: knowledgeFactEvidence.speakerLabel,
+                dependsOnSpeaker: knowledgeFactEvidence.dependsOnSpeaker,
+                quote: knowledgeFactEvidence.quote,
+                status: knowledgeFactEvidence.status,
+                confirmedAt: knowledgeFactEvidence.confirmedAt,
+            })
+            .from(knowledgeFactEvidence)
+            .where(eq(knowledgeFactEvidence.userId, userId)),
+    ]);
+    const missing = (ids: (string | null)[], have: ReadonlySet<string>) => [
+        ...new Set(ids.filter((id): id is string => !!id && !have.has(id))),
+    ];
+    const personIds = missing(
+        factRows.flatMap((row) => [row.subjectPersonId, row.objectPersonId]),
+        archived.people,
+    );
+    const entityIds = missing(
+        factRows.flatMap((row) => [row.subjectEntityId, row.objectEntityId]),
+        archived.entities,
+    );
+    const personRows =
+        personIds.length > 0
+            ? await db
+                  .select({
+                      id: people.id,
+                      displayName: people.displayName,
+                      mergedIntoId: people.mergedIntoId,
+                  })
+                  .from(people)
+                  .where(inArray(people.id, personIds))
+            : [];
+    const entityRows =
+        entityIds.length > 0
+            ? await db
+                  .select({
+                      id: knowledgeEntities.id,
+                      typeKey: knowledgeEntities.typeKey,
+                      name: knowledgeEntities.name,
+                      mergedIntoId: knowledgeEntities.mergedIntoId,
+                  })
+                  .from(knowledgeEntities)
+                  .where(inArray(knowledgeEntities.id, entityIds))
+            : [];
+    return {
+        facts: factRows.map((row) => ({
+            ...row,
+            objectLiteral: row.objectLiteral
+                ? decryptText(row.objectLiteral)
+                : null,
+            createdAt: row.createdAt.toISOString(),
+        })),
+        evidence: evidenceRows.map((row) => ({
+            ...row,
+            quote: decryptText(row.quote),
+            confirmedAt: row.confirmedAt.toISOString(),
+        })),
+        people: personRows.map((row) => ({
+            ...row,
+            displayName: decryptText(row.displayName),
+        })),
+        entities: entityRows.map((row) => ({
+            ...row,
+            name: decryptText(row.name),
+        })),
     };
 }

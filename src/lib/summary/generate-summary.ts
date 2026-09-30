@@ -27,11 +27,15 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
+import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
 import type { RecordingView } from "@/lib/sharing/access";
-import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
+import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
-import { findOrgSummarySource } from "@/lib/sharing/view-content";
+import {
+    contentWriterRefusalNow,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import {
     clampRounds,
@@ -70,9 +74,13 @@ export interface GenerateSummaryOptions {
      * prompts and language.
      */
     view?: RecordingView;
+    /** The job this run finishes; cancelled meanwhile, it writes nothing. */
+    jobId?: string;
 }
 
 export interface GenerateSummaryResult {
+    /** The recording's owner, whose summary this is in either view. */
+    ownerUserId: string;
     summary: string;
     keyPoints: string[];
     actionItems: string[];
@@ -102,6 +110,33 @@ export interface GenerateSummaryResult {
          */
         detail: string;
     };
+}
+
+/** Which transcript an Organization summary is made from, most preferred first. */
+const ORG_SUMMARY_SOURCE_ORDER = ["riffado", "mixed", "plaud"] as const;
+
+/**
+ * The transcript an Organization summary is made from, of those its owner
+ * holds: a provider's output over an edit, and both over an import.
+ */
+async function findOrgSummarySource(
+    recordingId: string,
+    ownerUserId: string,
+): Promise<typeof transcriptions.$inferSelect | undefined> {
+    const rows = await db
+        .select()
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, ownerUserId),
+            ),
+        );
+    for (const source of ORG_SUMMARY_SOURCE_ORDER) {
+        const row = rows.find((item) => item.source === source);
+        if (row) return row;
+    }
+    return undefined;
 }
 
 /**
@@ -151,7 +186,15 @@ export async function generateSummaryForRecording(
         );
     }
     const orgView = ctx.view === "org";
+    // The owner's rows in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
+    // Before the provider is paid; the write checks again under the lock.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
 
     const [recording] = await db
         .select()
@@ -173,8 +216,10 @@ export async function generateSummaryForRecording(
         );
     }
 
+    // A recording shared before sharing needed a named transcript may hold
+    // only an import; the Organization summarizes what it has.
     const transcription = orgView
-        ? await findOrgSummarySource(recordingId, ctx)
+        ? await findOrgSummarySource(recordingId, userId)
         : (
               await db
                   .select()
@@ -263,8 +308,11 @@ export async function generateSummaryForRecording(
     const model = enhancementChatModel(credentials);
 
     // Decrypt the transcript before sending it to the LLM. Plaintext is
-    // the LLM's input contract; ciphertext lives only in the DB.
-    const transcriptText = decryptText(transcription.text);
+    // the LLM's input contract; ciphertext lives only in the DB. Its
+    // corrections applied, and the fingerprint of that kept, so the summary
+    // can tell when they moved on.
+    const input = await modelInput(transcription);
+    const transcriptText = input.text;
 
     // Apply the AI output language directive via the system message rather
     // than the user prompt. This separates concerns: the user prompt carries
@@ -475,7 +523,7 @@ Correct the serialization without dropping or inventing information. Return exac
 
     const { summary, keyPoints, actionItems } = payload;
 
-    const { committed } = await upsertEnhancement({
+    const { committed, reason } = await upsertEnhancement({
         userId,
         recordingId,
         transcriptionId: transcription.id,
@@ -486,26 +534,31 @@ Correct the serialization without dropping or inventing information. Return exac
         provider: credentials.provider,
         model,
         multiPass,
+        inputFingerprint: input.fingerprint,
         allowReaped: (opts.trigger ?? "manual") === "manual",
-        recordingOwnerId: ctx.ownerUserId,
-        producedByUserId: ctx.actorUserId,
+        actorUserId: ctx.actorUserId,
+        jobId: opts.jobId,
     });
 
     if (!committed) {
+        if (reason === "cancelled") {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "The run was cancelled before it finished",
+                410,
+            );
+        }
+        if (reason) throw writerRefusalError(reason);
         throw new AppError(ErrorCode.NOT_FOUND, "Recording was deleted", 410);
     }
 
-    if (orgView) {
-        await orgContentChanged(recordingId);
-    } else {
-        await exportRecordingSidecarsIfEnabled(
-            userId,
-            recordingId,
-            "summary",
-            "riffado",
-        );
-        await notifyIfShared(recordingId);
-    }
+    await exportRecordingSidecarsIfEnabled(
+        userId,
+        recordingId,
+        "summary",
+        "riffado",
+    );
+    await notifyIfShared(recordingId);
 
     await captureServerEvent({
         distinctId: ctx.actorUserId,
@@ -525,6 +578,7 @@ Correct the serialization without dropping or inventing information. Return exac
     });
 
     return {
+        ownerUserId: ctx.ownerUserId,
         summary,
         keyPoints,
         actionItems,

@@ -1,0 +1,1 @@
+ALTER TABLE "transcriptions" ADD COLUMN "audio_md5" varchar(32);

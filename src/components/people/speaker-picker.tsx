@@ -25,10 +25,14 @@ export interface SpeakerPickerProps {
     /** The raw provider label being named, e.g. `speaker_0`. */
     label: string;
     /** Resolves true only after the attribution was persisted. */
-    onPick: (choice: {
-        personId?: string;
-        displayName?: string;
-    }) => Promise<boolean>;
+    onPick: (
+        choice: { personId: string } | { displayName: string },
+    ) => Promise<boolean>;
+    /**
+     * Answer "nobody known". Offered when present; resolves true only after
+     * the answer was persisted.
+     */
+    onMarkUnknown?: () => Promise<boolean>;
     onClose: () => void;
     /**
      * The Organization view names speakers with Organization people only; a
@@ -48,6 +52,7 @@ export interface SpeakerPickerProps {
 export function SpeakerPicker({
     label,
     onPick,
+    onMarkUnknown,
     onClose,
     organizationOnly = false,
 }: SpeakerPickerProps) {
@@ -114,6 +119,14 @@ export function SpeakerPicker({
                 ? { personId: personToSelect.id }
                 : { displayName: trimmedQuery },
         );
+        setSubmitting(false);
+        if (saved) onClose();
+    }
+
+    async function markUnknown() {
+        if (!onMarkUnknown || submitting) return;
+        setSubmitting(true);
+        const saved = await onMarkUnknown();
         setSubmitting(false);
         if (saved) onClose();
     }
@@ -232,6 +245,16 @@ export function SpeakerPicker({
                 </div>
 
                 <DialogFooter>
+                    {onMarkUnknown && (
+                        <Button
+                            variant="ghost"
+                            className="sm:mr-auto"
+                            onClick={() => void markUnknown()}
+                            disabled={submitting}
+                        >
+                            {i18n("Unknown speaker")}
+                        </Button>
+                    )}
                     <Button
                         variant="outline"
                         onClick={onClose}

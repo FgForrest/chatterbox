@@ -28,7 +28,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,9 +37,14 @@ import {
     buildArgs,
     buildPrompt,
     chatCompletion,
+    claudeMcpConfig,
     diagnosticTail,
+    MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseLearnRequest,
+    redact,
     resolveBackend,
+    schemaForCodex,
     sanitizeForLog,
     splitArgs,
 } from "./lib.mjs";
@@ -52,6 +57,12 @@ const MAX_BODY_BYTES = Number(process.env.BRIDGE_MAX_BODY_BYTES || 20_000_000);
 const WORKDIR = process.env.BRIDGE_WORKDIR || "/work";
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
+/**
+ * The one URL of Riffado's read-only knowledge tools (MCP) a Learn request
+ * may have the CLI call, e.g. `http://app:3000/api/mcp/learn`. Unset, no
+ * request can use tools. Requests never supply a URL.
+ */
+const LEARN_MCP_URL = (process.env.BRIDGE_LEARN_MCP_URL || "").trim();
 
 /**
  * Extra CLI flags, space-separated, appended after the bridge's own. The
@@ -77,23 +88,71 @@ if (!BRIDGE_TOKEN) {
 // Backends
 // ---------------------------------------------------------------------
 
-async function runClaude(model, prompt) {
-    const { stdout } = await execCli(
-        CLAUDE_BIN,
-        buildArgs("claude", model, CLAUDE_EXTRA_ARGS),
-        prompt,
-    );
-    return parseClaudeEnvelope(stdout, CLAUDE_BIN);
+/**
+ * What a Learn request adds: a `0600` file for the MCP config (Claude) or
+ * the schema (Codex), in a private temp dir removed afterwards, and the
+ * run token in the child's environment only.
+ */
+async function learnOptions(backend, dir, learn) {
+    const options = { mcp: null, schema: null };
+    const env = learn.mcp ? { [MCP_TOKEN_ENV]: learn.mcp.token } : {};
+    if (learn.mcp) {
+        if (backend === "claude") {
+            const configPath = join(dir, "mcp.json");
+            await writeFile(configPath, claudeMcpConfig(learn.mcp.url), {
+                mode: 0o600,
+            });
+            options.mcp = { tools: learn.mcp.tools, configPath };
+        } else {
+            options.mcp = { url: learn.mcp.url, tools: learn.mcp.tools };
+        }
+    }
+    if (learn.schema) {
+        if (backend === "claude") {
+            options.schema = { json: JSON.stringify(learn.schema) };
+        } else {
+            const path = join(dir, "schema.json");
+            await writeFile(path, JSON.stringify(schemaForCodex(learn.schema)), {
+                mode: 0o600,
+            });
+            options.schema = { path };
+        }
+    }
+    return { options, env };
 }
 
-async function runCodex(model, prompt) {
+async function runClaude(model, prompt, learn, signal) {
+    const dir = await mkdtemp(join(tmpdir(), "agent-bridge-claude-"));
+    try {
+        const { options, env } = await learnOptions("claude", dir, learn);
+        const { stdout } = await execCli(
+            CLAUDE_BIN,
+            buildArgs("claude", model, CLAUDE_EXTRA_ARGS, "", options),
+            prompt,
+            env,
+            learn.mcp ? [learn.mcp.token] : [],
+            signal,
+        );
+        return parseClaudeEnvelope(stdout, CLAUDE_BIN, {
+            structured: Boolean(learn.schema),
+        });
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+}
+
+async function runCodex(model, prompt, learn, signal) {
     const dir = await mkdtemp(join(tmpdir(), "agent-bridge-codex-"));
     const outPath = join(dir, "last-message.txt");
     try {
+        const { options, env } = await learnOptions("codex", dir, learn);
         await execCli(
             CODEX_BIN,
-            buildArgs("codex", model, CODEX_EXTRA_ARGS, outPath),
+            buildArgs("codex", model, CODEX_EXTRA_ARGS, outPath, options),
             prompt,
+            env,
+            learn.mcp ? [learn.mcp.token] : [],
+            signal,
         );
 
         const text = (await readFile(outPath, "utf8")).trim();
@@ -115,13 +174,45 @@ const RUNNERS = { claude: runClaude, codex: runCodex };
  * Run a CLI with the prompt on stdin. See `buildArgs` in lib.mjs for why
  * it must never go in argv.
  */
-function execCli(bin, args, stdinText) {
+function execCli(
+    bin,
+    args,
+    stdinText,
+    extraEnv = {},
+    secrets = [],
+    signal = undefined,
+) {
     return new Promise((resolve, reject) => {
+        // The caller went away: nobody reads the answer, and a Learn run's
+        // token would keep spending its lookups for nothing.
+        if (signal?.aborted) {
+            reject(new BridgeError(499, "the client closed the request"));
+            return;
+        }
+        // Its own process group: npm's `codex` is a Node wrapper around the
+        // real binary and cannot pass a SIGKILL on, so killing the wrapper
+        // alone would leave the binary running, holding the slot and
+        // spending the subscription. Killing the group stops both.
         const child = spawn(bin, args, {
             cwd: WORKDIR,
-            env: process.env,
+            env: { ...process.env, ...extraEnv },
             stdio: ["pipe", "pipe", "pipe"],
+            detached: true,
         });
+        const killAll = () => {
+            try {
+                process.kill(-child.pid, "SIGKILL");
+            } catch {
+                // Already gone, or never started (the "error" event says so).
+                child.kill("SIGKILL");
+            }
+        };
+        let abandoned = false;
+        const onAbort = () => {
+            abandoned = true;
+            killAll();
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
 
         let stdout = "";
         let stderr = "";
@@ -129,7 +220,7 @@ function execCli(bin, args, stdinText) {
 
         const timer = setTimeout(() => {
             timedOut = true;
-            child.kill("SIGKILL");
+            killAll();
             reject(
                 new BridgeError(
                     504,
@@ -159,13 +250,19 @@ function execCli(bin, args, stdinText) {
 
         child.on("close", (code) => {
             clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
             if (timedOut) return;
+            if (abandoned) {
+                reject(new BridgeError(499, "the client closed the request"));
+                return;
+            }
             if (code !== 0) {
                 // Codex DOES echo the prompt to stderr -- the original
                 // assumption here was wrong, and shipped a 502 body
                 // carrying transcript text. diagnosticTail drops any
                 // line that came from the prompt.
-                const tail = diagnosticTail(stderr, stdinText);
+                // And never the run token, should a CLI print it.
+                const tail = redact(diagnosticTail(stderr, stdinText), secrets);
                 reject(
                     new BridgeError(
                         502,
@@ -198,9 +295,15 @@ function execCli(bin, args, stdinText) {
 let active = 0;
 const waiting = [];
 
-async function withSlot(fn) {
+async function withSlot(fn, signal) {
     if (active >= MAX_CONCURRENCY) {
         await new Promise((resolve) => waiting.push(resolve));
+    }
+    // Abandoned while it queued: the slot goes to the next one.
+    if (signal?.aborted) {
+        const next = waiting.shift();
+        if (next) next();
+        throw new BridgeError(499, "the client closed the request");
     }
     active += 1;
     try {
@@ -304,8 +407,19 @@ async function handleChatCompletions(req, res) {
     // `temperature` and `max_tokens` arrive from Riffado and are dropped:
     // neither CLI exposes them. Worth stating rather than pretending --
     // replies come out at the agent's own defaults.
+    const learn = parseLearnRequest(payload, LEARN_MCP_URL);
+
+    // A caller that gives up (its own timeout) takes its CLI with it.
+    const abandon = new AbortController();
+    res.on("close", () => {
+        if (!res.writableFinished) abandon.abort();
+    });
+
     const startedAt = Date.now();
-    const content = await withSlot(() => RUNNERS[backend](model, prompt));
+    const content = await withSlot(
+        () => RUNNERS[backend](model, prompt, learn, abandon.signal),
+        abandon.signal,
+    );
     const elapsedMs = Date.now() - startedAt;
 
     // `model` came off the request body. `resolveBackend` already
@@ -316,7 +430,9 @@ async function handleChatCompletions(req, res) {
     console.log(
         `[agent-bridge] ${backend} model=${sanitizeForLog(model)} ` +
             `prompt_bytes=${Buffer.byteLength(prompt)} ` +
-            `reply_bytes=${Buffer.byteLength(content)} ms=${elapsedMs}`,
+            `reply_bytes=${Buffer.byteLength(content)} ms=${elapsedMs}` +
+            (learn.mcp ? ` tools=${learn.mcp.tools.length}` : "") +
+            (learn.schema ? " schema=1" : ""),
     );
 
     sendJson(res, 200, chatCompletion(model, content, randomUUID()));

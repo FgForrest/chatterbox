@@ -1,16 +1,13 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
     aiEnhancements,
     apiCredentials,
-    plaudConnections,
     recordings,
     transcriptions,
-    transcriptSpeakers,
     userSettings,
 } from "@/db/schema";
-import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
@@ -21,7 +18,6 @@ import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
 import {
     exportRecordingSidecarsIfEnabled,
-    refreshExistingRecordingSidecars,
     removeRecordingSidecar,
 } from "@/lib/export/document-sidecars";
 import {
@@ -29,29 +25,34 @@ import {
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
-import { createPlaudClient } from "@/lib/plaud/client-factory";
+import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
+import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import {
+    stampNewTranscriptAudioInTx,
+    transcriptRewrittenInTx,
+} from "@/lib/knowledge/transcript-rewrite";
+import { holdForAutoLearn } from "@/lib/learn/auto-learn";
+import { isOrgScopeEnabled } from "@/lib/org/config";
 import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
-import { consumeRateLimitBucket } from "@/lib/rate-limit";
+import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
-import { notifyIfShared, orgContentChanged } from "@/lib/sharing/notify";
-import {
-    applyCarriedSpeakerNames,
-    captureSpeakerNames,
-} from "@/lib/sharing/org-transcript";
+import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
+import {
+    contentWriterRefusal,
+    contentWriterRefusalNow,
+    sharingOrgUserId,
+    type WriterRefusal,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 import { buildAudioFile } from "@/lib/transcription/audio-file";
 import { chatTranscribe } from "@/lib/transcription/chat-transcribe";
 import { maybeCompressForWhisper } from "@/lib/transcription/compress-audio";
-import {
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
 import { elevenLabsTranscribe } from "@/lib/transcription/elevenlabs-transcribe";
 import {
     buildTranscriptionParams,
@@ -77,6 +78,11 @@ export type TranscribeErrorCode =
     | "AUDIO_REAPED"
     | "HOSTED_LOCKED_OUT"
     | "MYNAH_BUDGET_EXHAUSTED"
+    /**
+     * Shared with the Organization: only the organization account changes
+     * it, on the Organization view; its owner withdraws it first.
+     */
+    | "RECORDING_SHARED"
     | "TRANSCRIPTION_FAILED";
 
 export interface StoreBrowserTranscriptionInput {
@@ -139,6 +145,10 @@ export async function storeBrowserTranscription(
     }
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
+    const RECORDING_REFUSED = Symbol("recording-refused");
+    let refused: WriterRefusal | null = null;
+    // Before the transaction; see `sharingOrgUserId`.
+    const orgUserId = await sharingOrgUserId();
     try {
         await db.transaction(async (tx) => {
             const [stillActive] = await tx
@@ -155,9 +165,23 @@ export async function storeBrowserTranscription(
             if (!stillActive || stillActive.deletedAt) {
                 throw RECORDING_TOMBSTONED;
             }
+            // Shared since the browser started: the Organization's now.
+            refused = await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId: userId,
+                orgUserId,
+            });
+            if (refused) throw RECORDING_REFUSED;
 
             const [existing] = await tx
-                .select({ id: transcriptions.id })
+                .select({
+                    id: transcriptions.id,
+                    text: transcriptions.text,
+                    turns: transcriptions.turns,
+                    source: transcriptions.source,
+                    model: transcriptions.model,
+                })
                 .from(transcriptions)
                 .where(
                     and(
@@ -181,6 +205,9 @@ export async function storeBrowserTranscription(
                         source: "riffado",
                         turns: null,
                         topics: null,
+                        topicsInputFingerprint: null,
+                        producedByUserId: userId,
+                        revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
                         and(
@@ -188,6 +215,19 @@ export async function storeBrowserTranscription(
                             eq(transcriptions.userId, userId),
                         ),
                     );
+                // What was said about the text just replaced.
+                await transcriptRewrittenInTx(tx, {
+                    userId,
+                    transcriptionId: existing.id,
+                    previous: storedSpeakerVersion(existing),
+                    next: speakerVersionOf({
+                        source: "riffado",
+                        model,
+                        text,
+                        turns: null,
+                    }),
+                    audioMd5: null,
+                });
             } else {
                 await tx.insert(transcriptions).values({
                     recordingId,
@@ -200,8 +240,30 @@ export async function storeBrowserTranscription(
                     source: "riffado",
                     turns: null,
                     topics: null,
+                    topicsInputFingerprint: null,
+                    producedByUserId: userId,
+                });
+                // Which audio the browser fetched is not known here; it
+                // has no turns, so no speaker rests on it.
+                await stampNewTranscriptAudioInTx(tx, {
+                    recordingId,
+                    userId,
+                    source: "riffado",
+                    audioMd5: null,
                 });
             }
+
+            // The summary described the text replaced here; it goes in the
+            // same transaction, under the same writer check.
+            await tx
+                .delete(aiEnhancements)
+                .where(
+                    and(
+                        eq(aiEnhancements.recordingId, recordingId),
+                        eq(aiEnhancements.userId, userId),
+                        eq(aiEnhancements.source, "riffado"),
+                    ),
+                );
 
             await tx
                 .update(recordings)
@@ -215,6 +277,9 @@ export async function storeBrowserTranscription(
                 );
         });
     } catch (txError) {
+        if (txError === RECORDING_REFUSED && refused) {
+            return refusedResult(refused);
+        }
         if (txError === RECORDING_TOMBSTONED) {
             return {
                 success: false,
@@ -225,15 +290,6 @@ export async function storeBrowserTranscription(
         throw txError;
     }
 
-    await db
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, userId),
-                eq(aiEnhancements.source, "riffado"),
-            ),
-        );
     await removeRecordingSidecar(userId, recordingId, "summary", "riffado");
 
     await exportRecordingSidecarsIfEnabled(
@@ -275,6 +331,8 @@ export interface TranscribeOptions {
      * caller is the actor whose provider runs, not the owner.
      */
     view?: RecordingView;
+    /** The job this run finishes; cancelled meanwhile, it writes nothing. */
+    jobId?: string;
 }
 
 export interface TranscribeResult {
@@ -285,11 +343,6 @@ export interface TranscribeResult {
     text?: string;
     /** Present on success when the provider returned a language. */
     detectedLanguage?: string | null;
-}
-
-function recognizedSpeakerCount(text: string): number {
-    const parsed = parseSpeakerTurns(text);
-    return parsed ? speakerOrder(parsed).length : 0;
 }
 
 // Per-recording in-flight dedup within one process. Force and non-force
@@ -333,9 +386,25 @@ async function transcribeRecordingInner(
         };
     }
     const orgView = ctx.view === "org";
-    // `userId` is the owner of the rows this run reads and writes; on the
-    // private view that is also the actor and the recording's owner.
+    // `userId` is the owner of the recording and of the rows this run reads
+    // and writes, in either view: a shared recording is one recording.
     const userId = ctx.contentUserId;
+    // A shared recording is the organization account's to transcribe, on
+    // the Organization view, while the Organization accepts changes; its
+    // owner withdraws it first. Checked where the run starts, whoever
+    // queued it and whenever, so no provider is paid for a transcript that
+    // would be refused. The write checks again, under the lock.
+    if (orgView && !isOrgScopeEnabled()) {
+        return recordingSharedResult(
+            "The Organization is read-only on this instance",
+        );
+    }
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: ctx.ownerUserId,
+        actorUserId: ctx.actorUserId,
+    });
+    if (refusal) return refusedResult(refusal);
     try {
         // Hosted lockout: a lapsed account is read-only. No-op on
         // self-host (isHostedLockedOut always false there).
@@ -670,17 +739,11 @@ async function transcribeRecordingInner(
             persistModel = result.model;
         }
 
-        // The names the Organization view showed, read before this run
-        // replaces the transcript they were confirmed against.
-        const carriedNames = orgView
-            ? await captureSpeakerNames(recordingId, ctx)
-            : null;
-
         // Persist the user's own ('riffado') transcript via the shared,
         // tombstone-aware, source-scoped upsert. The persisted model is the
         // *actual* model used (may differ from the provider default when the
         // manual route supplied an override).
-        const { committed } = await upsertTranscription({
+        const { committed, reason } = await upsertTranscription({
             userId,
             recordingId,
             text: transcriptionText,
@@ -690,10 +753,16 @@ async function transcribeRecordingInner(
             model: persistModel,
             turns,
             allowReaped: (opts.trigger ?? "manual") === "manual",
-            recordingOwnerId: ctx.ownerUserId,
-            producedByUserId: ctx.actorUserId,
+            actorUserId: ctx.actorUserId,
+            // The summary describes the text a forced re-run replaces.
+            dropSummaryOnReplace: opts.force ? "riffado" : undefined,
+            jobId: opts.jobId,
+            // The audio this run downloaded, not whatever a sync put there
+            // meanwhile.
+            audioMd5: recording.fileMd5,
         });
 
+        if (!committed && reason) return refusedResult(reason);
         if (!committed) {
             return {
                 success: false,
@@ -702,52 +771,14 @@ async function transcribeRecordingInner(
             };
         }
 
-        const previousSpeakerCount = existingTranscription?.text
-            ? recognizedSpeakerCount(decryptText(existingTranscription.text))
-            : 0;
-        const nextSpeakerCount = recognizedSpeakerCount(transcriptionText);
-        const canPreserveSpeakerAttributions =
-            previousSpeakerCount > 0 &&
-            previousSpeakerCount === nextSpeakerCount;
-        if (orgView) {
-            const [orgTranscript] = await db
-                .select({ id: transcriptions.id })
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, recordingId),
-                        eq(transcriptions.userId, userId),
-                        eq(transcriptions.source, "riffado"),
-                    ),
-                )
-                .limit(1);
-            if (orgTranscript) {
-                await applyCarriedSpeakerNames(
-                    carriedNames,
-                    orgTranscript.id,
-                    userId,
-                );
-            }
-        } else if (
-            existingTranscription?.text &&
-            opts.force &&
-            !canPreserveSpeakerAttributions
-        ) {
-            await db
-                .delete(transcriptSpeakers)
-                .where(
-                    and(
-                        eq(transcriptSpeakers.userId, userId),
-                        eq(
-                            transcriptSpeakers.transcriptionId,
-                            existingTranscription.id,
-                        ),
-                    ),
-                );
-        }
-
+        // The upsert moved the speaker names onto the new labels itself.
+        const nextSpeakerCount = speakerVersionOf({
+            source: "riffado",
+            model: persistModel,
+            text: transcriptionText,
+            turns,
+        }).labels.length;
         if (
-            !orgView &&
             !existingTranscription &&
             opts.force &&
             opts.attributionSource &&
@@ -759,136 +790,65 @@ async function transcribeRecordingInner(
                 recordingId,
                 sourceSource: opts.attributionSource,
                 targetSource: "riffado",
-                targetText: transcriptionText,
+                // Shared or withdrawn since the transcript was written:
+                // someone else's to change now.
+                writer: {
+                    actorUserId: ctx.actorUserId,
+                    orgUserId: await sharingOrgUserId(),
+                },
             });
         }
 
-        if (!orgView) {
-            await exportRecordingSidecarsIfEnabled(
+        await exportRecordingSidecarsIfEnabled(
+            userId,
+            recordingId,
+            "transcript",
+            "riffado",
+        );
+
+        // The previous transcript was overwritten, so its summary, which
+        // described the old text, went with it in the write above: readers
+        // never see "fresh transcript + old summary". If auto-summarize is
+        // on, a fresh summary is generated below; otherwise the recording
+        // shows no summary until someone clicks "Generate summary". Its
+        // exported file goes here.
+        if (existingTranscription?.text && opts.force) {
+            await removeRecordingSidecar(
                 userId,
                 recordingId,
-                "transcript",
+                "summary",
                 "riffado",
             );
         }
 
-        // The previous transcript is being overwritten, so any existing
-        // summary now references stale source text. Drop it so readers never
-        // see "fresh transcript + old summary". If auto-summarize is on, a
-        // fresh summary is generated below; otherwise the recording shows no
-        // summary until the user clicks "Generate summary" manually. An
-        // Organization summary may also predate its first own transcript,
-        // having been made from the owner's, so it goes either way.
-        if (orgView || (existingTranscription?.text && opts.force)) {
-            await db
-                .delete(aiEnhancements)
-                .where(
-                    and(
-                        eq(aiEnhancements.recordingId, recordingId),
-                        eq(aiEnhancements.userId, userId),
-                        eq(aiEnhancements.source, "riffado"),
-                    ),
-                );
-            if (!orgView) {
-                await removeRecordingSidecar(
+        // Automatic Learn holds the title, summary and topics back until
+        // its review is done (72 h at most), so they are made from the
+        // transcript as corrected; `transcription.completed` then fires
+        // without the title, which follows as `recording.updated`.
+        const heldForLearn =
+            !orgView &&
+            (await holdForAutoLearn({
+                userId,
+                recordingId,
+                timed: Boolean(turns?.length),
+            }));
+
+        if (!heldForLearn && autoGenerateTitle && transcriptionText.trim()) {
+            try {
+                await applyGeneratedTitle({
                     userId,
                     recordingId,
-                    "summary",
-                    "riffado",
-                );
-            }
-        }
-
-        if (autoGenerateTitle && transcriptionText.trim()) {
-            try {
-                const generatedTitle = await generateTitleFromTranscription(
-                    userId,
-                    transcriptionText,
-                );
-
-                if (generatedTitle) {
-                    // Encrypt the generated title before storing it as the
-                    // recording's filename. The plaintext is still available
-                    // below for the optional sync-to-Plaud push.
-                    await db
-                        .update(recordings)
-                        .set({
-                            filename: encryptText(generatedTitle),
-                            updatedAt: new Date(),
-                        })
-                        .where(
-                            and(
-                                eq(recordings.id, recordingId),
-                                eq(recordings.userId, userId),
-                                isNull(recordings.deletedAt),
-                            ),
-                        );
-                    // The export was planned under the old title above;
-                    // plan again so its directory follows the rename now.
-                    await refreshExistingRecordingSidecars(userId, recordingId);
-
-                    if (syncTitleToPlaud) {
-                        try {
-                            const [connection] = await db
-                                .select()
-                                .from(plaudConnections)
-                                .where(eq(plaudConnections.userId, userId))
-                                .limit(1);
-
-                            if (connection) {
-                                const plaudClient = await createPlaudClient(
-                                    connection.bearerToken,
-                                    connection.apiBase,
-                                    connection.workspaceId,
-                                );
-                                await plaudClient.updateFilename(
-                                    recording.plaudFileId,
-                                    generatedTitle,
-                                );
-                                // Backfill workspaceId if newly resolved.
-                                // Always scope user-owned UPDATEs by userId
-                                // even when filtering by id (per AGENTS.md).
-                                const resolved = plaudClient.workspaceId;
-                                if (
-                                    resolved &&
-                                    resolved !== connection.workspaceId
-                                ) {
-                                    await db
-                                        .update(plaudConnections)
-                                        .set({ workspaceId: resolved })
-                                        .where(
-                                            and(
-                                                eq(
-                                                    plaudConnections.id,
-                                                    connection.id,
-                                                ),
-                                                eq(
-                                                    plaudConnections.userId,
-                                                    userId,
-                                                ),
-                                            ),
-                                        );
-                                }
-                            }
-                        } catch (error) {
-                            console.error(
-                                "Failed to sync title to Plaud:",
-                                error,
-                            );
-                        }
-                    }
-                }
+                    text: transcriptionText,
+                    plaudFileId: recording.plaudFileId,
+                    syncTitleToPlaud,
+                });
             } catch (error) {
                 console.error("Failed to generate title:", error);
             }
         }
 
-        if (orgView) {
-            await orgContentChanged(recordingId);
-        } else {
-            await emitEvent("transcription.completed", userId, recordingId);
-            await notifyIfShared(recordingId);
-        }
+        await emitEvent("transcription.completed", userId, recordingId);
+        await notifyIfShared(recordingId);
         await captureServerEvent({
             distinctId: ctx.actorUserId,
             event: "recording_transcribed",
@@ -901,69 +861,14 @@ async function transcribeRecordingInner(
         });
 
         // Topics need the timings only some providers report. Queued like the
-        // summary, and never on the Organization view (see generate-topics).
-        if (!orgView && turns?.length) {
+        // summary, and like it not after a run on the Organization view,
+        // where the organization account detects them by hand.
+        if (!heldForLearn && !orgView && turns?.length) {
             await queueAutoTopics(userId, recordingId, "riffado");
         }
 
-        if (autoSummarize) {
-            // Per-user hourly cap on auto-summary calls. Cheap defense
-            // against runaway provider cost if a sync replays N
-            // recordings or the user toggles auto-summarize on with an
-            // expensive model. The manual "Generate summary" button is
-            // not throttled -- the user is in the loop there.
-            const rateLimit = await consumeRateLimitBucket(
-                `auto-summary:user:${userId}`,
-                {
-                    limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-                    windowMs: 60 * 60 * 1000,
-                },
-            );
-
-            if (!rateLimit.allowed) {
-                console.warn(
-                    `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
-                );
-                await emitEvent("summary.failed", userId, recordingId, {
-                    error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
-                });
-            } else {
-                // Queued rather than run inline. This is the unattended path
-                // -- a sync can trigger a dozen of these with nobody
-                // watching -- and inline it inherited the lifetime of
-                // whatever process happened to be transcribing: a container
-                // upgrade partway through left a recording that simply never
-                // got a summary, with nothing to say why or to try again.
-                //
-                // `summary.completed` and `summary.failed` now come from the
-                // job handler, which keeps their meaning intact: the event
-                // still fires after the summary is written and readable,
-                // just from the worker rather than from here. What changes is
-                // that this function no longer waits for it.
-                try {
-                    await enqueueSummaryJob({
-                        userId,
-                        recordingId,
-                        presetId: autoSummarizePreset ?? undefined,
-                        trigger: "auto",
-                    });
-                } catch (error) {
-                    // Only a failure to QUEUE reaches here, which means the
-                    // database refused the insert -- the summary itself has
-                    // not been attempted yet. Never roll back the transcript
-                    // over it: the user wants the transcript regardless.
-                    console.error(
-                        `Could not queue auto-summary for recording ${recordingId}:`,
-                        error,
-                    );
-                    await emitEvent("summary.failed", userId, recordingId, {
-                        error:
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                    });
-                }
-            }
+        if (!heldForLearn && autoSummarize) {
+            await queueAutoSummary(userId, recordingId, autoSummarizePreset);
         }
 
         return {
@@ -1007,6 +912,24 @@ async function transcribeRecordingInner(
             errorCode: "TRANSCRIPTION_FAILED",
         };
     }
+}
+
+function recordingSharedResult(
+    error = "This recording is shared with the Organization; only its account transcribes it",
+): TranscribeResult {
+    return { success: false, error, errorCode: "RECORDING_SHARED" };
+}
+
+function refusedResult(refusal: WriterRefusal | "cancelled"): TranscribeResult {
+    if (refusal === "shared") return recordingSharedResult();
+    return {
+        success: false,
+        error:
+            refusal === "cancelled"
+                ? "The run was cancelled before it finished"
+                : "Recording not found",
+        errorCode: "RECORDING_NOT_FOUND",
+    };
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {

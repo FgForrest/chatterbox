@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/db", () => ({ db: {} }));
+// Erasing a shared recording withdraws it, which reaches the folders and
+// the Organization's configuration; neither is exercised here.
+vi.mock("@/lib/env", () => ({ env: {} }));
 vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));

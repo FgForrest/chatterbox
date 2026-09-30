@@ -30,6 +30,8 @@ export type { SortOrder } from "@/components/dashboard/recording-list-toolbar";
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
 }
 
@@ -95,6 +97,12 @@ export function RecordingList({
     const [dateTimeFormat] = useState<DateTimeFormat>(initialDateTimeFormat);
     const [sortOrder, setSortOrder] = useState<SortOrder>(initialSortOrder);
     const [query, setQuery] = useState("");
+    // Only the recordings a Learn review waits on.
+    const [needsReviewOnly, setNeedsReviewOnly] = useState(false);
+    const reviewCount = useMemo(
+        () => recordings.filter((r) => r.needsReview).length,
+        [recordings],
+    );
     const [visibleCount, setVisibleCount] = useState(initialChunkSize);
     const searchRef = useRef<HTMLInputElement>(null);
     const sentinelRef = useRef<HTMLDivElement>(null);
@@ -115,13 +123,20 @@ export function RecordingList({
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
+        const pool =
+            needsReviewOnly && reviewCount > 0
+                ? recordings.filter((r) => r.needsReview)
+                : recordings;
         const base = q
-            ? recordings.filter((r) => {
+            ? pool.filter((r) => {
                   if (r.filename.toLowerCase().includes(q)) return true;
+                  // What people read, and the words as heard, both.
                   const t = transcriptions.get(r.id);
-                  return !!t?.text && t.text.toLowerCase().includes(q);
+                  return [t?.readText, t?.text].some(
+                      (text) => !!text && text.toLowerCase().includes(q),
+                  );
               })
-            : recordings;
+            : pool;
 
         const sorted = [...base];
         switch (sortOrder) {
@@ -144,7 +159,14 @@ export function RecordingList({
                 break;
         }
         return sorted;
-    }, [recordings, transcriptions, query, sortOrder]);
+    }, [
+        recordings,
+        transcriptions,
+        query,
+        sortOrder,
+        needsReviewOnly,
+        reviewCount,
+    ]);
 
     const visible = filtered.slice(0, visibleCount);
 
@@ -261,6 +283,9 @@ export function RecordingList({
                     sortOrder={sortOrder}
                     onSortOrderChange={setSortOrderPersisted}
                     onOrganize={onOrganize}
+                    reviewCount={reviewCount}
+                    needsReviewOnly={needsReviewOnly && reviewCount > 0}
+                    onNeedsReviewOnlyChange={setNeedsReviewOnly}
                 />
 
                 {pendingUploads.length > 0 && (
@@ -299,7 +324,9 @@ export function RecordingList({
                                         )}
                                         snippet={transcriptSnippet(
                                             transcriptions.get(recording.id)
-                                                ?.text,
+                                                ?.readText ??
+                                                transcriptions.get(recording.id)
+                                                    ?.text,
                                         )}
                                         isCompact={false}
                                         rowPadding={rowPadding}

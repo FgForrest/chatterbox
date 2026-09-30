@@ -1,21 +1,25 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    aiEnhancements,
     asyncJobs,
     folderExportConfigurations,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
-    transcriptions,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
-import { promoteRecordingPeople } from "@/lib/knowledge/people";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import {
+    publishKnowledgeInTx,
+    withdrawKnowledgeInTx,
+} from "@/lib/knowledge/share-knowledge";
 import {
     assertOrgScopeWritable,
     getOrgUserId,
@@ -23,6 +27,9 @@ import {
 } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
 import { recordingJobSubject } from "@/lib/sharing/access";
+import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import { publishSpeakerNamesInTx } from "@/lib/sharing/share-names";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import type {
     FolderKind,
     FolderOrganization,
@@ -96,7 +103,7 @@ async function scheduleExportProjection(userId: string): Promise<void> {
 }
 
 /** Everyone's view of the tree, and the organization's exports of it, are stale. */
-async function orgTreeChanged(): Promise<void> {
+export async function orgTreeChanged(): Promise<void> {
     await notifyOrgChange({ type: "tree" });
     const orgUserId = await getOrgUserId();
     if (orgUserId) await scheduleExportProjection(orgUserId);
@@ -233,7 +240,7 @@ function assertWritable(target: AccessibleFolder): void {
  * unshare, or a folder delete could cascade away a recording moved into it a
  * moment earlier. One transaction-scoped lock rules both out.
  */
-async function lockOrgTree(tx: Tx): Promise<void> {
+export async function lockOrgTree(tx: Tx): Promise<void> {
     await tx.execute(
         sql`select pg_advisory_xact_lock(hashtext('riffado:org-tree'))`,
     );
@@ -844,6 +851,12 @@ async function pruneRedundantAssignments(
  * File a recording in a folder.
  *
  * Filing in the Organization tree is sharing, so only the owner may do it.
+ * The first Organization folder shares the recording, in one transaction:
+ * the assignment, the share gate on the owner's rows (which are what the
+ * Organization reads: a shared recording is one recording), and the
+ * publishing of its speaker names, so what gets published is exactly what
+ * passed. A refused share leaves nothing behind. Filing an already shared
+ * recording into another Organization folder is not gated.
  */
 export async function addRecordingToFolder(input: {
     userId: string;
@@ -874,24 +887,69 @@ export async function addRecordingToFolder(input: {
     }
     assertWritable(target);
 
-    await db.transaction(async (tx) => {
-        if (target.scope === "org") await lockOrgTree(tx);
-        await tx
-            .insert(recordingFolderAssignments)
-            .values({
-                userId: input.userId,
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            if (target.scope === "org") {
+                await lockOrgTree(tx);
+                // Before the recording: sharing promotes people, and a
+                // promotion may merge them, which locks recordings.
+                await lockOrgPeople(tx);
+            }
+            await lockRecording(tx, input.recordingId);
+            // Deleted, or given away, since the check above.
+            await requireOwnedRecording(tx, input.userId, input.recordingId);
+            const wasShared =
+                target.scope === "org" &&
+                (await isRecordingShared(
+                    input.recordingId,
+                    target.ownerId,
+                    tx,
+                ));
+            await tx
+                .insert(recordingFolderAssignments)
+                .values({
+                    userId: input.userId,
+                    recordingId: input.recordingId,
+                    folderId: target.folder.id,
+                })
+                .onConflictDoNothing();
+            await pruneRedundantAssignments(
+                tx,
+                target.ownerId,
+                input.recordingId,
+            );
+            if (target.scope !== "org" || wasShared) return;
+
+            // A shared recording is one recording: the Organization reads
+            // the owner's rows, so those are what must pass.
+            const problems = await loadShareGate(
+                tx,
+                input.recordingId,
+                input.userId,
+            );
+            if (problems.length > 0) {
+                throw new AppError(
+                    ErrorCode.SHARE_REQUIREMENTS_UNMET,
+                    "Name every speaker and finish the review before sharing",
+                    409,
+                    { problems },
+                );
+            }
+            const names = await publishSpeakerNamesInTx(tx, {
                 recordingId: input.recordingId,
-                folderId: target.folder.id,
-            })
-            .onConflictDoNothing();
-        await pruneRedundantAssignments(tx, target.ownerId, input.recordingId);
-    });
+                ownerUserId: input.userId,
+                orgUserId: target.ownerId,
+            });
+            // The knowledge on it: corrections, heard-as forms and facts.
+            const knowledge = await publishKnowledgeInTx(tx, {
+                recordingId: input.recordingId,
+                ownerUserId: input.userId,
+                orgUserId: target.ownerId,
+            });
+            await bumpScopeInTx(tx, [...names.scopes, ...knowledge.scopes]);
+        }),
+    );
     if (target.scope === "org") {
-        await promoteSharedNames(
-            input.recordingId,
-            input.userId,
-            target.ownerId,
-        );
         await orgTreeChanged();
     } else {
         await scheduleExportProjection(input.userId);
@@ -899,41 +957,21 @@ export async function addRecordingToFolder(input: {
 }
 
 /**
- * Sharing shows the owner's transcripts in the Organization view until the
- * organization has its own; every name confirmed on them becomes an
- * Organization person, so the shared view and everyone's knowledge base
- * agree on who is speaking.
- */
-async function promoteSharedNames(
-    recordingId: string,
-    ownerUserId: string,
-    orgUserId: string,
-): Promise<void> {
-    const [own] = await db
-        .select({ id: transcriptions.id })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, orgUserId),
-            ),
-        )
-        .limit(1);
-    if (own) return;
-    await promoteRecordingPeople(recordingId, ownerUserId, orgUserId);
-}
-
-/**
  * Take a recording out of one folder.
  *
  * In the Organization tree only the owner may do this. When it was the last
- * Organization folder, the recording is unshared: its Organization view is
- * deleted for everyone.
+ * Organization folder, the recording is withdrawn, which `withdraw` must
+ * confirm: it is the owner's again, as the Organization left it.
  */
 export async function removeRecordingFromFolder(input: {
     userId: string;
     recordingId: string;
     folderId: string;
+    /**
+     * The owner, or the organization account, confirmed that leaving the
+     * last Organization folder withdraws it.
+     */
+    withdraw?: boolean;
 }): Promise<void> {
     const orgUserId = await getOrgUserId();
     const target = await resolveFolder(
@@ -961,10 +999,16 @@ export async function removeRecordingFromFolder(input: {
         return;
     }
 
-    await requireRecordingOwnerForSharing(input.userId, input.recordingId);
+    await requireMayWithdraw(input.userId, input.recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, input.recordingId);
+        // Not shared (any more): nothing to take out, and nothing withdrawn.
+        // To the organization account it is then a recording it cannot see.
+        if (!(await isRecordingShared(input.recordingId, target.ownerId, tx))) {
+            if (input.userId === orgUserId) throw notSharedForCurator();
+            return;
+        }
         await tx
             .delete(recordingFolderAssignments)
             .where(
@@ -976,44 +1020,135 @@ export async function removeRecordingFromFolder(input: {
                     eq(recordingFolderAssignments.folderId, input.folderId),
                 ),
             );
-        await deleteOrgViewIfUnshared(tx, target.ownerId, input.recordingId);
+        // Its last Organization folder: leaving it withdraws the recording,
+        // which whoever removes it confirms knowing what the owner's
+        // retention will then delete. A client that thought another folder remained learns it
+        // here, and nothing changed.
+        if (
+            !input.withdraw &&
+            !(await isRecordingShared(input.recordingId, target.ownerId, tx))
+        ) {
+            throw new AppError(
+                ErrorCode.WITHDRAW_UNCONFIRMED,
+                "This is the recording's last Organization folder; removing it takes the recording out of the Organization",
+                409,
+            );
+        }
+        await bumpScopeInTx(
+            tx,
+            await endSharingIfUnfiled(tx, target.ownerId, input.recordingId),
+        );
     });
     await orgTreeChanged();
 }
 
-/** Remove a recording from the whole Organization tree. Owner only. */
+/**
+ * Remove a recording from the whole Organization tree: its owner, or the
+ * organization account (a withdrawal from the Organization's side). Like
+ * removing its last Organization folder, it needs `withdraw` (409
+ * WITHDRAW_UNCONFIRMED otherwise), sent once the owner's retention warning
+ * was seen: an API client is asked as the app is.
+ */
 export async function unshareRecording(
     userId: string,
     recordingId: string,
+    { withdraw = false }: { withdraw?: boolean } = {},
 ): Promise<void> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
-    await requireRecordingOwnerForSharing(userId, recordingId);
-    await db.transaction(async (tx) => {
+    await requireMayWithdraw(userId, recordingId, orgUserId);
+    const withdrew = await db.transaction(async (tx) => {
         await lockOrgTree(tx);
         await lockRecording(tx, recordingId);
-        const orgFolderIds = (
-            await tx
-                .select({ id: recordingFolders.id })
-                .from(recordingFolders)
-                .where(eq(recordingFolders.userId, orgUserId))
-        ).map((row) => row.id);
-        if (orgFolderIds.length > 0) {
-            await tx
-                .delete(recordingFolderAssignments)
-                .where(
-                    and(
-                        eq(recordingFolderAssignments.recordingId, recordingId),
-                        inArray(
-                            recordingFolderAssignments.folderId,
-                            orgFolderIds,
-                        ),
-                    ),
-                );
+        // Not shared (any more): nothing to withdraw.
+        if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
+            if (userId === orgUserId) throw notSharedForCurator();
+            return false;
         }
-        await deleteOrgViewIfUnshared(tx, orgUserId, recordingId);
+        if (!withdraw) {
+            throw new AppError(
+                ErrorCode.WITHDRAW_UNCONFIRMED,
+                "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
+                409,
+            );
+        }
+        await bumpScopeInTx(
+            tx,
+            await withdrawRecordingInTx(tx, orgUserId, recordingId),
+        );
+        return true;
     });
-    await orgTreeChanged();
+    if (withdrew) await orgTreeChanged();
+}
+
+/**
+ * Take a recording out of the whole Organization tree in the caller's
+ * transaction, which holds the Organization tree lock and then the
+ * recording's. The caller checked the owner, and calls `orgTreeChanged`
+ * after it commits.
+ */
+export async function withdrawRecordingInTx(
+    tx: Tx,
+    orgUserId: string,
+    recordingId: string,
+): Promise<Set<string>> {
+    const orgFolderIds = (
+        await tx
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId))
+    ).map((row) => row.id);
+    if (orgFolderIds.length > 0) {
+        await tx
+            .delete(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.recordingId, recordingId),
+                    inArray(recordingFolderAssignments.folderId, orgFolderIds),
+                ),
+            );
+    }
+    return endSharingIfUnfiled(tx, orgUserId, recordingId);
+}
+
+/**
+ * Taking a recording out of Organization folders, down to withdrawing it:
+ * its owner, or the organization account, which decides what the
+ * Organization holds (Johnny, 2026-09-28). Sharing stays the owner's.
+ */
+async function requireMayWithdraw(
+    userId: string,
+    recordingId: string,
+    orgUserId: string | null,
+): Promise<void> {
+    if (orgUserId !== null && userId === orgUserId) {
+        // Only a recording it can see: one that is shared now. Checked again
+        // under the locks.
+        const [recording] = await db
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .limit(1);
+        if (!recording || !(await isRecordingShared(recordingId, orgUserId))) {
+            throw notSharedForCurator();
+        }
+        return;
+    }
+    await requireRecordingOwnerForSharing(userId, recordingId);
+}
+
+/** A recording that is not shared, as the organization account sees it. */
+function notSharedForCurator(): AppError {
+    return new AppError(
+        ErrorCode.NOT_FOUND,
+        "Recording or folder not found",
+        404,
+    );
 }
 
 async function requireRecordingOwnerForSharing(
@@ -1044,17 +1179,22 @@ async function requireRecordingOwnerForSharing(
 }
 
 /**
- * Delete the Organization view of a recording that is no longer shared.
+ * End the sharing of a recording that has left the last Organization folder.
  *
- * Its transcript, summary and speaker names were produced for the
- * organization; once the owner withdraws the recording nobody else may keep
- * reading them. Queued Organization jobs are cancelled with them.
+ * A shared recording is one recording, and its owner gets it back as the
+ * Organization left it: every transcript, name and summary stays, and so
+ * do the corrections, now the owner's (`withdrawKnowledgeInTx`); the
+ * Organization's evidence goes. What the organization account queued on
+ * it is cancelled, as it may change the recording no longer.
+ *
+ * Returns the knowledge scopes the withdrawal reached, for the caller to
+ * bump at its end; none when the recording is still filed.
  */
-async function deleteOrgViewIfUnshared(
+async function endSharingIfUnfiled(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
-): Promise<void> {
+): Promise<Set<string>> {
     const remaining = await tx
         .select({ folderId: recordingFolderAssignments.folderId })
         .from(recordingFolderAssignments)
@@ -1069,29 +1209,9 @@ async function deleteOrgViewIfUnshared(
             ),
         )
         .limit(1);
-    if (remaining.length > 0) return;
+    if (remaining.length > 0) return new Set();
 
     const now = new Date();
-    await tx
-        .update(recordings)
-        .set({ unsharedAt: now })
-        .where(eq(recordings.id, recordingId));
-    await tx
-        .delete(aiEnhancements)
-        .where(
-            and(
-                eq(aiEnhancements.recordingId, recordingId),
-                eq(aiEnhancements.userId, orgUserId),
-            ),
-        );
-    await tx
-        .delete(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, orgUserId),
-            ),
-        );
     await tx
         .update(asyncJobs)
         .set({
@@ -1112,6 +1232,18 @@ async function deleteOrgViewIfUnshared(
                 inArray(asyncJobs.status, ["pending", "processing"]),
             ),
         );
+
+    const [owner] = await tx
+        .select({ userId: recordings.userId })
+        .from(recordings)
+        .where(eq(recordings.id, recordingId))
+        .limit(1);
+    if (!owner) return new Set();
+    return withdrawKnowledgeInTx(tx, {
+        recordingId,
+        ownerUserId: owner.userId,
+        orgUserId,
+    });
 }
 
 /**

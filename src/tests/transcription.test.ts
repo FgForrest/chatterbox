@@ -63,10 +63,36 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+// Storing the title runs as written (the database mock answers it); the
+// re-read before the Plaud push is steered per test.
+const { titleStillGenerated } = vi.hoisted(() => ({
+    titleStillGenerated: vi.fn(),
+}));
+vi.mock("@/lib/recordings/generated-title", async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import("@/lib/recordings/generated-title")
+    >()),
+    titleStillGenerated,
+}));
+
 vi.mock("@/lib/export/document-sidecars", () => ({
     exportRecordingSidecarsIfEnabled: vi.fn().mockResolvedValue(undefined),
     refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
     removeRecordingSidecar: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Carrying speaker rows and corrections over is tested against a real
+// database (`attribution-remap`, `corrections` integration tests); here
+// only that it happens.
+vi.mock("@/lib/knowledge/attribution", () => ({
+    copyMatchingSpeakerAttributions: vi.fn().mockResolvedValue(0),
+}));
+vi.mock("@/lib/knowledge/transcript-rewrite", () => ({
+    transcriptRewrittenInTx: vi.fn(),
+    stampNewTranscriptAudioInTx: vi.fn(),
+}));
+vi.mock("@/lib/knowledge/speaker-labels", () => ({
+    storedSpeakerVersion: () => ({ turns: null, labels: ["speaker_0"] }),
 }));
 
 import { OpenAI } from "openai";
@@ -74,11 +100,14 @@ import { db } from "@/db";
 import { recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
+import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
     storeBrowserTranscription,
     transcribeRecording,
 } from "@/lib/transcription/transcribe-recording";
 import { emitEvent } from "@/lib/webhooks/emit";
+import { exprReferencesColumn } from "./fixtures/drizzle-expr";
 
 describe("Transcription", () => {
     const mockUserId = "user-123";
@@ -298,7 +327,18 @@ describe("Transcription", () => {
             expect(result.error).toBe("API Error");
         });
 
-        it("bumps recording updatedAt and emits completion after generated title is stored", async () => {
+        /**
+         * A run that transcribes, then generates a title. `retitled` is
+         * whether the title update matched a row, i.e. no person had set
+         * the title.
+         */
+        function stubTitledRun({
+            syncTitleToPlaud,
+            retitled,
+        }: {
+            syncTitleToPlaud: boolean;
+            retitled: boolean;
+        }) {
             const mockCreate = vi.fn().mockResolvedValue({
                 text: "Fresh transcript",
                 language: "en",
@@ -358,7 +398,7 @@ describe("Transcription", () => {
                             limit: vi.fn().mockResolvedValue([
                                 {
                                     autoGenerateTitle: true,
-                                    syncTitleToPlaud: false,
+                                    syncTitleToPlaud,
                                 },
                             ]),
                         }),
@@ -402,21 +442,65 @@ describe("Transcription", () => {
                 insert: txInsert,
                 update: txUpdate,
             };
-            (db.transaction as Mock).mockImplementation(
-                async (
-                    callback: (
-                        transaction: typeof tx,
-                    ) => Promise<unknown> | unknown,
-                ) => callback(tx),
-            );
+            // The generated title is stored in a transaction of its own,
+            // which locks the recording first.
+            const titleLock = {
+                from: () => titleLock,
+                where: () => titleLock,
+                for: () => Promise.resolve([{ id: mockRecordingId }]),
+            };
+            const titleTx = {
+                select: () => titleLock,
+                update: (...args: unknown[]) => (db.update as Mock)(...args),
+            };
+            (db.transaction as Mock)
+                .mockImplementationOnce(
+                    async (
+                        callback: (
+                            transaction: typeof tx,
+                        ) => Promise<unknown> | unknown,
+                    ) => callback(tx),
+                )
+                .mockImplementationOnce(
+                    async (
+                        callback: (
+                            transaction: typeof titleTx,
+                        ) => Promise<unknown> | unknown,
+                    ) => callback(titleTx),
+                );
 
-            const titleUpdateWhere = vi.fn().mockResolvedValue(undefined);
+            // The title is written only while no person has set one; the
+            // update says whether it matched a row.
+            const titleUpdateReturning = vi
+                .fn()
+                .mockResolvedValue(retitled ? [{ id: mockRecordingId }] : []);
+            const titleUpdateWhere = vi
+                .fn()
+                .mockReturnValue({ returning: titleUpdateReturning });
             const titleUpdateSet = vi.fn().mockReturnValue({
                 where: titleUpdateWhere,
             });
             (db.update as Mock).mockReturnValue({
                 set: titleUpdateSet,
             });
+
+            return {
+                txInsert,
+                txUpdate,
+                recordingBumpSet,
+                titleUpdateSet,
+                titleUpdateWhere,
+            };
+        }
+
+        it("bumps recording updatedAt and emits completion after generated title is stored", async () => {
+            const {
+                txInsert,
+                txUpdate,
+                recordingBumpSet,
+                titleUpdateSet,
+                titleUpdateWhere,
+            } = stubTitledRun({ syncTitleToPlaud: false, retitled: true });
 
             const result = await transcribeRecording(
                 mockUserId,
@@ -452,6 +536,85 @@ describe("Transcription", () => {
                 (refreshExistingRecordingSidecars as Mock).mock
                     .invocationCallOrder[0],
             ).toBeGreaterThan(titleUpdateWhere.mock.invocationCallOrder[0]);
+        });
+
+        it("keeps a title a person set, and pushes nothing to Plaud", async () => {
+            const { titleUpdateWhere } = stubTitledRun({
+                syncTitleToPlaud: true,
+                retitled: false,
+            });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
+            );
+
+            expect(result.success).toBe(true);
+            // The rename check is in the update itself, so a rename that
+            // commits while the title is generated still wins.
+            expect(
+                exprReferencesColumn(
+                    titleUpdateWhere.mock.calls[0]?.[0],
+                    recordings.titleEditedAt,
+                ),
+            ).toBe(true);
+            expect(refreshExistingRecordingSidecars).not.toHaveBeenCalled();
+            expect(createPlaudClient).not.toHaveBeenCalled();
+        });
+        describe("pushing the generated title to Plaud", () => {
+            function stubPlaud() {
+                (db.select as Mock).mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    id: "conn-1",
+                                    bearerToken: "token",
+                                    apiBase: null,
+                                    workspaceId: "ws-1",
+                                },
+                            ]),
+                        }),
+                    }),
+                });
+                const updateFilename = vi.fn().mockResolvedValue(undefined);
+                (createPlaudClient as Mock).mockResolvedValue({
+                    updateFilename,
+                    workspaceId: "ws-1",
+                });
+                return updateFilename;
+            }
+
+            it("pushes it while nobody renamed the recording", async () => {
+                stubTitledRun({ syncTitleToPlaud: true, retitled: true });
+                const updateFilename = stubPlaud();
+                titleStillGenerated.mockResolvedValue(true);
+
+                await transcribeRecording(mockUserId, mockRecordingId);
+
+                expect(titleStillGenerated).toHaveBeenCalledWith(
+                    mockUserId,
+                    mockRecordingId,
+                );
+                expect(updateFilename).toHaveBeenCalledWith(
+                    "plaud-1",
+                    "Generated Title",
+                );
+            });
+
+            it("keeps it from Plaud once a person renamed the recording", async () => {
+                stubTitledRun({ syncTitleToPlaud: true, retitled: true });
+                const updateFilename = stubPlaud();
+                titleStillGenerated.mockResolvedValue(false);
+
+                const result = await transcribeRecording(
+                    mockUserId,
+                    mockRecordingId,
+                );
+
+                expect(result.success).toBe(true);
+                expect(updateFilename).not.toHaveBeenCalled();
+            });
         });
     });
 
@@ -513,6 +676,10 @@ describe("Transcription", () => {
                     }),
                 insert: txInsert,
                 update: txUpdate,
+                // The summary of the replaced text goes in the same write.
+                delete: vi.fn().mockReturnValue({
+                    where: vi.fn().mockResolvedValue(undefined),
+                }),
             };
             (db.transaction as Mock).mockImplementation(
                 async (
@@ -633,6 +800,19 @@ describe("Transcription", () => {
             expect(updated.provider).toBe("browser");
             expect(updated.model).toBe("whisper-small");
             expect(updated.detectedLanguage).toBeNull();
+            // A browser transcript has no speakers, so the old ones'
+            // names have nowhere to go.
+            expect(transcriptRewrittenInTx).toHaveBeenCalledWith(
+                expect.anything(),
+                {
+                    userId: mockUserId,
+                    transcriptionId: "trans-existing",
+                    previous: { turns: null, labels: ["speaker_0"] },
+                    next: { turns: null, labels: [] },
+                    // Which audio the browser fetched is not known.
+                    audioMd5: null,
+                },
+            );
             expect(emitEvent).toHaveBeenCalledWith(
                 "transcription.completed",
                 mockUserId,

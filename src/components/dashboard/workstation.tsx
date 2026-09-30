@@ -25,11 +25,13 @@ import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
 import { useListKeyboardNav } from "@/hooks/use-list-keyboard-nav";
 import { useOrgEvents } from "@/hooks/use-org-events";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTheme } from "@/hooks/use-theme";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import { useUploadQueue } from "@/hooks/use-upload-queue";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
+import { sharedRecordingIds } from "@/lib/folders/hierarchy";
 import {
     requestNotificationPermission,
     showNewRecordingNotification,
@@ -48,6 +50,8 @@ import type { Recording } from "@/types/recording";
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
     source?: string;
     provider?: string;
@@ -147,6 +151,7 @@ export function Workstation({
     isOrgAccount = false,
 }: WorkstationProps) {
     const i18n = useExtracted();
+    const shareRefusal = useShareRefusal();
     const { refresh } = useRouter();
     // A stable empty list: a fresh `[]` per render would re-run every effect
     // that depends on it, and one of them resets optimistic renames.
@@ -274,6 +279,17 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
+    // A shared recording is the organization account's to change: its
+    // Organization view for anyone else, and its owner's private copy.
+    const sharedIds = useMemo(
+        () => sharedRecordingIds(folderOrganization),
+        [folderOrganization],
+    );
+    const selectedTranscriptReadOnly = selectedRecording
+        ? currentIsOrgView
+            ? !isOrgAccount
+            : sharedIds.has(selectedRecording.id)
+        : false;
 
     // Keep currentRecording in sync with the recordings prop (updated
     // after refresh()). If the previously-selected recording is no
@@ -758,7 +774,12 @@ export function Workstation({
     );
 
     const handleFolderAssignment = useCallback(
-        async (recordingId: string, folderId: string, assigned: boolean) => {
+        async (
+            recordingId: string,
+            folderId: string,
+            assigned: boolean,
+            withdraw = false,
+        ) => {
             const assignment = { recordingId, folderId };
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
@@ -782,7 +803,9 @@ export function Workstation({
                 {
                     method: assigned ? "POST" : "DELETE",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ folderId }),
+                    body: JSON.stringify(
+                        withdraw ? { folderId, withdraw } : { folderId },
+                    ),
                 },
             );
             if (!response.ok) {
@@ -790,14 +813,41 @@ export function Workstation({
                     ...current,
                     assignments: previous,
                 }));
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        assigned
-                            ? i18n("Could not add recording to folder")
-                            : i18n("Could not remove recording from folder"),
-                    ),
-                );
+                const error = await parseApiError(response);
+                // The last Organization folder after all: the caller asks
+                // the owner to confirm the withdrawal.
+                if (error.code === "WITHDRAW_UNCONFIRMED") {
+                    throw Object.assign(new Error(error.error), {
+                        code: error.code,
+                    });
+                }
+                const refusal = shareRefusal(error);
+                if (refusal) {
+                    const recording = recordings.find(
+                        (candidate) => candidate.id === recordingId,
+                    );
+                    toast.error(refusal, {
+                        action: recording
+                            ? {
+                                  label: i18n("Open recording"),
+                                  onClick: () => {
+                                      setCurrentRecording(recording);
+                                      setSelectedFolderId(null);
+                                      setMobileView("detail");
+                                  },
+                              }
+                            : undefined,
+                    });
+                } else {
+                    toast.error(
+                        error.error ||
+                            (assigned
+                                ? i18n("Could not add recording to folder")
+                                : i18n(
+                                      "Could not remove recording from folder",
+                                  )),
+                    );
+                }
                 throw new Error(i18n("Could not update folder assignment"));
             }
             // Sharing or unsharing changes the Organization library itself.
@@ -813,7 +863,9 @@ export function Workstation({
             folderOrganization.assignments,
             folderOrganization.folders,
             i18n,
+            recordings,
             refresh,
+            shareRefusal,
         ],
     );
 
@@ -1039,6 +1091,17 @@ export function Workstation({
                                     }
                                     onTranscribe={handleTranscribe}
                                     onTranscribeComplete={refresh}
+                                    onTranscriptStale={refresh}
+                                    transcriptReadOnly={
+                                        selectedTranscriptReadOnly
+                                    }
+                                    recordingShared={
+                                        selectedRecording
+                                            ? sharedIds.has(
+                                                  selectedRecording.id,
+                                              )
+                                            : false
+                                    }
                                     onSelectRecording={setCurrentRecording}
                                     onRenamed={handleRenamed}
                                     onDelete={handleDelete}
@@ -1075,11 +1138,13 @@ export function Workstation({
                                     onRemoveFromFolder={(
                                         recordingId,
                                         folderId,
+                                        withdraw,
                                     ) =>
                                         handleFolderAssignment(
                                             recordingId,
                                             folderId,
                                             false,
+                                            withdraw,
                                         )
                                     }
                                     onMoveBetweenFolders={

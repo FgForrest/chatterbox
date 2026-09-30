@@ -7,6 +7,7 @@ import {
     removeRecordingFromFolder,
     unshareRecording,
 } from "@/lib/folders/folders";
+import { isSummaryStale } from "@/lib/learn/summary-refresh";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -39,7 +40,15 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         recordingId: id,
         folderId,
     });
-    return NextResponse.json({ assigned: true });
+    // Shared: the Organization reads its own corrections, so a summary
+    // made with the owner's may be stale there (it says so on its view).
+    return NextResponse.json({
+        assigned: true,
+        // Shared already: a failure here says nothing about the share.
+        summaryStale: await isSummaryStale(session.user.id, id).catch(
+            () => false,
+        ),
+    });
 });
 
 /** Move a recording from one folder to another in the same tree. */
@@ -58,7 +67,11 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Take a recording out of a folder, or with `{ "organization": true }` out of
- * the whole Organization tree. Leaving the Organization is owner only.
+ * the whole Organization tree. Out of Organization folders: its owner or the
+ * organization account; taking it out of its last Organization folder, or
+ * out of the whole tree, needs `{ "withdraw": true }` (409
+ * WITHDRAW_UNCONFIRMED otherwise), sent once the owner's retention warning
+ * was seen (`withdraw-preview`).
  */
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
@@ -69,13 +82,16 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         body !== null &&
         (body as { organization?: unknown }).organization === true
     ) {
-        await unshareRecording(session.user.id, id);
+        await unshareRecording(session.user.id, id, {
+            withdraw: (body as { withdraw?: unknown }).withdraw === true,
+        });
         return NextResponse.json({ shared: false });
     }
     await removeRecordingFromFolder({
         userId: session.user.id,
         recordingId: id,
         folderId: readString(body, "folderId"),
+        withdraw: (body as { withdraw?: unknown }).withdraw === true,
     });
     return NextResponse.json({ assigned: false });
 });

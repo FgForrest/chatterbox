@@ -17,6 +17,7 @@ const { queries } = vi.hoisted(() => ({
     queries: {
         claimDueJobs: vi.fn(),
         completeJob: vi.fn(),
+        deferJob: vi.fn(),
         failJobAttempt: vi.fn(),
         heartbeatJob: vi.fn(),
         reclaimStaleJobs: vi.fn(),
@@ -34,7 +35,7 @@ vi.mock("@/lib/posthog-server", () => ({
 }));
 
 import { clearJobHandlers, registerJobHandler } from "@/lib/jobs/registry";
-import { JobAbortedError } from "@/lib/jobs/retryable";
+import { JobAbortedError, JobDeferredError } from "@/lib/jobs/retryable";
 import type { JobHandler } from "@/lib/jobs/types";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import {
@@ -191,6 +192,28 @@ describe("job worker", () => {
         expect(queries.failJobAttempt.mock.calls[0][0].delayMs).toBeGreaterThan(
             0,
         );
+    });
+
+    it("puts off a job that says it is not time yet, without a failure", async () => {
+        queries.deferJob.mockResolvedValue(true);
+        registerJobHandler(
+            testHandler({
+                run: async () => {
+                    throw new JobDeferredError(90_000);
+                },
+            }),
+        );
+        claimOnce(claimed());
+
+        await runTick();
+
+        expect(queries.deferJob).toHaveBeenCalledWith({
+            jobId: "job-1",
+            claimToken: "token-1",
+            delayMs: 90_000,
+        });
+        expect(queries.failJobAttempt).not.toHaveBeenCalled();
+        expect(queries.completeJob).not.toHaveBeenCalled();
     });
 
     it("buries a failure that another attempt cannot fix", async () => {

@@ -93,10 +93,10 @@ vi.mock("@/lib/transcription/persist", () => ({
 }));
 
 import { db } from "@/db";
-import { aiEnhancements, transcriptSpeakers } from "@/db/schema";
+import { transcriptSpeakers } from "@/db/schema";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
-import { exprReferencesColumn } from "../fixtures/drizzle-expr";
 
 const userId = "user-1";
 const recordingId = "rec-1";
@@ -161,6 +161,13 @@ function captureDeletes(): { table: unknown; where: unknown }[] {
     return captured;
 }
 
+/**
+ * A forced re-run overwrites the transcript, and with it the text its
+ * speakers were named on. Moving the names is the transcript write's job
+ * (`upsertTranscription` remaps them in its own transaction), so the run
+ * itself never deletes speaker rows: it used to drop them whenever the
+ * speaker count changed, which lost names a relabelled run could keep.
+ */
 describe("forced re-transcribe and speaker attributions", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -172,7 +179,7 @@ describe("forced re-transcribe and speaker attributions", () => {
         });
     });
 
-    it("drops the attributions of the transcript it overwrites", async () => {
+    it("leaves the speaker rows to the transcript write", async () => {
         stubLookups({ id: transcriptionId, text: "speaker_0: Previous run" });
         const deletes = captureDeletes();
 
@@ -181,28 +188,28 @@ describe("forced re-transcribe and speaker attributions", () => {
         });
 
         expect(result.success).toBe(true);
-        const speakerDelete = deletes.find(
-            (call) => call.table === transcriptSpeakers,
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId,
+                recordingId,
+                source: "riffado",
+                turns: [
+                    expect.objectContaining({ speaker: "speaker_0" }),
+                    expect.objectContaining({ speaker: "speaker_1" }),
+                ],
+            }),
         );
-        expect(speakerDelete).toBeDefined();
-        expect(
-            exprReferencesColumn(
-                speakerDelete?.where,
-                transcriptSpeakers.userId,
-            ),
-        ).toBe(true);
-        expect(
-            exprReferencesColumn(
-                speakerDelete?.where,
-                transcriptSpeakers.transcriptionId,
-            ),
-        ).toBe(true);
-        expect(deletes.some((call) => call.table === aiEnhancements)).toBe(
-            true,
+        expect(deletes.some((call) => call.table === transcriptSpeakers)).toBe(
+            false,
+        );
+        // The summary was made from the old text, so it goes, in the same
+        // write as the text.
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ dropSummaryOnReplace: "riffado" }),
         );
     });
 
-    it("keeps the attributions when a run is not forced", async () => {
+    it("keeps everything when a run is not forced", async () => {
         stubLookups({ id: transcriptionId, text: "Previous run" });
         const deletes = captureDeletes();
 
@@ -211,37 +218,18 @@ describe("forced re-transcribe and speaker attributions", () => {
         // The short-circuit returns the stored transcript untouched, so the
         // labels it was attributed against still describe it.
         expect(result.text).toBe("Previous run");
+        expect(upsertTranscription).not.toHaveBeenCalled();
         expect(deletes).toHaveLength(0);
     });
 
-    it("keeps attributions when the speaker count is unchanged", async () => {
-        stubLookups({
-            id: transcriptionId,
-            text: "speaker_0: Previous\nspeaker_1: run",
-        });
-        const deletes = captureDeletes();
-
-        const result = await transcribeRecording(userId, recordingId, {
-            force: true,
-        });
-
-        expect(result.success).toBe(true);
-        expect(deletes.some((call) => call.table === transcriptSpeakers)).toBe(
-            false,
-        );
-        expect(deletes.some((call) => call.table === aiEnhancements)).toBe(
-            true,
-        );
-    });
-
-    it("drops the attributions before writing the transcript sidecar", async () => {
+    it("writes the transcript, and so its speakers, before the sidecar", async () => {
         stubLookups({ id: transcriptionId, text: "speaker_0: Previous run" });
+        captureDeletes();
         const order: string[] = [];
-        (db.delete as Mock).mockImplementation((table: unknown) => ({
-            where: vi.fn(async () => {
-                if (table === transcriptSpeakers) order.push("delete");
-            }),
-        }));
+        (upsertTranscription as Mock).mockImplementation(async () => {
+            order.push("write");
+            return { committed: true };
+        });
         (exportRecordingSidecarsIfEnabled as Mock).mockImplementation(
             async () => {
                 order.push("sidecar");
@@ -250,6 +238,6 @@ describe("forced re-transcribe and speaker attributions", () => {
 
         await transcribeRecording(userId, recordingId, { force: true });
 
-        expect(order).toEqual(["delete", "sidecar"]);
+        expect(order).toEqual(["write", "sidecar"]);
     });
 });

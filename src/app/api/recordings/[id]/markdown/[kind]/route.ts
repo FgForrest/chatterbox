@@ -9,7 +9,6 @@ import {
     requestedRecordingView,
     requireRecordingView,
 } from "@/lib/sharing/access";
-import { effectiveViewReader } from "@/lib/sharing/view-content";
 
 type MarkdownContext = {
     params: Promise<{ id: string; kind: string }>;
@@ -34,14 +33,13 @@ export const GET = apiHandler<MarkdownContext>(async (request, context) => {
 
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
-    const reader = await effectiveViewReader(id, access, kind);
     const document = await getRecordingMarkdownDocument(
-        reader.userId,
+        access.ownerUserId,
         id,
         kind,
         source,
-        access.ownerUserId,
         view === "org",
+        access.shared,
     );
     if (!document) {
         throw new AppError(

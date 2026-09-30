@@ -43,6 +43,12 @@ interface Props {
     onTranscribe: (attributionSource?: string) => void;
     /** Called after a browser-side transcription completes (refresh data). */
     onTranscribeComplete?: () => void;
+    /** Reload the page's transcripts; see `TranscriptionPanel`. */
+    onTranscriptStale?: () => void;
+    /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
+    transcriptReadOnly?: boolean;
+    /** Whether the recording is in the Organization: erasing it withdraws it. */
+    recordingShared?: boolean;
     onSelectRecording: (r: Recording) => void;
     onRenamed?: (filename: string) => void;
     onDelete: (recording: Recording) => Promise<void>;
@@ -61,6 +67,7 @@ interface Props {
     onRemoveFromFolder: (
         recordingId: string,
         folderId: string,
+        withdraw?: boolean,
     ) => Promise<void>;
     onMoveBetweenFolders?: (
         recordingId: string,
@@ -92,6 +99,9 @@ export function WorkstationDetailPane({
     visibleRecordings,
     onTranscribe,
     onTranscribeComplete,
+    onTranscriptStale,
+    transcriptReadOnly,
+    recordingShared = false,
     onSelectRecording,
     onRenamed,
     onDelete,
@@ -145,12 +155,19 @@ export function WorkstationDetailPane({
                     <RecordingPlayerHeader
                         recording={currentRecording}
                         onRenamed={onRenamed}
+                        shared={recordingShared}
+                        // The title follows the transcript's rule: the
+                        // organization account renames it on the
+                        // Organization view, the owner on their own.
+                        titleReadOnly={transcriptReadOnly}
                         action={
-                            // Erasing and deleting act on the owner's own
-                            // copy, never on what the Organization view shows.
+                            // Erasing and deleting are the owner's, on their
+                            // own view; a shared recording leaves the
+                            // Organization first.
                             currentRecording.view === "org" ? undefined : (
                                 <EraseRecordingMenu
                                     recording={currentRecording}
+                                    shared={recordingShared}
                                     onDeleteLocal={onDelete}
                                     onChanged={onArtifactsChanged}
                                 />
@@ -165,6 +182,13 @@ export function WorkstationDetailPane({
                         onAdd={onAddToFolder}
                         onRemove={onRemoveFromFolder}
                         isOwn={currentRecording.isOwn !== false}
+                        // On the Organization view the organization account
+                        // may take it out, as its owner may.
+                        canWithdraw={
+                            currentRecording.isOwn !== false ||
+                            (currentRecording.view === "org" &&
+                                transcriptReadOnly === false)
+                        }
                         organizationOnly={currentRecording.view === "org"}
                         onMove={onMoveBetweenFolders}
                     />
@@ -201,6 +225,8 @@ export function WorkstationDetailPane({
                             isTranscribing={isCurrentTranscribing}
                             onTranscribe={onTranscribe}
                             onTranscribeComplete={onTranscribeComplete}
+                            onTranscriptStale={onTranscriptStale}
+                            readOnly={transcriptReadOnly}
                             onSeekToTurn={
                                 currentRecording.audioReaped
                                     ? undefined

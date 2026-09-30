@@ -25,10 +25,12 @@ import {
     accounts,
     aiEnhancements,
     asyncJobs,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -38,7 +40,7 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, hooks } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -60,6 +62,9 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     return {
         dbProxy: proxy,
         dbRef: ref,
+        // Run once, inside the next share, right after it made the names
+        // the Organization's.
+        hooks: { afterPublish: null as null | (() => Promise<void>) },
         mockEnv: {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared" as "shared" | "local",
@@ -83,7 +88,26 @@ vi.mock("@/lib/posthog-server", () => ({
 vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
+// Another writer arriving while a share holds its locks.
+vi.mock("@/lib/sharing/share-names", async () => {
+    const actual = await vi.importActual<
+        typeof import("@/lib/sharing/share-names")
+    >("@/lib/sharing/share-names");
+    return {
+        ...actual,
+        publishSpeakerNamesInTx: async (
+            ...args: Parameters<typeof actual.publishSpeakerNamesInTx>
+        ) => {
+            const promoted = await actual.publishSpeakerNamesInTx(...args);
+            const run = hooks.afterPublish;
+            hooks.afterPublish = null;
+            await run?.();
+            return promoted;
+        },
+    };
+});
 
+import { db as appDb } from "@/db";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError } from "@/lib/errors";
 import {
@@ -98,19 +122,69 @@ import {
     retireLegacyPublicRoots,
     unshareRecording,
 } from "@/lib/folders/folders";
+import {
+    deleteSpeakerInTx,
+    lockForSpeakerChange,
+} from "@/lib/knowledge/attribution";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { deletePerson, mergePeople } from "@/lib/knowledge/people";
+import { changeTranscriptSpeaker } from "@/lib/knowledge/speaker-changes";
 import { ensureOrgAccount } from "@/lib/org/account";
 import {
     requireRecordingView,
     resolveRecordingAccess,
 } from "@/lib/sharing/access";
 import { upsertTranscription } from "@/lib/transcription/persist";
+import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const ALICE = "user-alice";
 const BOB = "user-bob";
+
+type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0];
+
+/**
+ * Run `work` in a transaction that stays open, holding its locks, until
+ * `commit` is called: another writer caught in the middle of its work.
+ */
+async function holdTransaction(work: (tx: Tx) => Promise<void>) {
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let ready = () => {};
+    const worked = new Promise<void>((resolve) => {
+        ready = resolve;
+    });
+    const done = appDb.transaction(async (tx) => {
+        await work(tx);
+        ready();
+        await released;
+    });
+    await Promise.race([worked, done]);
+    return {
+        commit: async () => {
+            release();
+            await done;
+        },
+    };
+}
+
+/** Whether `promise` is still pending after a moment: waiting on a lock. */
+async function stillWaiting(promise: Promise<unknown>): Promise<boolean> {
+    const pending = Symbol("pending");
+    const first = await Promise.race([
+        promise.then(
+            () => null,
+            () => null,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(pending), 300)),
+    ]);
+    return first === pending;
+}
 
 async function expectStatus(promise: Promise<unknown>, status: number) {
     const error = await promise.then(
@@ -156,7 +230,11 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
             ]);
     });
 
-    async function insertRecording(id: string, userId: string) {
+    async function insertRecording(
+        id: string,
+        userId: string,
+        { transcribed = true }: { transcribed?: boolean } = {},
+    ) {
         await db()
             .insert(recordings)
             .values({
@@ -174,6 +252,32 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 storagePath: `${userId}/${id}.mp3`,
                 plaudVersion: "1",
             });
+        // Transcribed, without speakers: nothing stands in the way of
+        // sharing it.
+        if (transcribed) await insertTranscript(id, userId);
+    }
+
+    async function insertTranscript(
+        recordingId: string,
+        userId: string,
+        {
+            text = "Hello.",
+            model = "whisper-1",
+            source = "riffado",
+        }: { text?: string; model?: string; source?: string } = {},
+    ): Promise<string> {
+        const [row] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId,
+                userId,
+                text: encryptText(text),
+                provider: "openai",
+                model,
+                source,
+            })
+            .returning({ id: transcriptions.id });
+        return row?.id ?? "";
     }
 
     async function orgRootId(): Promise<string> {
@@ -337,9 +441,11 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 requireRecordingView(BOB, "rec-a", "private"),
                 404,
             );
+            // One recording: the Organization view reads the owner's rows.
             const view = await requireRecordingView(BOB, "rec-a", "org");
-            expect(view.contentUserId).toBe(org);
+            expect(view.contentUserId).toBe(ALICE);
             expect(view.ownerUserId).toBe(ALICE);
+            expect(view.orgUserId).toBe(org);
         });
 
         it("lets only the owner share", async () => {
@@ -606,13 +712,16 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 }),
                 403,
             );
-            await expectStatus(unshareRecording(BOB, "rec-a"), 403);
+            await expectStatus(
+                unshareRecording(BOB, "rec-a", { withdraw: true }),
+                403,
+            );
             expect((await resolveRecordingAccess(BOB, "rec-a"))?.role).toBe(
                 "member",
             );
         });
 
-        it("deletes the Organization view and cancels its jobs on unshare", async () => {
+        it("gives the recording back as the Organization left it, and cancels its jobs, on unshare", async () => {
             await insertRecording("rec-a", ALICE);
             const root = await orgRootId();
             const org = await orgUser();
@@ -622,24 +731,15 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 folderId: root,
             });
             await upsertTranscription({
-                userId: org,
-                recordingOwnerId: ALICE,
-                producedByUserId: BOB,
+                userId: ALICE,
+                actorUserId: org,
                 recordingId: "rec-a",
                 text: "shared transcript",
                 detectedLanguage: "en",
                 source: "riffado",
                 provider: "openai",
                 model: "whisper-1",
-            });
-            await upsertTranscription({
-                userId: ALICE,
-                recordingId: "rec-a",
-                text: "private transcript",
-                detectedLanguage: "en",
-                source: "riffado",
-                provider: "openai",
-                model: "whisper-1",
+                allowReaped: true,
             });
             await db()
                 .insert(asyncJobs)
@@ -650,13 +750,19 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     payload: { recordingId: "rec-a", view: "org" },
                 });
 
-            await unshareRecording(ALICE, "rec-a");
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
 
             const rows = await db()
                 .select()
                 .from(transcriptions)
                 .where(eq(transcriptions.recordingId, "rec-a"));
-            expect(rows.map((row) => row.userId)).toEqual([ALICE]);
+            expect(
+                rows.map((row) => [
+                    row.userId,
+                    row.producedByUserId,
+                    decryptText(row.text),
+                ]),
+            ).toEqual([[ALICE, org, "shared transcript"]]);
             const [job] = await db().select().from(asyncJobs);
             expect(job?.status).toBe("failed");
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
@@ -704,7 +810,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 403,
             );
             // Withdrawing is still the owner's right.
-            await unshareRecording(ALICE, "rec-a");
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
         });
 
@@ -742,7 +848,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     folderId: root,
                 });
                 const [unshared] = await Promise.allSettled([
-                    unshareRecording(ALICE, "rec-a"),
+                    unshareRecording(ALICE, "rec-a", { withdraw: true }),
                     moveRecordingBetweenFolders({
                         userId: BOB,
                         recordingId: "rec-a",
@@ -756,8 +862,8 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
         });
     });
 
-    describe("writing the Organization view", () => {
-        it("records who produced the row and never touches the owner's", async () => {
+    describe("changing a shared recording", () => {
+        it("lets the organization account rewrite the owner's rows, recording who produced them", async () => {
             await insertRecording("rec-a", ALICE);
             const root = await orgRootId();
             const org = await orgUser();
@@ -767,9 +873,8 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 folderId: root,
             });
             const { committed } = await upsertTranscription({
-                userId: org,
-                recordingOwnerId: ALICE,
-                producedByUserId: BOB,
+                userId: ALICE,
+                actorUserId: org,
                 recordingId: "rec-a",
                 text: "shared transcript",
                 detectedLanguage: "en",
@@ -778,31 +883,49 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 model: "whisper-1",
             });
             expect(committed).toBe(true);
-            const [row] = await db()
+            const rows = await db()
                 .select()
                 .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, "rec-a"),
-                        eq(transcriptions.userId, org),
-                    ),
-                );
-            expect(row?.producedByUserId).toBe(BOB);
-            expect(decryptText(row?.text ?? "")).toBe("shared transcript");
-            const owned = await db()
-                .select()
-                .from(transcriptions)
-                .where(eq(transcriptions.userId, ALICE));
-            expect(owned).toHaveLength(0);
+                .where(eq(transcriptions.recordingId, "rec-a"));
+            expect(
+                rows.map((row) => [
+                    row.userId,
+                    row.producedByUserId,
+                    decryptText(row.text),
+                ]),
+            ).toEqual([[ALICE, org, "shared transcript"]]);
         });
 
-        it("writes nothing once the recording is no longer shared", async () => {
+        it("refuses the owner's and a member's writes while shared", async () => {
+            await insertRecording("rec-a", ALICE);
+            const root = await orgRootId();
+            await addRecordingToFolder({
+                userId: ALICE,
+                recordingId: "rec-a",
+                folderId: root,
+            });
+            for (const actorUserId of [ALICE, BOB]) {
+                expect(
+                    await upsertTranscription({
+                        userId: ALICE,
+                        actorUserId,
+                        recordingId: "rec-a",
+                        text: "not theirs to write",
+                        detectedLanguage: "en",
+                        source: "riffado",
+                        provider: "openai",
+                        model: "whisper-1",
+                    }),
+                ).toEqual({ committed: false, reason: "shared" });
+            }
+        });
+
+        it("writes nothing for the organization account once the recording is no longer shared", async () => {
             await insertRecording("rec-a", ALICE);
             const org = await orgUser();
-            const { committed } = await upsertTranscription({
-                userId: org,
-                recordingOwnerId: ALICE,
-                producedByUserId: BOB,
+            const { committed, reason } = await upsertTranscription({
+                userId: ALICE,
+                actorUserId: org,
                 recordingId: "rec-a",
                 text: "too late",
                 detectedLanguage: "en",
@@ -810,11 +933,436 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 provider: "openai",
                 model: "whisper-1",
             });
-            expect(committed).toBe(false);
+            expect({ committed, reason }).toEqual({
+                committed: false,
+                reason: "withdrawn",
+            });
             const rows = await db().select().from(aiEnhancements);
             expect(rows).toHaveLength(0);
-            const transcripts = await db().select().from(transcriptions);
-            expect(transcripts).toHaveLength(0);
+            const owned = await db()
+                .select()
+                .from(transcriptions)
+                .where(eq(transcriptions.userId, ALICE));
+            expect(owned.map((item) => decryptText(item.text))).toEqual([
+                "Hello.",
+            ]);
+        });
+    });
+
+    describe("sharing is gated on the owner's rows", () => {
+        const DIARIZED = "gpt-4o-transcribe-diarize";
+        const DIALOG = "speaker_0: Hello.\nspeaker_1: Hi there.";
+
+        /** Alice's recording with a diarized transcript per source. */
+        async function meeting(sources = ["riffado"]) {
+            await insertRecording("rec-a", ALICE, { transcribed: false });
+            const ids: Record<string, string> = {};
+            for (const source of sources) {
+                ids[source] = await insertTranscript("rec-a", ALICE, {
+                    text: DIALOG,
+                    model: DIARIZED,
+                    source,
+                });
+            }
+            return ids;
+        }
+
+        async function person(name: string): Promise<string> {
+            const [row] = await db()
+                .insert(people)
+                .values({ userId: ALICE, displayName: encryptText(name) })
+                .returning({ id: people.id });
+            return row?.id ?? "";
+        }
+
+        /** Alice's answer: a person, or unknown when null. */
+        async function answer(
+            transcriptionId: string,
+            label: string,
+            personId: string | null,
+        ) {
+            await db()
+                .insert(transcriptSpeakers)
+                .values({
+                    userId: ALICE,
+                    transcriptionId,
+                    label,
+                    personId,
+                    markedUnknown: personId === null,
+                    source: "user",
+                    status: "confirmed",
+                    confirmedByUserId: ALICE,
+                });
+        }
+
+        /** A meeting whose speakers are Jana and someone unknown. */
+        async function answeredMeeting() {
+            const { riffado } = await meeting();
+            const jana = await person("Jana");
+            await answer(riffado ?? "", "speaker_0", jana);
+            await answer(riffado ?? "", "speaker_1", null);
+            return { transcript: riffado ?? "", jana };
+        }
+
+        async function share(folderId?: string) {
+            await addRecordingToFolder({
+                userId: ALICE,
+                recordingId: "rec-a",
+                folderId: folderId ?? (await orgRootId()),
+            });
+        }
+
+        async function refusal(promise: Promise<unknown>) {
+            const error = await promise.then(
+                () => null,
+                (caught: unknown) => caught,
+            );
+            expect(error).toBeInstanceOf(AppError);
+            return error as AppError;
+        }
+
+        /** The speaker names the recording carries, which the Organization reads. */
+        async function sharedNames() {
+            return db()
+                .select({
+                    label: transcriptSpeakers.label,
+                    personId: transcriptSpeakers.personId,
+                    markedUnknown: transcriptSpeakers.markedUnknown,
+                    confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+                })
+                .from(transcriptSpeakers)
+                .where(eq(transcriptSpeakers.userId, ALICE))
+                .orderBy(transcriptSpeakers.label);
+        }
+
+        /** The rows the organization account owns: none, ever. */
+        async function orgOwnedRows() {
+            const org = await orgUser();
+            return [
+                ...(await db()
+                    .select({ id: transcriptions.id })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.userId, org))),
+                ...(await db()
+                    .select({ id: aiEnhancements.id })
+                    .from(aiEnhancements)
+                    .where(eq(aiEnhancements.userId, org))),
+            ];
+        }
+
+        async function assignments() {
+            return db()
+                .select({ folderId: recordingFolderAssignments.folderId })
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.recordingId, "rec-a"));
+        }
+
+        async function ownerOf(personId: string) {
+            const [row] = await db()
+                .select({ userId: people.userId })
+                .from(people)
+                .where(eq(people.id, personId));
+            return row?.userId ?? null;
+        }
+
+        it("refuses a speaker nobody named, and leaves nothing behind", async () => {
+            const { riffado } = await meeting();
+            const jana = await person("Jana");
+            await answer(riffado ?? "", "speaker_0", jana);
+
+            const error = await refusal(share());
+
+            expect(error.statusCode).toBe(409);
+            expect(error.code).toBe("SHARE_REQUIREMENTS_UNMET");
+            expect(error.details).toEqual({
+                problems: [
+                    {
+                        kind: "unresolved_speakers",
+                        source: "riffado",
+                        labels: ["speaker_1"],
+                    },
+                ],
+            });
+            expect(await assignments()).toEqual([]);
+            expect(await ownerOf(jana)).toBe(ALICE);
+            expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
+        });
+
+        it("refuses a recording without a transcript", async () => {
+            await insertRecording("rec-a", ALICE, { transcribed: false });
+            const error = await refusal(share());
+            expect(error.details).toEqual({
+                problems: [{ kind: "no_transcript" }],
+            });
+            expect(await assignments()).toEqual([]);
+        });
+
+        it("shares a recording whose every speaker is answered, its names made the Organization's", async () => {
+            const { riffado, plaud } = await meeting(["riffado", "plaud"]);
+            const jana = await person("Jana");
+            for (const id of [riffado ?? "", plaud ?? ""]) {
+                await answer(id, "speaker_0", jana);
+                await answer(id, "speaker_1", null);
+            }
+            await db()
+                .insert(aiEnhancements)
+                .values({
+                    recordingId: "rec-a",
+                    userId: ALICE,
+                    transcriptionId: riffado,
+                    summary: encryptText("What was said"),
+                    provider: "openai",
+                    model: "gpt",
+                    source: "riffado",
+                });
+
+            await share();
+
+            expect(await assignments()).toHaveLength(1);
+            // One recording: its rows stay the owner's, as they were.
+            expect(await orgOwnedRows()).toEqual([]);
+            expect(await sharedNames()).toEqual(
+                [jana, jana, null, null].map((personId, index) => ({
+                    label: index < 2 ? "speaker_0" : "speaker_1",
+                    personId,
+                    markedUnknown: personId === null,
+                    confirmedByUserId: ALICE,
+                })),
+            );
+            expect(await ownerOf(jana)).toBe(await orgUser());
+            const view = await requireRecordingView(BOB, "rec-a", "org");
+            expect(view.contentUserId).toBe(ALICE);
+        });
+
+        it("files a shared recording into another Organization folder without the gate", async () => {
+            await answeredMeeting();
+            await share();
+            const sales = await createFolder({
+                userId: BOB,
+                parentId: await orgRootId(),
+                name: "Sales",
+            });
+            // A transcript nobody answered for, written around the share.
+            await insertTranscript("rec-a", ALICE, {
+                text: DIALOG,
+                model: DIARIZED,
+                source: "plaud",
+            });
+
+            await share(sales.id);
+
+            // Filed in Sales, which makes the root assignment redundant.
+            expect(await assignments()).toEqual([{ folderId: sales.id }]);
+        });
+
+        it("gates and publishes the names again when shared again", async () => {
+            const { transcript } = await answeredMeeting();
+            await share();
+            await unshareRecording(ALICE, "rec-a", { withdraw: true });
+
+            // The owner's again, to change: a private person on it now.
+            const petr = await person("Petr");
+            await db()
+                .update(transcriptSpeakers)
+                .set({ personId: petr, markedUnknown: false })
+                .where(
+                    and(
+                        eq(transcriptSpeakers.transcriptionId, transcript),
+                        eq(transcriptSpeakers.label, "speaker_1"),
+                    ),
+                );
+            await share();
+
+            expect(
+                (await sharedNames()).find((row) => row.label === "speaker_1")
+                    ?.personId,
+            ).toBe(petr);
+            expect(await ownerOf(petr)).toBe(await orgUser());
+        });
+
+        it("publishes nobody through rows on labels the text no longer has", async () => {
+            const { transcript } = await answeredMeeting();
+            const contact = await person("A private contact");
+            const guess = await person("Maybe Karel");
+            // Left from an earlier diarization: labels the text lacks, so
+            // the gate never judged them.
+            await db()
+                .insert(transcriptSpeakers)
+                .values([
+                    {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        label: "speaker_8",
+                        personId: contact,
+                        source: "user" as const,
+                        status: "confirmed" as const,
+                        confirmedByUserId: ALICE,
+                    },
+                    {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        label: "speaker_9",
+                        personId: guess,
+                        source: "heuristic" as const,
+                        status: "suggested" as const,
+                    },
+                ]);
+
+            await share();
+
+            expect(
+                (await sharedNames()).map((row) => row.label).sort(),
+            ).toEqual(["speaker_0", "speaker_1"]);
+            expect(await ownerOf(contact)).toBe(ALICE);
+            expect(await ownerOf(guess)).toBe(ALICE);
+        });
+
+        describe("racing a share", () => {
+            // The organization account and its root exist before a race
+            // starts: creating them hashes a password, which would make a
+            // waiting share look like one waiting on a lock.
+            let root = "";
+            beforeEach(async () => {
+                root = await orgRootId();
+            });
+
+            it("refuses when a speaker's answer is taken back first", async () => {
+                const { transcript } = await answeredMeeting();
+                const clearing = await holdTransaction(async (tx) => {
+                    await lockForSpeakerChange(tx, {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        revision: 0,
+                    });
+                    await deleteSpeakerInTx(tx, {
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        label: "speaker_1",
+                    });
+                });
+
+                const sharing = share(root);
+                expect(await stillWaiting(sharing)).toBe(true);
+                await clearing.commit();
+
+                expect((await refusal(sharing)).statusCode).toBe(409);
+                expect(await assignments()).toEqual([]);
+            });
+
+            it("shares the answer, and refuses taking it back, when that comes after the share", async () => {
+                const { transcript } = await answeredMeeting();
+                let clearing: Promise<unknown> = Promise.resolve();
+                hooks.afterPublish = async () => {
+                    clearing = changeTranscriptSpeaker({
+                        userId: ALICE,
+                        transcriptionId: transcript,
+                        revision: 0,
+                        label: "speaker_1",
+                        answer: { kind: "clear" },
+                        actorUserId: ALICE,
+                        orgUserId: await orgUser(),
+                    });
+                    expect(await stillWaiting(clearing)).toBe(true);
+                };
+
+                await share(root);
+
+                const error = await refusal(clearing);
+                expect(error.code).toBe("RECORDING_SHARED");
+                const [own] = await db()
+                    .select()
+                    .from(transcriptSpeakers)
+                    .where(
+                        and(
+                            eq(transcriptSpeakers.transcriptionId, transcript),
+                            eq(transcriptSpeakers.label, "speaker_1"),
+                        ),
+                    );
+                expect(own?.markedUnknown).toBe(true);
+            });
+
+            it("refuses a transcript from the browser that waited for the share", async () => {
+                const { transcript } = await answeredMeeting();
+                let storing: Promise<{ errorCode?: string }> = Promise.resolve(
+                    {},
+                );
+                hooks.afterPublish = async () => {
+                    storing = storeBrowserTranscription({
+                        userId: ALICE,
+                        recordingId: "rec-a",
+                        text: "Made in the browser.",
+                        detectedLanguage: null,
+                        model: "whisper-base",
+                    });
+                    expect(await stillWaiting(storing)).toBe(true);
+                };
+
+                await share(root);
+
+                expect((await storing).errorCode).toBe("RECORDING_SHARED");
+                const [own] = await db()
+                    .select({ text: transcriptions.text })
+                    .from(transcriptions)
+                    .where(eq(transcriptions.id, transcript));
+                expect(decryptText(own?.text ?? "")).toBe(DIALOG);
+            });
+
+            it("refuses when a named person is deleted first", async () => {
+                const { jana } = await answeredMeeting();
+                // deletePerson, caught between its delete and its commit.
+                const deleting = await holdTransaction(async (tx) => {
+                    await lockOrgPeople(tx);
+                    await tx.delete(people).where(eq(people.id, jana));
+                });
+
+                const sharing = share(root);
+                expect(await stillWaiting(sharing)).toBe(true);
+                await deleting.commit();
+
+                expect((await refusal(sharing)).statusCode).toBe(409);
+                expect(await assignments()).toEqual([]);
+            });
+
+            it("shares the name when the person's deletion comes after the share", async () => {
+                const { jana } = await answeredMeeting();
+                let deleting: Promise<unknown> = Promise.resolve();
+                hooks.afterPublish = async () => {
+                    deleting = deletePerson(ALICE, jana);
+                    expect(await stillWaiting(deleting)).toBe(true);
+                };
+
+                await share(root);
+
+                // By then an Organization person, not the owner's to delete.
+                expect((await refusal(deleting)).statusCode).toBe(403);
+                expect(await ownerOf(jana)).toBe(await orgUser());
+                expect(
+                    (await sharedNames()).find(
+                        (row) => row.label === "speaker_0",
+                    )?.personId,
+                ).toBe(jana);
+            });
+
+            it("never publishes a private person a merge moved the named one into", async () => {
+                const { jana } = await answeredMeeting();
+                const privateJana = await person("Jana (mine)");
+                let merging: Promise<unknown> = Promise.resolve();
+                hooks.afterPublish = async () => {
+                    merging = mergePeople(ALICE, privateJana, jana);
+                    expect(await stillWaiting(merging)).toBe(true);
+                };
+
+                await share(root);
+
+                // By then Jana is the Organization's, not the owner's to
+                // fold into a private record.
+                expect((await refusal(merging)).statusCode).toBe(403);
+                const named = (await sharedNames()).find(
+                    (row) => row.label === "speaker_0",
+                );
+                expect(named?.personId).toBe(jana);
+                expect(await ownerOf(jana)).toBe(await orgUser());
+            });
         });
     });
 });

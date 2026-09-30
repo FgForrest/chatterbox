@@ -20,6 +20,9 @@ vi.mock("@/db", () => ({
         insert: vi.fn(),
         update: vi.fn(),
         delete: vi.fn(),
+        transaction: vi.fn(),
+        // The Organization-people lock a speaker change takes first.
+        execute: vi.fn().mockResolvedValue([]),
     },
 }));
 
@@ -37,6 +40,9 @@ vi.mock("@/lib/sharing/access", () => ({
     requireRecordingView: vi.fn(async (userId: string) => ({
         ownerUserId: userId,
         contentUserId: userId,
+        view: "private",
+        shared: false,
+        orgUserId: null,
     })),
 }));
 
@@ -71,6 +77,8 @@ function selectAnswer(rows: unknown[]) {
     const afterWhere = Object.assign(Promise.resolve(rows), {
         limit: vi.fn().mockResolvedValue(rows),
         orderBy: vi.fn().mockResolvedValue(rows),
+        // The row locks a speaker change takes.
+        for: vi.fn().mockResolvedValue(rows),
     });
     const node: Record<string, unknown> = {};
     node.from = vi.fn(() => node);
@@ -94,10 +102,13 @@ function context(id = RECORDING_ID) {
     return { params: Promise.resolve({ id }) };
 }
 
-function putRequest(body: unknown, query = ""): Request {
+/** The transcript version every change names; `tx-1` at revision 0. */
+const SEEN = { transcriptionId: "tx-1", revision: 0 };
+
+function putRequest(body: object, query = ""): Request {
     return new Request(
         `http://localhost/api/recordings/${RECORDING_ID}/speakers${query}`,
-        { method: "PUT", body: JSON.stringify(body) },
+        { method: "PUT", body: JSON.stringify({ ...SEEN, ...body }) },
     );
 }
 
@@ -108,6 +119,11 @@ describe("speakers route and ownership", () => {
         (db.update as Mock).mockReturnValue({
             set: vi.fn().mockReturnValue({ where: vi.fn() }),
         });
+        (db.delete as Mock).mockReturnValue({ where: vi.fn() });
+        // The writes run in a transaction; here it is the same mock.
+        (db.transaction as Mock).mockImplementation(
+            async (work: (tx: typeof db) => unknown) => work(db),
+        );
     });
 
     it("scopes the transcript lookup by userId and 404s on somebody else's", async () => {
@@ -144,7 +160,7 @@ describe("speakers route and ownership", () => {
     it("refuses a personId the session user does not own", async () => {
         // The transcript is the caller's; the person is not, so the person
         // lookup comes back empty.
-        queueSelects([{ id: "tx-1" }], []);
+        queueSelects([{ id: "tx-1", revision: 0 }], []);
 
         const response = await putSpeaker(
             putRequest({ label: "speaker_0", personId: "person-theirs" }),
@@ -162,7 +178,7 @@ describe("speakers route and ownership", () => {
 
     it("writes a user-confirmed attribution, the only kind that projects", async () => {
         queueSelects(
-            [{ id: "tx-1" }],
+            [{ id: "tx-1", revision: 0 }],
             [
                 {
                     id: "person-1",
@@ -173,6 +189,13 @@ describe("speakers route and ownership", () => {
                     updatedAt: new Date(),
                 },
             ],
+            // The recording, then the transcript, locked for the change.
+            [{ id: RECORDING_ID }],
+            [{ revision: 0 }],
+            // What the label answered before: nothing yet.
+            [],
+            // The person named, as they are now: not merged away.
+            [{ id: "person-1", mergedIntoId: null }],
             [],
         );
         const values = vi.fn().mockReturnValue({
@@ -194,12 +217,72 @@ describe("speakers route and ownership", () => {
                 personId: "person-1",
                 source: "user",
                 status: "confirmed",
+                confirmedByUserId: "user-1",
             }),
         );
         expect(refreshExistingRecordingSidecars).toHaveBeenCalledWith(
             "user-1",
             RECORDING_ID,
         );
+    });
+
+    it("requires the transcript version a change was made on", async () => {
+        const bodies = [
+            { transcriptionId: undefined },
+            { revision: undefined },
+            { revision: -1 },
+            { revision: 1.5 },
+            { revision: "0" },
+            { transcriptionId: 7 },
+            { transcriptionId: "" },
+        ];
+        for (const version of bodies) {
+            const response = await putSpeaker(
+                putRequest({ label: "speaker_0", unknown: true, ...version }),
+                context() as never,
+            );
+            expect(response.status).toBe(400);
+        }
+        expect(db.select).not.toHaveBeenCalled();
+        expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it("refuses a change made on another transcript or an older revision", async () => {
+        for (const seen of [
+            { transcriptionId: "tx-erased" },
+            { revision: 2 },
+        ]) {
+            queueSelects([{ id: "tx-1", revision: 3 }]);
+            const response = await putSpeaker(
+                putRequest({
+                    label: "speaker_0",
+                    unknown: true,
+                    revision: 3,
+                    ...seen,
+                }),
+                context() as never,
+            );
+            expect(response.status).toBe(409);
+        }
+        expect(db.insert).not.toHaveBeenCalled();
+    });
+
+    it("refuses a change when the transcript is rewritten under it", async () => {
+        // The route saw revision 0; by the time the lock is held a
+        // re-transcription has committed revision 1.
+        queueSelects(
+            [{ id: "tx-1", revision: 0 }],
+            [{ id: RECORDING_ID }],
+            [{ revision: 1 }],
+        );
+
+        const response = await putSpeaker(
+            putRequest({ label: "speaker_0", unknown: true }),
+            context() as never,
+        );
+
+        expect(response.status).toBe(409);
+        expect(db.insert).not.toHaveBeenCalled();
     });
 
     it("attributes against the transcript the caller named, not the recording", async () => {

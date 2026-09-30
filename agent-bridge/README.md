@@ -185,7 +185,8 @@ The bridge only turns a prompt into text, so it runs both CLIs with no tools and
 | Flag | Effect |
 |---|---|
 | `--tools ""` | Empties the built-in tool set. `--allowedTools` would only pre-approve tools; this removes them. |
-| `--strict-mcp-config` | Loads no MCP server (none is passed with `--mcp-config`). Needed on top of `--tools ""`, which leaves MCP tools in place. |
+| `--strict-mcp-config` | Loads no MCP server (none is passed with `--mcp-config`). Needed on top of `--tools ""`, which leaves MCP tools in place. A Learn request passes exactly one, Riffado's (see [Learn](#learn-riffados-knowledge-tools)). |
+| `--setting-sources ""` | Reads no user, project or local settings file. A user `advisorModel` setting keeps a server-side advisor that forwards the whole conversation to another model; neither `--disallowedTools` nor `--settings` removes it. OAuth still works. |
 | `--no-session-persistence` | No session transcript under `~/.claude/projects/`. |
 | `--settings '{"autoMemoryEnabled":false,"disableClaudeAiConnectors":true}'` | No auto-memory (a `MEMORY.md` per working directory, loaded into every session), and no claude.ai connectors, the subscription account's own MCP servers. |
 
@@ -273,14 +274,32 @@ What those are:
 
 Files an agent may have written into `/work` are in the container's own filesystem, not the volume; recreating the container (which a rebuild does) discards them.
 
+## Learn: Riffado's knowledge tools
+
+Riffado's Learn reads a transcript and proposes speaker names, corrections and facts. Through the bridge it can let the CLI look things up in Riffado's knowledge base itself, over MCP, with read-only tools. A request asks for that with two fields beyond the OpenAI shape:
+
+- `response_format: {"type": "json_schema", "json_schema": {"schema": {...}}}`: the answer's JSON Schema. Claude gets `--json-schema` and the bridge returns its `structured_output`; Codex gets `--output-schema` (a `0600` file).
+- `riffado_mcp: {"token": "<run token>", "tools": ["find_entities", ...]}`: the run's token and the tool names. **The URL is never the request's:** it is `BRIDGE_LEARN_MCP_URL`, and without it the bridge refuses such a request (400).
+
+| | Claude Code | Codex |
+|---|---|---|
+| Tools | `--tools` and `--allowedTools` list exactly `mcp__riffado__<tool>`; nothing built in | the one server via `-c mcp_servers.riffado.url=…`; the shell and every other feature stay disabled |
+| Server | `--strict-mcp-config --mcp-config <0600 file>` with one HTTP server | `--ignore-user-config` keeps any other out |
+| Token | `Authorization: Bearer ${RIFFADO_MCP_TOKEN}` in the file, expanded by the CLI from its environment | `-c mcp_servers.riffado.bearer_token_env_var="RIFFADO_MCP_TOKEN"` |
+
+The token is in the child's environment only: never in argv or a file, redacted from error text, never logged. It names one Learn run, expires, and works only while that run is running. The temp files go when the request ends. Verified with Claude Code 2.1.284 and Codex 0.155.1 (Spike 0.1, and a round trip through this bridge to a probe MCP server).
+
+The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, and `LEARN_BRIDGE_URL` to this bridge's base URL as the provider names it (`http://agent-bridge:8787/v1`): Riffado sends a run's token only to a Claude Code or Codex provider whose base URL is exactly that, never to an endpoint merely named like one.
+
 ## Configuration
 
 | Variable | Default | Notes |
 |---|---|---|
 | `BRIDGE_TOKEN` | *(required)* | Bearer token. The bridge refuses to start without it. |
+| `BRIDGE_LEARN_MCP_URL` | — | The one URL of Riffado's knowledge tools a Learn request may use, e.g. `http://app:3000/api/mcp/learn`. Unset, requests cannot use tools. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | From `claude setup-token`. Optional if you logged in interactively. |
 | `BRIDGE_MAX_CONCURRENCY` | `1` | Each request spawns a model session drawing on the same rolling window as your interactive coding. |
-| `BRIDGE_TIMEOUT_MS` | `300000` | Per request. The child is SIGKILLed on expiry. |
+| `BRIDGE_TIMEOUT_MS` | `300000` (compose: `900000`) | Per request. The child is SIGKILLed on expiry, and when the caller goes away. Learn with tools needs several minutes on a long recording. |
 | `BRIDGE_MAX_BODY_BYTES` | `20000000` | Transcripts are large; this is the ceiling. |
 | `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS` | — | Extra flags, space-separated, applied verbatim after the bridge's own. |
 | `CLAUDE_BIN` / `CODEX_BIN` | `claude` / `codex` | Override to test a different build. |

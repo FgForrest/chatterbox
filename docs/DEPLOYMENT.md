@@ -192,6 +192,13 @@ pm2 startup
 | `SMTP_USER` | SMTP username | - |
 | `SMTP_PASSWORD` | SMTP password | - |
 | `SMTP_FROM` | From email address | - |
+| `EMBEDDING_BASE_URL` | OpenAI-compatible embeddings endpoint for Learn; unset, Learn matches words only | - |
+| `EMBEDDING_MODEL` | Embedding model name | `bge-m3` |
+| `EMBEDDING_API_KEY` | Bearer key for the embeddings endpoint | - |
+
+To run embeddings locally, start the optional `embeddings` service (Ollama with BAAI/bge-m3, about
+1.3 GB of memory) with `docker compose --profile learn up -d` and set
+`EMBEDDING_BASE_URL=http://embeddings:11434/v1`. Its first start downloads the model (1.2 GB).
 
 ## Database Setup
 

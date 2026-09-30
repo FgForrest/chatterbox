@@ -19,8 +19,11 @@ import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useOrgEvents } from "@/hooks/use-org-events";
+import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
-import { getApiErrorMessage } from "@/lib/api-errors";
+import { parseApiError } from "@/lib/api-errors";
+import { sharedRecordingIds } from "@/lib/folders/hierarchy";
 import type { FolderOrganization } from "@/types/folder";
 import type { Recording } from "@/types/recording";
 
@@ -60,6 +63,7 @@ export function RecordingWorkstation({
     initialFolderOrganization,
 }: RecordingWorkstationProps) {
     const i18n = useExtracted();
+    const shareRefusal = useShareRefusal();
     const { push, refresh } = useRouter();
     const [filename, setFilename] = useState(recording.filename);
     const [folderOrganization, setFolderOrganization] =
@@ -76,6 +80,17 @@ export function RecordingWorkstation({
     useEffect(() => {
         setFolderOrganization(initialFolderOrganization);
     }, [initialFolderOrganization]);
+
+    // Shared or withdrawn in another tab: the page reloads its folders,
+    // and with them whether this transcript may be changed here.
+    useOrgEvents(
+        folderOrganization.folders.some((folder) => folder.scope === "org"),
+        (event) => {
+            if (event.type === "tree" || event.recordingId === recording.id) {
+                refresh();
+            }
+        },
+    );
 
     useEffect(() => {
         void observeTranscriptionById(recording.id);
@@ -120,7 +135,7 @@ export function RecordingWorkstation({
     }, [recording.id, refresh, push, i18n]);
 
     const handleFolderAssignment = useCallback(
-        async (folderId: string, assigned: boolean) => {
+        async (folderId: string, assigned: boolean, withdraw = false) => {
             const previous = folderOrganization.assignments;
             setFolderOrganization((current) => ({
                 ...current,
@@ -140,7 +155,9 @@ export function RecordingWorkstation({
                 {
                     method: assigned ? "POST" : "DELETE",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ folderId }),
+                    body: JSON.stringify(
+                        withdraw ? { folderId, withdraw } : { folderId },
+                    ),
                 },
             );
             if (!response.ok) {
@@ -148,15 +165,22 @@ export function RecordingWorkstation({
                     ...current,
                     assignments: previous,
                 }));
+                const error = await parseApiError(response);
+                // The last Organization folder after all: the folder tags
+                // ask the owner to confirm the withdrawal.
+                if (error.code === "WITHDRAW_UNCONFIRMED") {
+                    throw Object.assign(new Error(error.error), {
+                        code: error.code,
+                    });
+                }
                 toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not update folder assignment"),
-                    ),
+                    shareRefusal(error) ??
+                        (error.error ||
+                            i18n("Could not update folder assignment")),
                 );
             }
         },
-        [folderOrganization.assignments, recording.id, i18n],
+        [folderOrganization.assignments, recording.id, i18n, shareRefusal],
     );
 
     return (
@@ -178,9 +202,15 @@ export function RecordingWorkstation({
                     <RecordingPlayerHeader
                         recording={displayRecording}
                         onRenamed={handleRenamed}
+                        shared={sharedRecordingIds(folderOrganization).has(
+                            recording.id,
+                        )}
                         action={
                             <EraseRecordingMenu
                                 recording={displayRecording}
+                                shared={sharedRecordingIds(
+                                    folderOrganization,
+                                ).has(recording.id)}
                                 onDeleteLocal={handleDelete}
                                 onChanged={refresh}
                             />
@@ -198,8 +228,8 @@ export function RecordingWorkstation({
                         onAdd={(_recordingId, folderId) =>
                             handleFolderAssignment(folderId, true)
                         }
-                        onRemove={(_recordingId, folderId) =>
-                            handleFolderAssignment(folderId, false)
+                        onRemove={(_recordingId, folderId, withdraw) =>
+                            handleFolderAssignment(folderId, false, withdraw)
                         }
                     />
                     {!displayRecording.audioReaped && (
@@ -222,6 +252,11 @@ export function RecordingWorkstation({
                             isTranscribing={isTranscribing}
                             onTranscribe={handleTranscribe}
                             onTranscribeComplete={refresh}
+                            onTranscriptStale={refresh}
+                            // Shared, it is the organization account's.
+                            readOnly={sharedRecordingIds(
+                                folderOrganization,
+                            ).has(recording.id)}
                             onSeekToTurn={
                                 recording.audioReaped
                                     ? undefined

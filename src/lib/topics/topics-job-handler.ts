@@ -5,9 +5,12 @@
  * encrypted.
  */
 
+import { AppError, ErrorCode } from "@/lib/errors";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { isHeldForLearn } from "@/lib/learn/hold";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
+    admitRateLimitedAutoTopics,
     parseTopicsJobPayload,
     TOPICS_JOB_KIND,
     TOPICS_MAX_ATTEMPTS,
@@ -25,15 +28,41 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     parsePayload: parseTopicsJobPayload,
 
     async run({ payload, userId, reportProgress }): Promise<JobResult> {
-        const result = await generateTopicsForTranscript(
-            userId,
-            payload.recordingId,
-            payload.source,
-            {
-                trigger: payload.trigger,
-                onProgress: reportProgress,
-            },
-        );
+        // As for automatic summaries: the hold's release detects them. It
+        // holds the Riffado transcript's; the Plaud one's go on.
+        if (
+            payload.trigger !== "manual" &&
+            payload.view !== "org" &&
+            payload.source === "riffado" &&
+            (await isHeldForLearn(payload.recordingId))
+        ) {
+            return { skipped: "held" };
+        }
+        if (payload.rateLimited) await admitRateLimitedAutoTopics(userId);
+        let result: Awaited<ReturnType<typeof generateTopicsForTranscript>>;
+        try {
+            result = await generateTopicsForTranscript(
+                userId,
+                payload.recordingId,
+                payload.source,
+                {
+                    trigger: payload.trigger,
+                    onProgress: reportProgress,
+                    view: payload.view,
+                },
+            );
+        } catch (error) {
+            // Shared since it was queued: an automatic run has nothing to
+            // do, and nothing failed. A person who asked is told why.
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.RECORDING_SHARED &&
+                payload.trigger !== "manual"
+            ) {
+                return { skipped: "shared" };
+            }
+            throw error;
+        }
         return {
             source: payload.source,
             topicCount: result.topics.length,

@@ -15,6 +15,14 @@ import {
 } from "@/db/schema";
 import { ErrorCode } from "@/lib/errors";
 
+// Without corrections a model reads the stored turns as they are.
+vi.mock("@/lib/learn/llm-input", () => ({
+    modelInput: vi.fn(async (transcript: { text: string }) => ({
+        text: transcript.text,
+        turns: null,
+        fingerprint: null,
+    })),
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
@@ -60,20 +68,50 @@ function selectChain() {
     return c;
 }
 
-vi.mock("@/db", () => ({
-    db: {
-        select: () => selectChain(),
-        update: () => ({
-            set: (set: Record<string, unknown>) => ({
-                where: () => ({
-                    returning: async () => {
-                        writes.push({ set });
-                        return writeMatches ? [{ id: "tr-1" }] : [];
-                    },
-                }),
+vi.mock("@/db", () => {
+    const update = () => ({
+        set: (set: Record<string, unknown>) => ({
+            where: () => ({
+                returning: async () => {
+                    writes.push({ set });
+                    return writeMatches ? [{ id: "tr-1" }] : [];
+                },
             }),
         }),
-    },
+    });
+    // The recording lock the write takes.
+    const lockChain = {
+        from: () => lockChain,
+        where: () => lockChain,
+        for: () => Promise.resolve([{ id: "rec-1" }]),
+    };
+    const tx = { select: () => lockChain, update };
+    return {
+        db: {
+            select: () => selectChain(),
+            update,
+            transaction: <T>(run: (transaction: typeof tx) => Promise<T>) =>
+                run(tx),
+        },
+    };
+});
+// Sharing is tested against a real database (`src/tests/sharing/`); here
+// every run is the owner's, on the private view.
+vi.mock("@/lib/sharing/run-context", () => ({
+    resolveRunContext: async (actorUserId: string) => ({
+        view: "private",
+        actorUserId,
+        ownerUserId: actorUserId,
+        contentUserId: actorUserId,
+        settingsUserId: actorUserId,
+    }),
+}));
+// Sharing is tested against a real database (`src/tests/sharing/`).
+vi.mock("@/lib/sharing/writer", () => ({
+    contentWriterRefusal: async () => null,
+    contentWriterRefusalNow: async () => null,
+    sharingOrgUserId: async () => null,
+    writerRefusalError: () => new Error("refused"),
 }));
 
 import { generateTopicsForTranscript } from "@/lib/topics/generate-topics";

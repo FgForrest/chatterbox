@@ -18,6 +18,7 @@ class CompletedTranscriptionFailure extends AppError {}
 
 function failedResultError(
     code: TranscribeErrorCode | undefined,
+    message?: string,
 ): CompletedTranscriptionFailure {
     switch (code) {
         case "RECORDING_NOT_FOUND":
@@ -45,6 +46,12 @@ function failedResultError(
                 "The hosted account cannot transcribe recordings",
                 403,
             );
+        case "RECORDING_SHARED":
+            return new CompletedTranscriptionFailure(
+                ErrorCode.RECORDING_SHARED,
+                message ?? "The recording is shared with the Organization",
+                409,
+            );
         case "MYNAH_BUDGET_EXHAUSTED":
             return new CompletedTranscriptionFailure(
                 ErrorCode.MYNAH_BUDGET_EXHAUSTED,
@@ -71,7 +78,7 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             ? false
             : isRetryableError(error),
 
-    async run({ payload, userId }): Promise<JobResult> {
+    async run({ payload, userId, jobId }): Promise<JobResult> {
         const allowed =
             payload.view === "org" ||
             (await allowManualArtifactGeneration(
@@ -94,8 +101,21 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
             attributionSource: payload.attributionSource,
             force: payload.force,
             view: payload.view,
+            jobId,
         });
-        if (!result.success) throw failedResultError(result.errorCode);
+        // Shared since it was queued, queued on the Organization view by
+        // someone other than its account, or the Organization is read-only:
+        // an automatic run has nothing to do, and nothing failed. A person
+        // who asked is told why, once (not retryable).
+        if (
+            result.errorCode === "RECORDING_SHARED" &&
+            payload.trigger !== "manual"
+        ) {
+            return { skipped: "shared" };
+        }
+        if (!result.success) {
+            throw failedResultError(result.errorCode, result.error);
+        }
         return { transcribed: true };
     },
 };

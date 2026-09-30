@@ -1,17 +1,31 @@
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
+    knowledgeAliases,
     people,
     personNotes,
-    transcriptions,
+    transcriptCorrections,
+    transcriptSpeakerRejections,
     transcriptSpeakers,
     users,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { deleteFactsNamingInTx } from "@/lib/knowledge/fact-chains";
+import { moveFactsInTx } from "@/lib/knowledge/fact-merge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { planSpeakerMerge } from "@/lib/knowledge/merge-plan";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    lockOrgPeople,
+    lockOrgPeopleShared,
+    lockRecordingsNaming,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
+import {
+    bumpScopeInTx,
+    scopesNamingInTx,
+} from "@/lib/knowledge/scope-generation";
 
 /** The bound on `people.displayName`, shared by every route that writes it. */
 export const MAX_DISPLAY_NAME_LENGTH = 200;
@@ -141,20 +155,35 @@ async function viewerNotesFor(
  * transcript supplies a name and nothing else. An email is optional, and
  * only some people will ever have one.
  */
-export async function createPerson({
-    userId,
-    displayName,
-    primaryEmail,
-    notes,
-    createdByUserId,
-}: CreatePersonArgs): Promise<Person> {
+export async function createPerson(args: CreatePersonArgs): Promise<Person> {
+    return db.transaction(async (tx) => {
+        const person = await createPersonInTx(tx, args);
+        await bumpScopeInTx(tx, [args.userId]);
+        return person;
+    });
+}
+
+/**
+ * `createPerson` inside a caller's transaction, e.g. with the change naming
+ * them. The caller bumps `userId`'s scope generation at its end.
+ */
+export async function createPersonInTx(
+    executor: Pick<typeof db, "select" | "insert">,
+    {
+        userId,
+        displayName,
+        primaryEmail,
+        notes,
+        createdByUserId,
+    }: CreatePersonArgs,
+): Promise<Person> {
     const trimmedName = displayName.trim();
     if (!trimmedName) {
         throw new Error("A person needs a name");
     }
     const email = primaryEmail?.trim() || null;
 
-    const [created] = await db
+    const [created] = await executor
         .insert(people)
         .values({
             userId,
@@ -166,7 +195,7 @@ export async function createPerson({
         })
         .returning({ id: people.id });
 
-    const row = created ? await readPersonRow(db, created.id) : null;
+    const row = created ? await readPersonRow(executor, created.id) : null;
     if (!row) throw new Error("Person was not created");
     return toPerson(row);
 }
@@ -283,6 +312,11 @@ export async function updatePerson(
         // against the Organization's people and must not race an edit of it.
         await lockOrgPeople(tx);
         await updatePersonInTx(tx, actorId, personId, changes);
+        // A new name reads differently everywhere the person is named.
+        await bumpScopeInTx(
+            tx,
+            await scopesNamingInTx(tx, { personIds: [personId] }),
+        );
     });
     const updated = await getPerson(actorId, personId);
     if (!updated) throw personNotFound();
@@ -337,12 +371,19 @@ async function updatePersonInTx(
  * Works on person ids alone: an Organization person is named in many
  * accounts' transcripts, so every attribution row is moved, whoever's it
  * is. Callers authorize first.
+ *
+ * A transcript rewrite replaces its speaker rows under its recording's
+ * lock, so the recordings of every transcript naming either person are
+ * held first: otherwise a rewrite could re-insert a row this merge moved,
+ * or move one it is about to.
  */
 async function mergeInTx(
     tx: Tx,
     winnerId: string,
     loserId: string,
 ): Promise<void> {
+    await lockRecordingsNaming(tx, { personIds: [winnerId, loserId] });
+
     const attributionColumns = {
         id: transcriptSpeakers.id,
         transcriptionId: transcriptSpeakers.transcriptionId,
@@ -372,6 +413,28 @@ async function mergeInTx(
             .where(inArray(transcriptSpeakers.id, plan.repointLoserIds));
     }
 
+    // "Not this person" said about the loser is said about the same human.
+    const loserRejections = await tx
+        .select({
+            userId: transcriptSpeakerRejections.userId,
+            transcriptionId: transcriptSpeakerRejections.transcriptionId,
+            label: transcriptSpeakerRejections.label,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(eq(transcriptSpeakerRejections.personId, loserId));
+    if (loserRejections.length > 0) {
+        await tx
+            .insert(transcriptSpeakerRejections)
+            .values(
+                loserRejections.map((row) => ({ ...row, personId: winnerId })),
+            )
+            .onConflictDoNothing();
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(eq(transcriptSpeakerRejections.personId, loserId));
+    }
+    await settleContradictions(tx, winnerId);
+
     // Everyone's private notes about the loser follow the attributions.
     const loserNotes = await tx
         .select({ userId: personNotes.userId, notes: personNotes.notes })
@@ -383,6 +446,39 @@ async function mergeInTx(
     if (loserNotes.length > 0) {
         await tx.delete(personNotes).where(eq(personNotes.personId, loserId));
     }
+
+    // The knowledge naming the loser follows: corrections (two never cover
+    // the same words, so nothing collides), aliases (the survivor's own copy
+    // of a name wins), and facts (combined where they then say the same).
+    await tx
+        .update(transcriptCorrections)
+        .set({ targetPersonId: winnerId, updatedAt: new Date() })
+        .where(eq(transcriptCorrections.targetPersonId, loserId));
+    const other = alias(knowledgeAliases, "other");
+    await tx
+        .update(knowledgeAliases)
+        .set({ personId: winnerId, updatedAt: new Date() })
+        .where(
+            and(
+                eq(knowledgeAliases.personId, loserId),
+                sql`not exists (${tx
+                    .select({ id: other.id })
+                    .from(other)
+                    .where(
+                        and(
+                            eq(other.personId, winnerId),
+                            eq(other.userId, knowledgeAliases.userId),
+                            eq(other.kind, knowledgeAliases.kind),
+                            eq(other.textHmac, knowledgeAliases.textHmac),
+                            sql`${other.correctionId} is not distinct from ${knowledgeAliases.correctionId}`,
+                        ),
+                    )})`,
+            ),
+        );
+    await tx
+        .delete(knowledgeAliases)
+        .where(eq(knowledgeAliases.personId, loserId));
+    await moveFactsInTx(tx, { personId: loserId }, { personId: winnerId });
 
     // Chains collapse to the final winner rather than forming a linked
     // list nobody walks: anything already pointing at the loser is
@@ -403,6 +499,56 @@ async function mergeInTx(
         .update(people)
         .set({ mergedIntoId: winnerId, updatedAt: new Date() })
         .where(eq(people.mergedIntoId, loserId));
+}
+
+/**
+ * A merge can meet two answers about one label that now name the same
+ * person: "it is them" and "it is not them" (said about the other record
+ * of that human). The confirmation stands and the rejection goes, as when a
+ * person confirms someone they once rejected; a mere suggestion the
+ * rejection rules out goes instead.
+ */
+async function settleContradictions(tx: Tx, personId: string): Promise<void> {
+    // Both sides name `personId` on the same label of the same transcript.
+    const sameAnswer = and(
+        eq(transcriptSpeakers.personId, personId),
+        eq(transcriptSpeakerRejections.personId, personId),
+        eq(
+            transcriptSpeakers.transcriptionId,
+            transcriptSpeakerRejections.transcriptionId,
+        ),
+        eq(transcriptSpeakers.label, transcriptSpeakerRejections.label),
+    );
+    await tx.delete(transcriptSpeakerRejections).where(
+        and(
+            eq(transcriptSpeakerRejections.personId, personId),
+            exists(
+                tx
+                    .select({ id: transcriptSpeakers.id })
+                    .from(transcriptSpeakers)
+                    .where(
+                        and(
+                            sameAnswer,
+                            eq(transcriptSpeakers.status, "confirmed"),
+                        ),
+                    ),
+            ),
+        ),
+    );
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.personId, personId),
+                eq(transcriptSpeakers.status, "suggested"),
+                exists(
+                    tx
+                        .select({ id: transcriptSpeakerRejections.id })
+                        .from(transcriptSpeakerRejections)
+                        .where(sameAnswer),
+                ),
+            ),
+        );
 }
 
 /**
@@ -439,6 +585,9 @@ export async function mergePeople(
     if (keepId === loserId) return;
 
     await db.transaction(async (tx) => {
+        // Before anything is read: a share promoting either person decides
+        // whose they are, and a merge must see the outcome.
+        await lockOrgPeople(tx);
         const loser = await requireManageable(tx, actorId, loserId);
         const keep = await readPersonRow(tx, keepId);
         if (!keep || (keep.userId !== actorId && keep.ownerRole !== "org")) {
@@ -453,10 +602,14 @@ export async function mergePeople(
         // is never more than one hop deep and following it cannot loop.
         const winnerId = keep.mergedIntoId ?? keepId;
         if (winnerId === loserId) return;
+        const scopes = await scopesNamingInTx(tx, {
+            personIds: [winnerId, loserId],
+        });
         await mergeInTx(tx, winnerId, loserId);
         if (loser.ownerRole !== "org" && keep.ownerRole === "org") {
             await moveNotesToOverlay(tx, loser, winnerId);
         }
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
@@ -480,18 +633,42 @@ export async function deletePerson(
     personId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        // Before anything is read: a share may be promoting this person,
+        // and the private record it read would be the Organization's by
+        // the time it is deleted.
+        await lockOrgPeople(tx);
         const row = await requireManageable(tx, actorId, personId);
+        // Read before the delete: it takes everyone's aliases, notes, facts
+        // and corrections naming this person or their tombstones.
+        const doomed = await tx
+            .select({ id: people.id })
+            .from(people)
+            .where(
+                or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
+            );
+        await lockRecordingsNaming(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
+        const scopes = await scopesNamingInTx(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
         if (row.ownerRole === "org") {
             await tx
                 .update(transcriptSpeakers)
                 .set({ personId: null, updatedAt: new Date() })
                 .where(eq(transcriptSpeakers.personId, personId));
         }
+        // Before the cascade would: facts naming them as the value of a
+        // chain leave it whole.
+        await deleteFactsNamingInTx(tx, {
+            personIds: doomed.map((person) => person.id),
+        });
         await tx
             .delete(people)
             .where(
                 or(eq(people.id, personId), eq(people.mergedIntoId, personId)),
             );
+        await bumpScopeInTx(tx, scopes);
     });
 }
 
@@ -550,36 +727,41 @@ export async function addPersonNotes(
 ): Promise<void> {
     const trimmed = notes.trim();
     if (!trimmed) return;
-    await db.transaction((tx) =>
-        appendOverlayNotes(tx, personId, userId, encryptText(trimmed)),
-    );
+    await db.transaction(async (tx) => {
+        await lockOrgPeopleShared(tx);
+        await appendOverlayNotes(tx, personId, userId, encryptText(trimmed));
+        await bumpScopeInTx(tx, [userId]);
+    });
 }
 
 /**
- * Make a private person an Organization person.
- *
- * Promotion reassigns the row rather than copying it, so every attribution
- * -- the owner's private ones included -- keeps pointing at the same id and
- * the owner's knowledge base cannot drift from the Organization's. When the
- * Organization already knows someone with the same email, the private
- * record is folded into theirs instead. The owner's notes are never
- * promoted: they move to that owner's private overlay.
- *
- * Returns the id of the Organization person. Permanent: unsharing the
- * recording that caused it does not demote anyone.
+ * What sharing would make of a person, decided without writing anything
+ * (`promotePersonInTx` acts on it): the Organization person they are or
+ * would become, and for a private one the record promoted and the
+ * Organization person with the same email it would fold into. Null when
+ * they are gone. A merged-away id stands for the one it was folded into.
  */
-async function promotePersonInTx(
+export interface PersonPromotion {
+    /** The Organization person's id, now or once promoted. */
+    orgPersonId: string;
+    /** The private record to promote; null when already the Organization's. */
+    row: PersonRow | null;
+    foldInto: string | null;
+}
+
+export async function planPersonPromotionInTx(
     tx: Tx,
     personId: string,
     orgUserId: string,
-): Promise<string | null> {
+): Promise<PersonPromotion | null> {
     const row = await readPersonRow(tx, personId);
     if (!row) return null;
     if (row.mergedIntoId) {
-        return promotePersonInTx(tx, row.mergedIntoId, orgUserId);
+        return planPersonPromotionInTx(tx, row.mergedIntoId, orgUserId);
     }
-    if (row.userId === orgUserId || row.ownerRole === "org") return row.id;
-
+    if (row.userId === orgUserId || row.ownerRole === "org") {
+        return { orgPersonId: row.id, row: null, foldInto: null };
+    }
     const [emailRow] = await tx
         .select({ hash: people.primaryEmailHash })
         .from(people)
@@ -597,78 +779,49 @@ async function promotePersonInTx(
                 ),
             )
             .limit(1);
-        if (known) {
-            await mergeInTx(tx, known.id, row.id);
-            await moveNotesToOverlay(tx, row, known.id);
-            return known.id;
-        }
+        if (known) return { orgPersonId: known.id, row, foldInto: known.id };
+    }
+    return { orgPersonId: row.id, row, foldInto: null };
+}
+
+/**
+ * Make a private person an Organization person.
+ *
+ * Promotion reassigns the row rather than copying it, so every attribution
+ * -- the owner's private ones included -- keeps pointing at the same id and
+ * the owner's knowledge base cannot drift from the Organization's. When the
+ * Organization already knows someone with the same email, the private
+ * record is folded into theirs instead. The owner's notes are never
+ * promoted: they move to that owner's private overlay.
+ *
+ * Returns the id of the Organization person. Permanent: unsharing the
+ * recording that caused it does not demote anyone.
+ */
+export async function promotePersonInTx(
+    tx: Tx,
+    personId: string,
+    orgUserId: string,
+): Promise<string | null> {
+    const plan = await planPersonPromotionInTx(tx, personId, orgUserId);
+    if (!plan) return null;
+    const { row, foldInto } = plan;
+    if (!row) return plan.orgPersonId;
+    if (foldInto) {
+        await mergeInTx(tx, foldInto, row.id);
+        await moveNotesToOverlay(tx, row, foldInto);
+        return foldInto;
     }
 
     await moveNotesToOverlay(tx, row, row.id);
-    await tx
+    const [promoted] = await tx
         .update(people)
         .set({
             userId: orgUserId,
             createdByUserId: row.userId,
             updatedAt: new Date(),
         })
-        .where(eq(people.id, row.id));
-    return row.id;
-}
-
-/**
- * Serialize promotions, so two recordings shared at once cannot both create
- * an Organization person for the same email.
- */
-async function lockOrgPeople(tx: Tx): Promise<void> {
-    await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtext('riffado:org-people'))`,
-    );
-}
-
-/** Promote one person, e.g. after it was confirmed on a shared transcript. */
-export async function promotePerson(
-    personId: string,
-    orgUserId: string,
-): Promise<string | null> {
-    return db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        return promotePersonInTx(tx, personId, orgUserId);
-    });
-}
-
-/**
- * Promote everyone confirmed on the owner's transcripts of a recording.
- *
- * Called when the recording is shared and the Organization view shows the
- * owner's transcripts: each name visible there becomes an Organization
- * person. Suggestions are left alone -- they are the owner's to review.
- */
-export async function promoteRecordingPeople(
-    recordingId: string,
-    ownerUserId: string,
-    orgUserId: string,
-): Promise<void> {
-    await db.transaction(async (tx) => {
-        await lockOrgPeople(tx);
-        const rows = await tx
-            .selectDistinct({ personId: transcriptSpeakers.personId })
-            .from(transcriptSpeakers)
-            .innerJoin(
-                transcriptions,
-                eq(transcriptions.id, transcriptSpeakers.transcriptionId),
-            )
-            .innerJoin(people, eq(people.id, transcriptSpeakers.personId))
-            .where(
-                and(
-                    eq(transcriptions.recordingId, recordingId),
-                    eq(transcriptions.userId, ownerUserId),
-                    eq(transcriptSpeakers.status, "confirmed"),
-                    eq(people.userId, ownerUserId),
-                ),
-            );
-        for (const { personId } of rows) {
-            if (personId) await promotePersonInTx(tx, personId, orgUserId);
-        }
-    });
+        .where(eq(people.id, row.id))
+        .returning({ id: people.id });
+    // Deleted since it was read: there is nobody to promote.
+    return promoted?.id ?? null;
 }

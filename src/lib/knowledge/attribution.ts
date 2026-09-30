@@ -1,13 +1,29 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
-import { decryptText } from "@/lib/encryption/fields";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
-import { speakerAnchorId } from "@/lib/knowledge/speaker-references";
 import {
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
+    people,
+    recordings,
+    transcriptions,
+    transcriptSpeakerRejections,
+    transcriptSpeakers,
+} from "@/db/schema";
+import { decryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    demoteAll,
+    mapLabels,
+    remapAttributionRows,
+} from "@/lib/knowledge/label-mapping";
+import {
+    lockOrgPeopleShared,
+    orgOwnedCondition,
+} from "@/lib/knowledge/org-people";
+import {
+    type SpeakerVersion,
+    speakerKey,
+} from "@/lib/knowledge/speaker-label-rules";
+import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
+import { contentWriterRefusal } from "@/lib/sharing/writer-rule";
 import type { SpeakerNameResolver } from "@/lib/transcription/turns";
 
 export type AttributionSource =
@@ -29,18 +45,53 @@ export interface TranscriptSpeaker {
     status: AttributionStatus;
     confidence: number | null;
     evidenceStartMs: number | null;
+    /** A person looked and said nobody known: an answer, not an open label. */
+    markedUnknown: boolean;
+    /** The human who confirmed the row; null on machine rows. */
+    confirmedByUserId: string | null;
 }
 
 export interface SetTranscriptSpeakerArgs {
     userId: string;
     transcriptionId: string;
+    /** The transcript revision the change was made on; see `lockForSpeakerChange`. */
+    revision: number;
     label: string;
     personId: string | null;
     source: AttributionSource;
     status: AttributionStatus;
     confidence?: number | null;
     evidenceStartMs?: number | null;
+    markedUnknown?: boolean;
+    confirmedByUserId?: string | null;
 }
+
+/** One version of one user's transcript. */
+export interface TranscriptVersion {
+    userId: string;
+    transcriptionId: string;
+    revision: number;
+}
+
+/** One speaker label of one transcript. */
+export interface TranscriptLabelArgs {
+    userId: string;
+    transcriptionId: string;
+    /** The transcript revision the change was made on; see `lockForSpeakerChange`. */
+    revision: number;
+    label: string;
+}
+
+/** A suggestion a machine made, before it is filtered and written. */
+export interface SuggestedSpeaker {
+    label: string;
+    personId: string | null;
+    source: AttributionSource;
+    confidence?: number | null;
+    evidenceStartMs?: number | null;
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export interface NameScopeOptions {
     /**
@@ -58,139 +109,134 @@ function namePeopleCondition(ownerId: string, options: NameScopeOptions) {
         : or(eq(people.userId, ownerId), orgOwnedCondition(people.userId));
 }
 
-interface TransferableSpeakerRow {
-    transcriptionId: string;
-    transcriptionSource: string;
-    transcriptionText: string;
-    label: string | null;
-    personId: string | null;
-    source: AttributionSource | null;
-    confidence: number | null;
-    evidenceStartMs: number | null;
-}
-
 interface CopyMatchingSpeakerAttributionsArgs {
     userId: string;
     recordingId: string;
+    /** The transcript whose confirmed names are offered, e.g. `plaud`. */
     sourceSource: string;
+    /** The transcript they are offered on, e.g. `riffado`. */
     targetSource: string;
-    targetText: string;
-}
-
-function orderedSpeakers(text: string): string[] {
-    const turns = parseSpeakerTurns(text);
-    return turns ? speakerOrder(turns) : [];
-}
-
-function remapCandidateRows(
-    rows: readonly TransferableSpeakerRow[],
-    nextSpeakers: readonly string[],
-): Omit<SetTranscriptSpeakerArgs, "userId" | "transcriptionId">[] {
-    const previousSpeakers = orderedSpeakers(
-        decryptText(rows[0]?.transcriptionText ?? ""),
-    );
-    if (
-        previousSpeakers.length === 0 ||
-        previousSpeakers.length !== nextSpeakers.length
-    ) {
-        return [];
-    }
-
-    return rows.flatMap((row) => {
-        if (!row.label || !row.personId || !row.source) return [];
-        const previousIndex = previousSpeakers.findIndex(
-            (label) =>
-                speakerAnchorId(label) === speakerAnchorId(row.label ?? ""),
-        );
-        if (previousIndex === -1) return [];
-        return [
-            {
-                label: nextSpeakers[previousIndex],
-                personId: row.personId,
-                source: row.source,
-                status: "confirmed" as const,
-                confidence: row.confidence,
-                evidenceStartMs: row.evidenceStartMs,
-            },
-        ];
-    });
+    /**
+     * Who offers them, and the organization account sharing is decided
+     * against: nothing is offered unless that actor may change the
+     * recording now (`writerRefusal`), checked under the recording lock.
+     */
+    writer: { actorUserId: string; orgUserId: string | null };
 }
 
 /**
- * Copy confirmed names from another transcript source after the first manual
- * Riffado transcription, provided both diarizations found the same number of
- * speakers. Labels are mapped by speaker order so `Speaker 0` and `speaker_0`
- * remain equivalent across providers.
+ * Offer the names confirmed on one transcript of a recording as suggestions
+ * on another, e.g. from Plaud's transcript to the user's first own one.
+ *
+ * Two diarizers number the same voices independently, so labels are
+ * matched by speech overlap like a re-transcription's (`mapLabels`), or by
+ * speaking order when either transcript has no timings. Even a clean match
+ * is only a suggestion here: the other diarizer may have split or merged
+ * voices differently, and a person confirms. Only named rows travel, never
+ * an "unknown", and a pair rejected on the target stays rejected. Returns
+ * how many suggestions were written.
  */
 export async function copyMatchingSpeakerAttributions({
     userId,
     recordingId,
     sourceSource,
     targetSource,
-    targetText,
-}: CopyMatchingSpeakerAttributionsArgs): Promise<boolean> {
-    const rows = await db
-        .select({
-            transcriptionId: transcriptions.id,
-            transcriptionSource: transcriptions.source,
-            transcriptionText: transcriptions.text,
-            label: transcriptSpeakers.label,
-            personId: transcriptSpeakers.personId,
-            source: transcriptSpeakers.source,
-            confidence: transcriptSpeakers.confidence,
-            evidenceStartMs: transcriptSpeakers.evidenceStartMs,
-        })
-        .from(transcriptions)
-        .leftJoin(
-            transcriptSpeakers,
-            and(
-                eq(transcriptSpeakers.transcriptionId, transcriptions.id),
-                eq(transcriptSpeakers.userId, userId),
-                eq(transcriptSpeakers.status, "confirmed"),
-            ),
-        )
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, userId),
-            ),
-        );
-
-    const target = rows.find((row) => row.transcriptionSource === targetSource);
-    const nextSpeakers = orderedSpeakers(targetText);
-    if (!target || nextSpeakers.length === 0) return false;
-
-    const candidates = new Map<string, TransferableSpeakerRow[]>();
-    for (const row of rows) {
+    writer,
+}: CopyMatchingSpeakerAttributionsArgs): Promise<number> {
+    return db.transaction(async (tx) => {
+        // The people copied are named where a merge may be folding them
+        // away: after it, never meanwhile (`lockOrgPeopleShared`).
+        await lockOrgPeopleShared(tx);
+        // Held against a concurrent rewrite of either transcript, which
+        // locks the recording for update, and against a share or a
+        // withdrawal.
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .for("share");
         if (
-            row.transcriptionId === target.transcriptionId ||
-            row.transcriptionSource !== sourceSource ||
-            !row.personId
+            await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                ...writer,
+            })
         ) {
-            continue;
+            return 0;
         }
-        const candidate = candidates.get(row.transcriptionId) ?? [];
-        candidate.push(row);
-        candidates.set(row.transcriptionId, candidate);
-    }
+        const rows = await tx
+            .select({
+                id: transcriptions.id,
+                source: transcriptions.source,
+                model: transcriptions.model,
+                text: transcriptions.text,
+                turns: transcriptions.turns,
+            })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, recordingId),
+                    eq(transcriptions.userId, userId),
+                    inArray(transcriptions.source, [
+                        sourceSource,
+                        targetSource,
+                    ]),
+                ),
+            );
+        const from = rows.find((row) => row.source === sourceSource);
+        const to = rows.find((row) => row.source === targetSource);
+        if (!from || !to || from.id === to.id) return 0;
+        // Held like a speaker change holds it, so a rejection made meanwhile
+        // is either seen below or made after these suggestions exist.
+        await tx
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.id, to.id))
+            .for("update");
 
-    const mapped = Array.from(candidates.values())
-        .map((candidate) => remapCandidateRows(candidate, nextSpeakers))
-        .filter((candidate) => candidate.length > 0)
-        .sort((left, right) => right.length - left.length)[0];
-    if (!mapped) return false;
-
-    await db
-        .insert(transcriptSpeakers)
-        .values(
-            mapped.map((row) => ({
-                ...row,
-                userId,
-                transcriptionId: target.transcriptionId,
+        const previous = storedSpeakerVersion(from);
+        const next = storedSpeakerVersion(to);
+        const mapping = mapLabels(previous.turns, next.turns, {
+            previousLabels: previous.labels,
+            nextLabels: next.labels,
+        });
+        const named = await tx
+            .select({
+                label: transcriptSpeakers.label,
+                personId: transcriptSpeakers.personId,
+                status: transcriptSpeakers.status,
+                source: transcriptSpeakers.source,
+                markedUnknown: transcriptSpeakers.markedUnknown,
+                confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+                confidence: transcriptSpeakers.confidence,
+                evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+            })
+            .from(transcriptSpeakers)
+            .where(
+                and(
+                    eq(transcriptSpeakers.userId, userId),
+                    eq(transcriptSpeakers.transcriptionId, from.id),
+                    eq(transcriptSpeakers.status, "confirmed"),
+                    eq(transcriptSpeakers.markedUnknown, false),
+                    isNotNull(transcriptSpeakers.personId),
+                ),
+            );
+        return insertSuggestionsInTx(tx, {
+            userId,
+            transcriptionId: to.id,
+            rows: remapAttributionRows(named, mapping).map((row) => ({
+                label: row.label,
+                personId: row.personId,
+                source: "heuristic" as const,
+                confidence: row.confidence,
             })),
-        )
-        .onConflictDoNothing();
-    return true;
+        });
+    });
 }
 
 /**
@@ -217,6 +263,8 @@ export async function getTranscriptSpeakers(
             status: transcriptSpeakers.status,
             confidence: transcriptSpeakers.confidence,
             evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+            confirmedByUserId: transcriptSpeakers.confirmedByUserId,
         })
         .from(transcriptSpeakers)
         .leftJoin(
@@ -240,24 +288,106 @@ export async function getTranscriptSpeakers(
 }
 
 /**
+ * Hold the transcript still while a person changes one of its speakers, and
+ * refuse the change if the text is no longer the version they looked at.
+ *
+ * Locks the recording (shared) and then the transcript (exclusive), the
+ * same order a transcript write takes them, so a change and a
+ * re-transcription never interleave: the change either lands before the
+ * rewrite, which then moves it onto the new labels, or it sees the new
+ * revision and is refused instead of naming a label that now means
+ * someone else. Returns the recording it locked.
+ */
+export async function lockForSpeakerChange(
+    tx: Tx,
+    { userId, transcriptionId, revision }: TranscriptVersion,
+): Promise<{ recordingId: string }> {
+    const [recording] = await tx
+        .select({ id: recordings.id })
+        .from(recordings)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.recordingId, recordings.id),
+        )
+        .where(
+            and(
+                eq(transcriptions.id, transcriptionId),
+                eq(transcriptions.userId, userId),
+            ),
+        )
+        .for("share", { of: recordings });
+    const [transcript] = recording
+        ? await tx
+              .select({ revision: transcriptions.revision })
+              .from(transcriptions)
+              .where(
+                  and(
+                      eq(transcriptions.id, transcriptionId),
+                      eq(transcriptions.userId, userId),
+                  ),
+              )
+              .for("update")
+        : [];
+    if (!transcript) {
+        throw new AppError(
+            ErrorCode.NOT_FOUND,
+            "No transcript to attribute",
+            404,
+        );
+    }
+    if (transcript.revision !== revision) throw transcriptChanged();
+    return { recordingId: recording.id };
+}
+
+/** A change was made on a transcript version that is no longer the one shown. */
+export function transcriptChanged(): AppError {
+    return new AppError(
+        ErrorCode.CONFLICT,
+        "The transcript changed; reload",
+        409,
+    );
+}
+
+/**
  * Record who a speaker label refers to, replacing any previous answer for
  * that label.
  *
  * A correction is an ordinary update with nothing downstream to repair,
  * which is the whole benefit of attributing by name rather than by
  * voiceprint: there is no profile to poison, only a label to change.
+ *
+ * Naming a person a human once rejected for this label takes the rejection
+ * back: the latest answer is the one that counts.
  */
-export async function setTranscriptSpeaker({
-    userId,
-    transcriptionId,
-    label,
-    personId,
-    source,
-    status,
-    confidence = null,
-    evidenceStartMs = null,
-}: SetTranscriptSpeakerArgs): Promise<void> {
-    await db
+export async function setTranscriptSpeaker(
+    args: SetTranscriptSpeakerArgs,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await writeSpeakerInTx(tx, args);
+    });
+}
+
+/**
+ * The row write of `setTranscriptSpeaker`. The caller holds
+ * `lockForSpeakerChange`, and has checked the revision with it.
+ */
+export async function writeSpeakerInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        label,
+        personId,
+        source,
+        status,
+        confidence = null,
+        evidenceStartMs = null,
+        markedUnknown = false,
+        confirmedByUserId = null,
+    }: Omit<SetTranscriptSpeakerArgs, "revision">,
+): Promise<void> {
+    await tx
         .insert(transcriptSpeakers)
         .values({
             userId,
@@ -268,6 +398,8 @@ export async function setTranscriptSpeaker({
             status,
             confidence,
             evidenceStartMs,
+            markedUnknown,
+            confirmedByUserId,
         })
         .onConflictDoUpdate({
             target: [
@@ -280,9 +412,311 @@ export async function setTranscriptSpeaker({
                 status,
                 confidence,
                 evidenceStartMs,
+                markedUnknown,
+                confirmedByUserId,
                 updatedAt: new Date(),
             },
         });
+    if (personId && status === "confirmed") {
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(
+                and(
+                    eq(
+                        transcriptSpeakerRejections.transcriptionId,
+                        transcriptionId,
+                    ),
+                    eq(transcriptSpeakerRejections.label, label),
+                    eq(transcriptSpeakerRejections.personId, personId),
+                ),
+            );
+    }
+}
+
+/** Return a label to open: no name, no suggestion, no "unknown". */
+export async function clearTranscriptSpeaker(
+    args: TranscriptLabelArgs,
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await deleteSpeakerInTx(tx, args);
+    });
+}
+
+/** The delete of `clearTranscriptSpeaker`; the caller holds the lock. */
+export async function deleteSpeakerInTx(
+    tx: Tx,
+    { userId, transcriptionId, label }: Omit<TranscriptLabelArgs, "revision">,
+): Promise<void> {
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+                eq(transcriptSpeakers.label, label),
+            ),
+        );
+}
+
+/**
+ * Say a suggested person is not this speaker. The pair is remembered, so
+ * the same suggestion is never offered again for this label, even after
+ * other suggestions came and went.
+ */
+export async function rejectSuggestion(
+    args: TranscriptLabelArgs & { personId: string },
+): Promise<void> {
+    await db.transaction(async (tx) => {
+        await lockForSpeakerChange(tx, args);
+        await rejectInTx(tx, args);
+    });
+}
+
+/** The writes of `rejectSuggestion`; the caller holds the lock. */
+export async function rejectInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        label,
+        personId,
+    }: Omit<TranscriptLabelArgs, "revision"> & { personId: string },
+): Promise<void> {
+    await tx
+        .insert(transcriptSpeakerRejections)
+        .values({ userId, transcriptionId, label, personId })
+        .onConflictDoNothing();
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+                eq(transcriptSpeakers.label, label),
+                eq(transcriptSpeakers.personId, personId),
+                eq(transcriptSpeakers.status, "suggested"),
+            ),
+        );
+}
+
+/**
+ * Write machine suggestions for one transcript.
+ *
+ * A suggestion never overwrites anything: a label that already has a row,
+ * whether a human's answer or an earlier suggestion, keeps it. A suggestion
+ * without a person has nothing to offer, and a pair a human rejected stays
+ * rejected. Returns how many were written.
+ *
+ * The caller holds the transcript `FOR UPDATE` (after its recording), as a
+ * speaker change does, so a rejection cannot land between the read of the
+ * rejections here and the insert.
+ */
+export async function insertSuggestionsInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        rows,
+    }: {
+        userId: string;
+        transcriptionId: string;
+        rows: readonly SuggestedSpeaker[];
+    },
+): Promise<number> {
+    const named = rows.flatMap((row) =>
+        row.personId
+            ? [{ ...row, label: speakerKey(row.label), personId: row.personId }]
+            : [],
+    );
+    if (named.length === 0) return 0;
+    const rejected = await tx
+        .select({
+            label: transcriptSpeakerRejections.label,
+            personId: transcriptSpeakerRejections.personId,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(
+            eq(transcriptSpeakerRejections.transcriptionId, transcriptionId),
+        );
+    const rejectedPairs = new Set(
+        rejected.map((row) => pairKey(row.label, row.personId)),
+    );
+    const allowed = named.filter(
+        (row) => !rejectedPairs.has(pairKey(row.label, row.personId)),
+    );
+    if (allowed.length === 0) return 0;
+    const inserted = await tx
+        .insert(transcriptSpeakers)
+        .values(
+            allowed.map((row) => ({
+                userId,
+                transcriptionId,
+                label: row.label,
+                personId: row.personId,
+                source: row.source,
+                status: "suggested" as const,
+                confidence: row.confidence ?? null,
+                evidenceStartMs: row.evidenceStartMs ?? null,
+            })),
+        )
+        .onConflictDoNothing()
+        .returning({ id: transcriptSpeakers.id });
+    return inserted.length;
+}
+
+/**
+ * Move a transcript's speaker rows and rejections onto its new version.
+ *
+ * Called by every writer of transcript text or turns, in the transaction
+ * that writes them, right after the write: the rows described labels of
+ * the old text, and the new text may number the same voices differently.
+ * Labels are matched by speech overlap (`mapLabels`). A clean match keeps
+ * its row as it was; an uncertain one keeps only a name, as a suggestion.
+ * A rejection moves only with a clean match: on an uncertain one it would
+ * be about a voice nobody is sure of. Everything else is dropped.
+ *
+ * Speaker rows and rejections are selected by transcript: a transcript has
+ * one owner, and the calling writer has already locked and checked it.
+ *
+ * Rarely this can deadlock with a share that is promoting the same people,
+ * since both touch rows naming them. Postgres aborts one side: a job
+ * retries on its own, and sharing retries once.
+ */
+export async function remapTranscriptAttributionsInTx(
+    tx: Tx,
+    {
+        userId,
+        transcriptionId,
+        previous,
+        next,
+        audioChanged = false,
+    }: {
+        userId: string;
+        transcriptionId: string;
+        previous: SpeakerVersion;
+        next: SpeakerVersion;
+        /** The audio under it changed: every name a suggestion at best. */
+        audioChanged?: boolean;
+    },
+): Promise<void> {
+    const matched = mapLabels(previous.turns, next.turns, {
+        previousLabels: previous.labels,
+        nextLabels: next.labels,
+    });
+    const mapping = audioChanged ? demoteAll(matched) : matched;
+
+    const rows = await tx
+        .select({
+            label: transcriptSpeakers.label,
+            personId: transcriptSpeakers.personId,
+            status: transcriptSpeakers.status,
+            source: transcriptSpeakers.source,
+            markedUnknown: transcriptSpeakers.markedUnknown,
+            confirmedByUserId: transcriptSpeakers.confirmedByUserId,
+            confidence: transcriptSpeakers.confidence,
+            evidenceStartMs: transcriptSpeakers.evidenceStartMs,
+        })
+        .from(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+            ),
+        );
+    const rejections = await tx
+        .select({
+            userId: transcriptSpeakerRejections.userId,
+            label: transcriptSpeakerRejections.label,
+            personId: transcriptSpeakerRejections.personId,
+        })
+        .from(transcriptSpeakerRejections)
+        .where(
+            eq(transcriptSpeakerRejections.transcriptionId, transcriptionId),
+        );
+
+    await tx
+        .delete(transcriptSpeakers)
+        .where(
+            and(
+                eq(transcriptSpeakers.userId, userId),
+                eq(transcriptSpeakers.transcriptionId, transcriptionId),
+            ),
+        );
+    if (rejections.length > 0) {
+        await tx
+            .delete(transcriptSpeakerRejections)
+            .where(
+                eq(
+                    transcriptSpeakerRejections.transcriptionId,
+                    transcriptionId,
+                ),
+            );
+    }
+
+    // Read after the deletes, which waited for any merge or deletion of
+    // these people that had already touched the rows: a person merged away
+    // meanwhile is written as the person kept, a deleted one not at all.
+    const current = await currentPersonIds(tx, [
+        ...rows.flatMap((row) => (row.personId ? [row.personId] : [])),
+        ...rejections.map((rejection) => rejection.personId),
+    ]);
+    const movedRejections = rejections.flatMap((rejection) => {
+        const label = mapping.carried.get(rejection.label);
+        const personId = current.get(rejection.personId);
+        return label && personId
+            ? [{ ...rejection, label, personId, transcriptionId }]
+            : [];
+    });
+    const rejected = new Set(
+        movedRejections.map((row) => pairKey(row.label, row.personId)),
+    );
+    const remapped = remapAttributionRows(rows, mapping).flatMap((row) => {
+        if (!row.personId) return [row];
+        const personId = current.get(row.personId);
+        if (!personId) return [];
+        const ruledOut =
+            row.status === "suggested" &&
+            rejected.has(pairKey(row.label, personId));
+        return ruledOut ? [] : [{ ...row, personId }];
+    });
+
+    if (remapped.length > 0) {
+        await tx.insert(transcriptSpeakers).values(
+            remapped.map((row) => ({
+                ...row,
+                userId,
+                transcriptionId,
+            })),
+        );
+    }
+    if (movedRejections.length > 0) {
+        // Two rejections on one label can now name the same person.
+        await tx
+            .insert(transcriptSpeakerRejections)
+            .values(movedRejections)
+            .onConflictDoNothing();
+    }
+}
+
+/**
+ * Where each person id points now: a merged-away id to the person it was
+ * folded into (merges keep redirects one hop deep), a deleted one nowhere.
+ */
+async function currentPersonIds(
+    tx: Tx,
+    personIds: string[],
+): Promise<Map<string, string>> {
+    if (personIds.length === 0) return new Map();
+    const rows = await tx
+        .select({ id: people.id, mergedIntoId: people.mergedIntoId })
+        .from(people)
+        .where(inArray(people.id, [...new Set(personIds)]));
+    return new Map(rows.map((row) => [row.id, row.mergedIntoId ?? row.id]));
+}
+
+function pairKey(label: string, personId: string): string {
+    return `${label}\u0000${personId}`;
 }
 
 /**
@@ -339,9 +773,12 @@ export function namesFromRows(
     rows: readonly { label: string; displayName: string }[],
 ): SpeakerNameResolver {
     const names = new Map(
-        rows.map((row) => [row.label, decryptText(row.displayName)]),
+        rows.map((row) => [
+            speakerKey(row.label),
+            decryptText(row.displayName),
+        ]),
     );
-    return (speaker: string) => names.get(speaker) ?? null;
+    return (speaker: string) => names.get(speakerKey(speaker)) ?? null;
 }
 
 /** A resolver that names nobody, for transcripts with no attributions. */

@@ -24,6 +24,8 @@ export const RECORDING_CAP = 200;
 
 interface TranscriptionData {
     text?: string;
+    /** The text as people read it, when corrections change it. */
+    readText?: string;
     language?: string;
 }
 
@@ -103,9 +105,14 @@ export function RecordingsGroup({
     return (
         <Command.Group heading={i18n("Recent")}>
             {recordings.map((r) => {
+                const transcript = transcriptions.get(r.id);
+                // What people read, and found by the words as heard too.
                 const snippet = transcriptSnippet(
-                    transcriptions.get(r.id)?.text,
+                    transcript?.readText ?? transcript?.text,
                 );
+                const heard = transcript?.readText
+                    ? transcriptSnippet(transcript.text)
+                    : null;
                 const inFlight = inFlightActions.get(r.id);
                 const isCurrent = currentRecording?.id === r.id;
 
@@ -147,7 +154,12 @@ export function RecordingsGroup({
                       ? `${durationText} · ${timeText}`
                       : timeText;
 
-                const searchValue = [r.filename, r.id, snippet ?? ""].join(" ");
+                const searchValue = [
+                    r.filename,
+                    r.id,
+                    snippet ?? "",
+                    heard ?? "",
+                ].join(" ");
 
                 let accessory: ReactNode = null;
                 if (inFlight === "transcribing") {

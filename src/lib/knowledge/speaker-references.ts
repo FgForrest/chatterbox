@@ -1,3 +1,4 @@
+import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerNameResolver } from "@/lib/transcription/turns";
 
 export interface SpeakerAttribution {
@@ -83,7 +84,7 @@ export function resolveSpeakerAttribution(
     attributions: SpeakerAttributions | undefined,
     speaker: string,
 ): SpeakerAttribution | undefined {
-    const direct = attributions?.[speaker];
+    const direct = attributions?.[speakerKey(speaker)];
     if (direct) return direct;
 
     const anchor = speakerAnchorId(speaker);

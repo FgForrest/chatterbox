@@ -20,6 +20,15 @@
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// A sync that replaces the audio demotes names on the transcripts it keeps
+// (audio provenance); not what these tests are about.
+vi.mock("@/lib/knowledge/transcript-rewrite", async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import("@/lib/knowledge/transcript-rewrite")
+    >()),
+    audioReplacedInTx: vi.fn(),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: {
         DEFAULT_STORAGE_TYPE: "local",
@@ -95,6 +104,17 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
     transcribeRecording: vi.fn().mockResolvedValue({ success: true }),
 }));
 
+// Pruning facts with their transcripts is tested against a real database
+// (`facts.integration.test.ts`).
+vi.mock("@/lib/knowledge/fact-evidence", () => ({
+    knowledgeOnRecordingInTx: vi
+        .fn()
+        .mockResolvedValue({ factIds: [], scopes: new Set() }),
+    pruneUnsupportedFactsInTx: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/knowledge/scope-generation", () => ({
+    bumpScopeInTx: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
@@ -276,6 +296,7 @@ import { DELETE as deleteRecording } from "@/app/api/recordings/[id]/route";
 import {
     aiEnhancements,
     asyncJobs,
+    learnDismissals,
     recordings as recordingsTable,
     transcriptions as transcriptionsTable,
     webhookDeliveries,
@@ -321,7 +342,9 @@ describe("DELETE /api/recordings/[id]", () => {
                       ? "webhook_deliveries"
                       : t === asyncJobs
                         ? "async_jobs"
-                        : "unknown";
+                        : t === learnDismissals
+                          ? "learn_dismissals"
+                          : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -494,13 +517,14 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(5);
+        expect(txCalls).toHaveLength(6);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
-        // webhook redaction → recordings.
+        // Learn dismissals → webhook redaction → recordings.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",
         ]);
@@ -563,6 +587,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",
         ]);

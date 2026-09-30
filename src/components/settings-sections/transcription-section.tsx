@@ -106,6 +106,8 @@ export function TranscriptionSection() {
     );
     const titlePresetCopy = useTitlePresetCopy();
     const [autoDetectTopics, setAutoDetectTopics] = useState(false);
+    const [autoLearn, setAutoLearn] = useState(false);
+    const [autoLearnOffered, setAutoLearnOffered] = useState(false);
     // Starting state for the topic <TemplateList>, as for titles.
     const [topicTemplates, setTopicTemplates] = useState(() =>
         normalizeTopicPromptConfig(null),
@@ -136,6 +138,8 @@ export function TranscriptionSection() {
                         normalizeTitlePromptConfig(data.titleGenerationPrompt),
                     );
                     setAutoDetectTopics(data.autoDetectTopics ?? false);
+                    setAutoLearn(data.autoLearn ?? false);
+                    setAutoLearnOffered(data.autoLearnOffered === true);
                     setTopicTemplates(
                         normalizeTopicPromptConfig(data.topicPrompt),
                     );
@@ -192,6 +196,24 @@ export function TranscriptionSection() {
             }
         } catch {
             setAutoDetectTopics(previous);
+            toast.error(i18n("Failed to save settings. Changes reverted."));
+        }
+    };
+
+    const handleAutoLearnChange = async (checked: boolean) => {
+        const previous = autoLearn;
+        setAutoLearn(checked);
+        try {
+            const response = await fetch("/api/settings/user", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ autoLearn: checked }),
+            });
+            if (!response.ok) {
+                throw new Error("Failed to save settings");
+            }
+        } catch {
+            setAutoLearn(previous);
             toast.error(i18n("Failed to save settings. Changes reverted."));
         }
     };
@@ -650,6 +672,29 @@ export function TranscriptionSection() {
                         disabled={isSavingSettings}
                     />
                 </div>
+
+                {autoLearnOffered && (
+                    <div className="flex items-center justify-between">
+                        <div className="space-y-0.5 flex-1">
+                            <Label htmlFor="auto-learn" className="text-base">
+                                {i18n("Learn automatically")}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                                {i18n(
+                                    "Run Learn on each new transcript with timings. The title, summary and topics wait until you review what it found, 72 hours at most, so they are made from the corrected transcript.",
+                                )}
+                            </p>
+                        </div>
+                        <Switch
+                            id="auto-learn"
+                            checked={autoLearn}
+                            onCheckedChange={(checked) =>
+                                void handleAutoLearnChange(checked)
+                            }
+                            disabled={isSavingSettings}
+                        />
+                    </div>
+                )}
 
                 <div className="flex items-center justify-between">
                     <div className="space-y-0.5 flex-1">

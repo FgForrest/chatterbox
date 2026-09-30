@@ -26,7 +26,9 @@ type Rule = "owner" | "access" | "view" | "folders" | "job" | "people";
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/route.ts": {
         GET: "owner",
-        PATCH: "owner",
+        // The title: the owner on the private view, the organization
+        // account on the Organization view while shared.
+        PATCH: "view",
         DELETE: "owner",
     },
     "recordings/[id]/audio/route.ts": { GET: "access" },
@@ -37,6 +39,15 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         PATCH: "folders",
         DELETE: "folders",
     },
+    // Learn: whoever may change the recording in the view (the owner on
+    // the private view, the organization account on the Organization's).
+    "recordings/[id]/learn/route.ts": { GET: "view", POST: "view" },
+    "recordings/[id]/review/route.ts": { GET: "view" },
+    "recordings/[id]/review/items/[itemId]/route.ts": { PATCH: "view" },
+    "recordings/[id]/review/finish/route.ts": { POST: "view" },
+    // Corrections: read in either view; undone by whoever may change it.
+    "recordings/[id]/corrections/route.ts": { GET: "view" },
+    "recordings/[id]/corrections/[correctionId]/route.ts": { DELETE: "view" },
     "recordings/[id]/markdown/[kind]/route.ts": { GET: "view" },
     "recordings/[id]/speakers/route.ts": { GET: "view", PUT: "view" },
     "recordings/[id]/summary/route.ts": {
@@ -44,11 +55,14 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         POST: "view",
         DELETE: "view",
     },
-    // Gated as `view`, and the private view is the only one it accepts:
-    // topics are written onto the viewer's own transcript row.
+    // Topics are written onto the owner's transcript row: by the owner on
+    // the private view, by the organization account on the Organization
+    // view while shared.
     "recordings/[id]/topics/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcribe/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcription/from-browser/route.ts": { POST: "owner" },
+    // The private view, which is the owner's alone.
+    "recordings/[id]/withdraw-preview/route.ts": { GET: "view" },
     "jobs/[id]/route.ts": { GET: "job" },
     "folders/route.ts": { GET: "folders", POST: "folders" },
     "folders/[id]/route.ts": { PATCH: "folders", DELETE: "folders" },

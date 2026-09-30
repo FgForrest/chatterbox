@@ -1,11 +1,9 @@
 import {
     listArmedRetentionPolicies,
     listReapCandidates,
-    loadOrgRetentionContext,
-    type OrgRetentionContext,
     type RetentionPolicy,
 } from "@/db/queries/retention";
-import { findOrgAccountId } from "@/lib/org/config";
+import { getOrgUserId } from "@/lib/org/config";
 import { captureServerException } from "@/lib/posthog-server";
 import { createStorageProvider } from "@/lib/storage/factory";
 import { reapRecording } from "./reap";
@@ -30,14 +28,17 @@ let running = false;
 async function sweepUser(
     storage: ReturnType<typeof createStorageProvider>,
     policy: RetentionPolicy,
-    org: OrgRetentionContext | null,
+    orgUserId: string | null,
 ): Promise<void> {
+    // No Organization shown on this instance (local mode): nothing is
+    // shared, and every recording is its owner's policy's.
+    if (policy.isOrg && policy.userId !== orgUserId) return;
     const now = new Date();
     const candidates = await listReapCandidates(
         policy,
         now,
         MAX_RECORDINGS_PER_USER_PER_TICK,
-        policy.isOrg ? null : org,
+        orgUserId,
     );
     if (candidates.length === 0) return;
 
@@ -56,6 +57,7 @@ async function sweepUser(
                 policy,
                 candidate,
                 now,
+                orgUserId,
             );
             for (const kind of reaped) totals[kind] += 1;
             for (const [kind, error] of Object.entries(failed)) {
@@ -102,11 +104,11 @@ async function tick(): Promise<void> {
         if (policies.length === 0) return;
 
         const storage = createStorageProvider();
-        const orgUserId = await findOrgAccountId();
-        const org = orgUserId ? await loadOrgRetentionContext(orgUserId) : null;
+        // The Organization the writer rule follows (`sharing/writer.ts`).
+        const orgUserId = await getOrgUserId();
         for (const policy of policies) {
             try {
-                await sweepUser(storage, policy, org);
+                await sweepUser(storage, policy, orgUserId);
             } catch (error) {
                 console.error(
                     `[retention] sweep failed for user ${policy.userId}:`,

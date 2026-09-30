@@ -12,10 +12,14 @@ import {
     exportPlanJobHandler,
     exportReconcileJobHandler,
 } from "@/lib/folder-exports/job-handlers";
+import { knowledgeEmbedJobHandler } from "@/lib/knowledge/knowledge-embed";
+import { learnReleaseJobHandler } from "@/lib/learn/auto-learn";
+import { learnJobHandler } from "@/lib/learn/learn-job-handler";
 import {
     storageReconciliationJobHandler,
     storageReconciliationScanJobHandler,
 } from "@/lib/recordings/storage-reconciliation-job-handler";
+import { titleJobHandler } from "@/lib/recordings/title-job-handler";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import { topicsJobHandler } from "@/lib/topics/topics-job-handler";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
@@ -33,4 +37,8 @@ export function registerJobHandlers(): void {
     registerJobHandler(exportPlanJobHandler);
     registerJobHandler(exportMaterializeJobHandler);
     registerJobHandler(exportReconcileJobHandler);
+    registerJobHandler(knowledgeEmbedJobHandler);
+    registerJobHandler(learnJobHandler);
+    registerJobHandler(titleJobHandler);
+    registerJobHandler(learnReleaseJobHandler);
 }

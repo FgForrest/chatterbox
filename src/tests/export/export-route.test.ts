@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// No corrections: transcripts export as they are.
+vi.mock("@/lib/learn/llm-input", () => ({
+    confirmedOverlays: vi.fn(async () => new Map()),
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
@@ -25,6 +29,7 @@ vi.mock("@/lib/encryption/fields", () => ({
 import { GET } from "@/app/api/export/route";
 import { db } from "@/db";
 import { requireApiSession } from "@/lib/auth-server";
+import { confirmedOverlays } from "@/lib/learn/llm-input";
 
 const now = new Date("2026-05-06T12:00:00.000Z");
 
@@ -105,6 +110,11 @@ describe("GET /api/export (regression: summary decryption)", () => {
         expect(body[0].summary.keyPoints).toEqual(["key point"]);
         // Never leak the raw ciphertext prefix into the export.
         expect(JSON.stringify(body)).not.toContain("enc:");
+        // Every transcript's corrections read at once, not one by one.
+        expect(confirmedOverlays).toHaveBeenCalledTimes(1);
+        expect(confirmedOverlays).toHaveBeenCalledWith({
+            ownerUserId: "user-1",
+        });
     });
 });
 

@@ -23,12 +23,30 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
-vi.mock("@/db", () => ({
-    db: {
+vi.mock("@/db", () => {
+    const db = {
         select: vi.fn(),
         update: vi.fn(),
-    },
-}));
+        transaction: vi.fn(),
+    };
+    // The title is written in a transaction that first locks the recording
+    // (and checks it is not shared, which needs no query here: no
+    // Organization is configured).
+    db.transaction.mockImplementation(
+        async (run: (tx: unknown) => Promise<unknown>) => {
+            const lock = {
+                from: () => lock,
+                where: () => lock,
+                for: () => Promise.resolve([{ id: "rec-1" }]),
+            };
+            return run({
+                select: () => lock,
+                update: (...args: unknown[]) => db.update(...args),
+            });
+        },
+    );
+    return { db };
+});
 
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn().mockResolvedValue({
@@ -41,6 +59,23 @@ vi.mock("@/lib/encryption/fields", () => ({
         typeof value === "string" ? value.replace(/^encrypted:/, "") : value,
     ),
     encryptText: vi.fn((value: string) => `encrypted:${value}`),
+}));
+
+// Who may rename is the view's rule (tested in the sharing suite); here the
+// caller is the owner on the private view, and no Organization exists.
+vi.mock("@/lib/sharing/access", () => ({
+    requestedRecordingView: () => "private",
+    requireRecordingView: vi.fn(
+        async (userId: string, recordingId: string) => ({
+            recordingId,
+            ownerUserId: userId,
+            role: "owner",
+            shared: false,
+            orgUserId: null,
+            view: "private",
+            contentUserId: userId,
+        }),
+    ),
 }));
 
 vi.mock("@/lib/webhooks/emit", () => ({
@@ -187,6 +222,8 @@ describe("PATCH /api/recordings/[id]", () => {
         expect(set).toHaveBeenCalledWith(
             expect.objectContaining({
                 filename: "encrypted:Q4 planning",
+                // A person chose it, so no generated title replaces it.
+                titleEditedAt: expect.any(Date),
             }),
         );
         await expect(response.json()).resolves.toEqual({

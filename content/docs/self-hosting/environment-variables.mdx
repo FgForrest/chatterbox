@@ -81,6 +81,20 @@ See [Google Drive export](./google-drive) for the Google Cloud setup.
 | `GOOGLE_CLOUD_PROJECT_NUMBER` | —       | Numeric project number of the Google Cloud project (the Picker's app id).                  |
 | `GOOGLE_WORKSPACE_DOMAINS`    | —       | Comma-separated Workspace domains allowed to connect. Unset, any account the consent screen admits may. |
 
+## Learn (knowledge from recordings)
+
+Self-host only; ignored when `IS_HOSTED=true`. All optional.
+
+| Variable             | Default  | Effect                                                                                                   |
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `EMBEDDING_BASE_URL` | —        | An OpenAI-compatible `embeddings` endpoint. Unset, Learn matches names by their words only, and says so. |
+| `EMBEDDING_MODEL`    | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
+| `EMBEDDING_API_KEY`  | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
+| `LEARN_MCP_URL`      | —        | The one URL of Riffado's read-only knowledge tools the Learn bridge may call back.                       |
+| `LEARN_BRIDGE_URL`   | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
+| `LEARN_AUTO`         | `false`  | Offer "Learn automatically" in settings: Learn runs on each new transcript with timings, and its title, summary and topics wait for the review (72 hours at most). Turn it on once Learn does well enough on your recordings. |
+| `KNOWLEDGE_MEMORY_MB`| `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.     |
+
 ## SMTP (email notifications)
 
 | Variable        | Default                | Effect                                                                                |

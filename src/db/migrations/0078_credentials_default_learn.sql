@@ -1,0 +1,1 @@
+ALTER TABLE "api_credentials" ADD COLUMN "is_default_learn" boolean DEFAULT false NOT NULL;

@@ -3,6 +3,10 @@ import { db } from "@/db";
 import { people, transcriptSpeakers } from "@/db/schema";
 import { namesFromRows } from "@/lib/knowledge/attribution";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    type OverlayCorrection,
+    renderTurnsForPeople,
+} from "@/lib/learn/render";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import {
     renderTurnsAsText,
@@ -27,10 +31,20 @@ export interface ProjectableTranscript {
 export function projectTranscript(
     transcript: ProjectableTranscript,
     resolve: SpeakerNameResolver | undefined,
+    /** Confirmed corrections, applied as people read them. */
+    corrections: readonly OverlayCorrection[] = [],
 ): string {
-    if (!resolve) return transcript.text;
-    const turns = readTranscriptTurns(transcript);
-    if (!turns) return transcript.text;
+    if (!resolve && corrections.length === 0) return transcript.text;
+    const stored = readTranscriptTurns(transcript);
+    if (!stored) return transcript.text;
+    const turns =
+        corrections.length > 0
+            ? renderTurnsForPeople(stored, corrections)
+            : stored;
+    const changed = turns.some(
+        (turn, index) => turn.text !== stored[index]?.text,
+    );
+    if (!resolve && !changed) return transcript.text;
     const projected = renderTurnsAsText(turns, resolve);
     return projected || transcript.text;
 }

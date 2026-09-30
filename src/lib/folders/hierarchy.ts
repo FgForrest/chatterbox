@@ -181,3 +181,22 @@ export function relativeFolderChain(
     }
     return current?.id === rootFolderId ? segments : null;
 }
+
+/**
+ * Recordings filed anywhere in the Organization tree: the shared ones,
+ * whose transcripts and speakers the organization account manages.
+ */
+export function sharedRecordingIds(
+    organization: FolderOrganization,
+): Set<string> {
+    const orgFolderIds = new Set(
+        organization.folders
+            .filter((folder) => folder.scope === "org")
+            .map((folder) => folder.id),
+    );
+    return new Set(
+        organization.assignments
+            .filter((assignment) => orgFolderIds.has(assignment.folderId))
+            .map((assignment) => assignment.recordingId),
+    );
+}

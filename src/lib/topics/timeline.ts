@@ -39,6 +39,27 @@ const MIN_MARK_SPACING_MS = 15_000;
 const SENTENCE_BREAK = /(?<=[.!?…]["'”»)\]]*)\s+/u;
 
 /**
+ * A turn's sentences, each with where it starts in the text as it is, and
+ * its whitespace tidied for showing.
+ */
+function sentencesOf(raw: string): { text: string; at: number }[] {
+    const end = raw.trimEnd().length;
+    let at = raw.length - raw.trimStart().length;
+    const sentences: { text: string; at: number }[] = [];
+    const breaks = new RegExp(SENTENCE_BREAK.source, "gu");
+    for (const found of raw.slice(0, end).matchAll(breaks)) {
+        if (found.index < at) continue;
+        sentences.push({
+            text: raw.slice(at, found.index).replace(/\s+/g, " "),
+            at,
+        });
+        at = found.index + found[0].length;
+    }
+    sentences.push({ text: raw.slice(at, end).replace(/\s+/g, " "), at });
+    return sentences;
+}
+
+/**
  * Time marks for every turn: one at its start, and for a long turn more at
  * sentence boundaries inside it.
  *
@@ -49,7 +70,19 @@ const SENTENCE_BREAK = /(?<=[.!?…]["'”»)\]]*)\s+/u;
  * interpolated by character position -- speech rate is not constant, so they
  * can be a few seconds off, which is close enough to start listening.
  */
-export function buildTimeMarks(turns: readonly TranscriptTurn[]): TimeMark[] {
+export function buildTimeMarks(
+    turns: readonly TranscriptTurn[],
+    {
+        toHeard = (_turnIndex: number, fraction: number) => fraction,
+    }: {
+        /**
+         * For corrected turns: where a fraction of a turn's text was in the
+         * turn as heard (`correctedTimeline`), which is what the audio's
+         * times follow.
+         */
+        toHeard?: (turnIndex: number, fraction: number) => number;
+    } = {},
+): TimeMark[] {
     const marks: TimeMark[] = [];
 
     turns.forEach((turn, turnIndex) => {
@@ -63,13 +96,20 @@ export function buildTimeMarks(turns: readonly TranscriptTurn[]): TimeMark[] {
             return;
         }
 
-        const sentences = text.split(SENTENCE_BREAK);
-        let offset = 0;
         let chunk: { ms: number; text: string } | null = null;
-        for (const sentence of sentences) {
+        for (const [index, { text: sentence, at }] of sentencesOf(
+            turn.text,
+        ).entries()) {
+            // Placed by where it starts in the turn's text as it is, which
+            // is what `toHeard` maps; only what is shown is tidied. The
+            // first is the turn's start, whatever space leads its text.
             const ms =
-                turn.startMs + Math.round((offset / text.length) * duration);
-            offset += sentence.length + 1;
+                index === 0
+                    ? turn.startMs
+                    : turn.startMs +
+                      Math.round(
+                          toHeard(turnIndex, at / turn.text.length) * duration,
+                      );
             if (chunk && ms - chunk.ms < MIN_MARK_SPACING_MS) {
                 chunk.text = `${chunk.text} ${sentence}`;
                 continue;

@@ -17,6 +17,15 @@ import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// A sync that replaces the audio demotes names on the transcripts it keeps
+// (audio provenance); not what these tests are about.
+vi.mock("@/lib/knowledge/transcript-rewrite", async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import("@/lib/knowledge/transcript-rewrite")
+    >()),
+    audioReplacedInTx: vi.fn(),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: {
         DEFAULT_STORAGE_TYPE: "local",

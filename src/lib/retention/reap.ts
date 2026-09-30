@@ -3,10 +3,11 @@ import {
     clearReapedMarkers,
     deleteSummaryForRecording,
     deleteTranscriptsForRecording,
-    markKindsReaped,
     type ReapCandidate,
+    type RetentionGovernor,
     type RetentionKind,
     type RetentionPolicy,
+    reapAudioForRecording,
     releaseRemoteOriginalReapClaim,
 } from "@/db/queries/retention";
 import { movePlaudRecordingToTrash } from "@/lib/recordings/erase";
@@ -46,13 +47,23 @@ function isDue(startTime: Date, retentionDays: number | null, now: Date) {
  * not Riffado's copy of the data, and deleting files out of someone's
  * Documents folder is not a thing a retention setting should quietly do.
  * Removing the export is a manual act.
+ *
+ * A shared recording is the Organization's policy's, and only its: each
+ * kind is re-checked before it goes, the rows under the lock sharing and
+ * withdrawing take, so a share or withdrawal since the sweep chose it
+ * wins. `orgUserId` is the organization account an owner's policy yields
+ * shared recordings to, or null when this instance shows no Organization.
  */
 export async function reapRecording(
     storage: StorageProvider,
     policy: RetentionPolicy,
     recording: ReapCandidate,
     now = new Date(),
+    orgUserId: string | null = null,
 ): Promise<ReapOutcome> {
+    const governor: RetentionGovernor = policy.isOrg
+        ? { isOrg: true, orgUserId: policy.userId }
+        : { isOrg: false, orgUserId };
     const reaped: RetentionKind[] = [];
     const skipped: Partial<Record<RetentionKind, string>> = {};
     const failed: Partial<Record<RetentionKind, unknown>> = {};
@@ -98,30 +109,41 @@ export async function reapRecording(
 
     if (
         isDue(recording.startTime, policy.audioDays, now) &&
-        recording.audioReapedAt === null &&
-        // A shared recording's audio serves the whole Organization; see
-        // `OrgRetentionContext`.
-        recording.audioReleasable !== false
+        recording.audioReapedAt === null
     ) {
-        // `deleteFile` throws on a key that isn't there, and "already
-        // gone" is a perfectly ordinary state here (a failed stamp on an
-        // earlier tick, a manual cleanup). Check first so a missing blob
-        // settles the marker instead of retrying forever, and a genuine
-        // storage failure still surfaces as a failure.
-        const present = await hasLocalAudio();
-        if (present) {
-            await storage.deleteFile(recording.storagePath);
+        const audioReaped = await reapAudioForRecording(
+            recording.id,
+            recording.userId,
+            governor,
+            now,
+            async () => {
+                // `deleteFile` throws on a key that isn't there, and
+                // "already gone" is a perfectly ordinary state here (a
+                // failed stamp on an earlier tick, a manual cleanup). Check
+                // first so a missing blob settles the marker instead of
+                // retrying forever, and a genuine storage failure still
+                // surfaces as a failure.
+                if (await hasLocalAudio()) {
+                    await storage.deleteFile(recording.storagePath);
+                }
+            },
+        );
+        if (audioReaped) {
+            reaped.push("audio");
+        } else {
+            skipped.audio = "no longer governed by this policy";
         }
-        reaped.push("audio");
     }
 
     if (
         isDue(recording.startTime, policy.transcriptDays, now) &&
-        (policy.isOrg || recording.transcriptReapedAt === null)
+        recording.transcriptReapedAt === null
     ) {
         const removed = await deleteTranscriptsForRecording(
             recording.id,
-            policy.userId,
+            recording.userId,
+            governor,
+            now,
         );
         if (removed > 0) {
             reaped.push("transcript");
@@ -132,11 +154,13 @@ export async function reapRecording(
 
     if (
         isDue(recording.startTime, policy.summaryDays, now) &&
-        (policy.isOrg || recording.summaryReapedAt === null)
+        recording.summaryReapedAt === null
     ) {
         const removed = await deleteSummaryForRecording(
             recording.id,
-            policy.userId,
+            recording.userId,
+            governor,
+            now,
         );
         if (removed > 0) {
             reaped.push("summary");
@@ -145,13 +169,8 @@ export async function reapRecording(
         }
     }
 
-    // The organization's reaping leaves no marker: markers describe the
-    // owner's rows, which it never touches.
-    const localKinds = reaped.filter((kind) => kind !== "remoteOriginal");
-    if (!policy.isOrg) {
-        await markKindsReaped(recording.id, policy.userId, localKinds, now);
-    }
-
+    // Each kind's marker was stamped with its deletion, whichever policy
+    // reaped it: the markers describe the recording.
     return { reaped, skipped, failed };
 }
 

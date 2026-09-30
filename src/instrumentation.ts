@@ -38,6 +38,18 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
+type VocabularyModule = {
+    startCoreVocabularySeed: () => Promise<void>;
+};
+
+type KnowledgeLoaderModule = {
+    startKnowledgeListener: () => void;
+};
+
+type KnowledgeEmbedModule = {
+    startKnowledgeEmbedSeeder: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -45,6 +57,7 @@ type EnvModule = {
     };
 };
 
+type AutoLearnModule = { startAutoLearnSweeper: () => void };
 type PosthogServerModule = {
     captureServerException: (
         error: unknown,
@@ -130,6 +143,28 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
+
+    // Before the first request too: a person's vocabulary, and a Learn run's
+    // prompt, are built on the core types.
+    const { startCoreVocabularySeed } =
+        require("./lib/knowledge/vocabulary") as VocabularyModule;
+    await startCoreVocabularySeed();
+
+    // Only hears of knowledge changes sooner; every read checks the scope
+    // generations itself.
+    const { startKnowledgeListener } =
+        require("./lib/knowledge/knowledge-loader") as KnowledgeLoaderModule;
+    startKnowledgeListener();
+
+    // Keeps vectors up to date where an embedding service is configured.
+    const { startKnowledgeEmbedSeeder } =
+        require("./lib/knowledge/knowledge-embed") as KnowledgeEmbedModule;
+    startKnowledgeEmbedSeeder();
+
+    // Releases what automatic Learn held back once its 72 hours are up.
+    const { startAutoLearnSweeper } =
+        require("./lib/learn/auto-learn") as AutoLearnModule;
+    startAutoLearnSweeper();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

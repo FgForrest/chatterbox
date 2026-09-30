@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
     aiEnhancements,
     asyncJobs,
+    learnDismissals,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -14,6 +15,12 @@ import { requireApiSession } from "@/lib/auth-server";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import { lockOrgTree } from "@/lib/folders/folders";
+import {
+    knowledgeOnRecordingInTx,
+    pruneUnsupportedFactsInTx,
+} from "@/lib/knowledge/fact-evidence";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { getOrgUserId } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
 import { deleteRecordingStorageArtifacts } from "@/lib/recordings/erase";
@@ -22,8 +29,19 @@ import {
     normalizeRecordingTitle,
 } from "@/lib/recordings/filename";
 import { reconcileRecordingStorage } from "@/lib/recordings/reconcile-storage";
+import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
+import {
+    requestedRecordingView,
+    requireRecordingView,
+} from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    assertMayChange,
+    contentWriterRefusal,
+    sharingOrgUserId,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { createRedactedWebhookPayload } from "@/lib/webhooks/payload";
@@ -122,7 +140,18 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const userId = session.user.id;
+    // The owner renames it on the private view; while it is shared, the
+    // organization account on the Organization view. Either way the files
+    // are the owner's and follow the title in the owner's storage; nothing
+    // is pushed to the owner's Plaud account.
+    const actorUserId = session.user.id;
+    const access = await requireRecordingView(
+        actorUserId,
+        id,
+        requestedRecordingView(request),
+    );
+    assertMayChange(access, actorUserId);
+    const userId = access.ownerUserId;
     const [recording] = await db
         .select({
             id: recordings.id,
@@ -146,6 +175,16 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             404,
         );
     }
+    // Refused before any file is renamed, and again under the lock where
+    // the title is written.
+    const orgUserId = await sharingOrgUserId();
+    const refusal = await contentWriterRefusal(undefined, {
+        recordingId: id,
+        ownerUserId: userId,
+        actorUserId,
+        orgUserId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
 
     let reconciled: Awaited<ReturnType<typeof reconcileRecordingStorage>>;
     try {
@@ -168,26 +207,57 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const [updated] = await db
-        .update(recordings)
-        .set({
-            filename: encryptText(filename),
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordings.id, id),
-                eq(recordings.userId, userId),
-                eq(recordings.storagePath, reconciled.storagePath),
-                eq(recordings.storageFilename, reconciled.storageFilename),
-                isNull(recordings.deletedAt),
-            ),
-        )
-        .returning({
-            id: recordings.id,
-            filename: recordings.filename,
+    let refused: ReturnType<typeof writerRefusalError> | null = null;
+    const updated = await db.transaction(async (tx) => {
+        // The lock sharing takes, so a share that committed meanwhile is
+        // seen below.
+        await tx
+            .select({ id: recordings.id })
+            .from(recordings)
+            .where(and(eq(recordings.id, id), eq(recordings.userId, userId)))
+            .for("update");
+        const shared = await contentWriterRefusal(tx, {
+            recordingId: id,
+            ownerUserId: userId,
+            actorUserId,
+            orgUserId,
         });
+        if (shared) {
+            refused = writerRefusalError(shared);
+            return undefined;
+        }
+        const [row] = await tx
+            .update(recordings)
+            .set({
+                filename: encryptText(filename),
+                // A person chose this title; nothing generated replaces it.
+                titleEditedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordings.id, id),
+                    eq(recordings.userId, userId),
+                    eq(recordings.storagePath, reconciled.storagePath),
+                    eq(recordings.storageFilename, reconciled.storageFilename),
+                    isNull(recordings.deletedAt),
+                ),
+            )
+            .returning({
+                id: recordings.id,
+                filename: recordings.filename,
+            });
+        return row;
+    });
 
+    if (refused) {
+        // Shared while the files were being renamed for the refused title:
+        // they follow the title the recording kept instead.
+        if (reconciled.changed) {
+            await enqueueStorageReconciliationJob({ userId, recordingId: id });
+        }
+        throw refused;
+    }
     if (!updated) {
         throw new AppError(
             ErrorCode.RECORDING_NOT_FOUND,
@@ -276,8 +346,15 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     // 2. Atomic DB writes: child rows, webhook delivery payload redaction,
     //    and tombstone in one transaction.
     let wasShared = false;
+    // Before the transaction, which must not take a second pooled
+    // connection while it holds the recording lock.
+    const orgUserId = await getOrgUserId();
     const didTombstone = await db.transaction(async (tx) => {
         const now = new Date();
+        // Withdrawing takes the Organization tree lock before the
+        // recording's, as every change to the tree does, so no folder move
+        // can file the recording again beside this delete.
+        if (orgUserId) await lockOrgTree(tx);
 
         // Lock the parent recording row up front. Without this, a
         // concurrent transcribe/summary writer (which also re-checks
@@ -321,23 +398,32 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                         "transcription",
                         "summary",
                         "topics",
+                        "learn.run",
+                        "title.generate",
+                        "learn.release",
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             );
 
-        // Every content row of the recording, not only the owner's: the
-        // Organization view of a shared recording is owned by the
-        // organization account and must go for everyone at once.
+        // Every content row of the recording, whichever account holds it:
+        // it goes for everyone at once, the Organization included, and the
+        // facts said only here with it.
+        const knowledge = await knowledgeOnRecordingInTx(tx, id);
         await tx
             .delete(transcriptions)
             .where(eq(transcriptions.recordingId, id));
+        await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
 
         await tx
             .delete(aiEnhancements)
             .where(eq(aiEnhancements.recordingId, id));
+        // Learn runs and their items went with the transcripts; what was
+        // dismissed has nothing left to answer for.
+        await tx
+            .delete(learnDismissals)
+            .where(eq(learnDismissals.recordingId, id));
 
-        const orgUserId = await getOrgUserId();
         if (orgUserId) {
             const orgFolderIds = tx
                 .select({ id: recordingFolders.id })
@@ -376,7 +462,8 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         // only want to emit `recording.deleted` for the winning request.
         const tombstoned = await tx
             .update(recordings)
-            .set({ deletedAt: now, updatedAt: now })
+            // Nothing waits for Learn on a deleted recording.
+            .set({ deletedAt: now, updatedAt: now, summaryDueAt: null })
             .where(
                 and(
                     eq(recordings.id, id),
@@ -386,6 +473,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             )
             .returning({ id: recordings.id });
 
+        await bumpScopeInTx(tx, knowledge.scopes);
         return tombstoned.length > 0;
     });
 

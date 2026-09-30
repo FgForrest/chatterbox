@@ -1,12 +1,17 @@
-import { and, countDistinct, eq, inArray, isNull, max } from "drizzle-orm";
+import { and, countDistinct, eq, isNull, max, or } from "drizzle-orm";
 import { headers } from "next/headers";
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getExtracted } from "next-intl/server";
 import { PeopleList } from "@/components/people/people-list";
 import { db } from "@/db";
 import { recordings, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listPeople } from "@/lib/knowledge/people";
-import { getOrgUserId } from "@/lib/org/config";
+import { pendingReviewCount } from "@/lib/learn/pending";
+import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
+import { sharedRecordingCondition } from "@/lib/sharing/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +22,10 @@ export default async function PeoplePage() {
     }
 
     const userId = session.user.id;
-    // The Organization view's names count too: its rows exist only for
-    // recordings that are shared, which everyone may see.
+    // The names on shared recordings count too, which everyone may see.
     const orgUserId = await getOrgUserId();
-    const attributors = orgUserId ? [userId, orgUserId] : [userId];
 
-    const [rows, appearances] = await Promise.all([
+    const [rows, appearances, pendingReviews] = await Promise.all([
         listPeople(userId),
         // How many recordings each person appears in, and when they were last
         // heard. Both come from the attribution overlay joined back to the
@@ -44,13 +47,24 @@ export default async function PeoplePage() {
             )
             .where(
                 and(
-                    inArray(transcriptSpeakers.userId, attributors),
+                    or(
+                        eq(transcriptSpeakers.userId, userId),
+                        orgUserId
+                            ? sharedRecordingCondition(orgUserId)
+                            : undefined,
+                    ),
                     eq(transcriptSpeakers.status, "confirmed"),
                     isNull(recordings.deletedAt),
                 ),
             )
             .groupBy(transcriptSpeakers.personId),
+        isLearnDeploymentAvailable()
+            ? isOrgAccount(userId).then((organization) =>
+                  pendingReviewCount(userId, organization),
+              )
+            : 0,
     ]);
+    const i18n = await getExtracted();
 
     const stats = new Map(
         appearances.map((row) => [
@@ -61,6 +75,20 @@ export default async function PeoplePage() {
 
     return (
         <div className="container mx-auto max-w-7xl px-4 py-6">
+            {pendingReviews > 0 && (
+                <Link
+                    href="/people/review"
+                    className="mb-4 flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 text-sm hover:bg-primary/10"
+                >
+                    {i18n(
+                        "{count, plural, one {# Learn review waits for you} other {# Learn reviews wait for you}}",
+                        { count: pendingReviews },
+                    )}
+                    <span className="font-medium text-primary">
+                        {i18n("Open the queue")}
+                    </span>
+                </Link>
+            )}
             <PeopleList
                 people={rows.map((row) => ({
                     id: row.id,

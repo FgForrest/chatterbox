@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+// No corrections: the transcript exports as it is.
+vi.mock("@/lib/learn/llm-input", () => ({
+    correctionOverlay: vi.fn(async () => []),
+}));
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerEvent: vi.fn(),
+    captureServerException: vi.fn(),
+}));
+
 vi.mock("@/db", () => ({
     db: { select: vi.fn(), update: vi.fn() },
 }));

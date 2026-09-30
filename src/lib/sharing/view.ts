@@ -1,9 +1,10 @@
 /**
- * Which set of content rows a request reads and writes.
+ * Which view of a recording a request is made in.
  *
- * `private` is the owner's own transcript and summary. `org` is the
- * Organization view of a shared recording: rows owned by the organization
- * account, falling back to the owner's rows until someone produces its own.
+ * Both read the owner's rows: a shared recording is one recording. `private`
+ * is the owner's view, `org` the Organization's view of a shared recording,
+ * where only the organization account changes it and its runs follow the
+ * Organization's prompts and language.
  *
  * Dependency-free so client components and the light job-queueing modules
  * can import it.

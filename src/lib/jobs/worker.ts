@@ -29,6 +29,7 @@ import {
     claimDueJobs,
     completeJob,
     countPendingJobs,
+    deferJob,
     failJobAttempt,
     heartbeatJob,
     pruneFinishedJobs,
@@ -43,6 +44,7 @@ import {
     describeJobError,
     isRetryableError,
     JobAbortedError,
+    JobDeferredError,
     JobTimeoutError,
 } from "./retryable";
 import type { JobHandler, JobProgress } from "./types";
@@ -184,6 +186,20 @@ async function runJob(
         });
     } catch (error) {
         stop();
+        if (error instanceof JobDeferredError) {
+            await deferJob({
+                jobId: job.id,
+                claimToken: job.claimToken,
+                delayMs: error.delayMs,
+            }).catch((writeError) => {
+                // The stale reclaim picks it up, as for a failure.
+                console.error(
+                    `[job-worker] could not put off job ${job.id}:`,
+                    writeError,
+                );
+            });
+            return;
+        }
         const retryable = (handler.isRetryable ?? isRetryableError)(error);
         const { message, code } = describeJobError(error);
         const delayMs = backoffDelayMs(job.attempts, {

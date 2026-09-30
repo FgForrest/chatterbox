@@ -21,16 +21,8 @@ vi.mock("@/lib/sharing/access", () => ({
     requireRecordingView: vi.fn(async (userId: string) => ({
         ownerUserId: userId,
         contentUserId: userId,
+        shared: false,
     })),
-}));
-
-vi.mock("@/lib/sharing/view-content", () => ({
-    effectiveViewReader: vi.fn(
-        async (_id: string, owners: { contentUserId: string }) => ({
-            userId: owners.contentUserId,
-            fallback: false,
-        }),
-    ),
 }));
 
 import { GET } from "@/app/api/recordings/[id]/markdown/[kind]/route";
@@ -70,7 +62,8 @@ describe("recording Markdown route", () => {
             "rec-1",
             "transcript",
             undefined,
-            "user-1",
+            false,
+            // Corrections are read in the sharing state it was authorized in.
             false,
         );
     });

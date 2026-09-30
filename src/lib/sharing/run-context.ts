@@ -5,15 +5,16 @@ import { type RecordingView, requireRecordingView } from "@/lib/sharing/access";
  * Whose data a transcription or summary run touches.
  *
  * On the private view these are all the owner. On the Organization view
- * they split: the recording and its audio stay the owner's, the rows written
- * belong to the organization account and follow its prompts and language,
- * and the provider, model and keys are the actor's, who pays for the run.
+ * they split: the recording and the rows written stay the owner's (a shared
+ * recording is one recording), the run follows the Organization's prompts
+ * and language, and the provider, model and keys are the actor's, who pays
+ * for the run.
  */
 export interface ContentRunContext {
     view: RecordingView;
     actorUserId: string;
     ownerUserId: string;
-    /** Owner of the transcript/summary rows read and written. */
+    /** Owner of the transcript/summary rows read and written: the recording's owner. */
     contentUserId: string;
     /** Source of prompts, templates and output language. */
     settingsUserId: string;
@@ -53,7 +54,8 @@ export async function resolveRunContext(
             actorUserId,
             ownerUserId: access.ownerUserId,
             contentUserId: access.contentUserId,
-            settingsUserId: access.contentUserId,
+            // Never null here: the Organization view requires the account.
+            settingsUserId: access.orgUserId ?? access.ownerUserId,
         };
     } catch (error) {
         if (error instanceof AppError && error.statusCode === 404) return null;

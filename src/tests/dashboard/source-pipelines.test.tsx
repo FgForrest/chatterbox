@@ -3,10 +3,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { summaryOptions, transcriptSources } = vi.hoisted(() => ({
-    summaryOptions: [] as Array<{ summarySource?: string }>,
-    transcriptSources: [] as string[],
-}));
+const { summaryOptions, transcriptSources, speakerTagMounts } = vi.hoisted(
+    () => ({
+        summaryOptions: [] as Array<{ summarySource?: string }>,
+        transcriptSources: [] as string[],
+        speakerTagMounts: [] as string[],
+    }),
+);
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
     useTranscriptionSummary: (options: { summarySource?: string }) => {
@@ -34,10 +37,18 @@ vi.mock("@/components/dashboard/transcript-view", () => ({
     },
 }));
 
-vi.mock("@/components/people/speaker-tags", () => ({
-    SpeakerTags: () => null,
-    confirmedAttributions: () => ({}),
-}));
+vi.mock("@/components/people/speaker-tags", async () => {
+    const { useEffect } = await import("react");
+    return {
+        SpeakerTags: ({ source }: { source: string }) => {
+            useEffect(() => {
+                speakerTagMounts.push(source);
+            }, [source]);
+            return null;
+        },
+        confirmedAttributions: () => ({}),
+    };
+});
 
 vi.mock("@/components/dashboard/transcribe-in-browser-button", () => ({
     TranscribeInBrowserButton: () => null,
@@ -53,6 +64,7 @@ describe("independent transcript and summary pipelines", () => {
     beforeEach(() => {
         summaryOptions.length = 0;
         transcriptSources.length = 0;
+        speakerTagMounts.length = 0;
         vi.stubGlobal(
             "fetch",
             vi.fn().mockResolvedValue(
@@ -137,6 +149,43 @@ describe("independent transcript and summary pipelines", () => {
         expect(summaryOptions.at(-1)?.summarySource).toBe("riffado");
     });
 
+    it("mounts the speaker tags afresh for a new text, not for a refetch", () => {
+        const recording = {
+            id: "rec-1",
+            filename: "Meeting.ogg",
+            duration: 60_000,
+            filesize: 1024,
+            startTime: new Date(0).toISOString(),
+            deviceSn: "SN-1",
+        };
+        const transcript = (text: string) => [
+            {
+                source: "riffado",
+                text,
+                provider: "openai",
+                model: "gpt-4o-transcribe-diarize",
+            },
+        ];
+        const panel = (text: string) => (
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={transcript(text)}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />
+        );
+        const { rerender } = render(panel("speaker_0: Hi\nspeaker_1: Hello"));
+        expect(speakerTagMounts).toEqual(["riffado"]);
+
+        // The same transcript, fetched again.
+        rerender(panel("speaker_0: Hi\nspeaker_1: Hello"));
+        expect(speakerTagMounts).toEqual(["riffado"]);
+
+        // Re-transcribed: the voices are numbered the other way round.
+        rerender(panel("speaker_1: Hi\nspeaker_0: Hello"));
+        expect(speakerTagMounts).toEqual(["riffado", "riffado"]);
+    });
+
     it("hides the summary source switch for an uploaded recording", () => {
         render(
             <TranscriptionPanel
@@ -194,5 +243,50 @@ describe("independent transcript and summary pipelines", () => {
         expect(
             screen.getByRole("group", { name: "Summary source" }),
         ).toBeTruthy();
+    });
+    it("offers no transcription or summary of a recording the viewer may not change", () => {
+        const recording = {
+            id: "rec-1",
+            filename: "Meeting.ogg",
+            duration: 60_000,
+            filesize: 1024,
+            startTime: new Date(0).toISOString(),
+            deviceSn: "SN-1",
+        };
+        const transcripts = [
+            {
+                source: "riffado",
+                text: "Custom text",
+                provider: "openai",
+                model: "whisper-1",
+            },
+        ];
+        const { rerender } = render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={transcripts}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+            />,
+        );
+        expect(screen.getByRole("button", { name: /Summarize/ })).toBeTruthy();
+        expect(
+            screen.getByRole("button", { name: /Re-transcribe/ }),
+        ).toBeTruthy();
+
+        // Shared: the organization account's to change.
+        rerender(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={transcripts}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                readOnly
+            />,
+        );
+        expect(screen.queryByRole("button", { name: /Summarize/ })).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: /Re-transcribe/ }),
+        ).toBeNull();
     });
 });

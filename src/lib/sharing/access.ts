@@ -31,7 +31,11 @@ export interface RecordingAccess {
 
 export interface RecordingViewContext extends RecordingAccess {
     view: RecordingView;
-    /** Owner of the transcript and summary rows this view reads and writes. */
+    /**
+     * Owner of the transcript and summary rows this view reads and writes:
+     * the recording's owner in both views. A shared recording is one
+     * recording; the views differ in who may change it, not in its rows.
+     */
     contentUserId: string;
 }
 
@@ -109,14 +113,7 @@ export async function requireRecordingView(
             404,
         );
     }
-    return {
-        ...access,
-        view,
-        contentUserId:
-            view === "org" && access.orgUserId
-                ? access.orgUserId
-                : access.ownerUserId,
-    };
+    return { ...access, view, contentUserId: access.ownerUserId };
 }
 
 /**

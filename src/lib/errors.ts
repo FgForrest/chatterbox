@@ -52,6 +52,23 @@ export enum ErrorCode {
      * than implying the recording is broken. Served as 410 Gone.
      */
     RECORDING_DATA_REAPED = "RECORDING_DATA_REAPED",
+    /**
+     * Sharing refused: the recording has no transcript, or speakers nobody
+     * answered for. `details.problems` lists what is missing, as
+     * `ShareGateProblem`s. Served as 409.
+     */
+    SHARE_REQUIREMENTS_UNMET = "SHARE_REQUIREMENTS_UNMET",
+    /**
+     * The recording is shared with the Organization, and while it is only
+     * the organization account changes it; its owner withdraws it first.
+     * Served as 409.
+     */
+    RECORDING_SHARED = "RECORDING_SHARED",
+    /**
+     * Removing a recording's last Organization folder withdraws it; the
+     * request must confirm that (`withdraw: true`). Served as 409.
+     */
+    WITHDRAW_UNCONFIRMED = "WITHDRAW_UNCONFIRMED",
 
     EMAIL_SEND_FAILED = "EMAIL_SEND_FAILED",
     SMTP_NOT_CONFIGURED = "SMTP_NOT_CONFIGURED",

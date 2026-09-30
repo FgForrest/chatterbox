@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// No corrections: transcripts export as they are.
+// The route says whether automatic Learn is offered here.
+vi.mock("@/lib/knowledge/availability", () => ({
+    isAutoLearnOffered: () => false,
+}));
+
+vi.mock("@/lib/learn/llm-input", () => ({
+    confirmedOverlays: vi.fn(async () => new Map()),
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),

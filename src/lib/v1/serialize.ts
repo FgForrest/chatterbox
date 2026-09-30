@@ -8,6 +8,8 @@ import {
     userSettings,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import type { OverlayCorrection } from "@/lib/learn/render";
+import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
 type RecordingRow = typeof recordings.$inferSelect;
 type DeviceRow = typeof plaudDevices.$inferSelect;
@@ -22,10 +24,39 @@ export type RecordingCursor = {
 export type V1Transcript = {
     source: string;
     language: string | null;
+    /** As heard: corrections never rewrite it. */
     text: string;
     provider: string;
     model: string;
     created_at: string;
+    /**
+     * The confirmed corrections on it, as an overlay: a turn and UTF-16
+     * offsets into its text. On the transcript endpoint only.
+     */
+    corrections?: V1Correction[];
+    /** The turns the corrections point into; with them only. */
+    turns?: V1Turn[] | null;
+};
+
+export type V1Turn = {
+    /** The provider's label, never a name. */
+    speaker: string;
+    start_ms: number;
+    end_ms: number;
+    text: string;
+};
+
+export type V1Correction = {
+    id: string;
+    turn_index: number;
+    char_start: number;
+    char_end: number;
+    heard: string;
+    /** `correct` replaces what was heard; `link` keeps it and says what it means. */
+    kind: "correct" | "link";
+    replacement: string | null;
+    /** The name of whom or what it refers to. */
+    meaning: string;
 };
 
 export type V1Summary = {
@@ -123,6 +154,7 @@ export function decodeRecordingCursor(cursor: string): RecordingCursor | null {
 
 export function serializeTranscript(
     transcription: TranscriptionRow | null,
+    corrections?: readonly OverlayCorrection[],
 ): V1Transcript | null {
     if (!transcription) return null;
 
@@ -133,6 +165,27 @@ export function serializeTranscript(
         provider: transcription.provider,
         model: transcription.model,
         created_at: toIso(transcription.createdAt),
+        ...(corrections
+            ? {
+                  turns:
+                      readTranscriptTurns(transcription)?.map((turn) => ({
+                          speaker: turn.speaker,
+                          start_ms: turn.startMs,
+                          end_ms: turn.endMs,
+                          text: turn.text,
+                      })) ?? null,
+                  corrections: corrections.map((correction) => ({
+                      id: correction.id ?? "",
+                      turn_index: correction.turnIndex,
+                      char_start: correction.charStart,
+                      char_end: correction.charEnd,
+                      heard: correction.heard,
+                      kind: correction.kind,
+                      replacement: correction.replacement,
+                      meaning: correction.meaning,
+                  })),
+              }
+            : {}),
     };
 }
 
@@ -223,7 +276,7 @@ export function serializeRecordingDetail(
         }),
         transcript: serializeTranscript(primary),
         transcripts: transcripts
-            .map(serializeTranscript)
+            .map((transcript) => serializeTranscript(transcript))
             .filter((t): t is V1Transcript => t !== null),
         summary: serializeSummary(primaryEnhancement),
     };

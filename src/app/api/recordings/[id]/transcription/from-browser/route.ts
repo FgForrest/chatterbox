@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { recordingShared } from "@/lib/sharing/writer";
 import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -79,6 +80,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                     result.error ?? "Recording was deleted",
                     410,
                 );
+            case "RECORDING_SHARED":
+                throw recordingShared();
             case "HOSTED_LOCKED_OUT":
                 throw new AppError(
                     ErrorCode.ACCOUNT_LOCKED,

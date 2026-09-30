@@ -9,9 +9,27 @@ import {
 } from "@/db/schema";
 import { sniffAudio } from "@/lib/audio/sniff";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    lockOrgTree,
+    orgTreeChanged,
+    withdrawRecordingInTx,
+} from "@/lib/folders/folders";
+import {
+    knowledgeOnRecordingInTx,
+    pruneUnsupportedFactsInTx,
+} from "@/lib/knowledge/fact-evidence";
+import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { sidecarKey } from "@/lib/recordings/storage-files";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    contentWriterRefusal,
+    contentWriterRefusalNow,
+    recordingShared,
+    sharingOrgUserId,
+    writerRefusalError,
+} from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
 
@@ -100,10 +118,20 @@ async function cancelArtifactJobs(
         );
 }
 
+/**
+ * Erase one kind of a recording's local data.
+ *
+ * A shared recording is the organization account's to change, so its
+ * owner's erase takes it out of the Organization first: refused (409)
+ * unless `withdraw` says the owner agreed to that, and then withdrawn and
+ * erased in one transaction, so the Organization never sees it half
+ * erased.
+ */
 export async function eraseLocalArtifact(
     userId: string,
     recordingId: string,
     scope: LocalEraseScope,
+    options: { withdraw?: boolean } = {},
 ): Promise<void> {
     const [recording] = await db
         .select({ storagePath: recordings.storagePath })
@@ -124,8 +152,17 @@ export async function eraseLocalArtifact(
         );
     }
 
+    // Before the transaction, which would otherwise hold a second pooled
+    // connection while it looks the account up.
+    const orgUserId = await sharingOrgUserId();
+    let withdrew = false;
     await db.transaction(async (tx) => {
         const now = new Date();
+        // The knowledge scopes the withdrawal and the erasure reach, moved
+        // once at the end.
+        const scopes = new Set<string>();
+        // Before the recording lock, as withdrawing takes them.
+        if (orgUserId && options.withdraw) await lockOrgTree(tx);
         const [locked] = await tx
             .select({ deletedAt: recordings.deletedAt })
             .from(recordings)
@@ -143,6 +180,20 @@ export async function eraseLocalArtifact(
                 "Recording not found",
                 404,
             );
+        }
+        if (
+            orgUserId &&
+            (await isRecordingShared(recordingId, orgUserId, tx))
+        ) {
+            if (!options.withdraw) throw recordingShared();
+            for (const scope of await withdrawRecordingInTx(
+                tx,
+                orgUserId,
+                recordingId,
+            )) {
+                scopes.add(scope);
+            }
+            withdrew = true;
         }
 
         if (scope === "audio") {
@@ -195,9 +246,42 @@ export async function eraseLocalArtifact(
                 tx,
                 userId,
                 recordingId,
-                ["transcription", "summary", "topics"],
+                [
+                    "transcription",
+                    "summary",
+                    "topics",
+                    "learn.run",
+                    "title.generate",
+                    "learn.release",
+                ],
                 now,
             );
+            // A Learn run on the Organization view reads the same
+            // transcript, whoever started it.
+            await tx
+                .update(asyncJobs)
+                .set({
+                    status: "failed",
+                    completedAt: now,
+                    updatedAt: now,
+                    heartbeatAt: null,
+                    claimToken: null,
+                    errorCode: ErrorCode.RECORDING_DATA_REAPED,
+                    lastError:
+                        "Cancelled because the recording artifact was erased",
+                })
+                .where(
+                    and(
+                        eq(
+                            asyncJobs.subjectId,
+                            recordingJobSubject(recordingId, "org"),
+                        ),
+                        eq(asyncJobs.kind, "learn.run"),
+                        inArray(asyncJobs.status, ["pending", "processing"]),
+                    ),
+                );
+            // Facts said only here go with the transcript.
+            const knowledge = await knowledgeOnRecordingInTx(tx, recordingId);
             await tx
                 .delete(transcriptions)
                 .where(
@@ -206,15 +290,22 @@ export async function eraseLocalArtifact(
                         eq(transcriptions.userId, userId),
                     ),
                 );
+            await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
             await tx
                 .update(recordings)
-                .set({ transcriptReapedAt: now, updatedAt: now })
+                // No transcript left for what waited for Learn.
+                .set({
+                    transcriptReapedAt: now,
+                    updatedAt: now,
+                    summaryDueAt: null,
+                })
                 .where(
                     and(
                         eq(recordings.id, recordingId),
                         eq(recordings.userId, userId),
                     ),
                 );
+            for (const scope of knowledge.scopes) scopes.add(scope);
         } else {
             await cancelArtifactJobs(tx, userId, recordingId, ["summary"], now);
             await tx
@@ -235,7 +326,10 @@ export async function eraseLocalArtifact(
                     ),
                 );
         }
+        await bumpScopeInTx(tx, scopes);
     });
+
+    if (withdrew) await orgTreeChanged();
 
     try {
         const storage = await createUserStorageProvider(userId);
@@ -373,6 +467,13 @@ export async function restoreAudioFromPlaud(
         userId,
         recordingId,
     );
+    // Shared, the recording is the organization account's to change.
+    const refusal = await contentWriterRefusalNow({
+        recordingId,
+        ownerUserId: userId,
+        actorUserId: userId,
+    });
+    if (refusal) throw writerRefusalError(refusal);
     const client = await createPlaudClient(
         connection.bearerToken,
         connection.apiBase,
@@ -381,21 +482,55 @@ export async function restoreAudioFromPlaud(
     const audio = await client.downloadRecording(recording.plaudFileId, false);
     const sniffed = sniffAudio(audio);
     const storage = await createUserStorageProvider(userId);
-    await storage.uploadFile(recording.storagePath, audio, sniffed.contentType);
-    await db
-        .update(recordings)
-        .set({
-            audioReapedAt: null,
-            downloadedAt: new Date(),
-            filesize: audio.length,
-            waveformPeaks: null,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordings.id, recordingId),
-                eq(recordings.userId, userId),
-                isNull(recordings.deletedAt),
-            ),
+    const orgUserId = await sharingOrgUserId();
+    // Written under the recording lock, once it is known to be still the
+    // owner's to change: a share landing during the download must not have
+    // its audio replaced, nor its retention marker cleared.
+    await db.transaction(async (tx) => {
+        const [locked] = await tx
+            .select({ deletedAt: recordings.deletedAt })
+            .from(recordings)
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!locked || locked.deletedAt) {
+            throw new AppError(
+                ErrorCode.RECORDING_NOT_FOUND,
+                "Recording not found",
+                404,
+            );
+        }
+        const shared = await contentWriterRefusal(tx, {
+            recordingId,
+            ownerUserId: userId,
+            actorUserId: userId,
+            orgUserId,
+        });
+        if (shared) throw writerRefusalError(shared);
+        await storage.uploadFile(
+            recording.storagePath,
+            audio,
+            sniffed.contentType,
         );
+        await tx
+            .update(recordings)
+            .set({
+                audioReapedAt: null,
+                downloadedAt: new Date(),
+                filesize: audio.length,
+                waveformPeaks: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordings.id, recordingId),
+                    eq(recordings.userId, userId),
+                ),
+            );
+    });
 }

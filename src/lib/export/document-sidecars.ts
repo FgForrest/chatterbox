@@ -14,6 +14,7 @@ import {
     inferSummarySpeakerNumberOffset,
     projectSummarySpeakerReferencesForExport,
 } from "@/lib/knowledge/speaker-references";
+import { correctionOverlay } from "@/lib/learn/llm-input";
 import {
     reconcileRecordingStorage,
     recordingStorageNeedsReconciliation,
@@ -209,19 +210,21 @@ export async function exportRecordingSidecars(
 
 /** Build the same portable Markdown document used for disk sidecars. */
 /**
- * Render a recording's transcript or summary as Markdown.
- *
- * `userId` owns the content rows read; `ownerUserId`, when different, owns
- * the recording itself (the Organization view of a shared recording).
+ * Render a recording's transcript or summary as Markdown, from the rows its
+ * owner holds: a shared recording is one recording.
  */
 export async function getRecordingMarkdownDocument(
-    userId: string,
+    ownerUserId: string,
     recordingId: string,
     kind: SidecarKind,
     source?: string,
-    ownerUserId: string = userId,
     /** Rendering for the Organization view: name Organization people only. */
     orgPeopleOnly = false,
+    /**
+     * The sharing state the reader was authorized in; its corrections are
+     * read only in that state (see `correctionOverlay`).
+     */
+    sharedAs?: boolean,
 ): Promise<RecordingMarkdownDocument | null> {
     const [recording] = await db
         .select()
@@ -238,13 +241,14 @@ export async function getRecordingMarkdownDocument(
 
     const title = decryptText(recording.filename);
     return renderRecordingMarkdownDocument(
-        userId,
+        ownerUserId,
         recording,
         title,
         kind,
         recording.storagePath,
         source,
         orgPeopleOnly,
+        sharedAs,
     );
 }
 
@@ -256,6 +260,7 @@ async function renderRecordingMarkdownDocument(
     storagePath: string,
     source?: string,
     orgPeopleOnly = false,
+    sharedAs?: boolean,
 ): Promise<RecordingMarkdownDocument | null> {
     if (kind === "transcript") {
         const projection = await loadSidecarProjectionContext(
@@ -263,7 +268,6 @@ async function renderRecordingMarkdownDocument(
             recording.id,
             source,
             undefined,
-            userId,
             orgPeopleOnly,
         );
         const { primary } = projection;
@@ -273,6 +277,17 @@ async function renderRecordingMarkdownDocument(
             .at(-1);
         if (!filename) return null;
 
+        // As people read it: its confirmed corrections applied (a review
+        // not yet finished is not in a document).
+        const corrections = await correctionOverlay(
+            {
+                id: primary.id,
+                userId: primary.userId,
+                recordingId: recording.id,
+                revision: primary.revision,
+            },
+            { pending: false, sharedAs },
+        );
         const text = projectTranscript(
             {
                 id: primary.id,
@@ -280,6 +295,7 @@ async function renderRecordingMarkdownDocument(
                 turns: primary.turns,
             },
             projection.resolve,
+            corrections,
         );
         if (!text?.trim()) return null;
 
@@ -318,7 +334,6 @@ async function renderRecordingMarkdownDocument(
         recording.id,
         enhancement.source,
         enhancement.transcriptionId,
-        recording.userId,
         orgPeopleOnly,
     );
     const filename = sidecarKey(storagePath, kind, enhancement.source)
@@ -388,7 +403,6 @@ async function loadSidecarProjectionContext(
     recordingId: string,
     source?: string,
     transcriptionId?: string | null,
-    ownerUserId: string = userId,
     orgPeopleOnly = false,
 ): Promise<SidecarProjectionContext> {
     const rows = await db
@@ -400,27 +414,6 @@ async function loadSidecarProjectionContext(
                 eq(transcriptions.userId, userId),
             ),
         );
-    // An Organization summary may have been made from the owner's transcript
-    // before the organization had its own; that is the one it names.
-    if (
-        transcriptionId &&
-        ownerUserId !== userId &&
-        !rows.some((row) => row.id === transcriptionId)
-    ) {
-        rows.push(
-            ...(await db
-                .select()
-                .from(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.id, transcriptionId),
-                        eq(transcriptions.recordingId, recordingId),
-                        eq(transcriptions.userId, ownerUserId),
-                    ),
-                )),
-        );
-    }
-
     const [settings] = await db
         .select({ preferred: userSettings.preferredTranscriptSource })
         .from(userSettings)

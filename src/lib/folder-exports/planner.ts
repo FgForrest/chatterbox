@@ -20,10 +20,6 @@ import {
 } from "@/lib/folders/hierarchy";
 import { isOrgAccount } from "@/lib/org/config";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
-import {
-    readOrgViewSummaryRows,
-    readOrgViewTranscriptRows,
-} from "@/lib/sharing/view-content";
 import type { RecordingFolder } from "@/types/folder";
 import { enqueueExportMaterialization } from "./jobs";
 import { withExportLock } from "./lock";
@@ -153,9 +149,9 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
     const configuration = await loadExportTarget(userId, exportId);
     if (!configuration) return 0;
 
-    // The organization account exports the Organization view of every
-    // shared recording: its own rows, else the owner's, under the owner's
-    // audio. Everyone else exports their own library.
+    // The organization account exports every shared recording: the
+    // owner's rows and audio, as a shared recording is one recording.
+    // Everyone else exports their own library.
     const isOrg = await isOrgAccount(userId);
     const organization = await listExportFolderOrganization(userId);
     const configSubtree = descendantFolderIds(
@@ -173,10 +169,11 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                 isNull(recordings.deletedAt),
             ),
         );
-    const refs = recordingRows.map((row) => ({
-        id: row.id,
-        ownerUserId: row.userId,
-    }));
+    // The Organization's rows: those the owner of a shared recording holds.
+    const sharedContent = and(
+        sharedRecordingCondition(userId),
+        isNull(recordings.deletedAt),
+    );
     const [
         transcriptRows,
         summaryRows,
@@ -184,35 +181,38 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
         existingDirectories,
         existingPlacements,
     ] = await Promise.all([
-        isOrg
-            ? readOrgViewTranscriptRows(refs, userId).then(({ rows }) =>
-                  rows.map((row) => ({
-                      id: row.id,
-                      recordingId: row.recordingId,
-                      source: row.source,
-                      userId: row.userId,
-                  })),
-              )
-            : db
-                  .select({
-                      id: transcriptions.id,
-                      recordingId: transcriptions.recordingId,
-                      source: transcriptions.source,
-                      userId: transcriptions.userId,
-                  })
-                  .from(transcriptions)
-                  .where(eq(transcriptions.userId, userId)),
-        isOrg
-            ? readOrgViewSummaryRows(refs, userId)
-            : db
-                  .select({
-                      id: aiEnhancements.id,
-                      recordingId: aiEnhancements.recordingId,
-                      source: aiEnhancements.source,
-                      userId: aiEnhancements.userId,
-                  })
-                  .from(aiEnhancements)
-                  .where(eq(aiEnhancements.userId, userId)),
+        db
+            .select({
+                id: transcriptions.id,
+                recordingId: transcriptions.recordingId,
+                source: transcriptions.source,
+                userId: transcriptions.userId,
+            })
+            .from(transcriptions)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, transcriptions.recordingId),
+                    eq(recordings.userId, transcriptions.userId),
+                ),
+            )
+            .where(isOrg ? sharedContent : eq(transcriptions.userId, userId)),
+        db
+            .select({
+                id: aiEnhancements.id,
+                recordingId: aiEnhancements.recordingId,
+                source: aiEnhancements.source,
+                userId: aiEnhancements.userId,
+            })
+            .from(aiEnhancements)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, aiEnhancements.recordingId),
+                    eq(recordings.userId, aiEnhancements.userId),
+                ),
+            )
+            .where(isOrg ? sharedContent : eq(aiEnhancements.userId, userId)),
         db
             .select({
                 id: folderExportMaterializations.id,
@@ -444,7 +444,6 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                     recording.id,
                     "transcript",
                     transcript.source,
-                    recording.userId,
                     isOrg,
                 );
                 if (!document) continue;
@@ -473,7 +472,6 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                     recording.id,
                     "summary",
                     summary.source,
-                    recording.userId,
                     isOrg,
                 );
                 if (!document) continue;

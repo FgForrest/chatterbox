@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const deleteTranscriptsForRecording = vi.fn();
 const deleteSummaryForRecording = vi.fn();
-const markKindsReaped = vi.fn();
+const reapAudioForRecording = vi.fn();
 const clearReapedMarkers = vi.fn();
 const claimRemoteOriginalReap = vi.fn();
 const releaseRemoteOriginalReapClaim = vi.fn();
@@ -13,7 +13,8 @@ vi.mock("@/db/queries/retention", () => ({
         deleteTranscriptsForRecording(...args),
     deleteSummaryForRecording: (...args: unknown[]) =>
         deleteSummaryForRecording(...args),
-    markKindsReaped: (...args: unknown[]) => markKindsReaped(...args),
+    reapAudioForRecording: (...args: unknown[]) =>
+        reapAudioForRecording(...args),
     clearReapedMarkers: (...args: unknown[]) => clearReapedMarkers(...args),
     claimRemoteOriginalReap: (...args: unknown[]) =>
         claimRemoteOriginalReap(...args),
@@ -45,6 +46,7 @@ function policy(overrides: Partial<RetentionPolicy> = {}): RetentionPolicy {
 function candidate(overrides: Partial<ReapCandidate> = {}): ReapCandidate {
     return {
         id: "rec-1",
+        userId: "user-1",
         storagePath: "user-1/Board meeting.mp3",
         startTime: new Date("2026-07-01T00:00:00.000Z"),
         deviceSn: "plaud-device-1",
@@ -72,7 +74,21 @@ describe("reapRecording", () => {
         vi.clearAllMocks();
         deleteTranscriptsForRecording.mockResolvedValue(0);
         deleteSummaryForRecording.mockResolvedValue(0);
-        markKindsReaped.mockResolvedValue(undefined);
+        // Whether the policy still governs the recording, and the markers,
+        // are tested against a real database
+        // (`org-retention.integration.test.ts`); here the deletion runs.
+        reapAudioForRecording.mockImplementation(
+            async (
+                _recordingId: string,
+                _ownerUserId: string,
+                _governor: unknown,
+                _at: Date,
+                removeFile: () => Promise<void>,
+            ) => {
+                await removeFile();
+                return true;
+            },
+        );
         clearReapedMarkers.mockResolvedValue(undefined);
         claimRemoteOriginalReap.mockResolvedValue(true);
         releaseRemoteOriginalReapClaim.mockResolvedValue(undefined);
@@ -91,11 +107,12 @@ describe("reapRecording", () => {
 
         expect(s.deleteFile).toHaveBeenCalledWith("user-1/Board meeting.mp3");
         expect(result.reaped).toEqual(["audio"]);
-        expect(markKindsReaped).toHaveBeenCalledWith(
+        expect(reapAudioForRecording).toHaveBeenCalledWith(
             "rec-1",
             "user-1",
-            ["audio"],
+            { isOrg: false, orgUserId: null },
             NOW,
+            expect.any(Function),
         );
         expect(deleteTranscriptsForRecording).not.toHaveBeenCalled();
         expect(deleteSummaryForRecording).not.toHaveBeenCalled();
@@ -166,12 +183,22 @@ describe("reapRecording", () => {
         // auto-transcribe for a recording that simply never had a run.
         expect(result.reaped).toEqual([]);
         expect(result.skipped.transcript).toBe("no transcript to remove");
-        expect(markKindsReaped).toHaveBeenCalledWith(
-            "rec-1",
-            "user-1",
-            [],
+    });
+
+    it("leaves audio a share or a withdrawal took from this policy", async () => {
+        reapAudioForRecording.mockResolvedValue(false);
+        const s = storage();
+
+        const result = await reapRecording(
+            s.provider,
+            policy({ audioDays: 30 }),
+            candidate(),
             NOW,
         );
+
+        expect(result.reaped).toEqual([]);
+        expect(result.skipped.audio).toBe("no longer governed by this policy");
+        expect(s.deleteFile).not.toHaveBeenCalled();
     });
 
     it("stamps transcript and summary when rows were actually removed", async () => {
@@ -190,10 +217,14 @@ describe("reapRecording", () => {
         expect(deleteTranscriptsForRecording).toHaveBeenCalledWith(
             "rec-1",
             "user-1",
+            { isOrg: false, orgUserId: null },
+            NOW,
         );
         expect(deleteSummaryForRecording).toHaveBeenCalledWith(
             "rec-1",
             "user-1",
+            { isOrg: false, orgUserId: null },
+            NOW,
         );
     });
 
@@ -210,12 +241,6 @@ describe("reapRecording", () => {
         );
 
         expect(result.reaped).toEqual(["audio", "transcript", "summary"]);
-        expect(markKindsReaped).toHaveBeenCalledWith(
-            "rec-1",
-            "user-1",
-            ["audio", "transcript", "summary"],
-            NOW,
-        );
     });
 
     it("applies each kind's retention period independently", async () => {

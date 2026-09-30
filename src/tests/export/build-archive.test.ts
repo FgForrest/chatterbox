@@ -7,10 +7,35 @@ const { dbMock } = vi.hoisted(() => ({ dbMock: { select: vi.fn() } }));
 
 vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/db/schema", () => ({
+    users: { id: "users.id", role: "users.role" },
+    learnRuns: {
+        id: "learnRuns.id",
+        scopeUserId: "learnRuns.scopeUserId",
+        recordingId: "learnRuns.recordingId",
+        transcriptionId: "learnRuns.transcriptionId",
+        view: "learnRuns.view",
+        trigger: "learnRuns.trigger",
+        status: "learnRuns.status",
+        path: "learnRuns.path",
+        provider: "learnRuns.provider",
+        model: "learnRuns.model",
+        transcriptRevision: "learnRuns.transcriptRevision",
+        stats: "learnRuns.stats",
+        createdAt: "learnRuns.createdAt",
+        finishedAt: "learnRuns.finishedAt",
+    },
+    learnReviewItems: {
+        runId: "learnReviewItems.runId",
+        kind: "learnReviewItems.kind",
+        preTicked: "learnReviewItems.preTicked",
+        decision: "learnReviewItems.decision",
+        dependsOnLabel: "learnReviewItems.dependsOnLabel",
+        payload: "learnReviewItems.payload",
+    },
     recordings: "recordings",
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",
-    // The knowledge-base reads project individual columns, so these two
+    // The knowledge-base reads project individual columns, so these
     // need a shape rather than a placeholder string.
     people: {
         id: "people.id",
@@ -30,6 +55,15 @@ vi.mock("@/db/schema", () => ({
         status: "transcriptSpeakers.status",
         confidence: "transcriptSpeakers.confidence",
         evidenceStartMs: "transcriptSpeakers.evidenceStartMs",
+        markedUnknown: "transcriptSpeakers.markedUnknown",
+        confirmedByUserId: "transcriptSpeakers.confirmedByUserId",
+    },
+    transcriptSpeakerRejections: {
+        userId: "transcriptSpeakerRejections.userId",
+        transcriptionId: "transcriptSpeakerRejections.transcriptionId",
+        label: "transcriptSpeakerRejections.label",
+        personId: "transcriptSpeakerRejections.personId",
+        createdAt: "transcriptSpeakerRejections.createdAt",
     },
     recordingFolders: {
         id: "recordingFolders.id",
@@ -44,6 +78,104 @@ vi.mock("@/db/schema", () => ({
         userId: "recordingFolderAssignments.userId",
         recordingId: "recordingFolderAssignments.recordingId",
         folderId: "recordingFolderAssignments.folderId",
+    },
+    personNotes: {
+        personId: "personNotes.personId",
+        userId: "personNotes.userId",
+        notes: "personNotes.notes",
+    },
+    transcriptCorrections: {
+        userId: "transcriptCorrections.userId",
+        transcriptionId: "transcriptCorrections.transcriptionId",
+        transcriptRevision: "transcriptCorrections.transcriptRevision",
+        turnIndex: "transcriptCorrections.turnIndex",
+        charStart: "transcriptCorrections.charStart",
+        charEnd: "transcriptCorrections.charEnd",
+        heard: "transcriptCorrections.heard",
+        kind: "transcriptCorrections.kind",
+        targetPersonId: "transcriptCorrections.targetPersonId",
+        targetEntityId: "transcriptCorrections.targetEntityId",
+        replacement: "transcriptCorrections.replacement",
+        preTicked: "transcriptCorrections.preTicked",
+        createdAt: "transcriptCorrections.createdAt",
+    },
+    knowledgeEntities: {
+        id: "knowledgeEntities.id",
+        userId: "knowledgeEntities.userId",
+        typeKey: "knowledgeEntities.typeKey",
+        name: "knowledgeEntities.name",
+        description: "knowledgeEntities.description",
+        mergedIntoId: "knowledgeEntities.mergedIntoId",
+        createdAt: "knowledgeEntities.createdAt",
+    },
+    knowledgeAliases: {
+        userId: "knowledgeAliases.userId",
+        personId: "knowledgeAliases.personId",
+        entityId: "knowledgeAliases.entityId",
+        kind: "knowledgeAliases.kind",
+        text: "knowledgeAliases.text",
+        language: "knowledgeAliases.language",
+        provider: "knowledgeAliases.provider",
+        createdAt: "knowledgeAliases.createdAt",
+    },
+    knowledgeFacts: {
+        id: "knowledgeFacts.id",
+        userId: "knowledgeFacts.userId",
+        subjectPersonId: "knowledgeFacts.subjectPersonId",
+        subjectEntityId: "knowledgeFacts.subjectEntityId",
+        relationKey: "knowledgeFacts.relationKey",
+        objectPersonId: "knowledgeFacts.objectPersonId",
+        objectEntityId: "knowledgeFacts.objectEntityId",
+        objectLiteral: "knowledgeFacts.objectLiteral",
+        origin: "knowledgeFacts.origin",
+        replacedByFactId: "knowledgeFacts.replacedByFactId",
+        createdAt: "knowledgeFacts.createdAt",
+    },
+    knowledgeFactEvidence: {
+        userId: "knowledgeFactEvidence.userId",
+        factId: "knowledgeFactEvidence.factId",
+        transcriptionId: "knowledgeFactEvidence.transcriptionId",
+        recordingId: "knowledgeFactEvidence.recordingId",
+        transcriptRevision: "knowledgeFactEvidence.transcriptRevision",
+        startMs: "knowledgeFactEvidence.startMs",
+        endMs: "knowledgeFactEvidence.endMs",
+        speakerLabel: "knowledgeFactEvidence.speakerLabel",
+        dependsOnSpeaker: "knowledgeFactEvidence.dependsOnSpeaker",
+        quote: "knowledgeFactEvidence.quote",
+        status: "knowledgeFactEvidence.status",
+        confirmedAt: "knowledgeFactEvidence.confirmedAt",
+    },
+    knowledgeEntityNotes: {
+        entityId: "knowledgeEntityNotes.entityId",
+        userId: "knowledgeEntityNotes.userId",
+        notes: "knowledgeEntityNotes.notes",
+    },
+    knowledgeEntityTypes: {
+        userId: "knowledgeEntityTypes.userId",
+        key: "knowledgeEntityTypes.key",
+        label: "knowledgeEntityTypes.label",
+        adoptedAsKey: "knowledgeEntityTypes.adoptedAsKey",
+        createdAt: "knowledgeEntityTypes.createdAt",
+    },
+    knowledgeRelationTypes: {
+        userId: "knowledgeRelationTypes.userId",
+        key: "knowledgeRelationTypes.key",
+        label: "knowledgeRelationTypes.label",
+        subjectTypes: "knowledgeRelationTypes.subjectTypes",
+        objectTypes: "knowledgeRelationTypes.objectTypes",
+        objectKind: "knowledgeRelationTypes.objectKind",
+        cardinality: "knowledgeRelationTypes.cardinality",
+        adoptedAsKey: "knowledgeRelationTypes.adoptedAsKey",
+        createdAt: "knowledgeRelationTypes.createdAt",
+    },
+    knowledgeVocabularyProposals: {
+        id: "knowledgeVocabularyProposals.id",
+        phrase: "knowledgeVocabularyProposals.phrase",
+        status: "knowledgeVocabularyProposals.status",
+    },
+    knowledgeVocabularyProposalVotes: {
+        proposalId: "knowledgeVocabularyProposalVotes.proposalId",
+        userId: "knowledgeVocabularyProposalVotes.userId",
     },
 }));
 vi.mock("@/lib/encryption/fields", () => ({
@@ -210,6 +342,28 @@ describe("buildAndUploadExportArchive", () => {
                     status: "confirmed",
                     confidence: null,
                     evidenceStartMs: 14_320,
+                    markedUnknown: false,
+                    confirmedByUserId: "user-1",
+                },
+                {
+                    transcriptionId: "tr-1",
+                    label: "speaker_1",
+                    personId: null,
+                    source: "user",
+                    status: "confirmed",
+                    confidence: null,
+                    evidenceStartMs: null,
+                    markedUnknown: true,
+                    confirmedByUserId: "user-1",
+                },
+            ],
+            // rejected suggestions
+            [
+                {
+                    transcriptionId: "tr-1",
+                    label: "speaker_1",
+                    personId: "p-1",
+                    createdAt: new Date("2026-01-02T00:00:00Z"),
                 },
             ],
         ]);
@@ -244,13 +398,118 @@ describe("buildAndUploadExportArchive", () => {
                 status: "confirmed",
                 confidence: null,
                 evidenceStartMs: 14_320,
+                markedUnknown: false,
+                confirmedByUserId: "user-1",
+            },
+            {
+                transcriptionId: "tr-1",
+                label: "speaker_1",
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                confidence: null,
+                evidenceStartMs: null,
+                markedUnknown: true,
+                confirmedByUserId: "user-1",
+            },
+        ]);
+        expect(knowledge.rejections).toEqual([
+            {
+                transcriptionId: "tr-1",
+                label: "speaker_1",
+                personId: "p-1",
+                createdAt: "2026-01-02T00:00:00.000Z",
             },
         ]);
 
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );
-        expect(manifest.knowledge).toEqual({ people: 1, attributions: 1 });
+        expect(manifest.knowledge).toEqual({
+            people: 1,
+            attributions: 2,
+            rejections: 1,
+            corrections: 0,
+        });
+    });
+
+    it("carries corrections, and the Organization people they target", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions
+            [],
+            [],
+            [],
+            [],
+            // corrections
+            [
+                {
+                    transcriptionId: "tr-1",
+                    transcriptRevision: 3,
+                    turnIndex: 0,
+                    charStart: 16,
+                    charEnd: 21,
+                    heard: "enc-Novák",
+                    kind: "correct",
+                    personId: "p-org",
+                    targetEntityId: null,
+                    replacement: "enc-Novotný",
+                    preTicked: false,
+                    createdAt: new Date("2026-01-03T00:00:00Z"),
+                },
+            ],
+            // the Organization people referenced
+            [
+                {
+                    id: "p-org",
+                    displayName: "enc-Jan Novotný",
+                    primaryEmail: null,
+                    notes: null,
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // the user's own notes on them
+            [],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/corrections.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const knowledge = JSON.parse(
+            entries.get("knowledge/people.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(knowledge.corrections).toEqual([
+            {
+                transcriptionId: "tr-1",
+                transcriptRevision: 3,
+                turnIndex: 0,
+                charStart: 16,
+                charEnd: 21,
+                heard: "decrypted:enc-Novák",
+                kind: "correct",
+                targetPersonId: "p-org",
+                targetEntityId: null,
+                replacement: "decrypted:enc-Novotný",
+                preTicked: false,
+                createdAt: "2026-01-03T00:00:00.000Z",
+            },
+        ]);
+        expect(knowledge.people).toEqual([
+            expect.objectContaining({
+                id: "p-org",
+                displayName: "decrypted:enc-Jan Novotný",
+            }),
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.knowledge).toMatchObject({ corrections: 1, people: 1 });
     });
 
     it("carries folder organization and recording assignments", async () => {
@@ -271,6 +530,10 @@ describe("buildAndUploadExportArchive", () => {
             [],
             [],
             [],
+            [],
+            // rejected suggestions
+            [],
+            // corrections
             [],
             [
                 {
@@ -322,6 +585,282 @@ describe("buildAndUploadExportArchive", () => {
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );
         expect(manifest.organization).toEqual({ folders: 2, assignments: 1 });
+    });
+
+    it("carries the user's own vocabulary and the phrases they suggested", async () => {
+        mockSelectSequence([
+            // recordings, people, attributions, rejected suggestions,
+            // corrections, folders, assignments
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [
+                {
+                    key: "u_type1",
+                    label: "enc-Supplier",
+                    adoptedAsKey: null,
+                    createdAt: new Date("2026-01-04T00:00:00Z"),
+                },
+            ],
+            [
+                {
+                    key: "u_rel1",
+                    label: "enc-mentors",
+                    subjectTypes: ["person"],
+                    objectTypes: ["person"],
+                    objectKind: "entity",
+                    cardinality: "many",
+                    adoptedAsKey: "o_rel1",
+                    createdAt: new Date("2026-01-05T00:00:00Z"),
+                },
+            ],
+            [{ phrase: "enc-mentors", status: "adopted" }],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/vocabulary.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const vocabulary = JSON.parse(
+            entries
+                .get("knowledge/vocabulary.json")
+                ?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(vocabulary.entityTypes).toEqual([
+            {
+                key: "u_type1",
+                label: "decrypted:enc-Supplier",
+                adoptedAsKey: null,
+                createdAt: "2026-01-04T00:00:00.000Z",
+            },
+        ]);
+        expect(vocabulary.relationTypes[0]).toMatchObject({
+            key: "u_rel1",
+            label: "decrypted:enc-mentors",
+            objectTypes: ["person"],
+            adoptedAsKey: "o_rel1",
+        });
+        expect(vocabulary.suggestedPhrases).toEqual([
+            { phrase: "decrypted:enc-mentors", status: "adopted" },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.vocabulary).toEqual({
+            entityTypes: 1,
+            relationTypes: 1,
+            suggestedPhrases: 1,
+        });
+    });
+
+    it("carries entities, the names given them, and the Organization's they point at", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions,
+            // corrections, folders, assignments, entity types, relation
+            // types, suggested phrases
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            // own entities
+            [
+                {
+                    id: "e-own",
+                    typeKey: "project",
+                    name: "enc-Orion",
+                    description: "enc-CRM migration",
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // aliases
+            [
+                {
+                    personId: null,
+                    entityId: "e-org",
+                    kind: "heard_as",
+                    text: "enc-Senezi",
+                    language: "cs",
+                    provider: "openai",
+                    createdAt: new Date("2026-01-02T00:00:00Z"),
+                },
+                {
+                    personId: "p-org",
+                    entityId: null,
+                    kind: "alias",
+                    text: "enc-Honza",
+                    language: null,
+                    provider: null,
+                    createdAt: new Date("2026-01-03T00:00:00Z"),
+                },
+            ],
+            // notes on Organization entities
+            [{ entityId: "e-org", notes: "enc-our biggest client" }],
+            // entities the corrections target
+            [],
+            // the Organization entities referenced
+            [
+                {
+                    id: "e-org",
+                    typeKey: "organization",
+                    name: "enc-Tavesi",
+                    description: null,
+                    mergedIntoId: null,
+                    createdAt: new Date("2026-01-01T00:00:00Z"),
+                },
+            ],
+            // the Organization people the aliases name
+            [
+                {
+                    id: "p-org",
+                    displayName: "enc-Jan Novotný",
+                    mergedIntoId: null,
+                },
+            ],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/entities.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const archived = JSON.parse(
+            entries.get("knowledge/entities.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(archived.entities).toEqual([
+            expect.objectContaining({
+                id: "e-own",
+                name: "decrypted:enc-Orion",
+                description: "decrypted:enc-CRM migration",
+                organization: false,
+            }),
+            expect.objectContaining({
+                id: "e-org",
+                name: "decrypted:enc-Tavesi",
+                organization: true,
+            }),
+        ]);
+        expect(archived.aliases.map((a: { text: string }) => a.text)).toEqual([
+            "decrypted:enc-Senezi",
+            "decrypted:enc-Honza",
+        ]);
+        expect(archived.notes).toEqual([
+            { entityId: "e-org", notes: "decrypted:enc-our biggest client" },
+        ]);
+        expect(archived.people).toEqual([
+            {
+                id: "p-org",
+                displayName: "decrypted:enc-Jan Novotný",
+                mergedIntoId: null,
+            },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.entities).toEqual({
+            entities: 2,
+            aliases: 2,
+            notes: 1,
+        });
+    });
+
+    it("carries facts, where they were said, and the Organization's people they name", async () => {
+        mockSelectSequence([
+            // recordings, people, speakers, rejected suggestions,
+            // corrections, folders, assignments, entity types, relation
+            // types, suggested phrases, entities, aliases, entity notes,
+            // correction targets
+            ...Array.from({ length: 14 }, () => []),
+            // facts
+            [
+                {
+                    id: "f-1",
+                    subjectPersonId: "p-org",
+                    subjectEntityId: null,
+                    relationKey: "has_role",
+                    objectPersonId: null,
+                    objectEntityId: null,
+                    objectLiteral: "enc-CTO",
+                    origin: "recording",
+                    replacedByFactId: null,
+                    createdAt: new Date("2026-03-03T00:00:00Z"),
+                },
+            ],
+            // evidence
+            [
+                {
+                    factId: "f-1",
+                    transcriptionId: "tr-1",
+                    recordingId: "rec-1",
+                    transcriptRevision: 2,
+                    startMs: 724_000,
+                    endMs: 739_000,
+                    speakerLabel: "speaker_1",
+                    dependsOnSpeaker: true,
+                    quote: "enc-I am the CTO",
+                    status: "supported",
+                    confirmedAt: new Date("2026-03-04T00:00:00Z"),
+                },
+            ],
+            // the Organization people named
+            [{ id: "p-org", displayName: "enc-Jan", mergedIntoId: null }],
+        ]);
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/facts.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const archived = JSON.parse(
+            entries.get("knowledge/facts.json")?.buffer.toString("utf-8") ??
+                "{}",
+        );
+        expect(archived.facts).toEqual([
+            expect.objectContaining({
+                id: "f-1",
+                relationKey: "has_role",
+                objectLiteral: "decrypted:enc-CTO",
+            }),
+        ]);
+        expect(archived.evidence).toEqual([
+            expect.objectContaining({
+                factId: "f-1",
+                quote: "decrypted:enc-I am the CTO",
+                dependsOnSpeaker: true,
+            }),
+        ]);
+        expect(archived.people).toEqual([
+            {
+                id: "p-org",
+                displayName: "decrypted:enc-Jan",
+                mergedIntoId: null,
+            },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.facts).toEqual({ facts: 1, evidence: 1 });
     });
 
     it("carries the transcription ids the attributions are keyed on", async () => {
@@ -633,6 +1172,9 @@ describe("buildAndUploadExportArchive", () => {
 
         const entries = await readZipEntries(storage.uploaded as Buffer);
         expect([...entries.keys()]).not.toContain("knowledge/people.json");
+        expect([...entries.keys()]).not.toContain("knowledge/vocabulary.json");
+        expect([...entries.keys()]).not.toContain("knowledge/entities.json");
+        expect([...entries.keys()]).not.toContain("knowledge/facts.json");
         const manifest = JSON.parse(
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );

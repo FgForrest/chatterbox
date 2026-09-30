@@ -68,9 +68,25 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+// No backlog the hourly cap put off: the cap decides.
+vi.mock("@/db/queries/async-jobs", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/db/queries/async-jobs")>()),
+    countRateLimitedJobs: vi.fn().mockResolvedValue(0),
+}));
 vi.mock("@/lib/summary/summary-job", () => ({
+    SUMMARY_JOB_KIND: "summary",
     enqueueSummaryJob: vi.fn(),
 }));
+
+// The write itself runs; the test reads what it was asked to do.
+vi.mock("@/lib/transcription/persist", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/transcription/persist")>();
+    return {
+        ...actual,
+        upsertTranscription: vi.fn(actual.upsertTranscription),
+    };
+});
 
 vi.mock("@/lib/rate-limit", () => ({
     consumeRateLimitBucket: vi.fn().mockResolvedValue({
@@ -82,9 +98,10 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { db } from "@/db";
-import { aiEnhancements } from "@/db/schema";
+import { countRateLimitedJobs } from "@/db/queries/async-jobs";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -337,6 +354,64 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         expect(completedSummary).toBeUndefined();
     });
 
+    it("drops a fresh summary behind a backlog the cap put off, as a full cap does", async () => {
+        mountSelectChain({
+            autoGenerateTitle: false,
+            syncTitleToPlaud: false,
+            autoSummarize: true,
+            autoSummarizePreset: null,
+        });
+        mountInsertTransaction();
+        (countRateLimitedJobs as Mock).mockResolvedValueOnce(2);
+
+        const result = await transcribeRecording(mockUserId, mockRecordingId);
+
+        expect(result.success).toBe(true);
+        // Nor does it take the next window from the backlog.
+        expect(consumeRateLimitBucket).not.toHaveBeenCalledWith(
+            `auto-summary:user:${mockUserId}`,
+            expect.anything(),
+        );
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+        expect(emitEvent).toHaveBeenCalledWith(
+            "summary.failed",
+            mockUserId,
+            mockRecordingId,
+            {
+                error: expect.stringContaining(
+                    "Auto-summary rate limit exceeded",
+                ),
+            },
+        );
+    });
+
+    it("keeps transcript success when the backlog cannot be counted", async () => {
+        mountSelectChain({
+            autoGenerateTitle: false,
+            syncTitleToPlaud: false,
+            autoSummarize: true,
+            autoSummarizePreset: null,
+        });
+        mountInsertTransaction();
+        (countRateLimitedJobs as Mock).mockRejectedValueOnce(
+            new Error("Connection reset"),
+        );
+
+        const result = await transcribeRecording(mockUserId, mockRecordingId);
+
+        expect(result.success).toBe(true);
+        expect(emitEvent).toHaveBeenCalledWith(
+            "summary.failed",
+            mockUserId,
+            mockRecordingId,
+            { error: "Connection reset" },
+        );
+        const failedTranscription = (emitEvent as Mock).mock.calls.find(
+            (c) => c[0] === "transcription.failed",
+        );
+        expect(failedTranscription).toBeUndefined();
+    });
+
     it("skips auto-summary and emits summary.failed when rate limit is exhausted", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
@@ -385,6 +460,11 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         });
 
         expect(result.success).toBe(true);
-        expect(db.delete).toHaveBeenCalledWith(aiEnhancements);
+        // The summary goes with the text it described, in the same write
+        // (tested against a real database in
+        // `transcript-revision.integration.test.ts`).
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ dropSummaryOnReplace: "riffado" }),
+        );
     });
 });

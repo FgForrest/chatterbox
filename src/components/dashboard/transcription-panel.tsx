@@ -12,10 +12,13 @@ import {
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import type { LearnMarks } from "@/components/learn/learn-marks";
+import { LearnReview } from "@/components/learn/learn-review";
 import { Markdown } from "@/components/markdown";
 import {
     confirmedAttributions,
@@ -38,20 +41,19 @@ import {
     type SummarySource,
     useTranscriptionSummary,
 } from "@/hooks/use-transcription-summary";
+import { getApiErrorMessage } from "@/lib/api-errors";
+import { isUntimed } from "@/lib/knowledge/correction-anchors";
+import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
 import {
     inferSummarySpeakerNumberOffset,
     type SpeakerAttributions,
 } from "@/lib/knowledge/speaker-references";
+import type { OverlayCorrection } from "@/lib/learn/render";
 import { withRecordingView } from "@/lib/sharing/view";
 import { describeMultiPass } from "@/lib/summary/multi-pass";
 import { formatElapsed } from "@/lib/summary/progress-stream";
 import type { TranscriptTopic } from "@/lib/topics/timeline";
-import {
-    formatSpeakerLabel,
-    mayBeDiarized,
-    parseSpeakerTurns,
-    speakerOrder,
-} from "@/lib/transcription/diarization";
+import { formatSpeakerLabel } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import type { Recording } from "@/types/recording";
 
@@ -71,6 +73,12 @@ export interface Transcription {
 export interface TranscriptOption {
     source: string;
     text: string;
+    /**
+     * Which stored transcript this text is, and its revision. A speaker
+     * change names it, so it is refused if the text on screen is no longer
+     * the stored one.
+     */
+    version?: { transcriptionId: string; revision: number };
     language?: string;
     provider?: string;
     model?: string;
@@ -91,10 +99,22 @@ interface TranscriptionPanelProps {
     onTranscribe: (attributionSource?: string) => void;
     /** Refresh handler called after a browser-side transcription completes. */
     onTranscribeComplete?: () => void;
+    /**
+     * Reload the page's transcripts: the one on screen was replaced, e.g.
+     * re-transcribed in another tab.
+     */
+    onTranscriptStale?: () => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
+    /**
+     * The recording is not the viewer's to change: while it is shared only
+     * the organization account changes it, on the Organization view.
+     * Speakers are shown read-only, and no transcription, summary or topic
+     * detection is offered.
+     */
+    readOnly?: boolean;
 }
 
 function SourceSwitcher({
@@ -164,22 +184,34 @@ export function toTranscriptList(
     ];
 }
 
+/**
+ * A short hash of what a transcript's speaker labels come from, so the
+ * speaker tags can tell a re-transcription from a refetch of the same text.
+ */
+export function transcriptFingerprint(
+    transcript: TranscriptOption | undefined,
+): string {
+    if (!transcript) return "";
+    const turns = (transcript.turns ?? [])
+        .map((turn) => `${turn.speaker}|${turn.startMs}|${turn.endMs}`)
+        .join("\n");
+    // FNV-1a, 32 bits: collisions only cost a missed reload.
+    let hash = 0x811c9dc5;
+    for (const part of [transcript.text, turns]) {
+        for (let index = 0; index < part.length; index++) {
+            hash ^= part.charCodeAt(index);
+            hash = Math.imul(hash, 0x01000193);
+        }
+    }
+    return (hash >>> 0).toString(36);
+}
+
 /** Distinct speaker tags in first-appearance order for one transcript. */
 export function transcriptSpeakerTags(
     transcript: TranscriptOption | undefined,
 ): TranscriptSpeakerTag[] {
     if (!transcript) return [];
-    const turns = transcript.turns?.length
-        ? transcript.turns.map((turn) => ({
-              speaker: turn.speaker,
-              label: formatSpeakerLabel(turn.speaker),
-              text: turn.text,
-          }))
-        : mayBeDiarized(transcript)
-          ? parseSpeakerTurns(transcript.text)
-          : null;
-    if (!turns) return [];
-    return speakerOrder(turns).map((speaker) => ({
+    return speakerLabelsForTranscript(transcript).map((speaker) => ({
         speaker,
         label: formatSpeakerLabel(speaker),
     }));
@@ -192,14 +224,16 @@ export function TranscriptionPanel({
     isTranscribing,
     onTranscribe,
     onTranscribeComplete,
+    onTranscriptStale,
     onSeekToTurn,
     getPlaybackMs,
+    readOnly = false,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
     const summaryPresetCopy = useSummaryPresetCopy();
     const transcriptList = toTranscriptList(transcripts, transcription);
-    // The Organization view of a shared recording: its own transcript and
-    // summary, made with the organization's templates, never the owner's.
+    // The Organization view of a shared recording: the one recording, its
+    // summaries made with the Organization's templates.
     const view = recording.view;
     const orgView = view === "org";
 
@@ -218,13 +252,28 @@ export function TranscriptionPanel({
         () => transcriptSpeakerTags(activeTranscript),
         [activeTranscript],
     );
-    // Topics are anchored to timed turns and written onto the viewer's own
-    // transcript row, so they are offered only there.
+    // Which transcript text is on screen: its stored version when the page
+    // loaded one, else a hash of the text.
+    const activeTranscriptKey = useMemo(
+        () =>
+            activeTranscript?.version
+                ? `${activeTranscript.version.transcriptionId}@${activeTranscript.version.revision}`
+                : transcriptFingerprint(activeTranscript),
+        [activeTranscript],
+    );
+    // Topics are anchored to timed turns and written onto the transcript
+    // row, by whoever may change it: its owner on the private view, the
+    // organization account on the Organization view while shared.
     const canDetectTopics =
-        !orgView &&
+        !readOnly &&
         (activeTranscript?.source === "plaud" ||
             activeTranscript?.source === "riffado") &&
         (activeTranscript.turns?.length ?? 0) > 0;
+    // Learn reads timed turns, on a transcript the viewer may change: the
+    // owner's on the private view, the organization account's on the
+    // Organization view (the server decides whether Learn is available).
+    const canLearn =
+        canDetectTopics && !isUntimed(activeTranscript?.turns ?? []);
     const {
         topics,
         detecting: detectingTopics,
@@ -234,11 +283,97 @@ export function TranscriptionPanel({
         activeTranscript?.source,
         activeTranscript?.topics,
         canDetectTopics,
+        view,
     );
     const transcriptSectionRef = useRef<HTMLElement>(null);
     // A fresh object per jump, so jumping to the same topic twice scrolls
     // and highlights twice.
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
+    // The ready review's proposals, shown in the transcript it was made on.
+    const [learnMarks, setLearnMarks] = useState<LearnMarks | null>(null);
+    // Reviews finished here: a review names speakers without a new
+    // revision, so the speaker tags mount afresh to read them again.
+    const [reviewsFinished, setReviewsFinished] = useState(0);
+    const handleReviewFinished = useCallback(() => {
+        setReviewsFinished((count) => count + 1);
+        onTranscriptStale?.();
+    }, [onTranscriptStale]);
+
+    // The transcript's corrections, read edited by default. Only a Plaud or
+    // Riffado transcript with stored turns has any; a mix has none.
+    const correctionSource =
+        (activeTranscript?.source === "plaud" ||
+            activeTranscript?.source === "riffado") &&
+        (activeTranscript.turns?.length ?? 0) > 0
+            ? activeTranscript.source
+            : null;
+    const correctionsUrl = correctionSource
+        ? withRecordingView(
+              `/api/recordings/${recording.id}/corrections?source=${correctionSource}`,
+              view,
+          )
+        : null;
+    const [correctionsState, setCorrectionsState] = useState<{
+        url: string;
+        list: OverlayCorrection[];
+        canUndo: boolean;
+    } | null>(null);
+    const [correctionsRead, setCorrectionsRead] = useState(0);
+    const [showOriginal, setShowOriginal] = useState(false);
+    useEffect(() => {
+        if (!correctionsUrl) return;
+        // Read again after a review or an undo changed them.
+        void reviewsFinished;
+        void correctionsRead;
+        let cancelled = false;
+        fetch(correctionsUrl)
+            .then((response) => (response.ok ? response.json() : null))
+            .then(
+                (
+                    body: {
+                        corrections?: OverlayCorrection[];
+                        canUndo?: boolean;
+                    } | null,
+                ) => {
+                    if (cancelled) return;
+                    setCorrectionsState({
+                        url: correctionsUrl,
+                        list: body?.corrections ?? [],
+                        canUndo: body?.canUndo === true,
+                    });
+                },
+            )
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [correctionsUrl, reviewsFinished, correctionsRead]);
+    const shownCorrections =
+        correctionsState && correctionsState.url === correctionsUrl
+            ? correctionsState
+            : null;
+    const undoCorrection = useCallback(
+        async (correctionId: string) => {
+            const response = await fetch(
+                withRecordingView(
+                    `/api/recordings/${recording.id}/corrections/${correctionId}`,
+                    view,
+                ),
+                { method: "DELETE" },
+            );
+            if (!response.ok) {
+                toast.error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("Could not undo the correction"),
+                    ),
+                );
+            }
+            setCorrectionsRead((count) => count + 1);
+            onTranscriptStale?.();
+        },
+        [recording.id, view, i18n, onTranscriptStale],
+    );
     const handleSelectTopic = (index: number) => {
         const topic = topics?.[index];
         if (!topic) return;
@@ -463,7 +598,7 @@ export function TranscriptionPanel({
                                     view={view}
                                 />
                             )}
-                            {activeTranscript?.text && (
+                            {activeTranscript?.text && !readOnly && (
                                 <Button
                                     onClick={() =>
                                         onTranscribe(activeTranscript.source)
@@ -488,59 +623,70 @@ export function TranscriptionPanel({
                                     {i18n("Re-transcribe")}
                                 </Button>
                             )}
-                            {!activeTranscript?.text && !isTranscribing && (
-                                <>
-                                    <Button
-                                        onClick={() => onTranscribe()}
-                                        size="sm"
-                                        disabled={
-                                            isTranscribing ||
-                                            recording.audioReaped
-                                        }
-                                        title={
-                                            recording.audioReaped
-                                                ? i18n(
-                                                      "Audio was removed by your retention policy",
-                                                  )
-                                                : undefined
-                                        }
-                                    >
-                                        <Sparkles className="size-4 mr-2" />{" "}
-                                        {i18n("Transcribe")}
-                                    </Button>
-                                    {!orgView && (
-                                        <TranscribeInBrowserButton
-                                            recordingId={recording.id}
+                            {!activeTranscript?.text &&
+                                !isTranscribing &&
+                                !readOnly && (
+                                    <>
+                                        <Button
+                                            onClick={() => onTranscribe()}
+                                            size="sm"
                                             disabled={
                                                 isTranscribing ||
                                                 recording.audioReaped
                                             }
-                                            onComplete={
-                                                // Falling back to `onTranscribe` here
-                                                // would kick off a redundant SERVER
-                                                // transcription right after a
-                                                // successful browser one, possibly
-                                                // overwriting it. Callers that care
-                                                // about refreshing after a browser
-                                                // transcription must pass
-                                                // `onTranscribeComplete` explicitly.
-                                                onTranscribeComplete ??
-                                                (() => {})
+                                            title={
+                                                recording.audioReaped
+                                                    ? i18n(
+                                                          "Audio was removed by your retention policy",
+                                                      )
+                                                    : undefined
                                             }
-                                        />
-                                    )}
-                                </>
-                            )}
+                                        >
+                                            <Sparkles className="size-4 mr-2" />{" "}
+                                            {i18n("Transcribe")}
+                                        </Button>
+                                        {!orgView && (
+                                            <TranscribeInBrowserButton
+                                                recordingId={recording.id}
+                                                disabled={
+                                                    isTranscribing ||
+                                                    recording.audioReaped
+                                                }
+                                                onComplete={
+                                                    // Falling back to `onTranscribe` here
+                                                    // would kick off a redundant SERVER
+                                                    // transcription right after a
+                                                    // successful browser one, possibly
+                                                    // overwriting it. Callers that care
+                                                    // about refreshing after a browser
+                                                    // transcription must pass
+                                                    // `onTranscribeComplete` explicitly.
+                                                    onTranscribeComplete ??
+                                                    (() => {})
+                                                }
+                                            />
+                                        )}
+                                    </>
+                                )}
                         </div>
                     </div>
                     {activeTranscript && speakerTags.length > 0 && (
                         <SpeakerTags
+                            // Another recording, view, source or text is
+                            // another transcript to name: mount afresh, so
+                            // nothing of the last one's state, or its late
+                            // answers, reaches this one.
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
                             recordingId={recording.id}
                             source={activeTranscript.source}
                             speakers={speakerTags}
                             attributions={speakerAttributions}
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
+                            onSeek={onSeekToTurn}
+                            shownVersion={activeTranscript.version}
+                            onStale={onTranscriptStale}
+                            readOnly={readOnly}
                         />
                     )}
                 </CardHeader>
@@ -582,6 +728,38 @@ export function TranscriptionPanel({
                                     onSelect={handleSelectTopic}
                                     getPlaybackMs={getPlaybackMs}
                                 />
+                                {(shownCorrections?.list.length ?? 0) > 0 && (
+                                    <button
+                                        type="button"
+                                        aria-pressed={showOriginal}
+                                        onClick={() =>
+                                            setShowOriginal(!showOriginal)
+                                        }
+                                        className="text-sm font-medium transition-colors hover:text-primary"
+                                    >
+                                        {showOriginal
+                                            ? i18n("Show edited")
+                                            : i18n("Show original")}
+                                    </button>
+                                )}
+                                {canLearn && activeTranscript && (
+                                    <LearnReview
+                                        // Another recording, view, source
+                                        // or revision is another review.
+                                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                                        recordingId={recording.id}
+                                        view={view}
+                                        source={
+                                            activeTranscript.source === "plaud"
+                                                ? "plaud"
+                                                : "riffado"
+                                        }
+                                        turns={activeTranscript.turns ?? []}
+                                        onSeek={onSeekToTurn}
+                                        onFinished={handleReviewFinished}
+                                        onMarks={setLearnMarks}
+                                    />
+                                )}
                             </div>
                             {transcriptExpanded && (
                                 <div className="space-y-4">
@@ -602,6 +780,30 @@ export function TranscriptionPanel({
                                             topics={topics}
                                             highlightedTopic={
                                                 topicJump?.index ?? null
+                                            }
+                                            // A mix is not the transcript
+                                            // Learn read.
+                                            corrections={
+                                                shownCorrections &&
+                                                !showOriginal
+                                                    ? {
+                                                          list: shownCorrections.list,
+                                                          canUndo:
+                                                              shownCorrections.canUndo &&
+                                                              !readOnly,
+                                                          onUndo: (id) =>
+                                                              void undoCorrection(
+                                                                  id,
+                                                              ),
+                                                      }
+                                                    : null
+                                            }
+                                            learnMarks={
+                                                canLearn &&
+                                                activeTranscript.source !==
+                                                    "mixed"
+                                                    ? learnMarks
+                                                    : null
                                             }
                                         />
                                     </section>
@@ -698,6 +900,7 @@ export function TranscriptionPanel({
                                 )}
                                 {summarySource === "riffado" &&
                                     !orgView &&
+                                    !readOnly &&
                                     !isSummarizing && (
                                         <Select
                                             value={summaryPreset}
@@ -724,7 +927,7 @@ export function TranscriptionPanel({
                                             </SelectContent>
                                         </Select>
                                     )}
-                                {summarySource === "riffado" && (
+                                {summarySource === "riffado" && !readOnly && (
                                     <Button
                                         onClick={handleSummarize}
                                         size="sm"
@@ -789,13 +992,6 @@ export function TranscriptionPanel({
                                         : i18n("Expand summary")}
                                 </button>
 
-                                {summaryData.fallback && (
-                                    <p className="text-xs text-muted-foreground">
-                                        {i18n(
-                                            "Showing the owner's summary. Re-summarize to create the Organization version.",
-                                        )}
-                                    </p>
-                                )}
                                 {summaryExpanded && (
                                     <section
                                         aria-label={i18n("Summary content")}
@@ -915,6 +1111,31 @@ export function TranscriptionPanel({
                                                         {summaryData.model}
                                                     </span>
                                                 )}
+                                                {summaryData.stale &&
+                                                    summarySource ===
+                                                        "riffado" && (
+                                                        <span className="flex items-center gap-2 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                                            {i18n(
+                                                                "May contain stale names or terms",
+                                                            )}
+                                                            {!readOnly && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                                                                    disabled={
+                                                                        isSummarizing
+                                                                    }
+                                                                    onClick={
+                                                                        handleSummarize
+                                                                    }
+                                                                >
+                                                                    {i18n(
+                                                                        "Regenerate",
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    )}
                                                 {multiPassBadge && (
                                                     <span
                                                         className={

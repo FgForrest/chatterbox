@@ -16,18 +16,19 @@ import { exportProvidersAvailability } from "@/lib/folder-exports/configurations
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { organizationForDeployment } from "@/lib/folders/hierarchy";
 import { isAdminEmail } from "@/lib/hosted/admin/guard";
+import { confirmedOverlays } from "@/lib/learn/llm-input";
+import { recordingsNeedingReview } from "@/lib/learn/pending";
+import { type OverlayCorrection, readTextOf } from "@/lib/learn/render";
 import { getOrgUserId, isOrgAccount } from "@/lib/org/config";
 import { initialSettingsFromRow } from "@/lib/settings/initial-settings";
 import { sharedRecordingCondition } from "@/lib/sharing/access";
-import {
-    readOrgViewSummaryRecordingIds,
-    readOrgViewTranscriptRows,
-} from "@/lib/sharing/view-content";
 import { readTranscriptTopics } from "@/lib/topics/stored-topics";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { serializeRecording } from "@/types/recording";
 
 type TranscriptRow = {
+    id: string;
+    revision: number;
     recordingId: string;
     text: string;
     detectedLanguage: string | null;
@@ -41,28 +42,43 @@ type TranscriptRow = {
 type TranscriptVariant = {
     source: string;
     text: string;
+    version: { transcriptionId: string; revision: number };
     language?: string;
     provider?: string;
     model?: string;
     turns: ReturnType<typeof readTranscriptTurns>;
     topics: ReturnType<typeof readTranscriptTopics>;
+    /**
+     * The text as people read it, its corrections applied, when any
+     * change it: what the list previews and searches beside the text.
+     */
+    readText?: string;
 };
 
 /** Decrypt transcript rows into per-recording variants, preferred source first. */
 function buildTranscriptVariants(
     rows: TranscriptRow[],
     preferredSource: string,
+    /** Each transcript's confirmed corrections (`confirmedOverlays`). */
+    overlays: ReadonlyMap<string, OverlayCorrection[]> = new Map(),
 ): Map<string, TranscriptVariant[]> {
     const variantsByRecording = new Map<string, TranscriptVariant[]>();
     for (const transcript of rows) {
+        const turns = readTranscriptTurns(transcript);
+        const readText = readTextOf(turns, overlays.get(transcript.id));
         const variant = {
             source: transcript.source,
             text: decryptText(transcript.text),
+            version: {
+                transcriptionId: transcript.id,
+                revision: transcript.revision,
+            },
             language: transcript.detectedLanguage || undefined,
             provider: transcript.provider ?? undefined,
             model: transcript.model ?? undefined,
-            turns: readTranscriptTurns(transcript),
+            turns,
             topics: readTranscriptTopics(transcript),
+            ...(readText !== null ? { readText } : {}),
         };
         const variants = variantsByRecording.get(transcript.recordingId) ?? [];
         variants.push(variant);
@@ -87,13 +103,15 @@ function primaryVariants(
 }
 
 /**
- * The Organization library: every shared recording, read through its
- * Organization view (the organization's rows, else the owner's).
+ * The Organization library: every shared recording, with its owner's rows,
+ * as a shared recording is one recording.
  */
 async function loadOrganizationLibrary(
     viewerId: string,
     orgUserId: string,
     preferredSource: string,
+    /** Recordings whose review waits for the viewer (the organization account's). */
+    reviewIds: ReadonlySet<string> = new Set(),
 ) {
     const rows = await db
         .select({
@@ -118,13 +136,51 @@ async function loadOrganizationLibrary(
             ),
         )
         .orderBy(desc(recordings.startTime));
-    const refs = rows.map((row) => ({ id: row.id, ownerUserId: row.userId }));
-    const [{ rows: transcriptRows }, summaryIds] = await Promise.all([
-        readOrgViewTranscriptRows(refs, orgUserId),
-        readOrgViewSummaryRecordingIds(refs, orgUserId),
+    const [transcriptRows, summaryRows] = await Promise.all([
+        db
+            .select({ transcription: transcriptions })
+            .from(transcriptions)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, transcriptions.recordingId),
+                    eq(recordings.userId, transcriptions.userId),
+                ),
+            )
+            .where(
+                and(
+                    isNull(recordings.deletedAt),
+                    sharedRecordingCondition(orgUserId),
+                ),
+            )
+            .then((found) => found.map((row) => row.transcription)),
+        db
+            .select({ recordingId: aiEnhancements.recordingId })
+            .from(aiEnhancements)
+            .innerJoin(
+                recordings,
+                and(
+                    eq(recordings.id, aiEnhancements.recordingId),
+                    eq(recordings.userId, aiEnhancements.userId),
+                ),
+            )
+            .where(
+                and(
+                    isNotNull(aiEnhancements.summary),
+                    isNull(recordings.deletedAt),
+                    sharedRecordingCondition(orgUserId),
+                ),
+            ),
     ]);
+    const summaryIds = new Set(summaryRows.map((row) => row.recordingId));
     const transcriptIds = new Set(transcriptRows.map((row) => row.recordingId));
-    const variants = buildTranscriptVariants(transcriptRows, preferredSource);
+    const variants = buildTranscriptVariants(
+        transcriptRows,
+        preferredSource,
+        transcriptRows.length > 0
+            ? await confirmedOverlays({ organization: true })
+            : new Map(),
+    );
     const library = rows.map(
         ({
             waveformPeaks,
@@ -139,6 +195,7 @@ async function loadOrganizationLibrary(
                 {
                     hasTranscript: transcriptIds.has(row.id),
                     hasSummary: summaryIds.has(row.id),
+                    needsReview: reviewIds.has(row.id),
                     audioReaped: audioReapedAt !== null,
                     waveformPeaks: Array.isArray(waveformPeaks)
                         ? (waveformPeaks as number[])
@@ -193,6 +250,10 @@ export default async function DashboardPage() {
             .orderBy(desc(recordings.startTime)),
         db
             .select({
+                // Which stored transcript each text is: speaker changes
+                // name it.
+                id: transcriptions.id,
+                revision: transcriptions.revision,
                 recordingId: transcriptions.recordingId,
                 text: transcriptions.text,
                 detectedLanguage: transcriptions.detectedLanguage,
@@ -245,6 +306,10 @@ export default async function DashboardPage() {
     const ownTranscriptions = viewerIsOrgAccount ? [] : userTranscriptions;
     const summaryIds = new Set(userSummaryRows.map((r) => r.recordingId));
     const transcriptIds = new Set(ownTranscriptions.map((t) => t.recordingId));
+    const reviewIds = await recordingsNeedingReview(
+        session.user.id,
+        viewerIsOrgAccount,
+    );
 
     // Content fields are encrypted at rest; decrypt server-side (this is
     // an RSC — client never sees a key) before serializing for the
@@ -256,6 +321,7 @@ export default async function DashboardPage() {
                 {
                     hasTranscript: transcriptIds.has(r.id),
                     hasSummary: summaryIds.has(r.id),
+                    needsReview: reviewIds.has(r.id),
                     audioReaped: audioReapedAt !== null,
                     // jsonb comes back already-parsed; coerce to the typed shape.
                     waveformPeaks: Array.isArray(waveformPeaks)
@@ -270,6 +336,9 @@ export default async function DashboardPage() {
     const transcriptVariants = buildTranscriptVariants(
         ownTranscriptions,
         preferredTranscriptSource,
+        ownTranscriptions.length > 0
+            ? await confirmedOverlays({ ownerUserId: session.user.id })
+            : new Map(),
     );
     const transcriptionMap = primaryVariants(transcriptVariants);
 
@@ -278,6 +347,7 @@ export default async function DashboardPage() {
               session.user.id,
               orgUserId,
               preferredTranscriptSource,
+              viewerIsOrgAccount ? reviewIds : new Set(),
           )
         : null;
 

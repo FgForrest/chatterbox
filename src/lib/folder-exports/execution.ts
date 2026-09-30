@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -150,8 +150,8 @@ async function materializeLocked(
                 options,
             );
         } else {
-            // The Organization view may still be showing the owner's rows.
-            const readers = [userId, state.ownerUserId];
+            // The owner's rows, for the Organization's export too: a shared
+            // recording is one recording.
             const source =
                 state.artifactType === "transcript"
                     ? await db
@@ -167,11 +167,7 @@ async function materializeLocked(
                                       transcriptions.recordingId,
                                       state.recordingId,
                                   ),
-                                  or(
-                                      ...readers.map((reader) =>
-                                          eq(transcriptions.userId, reader),
-                                      ),
-                                  ),
+                                  eq(transcriptions.userId, state.ownerUserId),
                               ),
                           )
                           .limit(1)
@@ -188,11 +184,7 @@ async function materializeLocked(
                                       aiEnhancements.recordingId,
                                       state.recordingId,
                                   ),
-                                  or(
-                                      ...readers.map((reader) =>
-                                          eq(aiEnhancements.userId, reader),
-                                      ),
-                                  ),
+                                  eq(aiEnhancements.userId, state.ownerUserId),
                               ),
                           )
                           .limit(1);
@@ -202,7 +194,6 @@ async function materializeLocked(
                       state.recordingId,
                       state.artifactType,
                       source[0].source,
-                      state.ownerUserId,
                       isOrg,
                   )
                 : null;

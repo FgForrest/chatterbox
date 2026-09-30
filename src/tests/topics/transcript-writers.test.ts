@@ -66,8 +66,8 @@ describe("transcript writers and topics", () => {
 
     it("finds the writers", () => {
         // persist.ts (update + insert), the browser path (update + insert),
-        // the Organization copy, and the topics write itself.
-        expect(writes.length).toBeGreaterThanOrEqual(6);
+        // and the topics write itself.
+        expect(writes.length).toBeGreaterThanOrEqual(5);
     });
 
     it("writes topics wherever it writes a transcript's text or turns", () => {

@@ -84,6 +84,7 @@ export default async function RecordingDetailPage({
     ].map((t) => ({
         source: t.source,
         text: decryptText(t.text),
+        version: { transcriptionId: t.id, revision: t.revision },
         language: t.detectedLanguage || undefined,
         provider: t.provider,
         model: t.model,

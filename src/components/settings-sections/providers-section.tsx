@@ -21,6 +21,8 @@ interface Provider {
     defaultModel: string | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
+    /** Present only where this instance has Learn. */
+    isDefaultLearn?: boolean;
     createdAt: Date;
     managed?: boolean;
     includedSeconds?: number;
@@ -154,6 +156,42 @@ export function ProvidersSection({
         })();
     };
 
+    /** Mark a provider for Learn, or (null) let Learn follow enhancements. */
+    const handleSetLearn = (providerId: string | null) => {
+        void (async () => {
+            try {
+                const res = await fetch(
+                    "/api/settings/ai/providers/default-learn",
+                    providerId === null
+                        ? { method: "DELETE" }
+                        : {
+                              method: "PUT",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ providerId }),
+                          },
+                );
+                if (!res.ok) {
+                    const b = (await res.json().catch(() => ({}))) as {
+                        error?: string;
+                    };
+                    throw new Error(b.error ?? `HTTP ${res.status}`);
+                }
+                toast.success(
+                    providerId === null
+                        ? i18n("Learn uses the AI enhancement provider again")
+                        : i18n("Learn provider updated"),
+                );
+                await refreshProviders();
+            } catch (e) {
+                toast.error(
+                    e instanceof Error
+                        ? e.message
+                        : i18n("Failed to update default"),
+                );
+            }
+        })();
+    };
+
     const handleDelete = (id: string) => {
         void confirm({
             title: i18n("Delete this provider?"),
@@ -212,6 +250,7 @@ export function ProvidersSection({
                     onDelete={handleDelete}
                     onSetDefault={handleSetDefaultTranscription}
                     onSetDefaultEnhancement={handleSetDefaultEnhancement}
+                    onSetLearn={handleSetLearn}
                 />
             </div>
 
@@ -257,6 +296,7 @@ function ProvidersList({
     onDelete,
     onSetDefault,
     onSetDefaultEnhancement,
+    onSetLearn,
 }: {
     providers: Provider[];
     deletingId: string | null;
@@ -265,6 +305,7 @@ function ProvidersList({
     onDelete: (id: string) => void;
     onSetDefault: (id: string) => void;
     onSetDefaultEnhancement: (id: string) => void;
+    onSetLearn: (id: string | null) => void;
 }) {
     const i18n = useExtracted();
     if (providers.length === 0) {
@@ -363,6 +404,11 @@ function ProvidersList({
                                         {i18n("Enhancement")}
                                     </span>
                                 )}
+                                {provider.isDefaultLearn && (
+                                    <span className="text-xs px-2 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded border border-amber-500/20">
+                                        {i18n("Learn")}
+                                    </span>
+                                )}
                             </div>
                             {provider.defaultModel && (
                                 <p className="text-sm text-muted-foreground">
@@ -404,6 +450,30 @@ function ProvidersList({
                                         {i18n("Use for AI enhancements")}
                                     </Button>
                                 )}
+                            {provider.isDefaultLearn === false &&
+                                !isTranscriptionOnlyProvider(
+                                    provider.provider,
+                                ) && (
+                                    <Button
+                                        onClick={() => onSetLearn(provider.id)}
+                                        variant="outline"
+                                        size="sm"
+                                        title={i18n(
+                                            "Learn runs on this provider and model instead of the AI enhancement one",
+                                        )}
+                                    >
+                                        {i18n("Use for Learn")}
+                                    </Button>
+                                )}
+                            {provider.isDefaultLearn === true && (
+                                <Button
+                                    onClick={() => onSetLearn(null)}
+                                    variant="outline"
+                                    size="sm"
+                                >
+                                    {i18n("Stop using for Learn")}
+                                </Button>
+                            )}
                             <Button
                                 onClick={() => onEdit(provider)}
                                 variant="outline"

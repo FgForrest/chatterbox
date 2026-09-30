@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// A sync that replaces the audio demotes names on the transcripts it keeps
+// (audio provenance); not what these tests are about.
+vi.mock("@/lib/knowledge/transcript-rewrite", async (importOriginal) => ({
+    ...(await importOriginal<
+        typeof import("@/lib/knowledge/transcript-rewrite")
+    >()),
+    audioReplacedInTx: vi.fn(),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: {
         DEFAULT_STORAGE_TYPE: "local",
@@ -63,6 +72,7 @@ vi.mock("@/lib/posthog-server", () => ({
 
 import { db } from "@/db";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
+import { decryptText } from "@/lib/encryption/fields";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { captureServerException } from "@/lib/posthog-server";
 import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
@@ -270,6 +280,8 @@ describe("Sync", () => {
                 {
                     transcriptMode: "plaud_only",
                     excludeIds: [],
+                    // No Organization in this deployment.
+                    excludeSharedWith: null,
                 },
             );
             await vi.waitFor(() => {
@@ -338,11 +350,17 @@ describe("Sync", () => {
                 {
                     transcriptMode: "keep_both",
                     excludeIds: [],
+                    // No Organization in this deployment.
+                    excludeSharedWith: null,
                 },
             );
         });
 
-        it("should update recordings with newer version", async () => {
+        /**
+         * Sync a recording Plaud reports a newer version of. `locked` is the
+         * row the update re-reads under its lock.
+         */
+        async function syncNewerVersion(locked: Record<string, unknown>) {
             const mockConnection = {
                 id: "conn-1",
                 userId: mockUserId,
@@ -445,9 +463,7 @@ describe("Sync", () => {
                                     for: vi.fn().mockReturnValue({
                                         limit: vi
                                             .fn()
-                                            .mockResolvedValue([
-                                                { deletedAt: null },
-                                            ]),
+                                            .mockResolvedValue([locked]),
                                     }),
                                 }),
                             }),
@@ -461,6 +477,11 @@ describe("Sync", () => {
             );
 
             const result = await syncRecordingsForUser(mockUserId);
+            return { result, set };
+        }
+
+        it("should update recordings with newer version", async () => {
+            const { result, set } = await syncNewerVersion({ deletedAt: null });
 
             expect(result.newRecordings).toBe(0);
             expect(result.updatedRecordings).toBe(1);
@@ -469,6 +490,26 @@ describe("Sync", () => {
             );
             expect(set).toHaveBeenCalledWith(
                 expect.objectContaining({ waveformPeaks: [0.25, 1] }),
+            );
+            // A machine's title follows Plaud's filename.
+            expect(decryptText(set.mock.calls[0]?.[0].filename)).toBe(
+                "Recording 1.mp3",
+            );
+        });
+
+        it("keeps a title a person set over Plaud's filename", async () => {
+            const { result, set } = await syncNewerVersion({
+                deletedAt: null,
+                titleEditedAt: new Date("2026-09-01T10:00:00Z"),
+                filename: "stored:Renamed by a person",
+            });
+
+            expect(result.updatedRecordings).toBe(1);
+            expect(set).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    filename: "stored:Renamed by a person",
+                    waveformPeaks: [0.25, 1],
+                }),
             );
         });
 

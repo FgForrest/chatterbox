@@ -1,0 +1,1 @@
+ALTER TABLE "recordings" ALTER COLUMN "title_edited_at" DROP DEFAULT;

@@ -44,6 +44,42 @@ function databaseUrlFor(adminUrl: string, databaseName: string): string {
     return url.toString();
 }
 
+// The migration chain runs in one transaction, which holds a lock on every
+// relation it creates until it commits. Postgres keeps those in one shared
+// table (`max_locks_per_transaction` x `max_connections`, 6,400 by default),
+// and a machine with many cores runs one test file per core, each migrating
+// its own database at once: past a few dozen tables that runs out ("out of
+// shared memory"). So only this many migrate at a time, across processes,
+// by session advisory locks on the admin database.
+const MIGRATION_SLOTS = 6;
+const MIGRATION_LOCK_BASE = 72_457_000;
+
+async function withMigrationSlot<T>(
+    adminUrl: string,
+    run: () => Promise<T>,
+): Promise<T> {
+    const gate = postgres(adminUrl, { max: 1 });
+    try {
+        for (;;) {
+            for (let slot = 0; slot < MIGRATION_SLOTS; slot++) {
+                const key = MIGRATION_LOCK_BASE + slot;
+                const [row] =
+                    await gate`select pg_try_advisory_lock(${key}) as taken`;
+                if (row?.taken) {
+                    try {
+                        return await run();
+                    } finally {
+                        await gate`select pg_advisory_unlock(${key})`;
+                    }
+                }
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+    } finally {
+        await gate.end();
+    }
+}
+
 function makeDatabaseName(label: string): string {
     const safeLabel = label.toLowerCase().replace(/[^a-z0-9_]/g, "_");
     const suffix = randomBytes(6).toString("hex");
@@ -82,7 +118,9 @@ export async function createMigratedTestDatabase(
     };
 
     try {
-        await migrate(db, { migrationsFolder: "./src/db/migrations" });
+        await withMigrationSlot(adminUrl, () =>
+            migrate(db, { migrationsFolder: "./src/db/migrations" }),
+        );
     } catch (error) {
         await dispose();
         throw error;

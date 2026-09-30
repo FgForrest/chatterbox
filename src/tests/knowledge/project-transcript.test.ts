@@ -28,6 +28,41 @@ const jan = () => (speaker: string) =>
     speaker === "speaker_0" ? "Jan Novotný" : null;
 
 describe("projectTranscript", () => {
+    it("applies confirmed corrections as people read them, names or not", () => {
+        const overlay = [
+            {
+                turnIndex: 1,
+                charStart: 0,
+                charEnd: 7,
+                heard: "Zdravim",
+                kind: "correct" as const,
+                replacement: "Zdravím",
+                meaning: "Zdravím",
+            },
+        ];
+        expect(
+            projectTranscript(
+                { id: "t1", text: RAW_TEXT, turns: encryptJsonField(TURNS) },
+                jan(),
+                overlay,
+            ),
+        ).toBe("Jan Novotný: Ahoj.\nspeaker_1: Zdravím.");
+        expect(
+            projectTranscript(
+                { id: "t1", text: RAW_TEXT, turns: encryptJsonField(TURNS) },
+                undefined,
+                overlay,
+            ),
+        ).toBe("speaker_0: Ahoj.\nspeaker_1: Zdravím.");
+        expect(
+            projectTranscript(
+                { id: "t1", text: RAW_TEXT, turns: encryptJsonField(TURNS) },
+                undefined,
+                [],
+            ),
+        ).toBe(RAW_TEXT);
+    });
+
     it("applies names over the stored turns", () => {
         expect(
             projectTranscript(
