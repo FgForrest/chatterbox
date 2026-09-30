@@ -7,7 +7,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    countDelayedAutoJobs,
+    countRateLimitedJobs,
     delayBehindBacklog,
     type EnqueueJobResult,
     enqueueJob,
@@ -100,8 +100,11 @@ export async function enqueueTopicsJob(input: {
 }): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
         ...(input.delayMs ? { delayMs: input.delayMs } : {}),
-        // A click starts what a rate limit put off, not wait for it.
-        takeOverDelayed: input.trigger === "manual",
+        // A click starts what a rate limit put off, not wait for it; the
+        // same transcript's only (the job is per recording).
+        ...(input.trigger === "manual"
+            ? { takeOverDelayed: { payload: { source: input.source } } }
+            : {}),
         userId: input.userId,
         kind: TOPICS_JOB_KIND,
         subjectId: recordingJobSubject(
@@ -173,41 +176,42 @@ export async function queueAutoTopics(
             limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
             windowMs: 60 * 60 * 1000,
         };
-        const rateLimit = await consumeRateLimitBucket(
-            `auto-topics:user:${userId}`,
-            window,
-        );
-        if (!rateLimit.allowed) {
-            // Strict (what was held for Learn): queued for when the window
-            // opens again, not dropped.
-            if (strict) {
-                await enqueueTopicsJob({
-                    userId,
-                    recordingId,
-                    source,
-                    trigger: "auto",
-                    rateLimited: true,
-                    delayMs: delayBehindBacklog({
-                        ...window,
-                        resetAt: rateLimit.resetAt,
-                        backlog: await countDelayedAutoJobs(
-                            userId,
-                            TOPICS_JOB_KIND,
-                        ),
-                    }),
-                });
+        // Behind a backlog the cap put off, in turn (see queueAutoSummary).
+        const backlog = await countRateLimitedJobs(userId, TOPICS_JOB_KIND);
+        let putOff: number | null = null;
+        if (backlog > 0) {
+            putOff = delayBehindBacklog({
+                ...window,
+                resetAt: new Date(),
+                backlog,
+            });
+        } else {
+            const rateLimit = await consumeRateLimitBucket(
+                `auto-topics:user:${userId}`,
+                window,
+            );
+            if (!rateLimit.allowed && !strict) {
+                console.warn(
+                    `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
+                );
                 return;
             }
-            console.warn(
-                `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
-            );
-            return;
+            // Strict (what was held for Learn): queued for when the window
+            // opens again, not dropped.
+            if (!rateLimit.allowed) {
+                putOff = delayBehindBacklog({
+                    ...window,
+                    resetAt: rateLimit.resetAt,
+                    backlog,
+                });
+            }
         }
         await enqueueTopicsJob({
             userId,
             recordingId,
             source,
             trigger: "auto",
+            ...(putOff === null ? {} : { rateLimited: true, delayMs: putOff }),
         });
     } catch (error) {
         if (strict) throw error;

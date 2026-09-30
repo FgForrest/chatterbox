@@ -129,15 +129,26 @@ export interface NameToken {
 export function nameTokens(text: string): NameToken[] {
     const tokens: NameToken[] = [];
     let initial = true;
+    let previous = "";
     for (const [raw] of text.matchAll(/[\p{L}\p{N}\p{M}]+|[.!?…]/gu)) {
         if (/^[.!?…]$/u.test(raw)) {
-            initial = true;
+            // Not the period of a title or an initial ("Ing. Novák").
+            if (
+                !(
+                    raw === "." &&
+                    (previous.length === 1 || TITLES.has(previous))
+                )
+            ) {
+                initial = true;
+            }
+            previous = "";
             continue;
         }
         const word = nameWords(raw).join("");
         if (!word) continue;
         tokens.push({ word, capital: /^\p{Lu}/u.test(raw), initial });
         initial = false;
+        previous = word;
     }
     return tokens;
 }

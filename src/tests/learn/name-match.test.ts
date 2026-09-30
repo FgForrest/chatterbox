@@ -55,6 +55,12 @@ describe("name matching, as Czech says names", () => {
                 name: "Martin Zelený",
             }),
         ).toBe(true);
+        // A title's period ends no sentence.
+        expect(
+            moreThanFirstName(words("Mluvil jsem s Ing. Zeleným."), {
+                name: "Martin Zelený",
+            }),
+        ).toBe(true);
         // A noun's ending starting a sentence still names them.
         expect(
             moreThanFirstName(words("Dubovi to pošlu."), { name: "Jan Dub" }),

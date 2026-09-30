@@ -1,5 +1,5 @@
 import {
-    countDelayedAutoJobs,
+    countRateLimitedJobs,
     delayBehindBacklog,
 } from "@/db/queries/async-jobs";
 import { env } from "@/lib/env";
@@ -54,36 +54,39 @@ export async function queueAutoSummary(
         limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
         windowMs: 60 * 60 * 1000,
     };
-    const rateLimit = await consumeRateLimitBucket(
-        `auto-summary:user:${userId}`,
-        window,
-    );
-
-    if (!rateLimit.allowed && strict) {
-        // What was held for Learn: queued for when the window opens again,
-        // not dropped.
-        await enqueueSummaryJob({
-            userId,
-            recordingId,
-            presetId: presetId ?? undefined,
-            trigger: "auto",
-            rateLimited: true,
-            delayMs: delayBehindBacklog({
+    // Behind a backlog the cap put off, in turn: fresh work taking each new
+    // window first could keep that backlog waiting for ever. The backlog's
+    // jobs pass the cap when they start, oldest first.
+    const backlog = await countRateLimitedJobs(userId, SUMMARY_JOB_KIND);
+    let putOff: number | null = null;
+    if (backlog > 0) {
+        putOff = delayBehindBacklog({
+            ...window,
+            resetAt: new Date(),
+            backlog,
+        });
+    } else {
+        const rateLimit = await consumeRateLimitBucket(
+            `auto-summary:user:${userId}`,
+            window,
+        );
+        if (!rateLimit.allowed && strict) {
+            // What was held for Learn: queued for when the window opens
+            // again, not dropped.
+            putOff = delayBehindBacklog({
                 ...window,
                 resetAt: rateLimit.resetAt,
-                backlog: await countDelayedAutoJobs(userId, SUMMARY_JOB_KIND),
-            }),
-        });
-        return;
-    }
-    if (!rateLimit.allowed) {
-        console.warn(
-            `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
-        );
-        await emitEvent("summary.failed", userId, recordingId, {
-            error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
-        });
-        return;
+                backlog,
+            });
+        } else if (!rateLimit.allowed) {
+            console.warn(
+                `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
+            );
+            await emitEvent("summary.failed", userId, recordingId, {
+                error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
+            });
+            return;
+        }
     }
     // Queued rather than run inline. This is the unattended path -- a sync
     // can trigger a dozen of these with nobody watching -- and inline it
@@ -101,6 +104,7 @@ export async function queueAutoSummary(
             recordingId,
             presetId: presetId ?? undefined,
             trigger: "auto",
+            ...(putOff === null ? {} : { rateLimited: true, delayMs: putOff }),
         });
     } catch (error) {
         if (strict) throw error;

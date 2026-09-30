@@ -134,7 +134,7 @@ export async function enqueueSummaryJob(
     const enqueued = await enqueueJob({
         ...(input.delayMs ? { delayMs: input.delayMs } : {}),
         // A click starts what a rate limit put off, not wait for it.
-        takeOverDelayed: input.trigger === "manual",
+        ...(input.trigger === "manual" ? { takeOverDelayed: {} } : {}),
         userId: input.userId,
         kind: SUMMARY_JOB_KIND,
         subjectId: recordingJobSubject(

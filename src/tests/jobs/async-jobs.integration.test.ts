@@ -64,8 +64,8 @@ import {
     buryExhaustedStaleJobs,
     claimDueJobs,
     completeJob,
-    countDelayedAutoJobs,
     countPendingJobs,
+    countRateLimitedJobs,
     deferJob,
     delayBehindBacklog,
     enqueueJob,
@@ -223,7 +223,7 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
             });
 
             const clicked = await queue({
-                takeOverDelayed: true,
+                takeOverDelayed: {},
                 priority: 10,
                 payload: { recordingId: "rec-1", trigger: "manual" },
             });
@@ -239,12 +239,38 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
             expect(claimed?.id).toBe(delayed.job.id);
         });
 
+        it("does not take over a delayed job doing other work", async () => {
+            const delayed = await queue({
+                kind: "topics",
+                delayMs: 55 * 60_000,
+                payload: {
+                    recordingId: "rec-1",
+                    source: "riffado",
+                    trigger: "auto",
+                },
+            });
+
+            const clicked = await queue({
+                kind: "topics",
+                takeOverDelayed: { payload: { source: "plaud" } },
+                payload: {
+                    recordingId: "rec-1",
+                    source: "plaud",
+                    trigger: "manual",
+                },
+            });
+
+            expect(clicked.created).toBe(false);
+            expect(clicked.job.id).toBe(delayed.job.id);
+            expect(clicked.job.payload).toMatchObject({ source: "riffado" });
+        });
+
         it("joins a job that is due without taking it over", async () => {
             const due = await queue({
                 payload: { recordingId: "rec-1", trigger: "auto" },
             });
 
-            const clicked = await queue({ takeOverDelayed: true });
+            const clicked = await queue({ takeOverDelayed: {} });
 
             expect(clicked.created).toBe(false);
             expect(clicked.job.id).toBe(due.job.id);
@@ -254,26 +280,26 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
             });
         });
 
-        it("counts the automatic jobs a user has waiting to start", async () => {
+        it("counts the jobs a rate limit put off that have not run yet", async () => {
             await queue({
                 subjectId: "rec-1",
                 delayMs: 60_000,
-                payload: { trigger: "auto" },
+                payload: { trigger: "auto", rateLimited: true },
             });
+            // Due now, not started yet: still ahead of fresh work.
             await queue({
                 subjectId: "rec-2",
+                payload: { trigger: "auto", rateLimited: true },
+            });
+            // An automatic job merely waiting out a retry is not one.
+            await queue({
+                subjectId: "rec-3",
                 delayMs: 60_000,
                 payload: { trigger: "auto" },
             });
-            await queue({ subjectId: "rec-3", payload: { trigger: "auto" } });
-            await queue({
-                subjectId: "rec-4",
-                delayMs: 60_000,
-                payload: { trigger: "manual" },
-            });
 
-            expect(await countDelayedAutoJobs(USER, "summary")).toBe(2);
-            expect(await countDelayedAutoJobs(USER, "topics")).toBe(0);
+            expect(await countRateLimitedJobs(USER, "summary")).toBe(2);
+            expect(await countRateLimitedJobs(USER, "topics")).toBe(0);
         });
     });
 

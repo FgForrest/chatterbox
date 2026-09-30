@@ -91,9 +91,11 @@ export interface EnqueueJobInput {
      * A job of this kind and subject queued to start later (an automatic
      * one a rate limit put off) is taken over by this one: it starts now,
      * as this caller asks. A person clicking does not wait for the window
-     * a background job was waiting for.
+     * a background job was waiting for. `payload` names the fields that
+     * job's payload must share with this one (the same transcript): one
+     * doing other work is left alone.
      */
-    takeOverDelayed?: boolean;
+    takeOverDelayed?: { payload?: Record<string, string> };
 }
 
 export interface EnqueueJobResult {
@@ -184,6 +186,12 @@ export async function enqueueJob(
                         eq(asyncJobs.status, "pending"),
                         eq(asyncJobs.attempts, 0),
                         sql`${asyncJobs.nextAttemptAt} > now()`,
+                        ...Object.entries(
+                            input.takeOverDelayed.payload ?? {},
+                        ).map(
+                            ([key, value]) =>
+                                sql`${asyncJobs.payload}->>${key} = ${value}`,
+                        ),
                     ),
                 )
                 .returning();
@@ -198,10 +206,10 @@ export async function enqueueJob(
 }
 
 /**
- * How many automatic jobs of a kind a user has queued to start later: the
- * backlog a rate limit put off, which the next ones queue behind.
+ * How many jobs of a kind a rate limit put off for a user and have not run
+ * yet (payload `rateLimited`): the backlog the next ones queue behind.
  */
-export async function countDelayedAutoJobs(
+export async function countRateLimitedJobs(
     userId: string,
     kind: string,
 ): Promise<number> {
@@ -212,9 +220,8 @@ export async function countDelayedAutoJobs(
             and(
                 eq(asyncJobs.userId, userId),
                 eq(asyncJobs.kind, kind),
-                eq(asyncJobs.status, "pending"),
-                sql`${asyncJobs.nextAttemptAt} > now()`,
-                sql`${asyncJobs.payload}->>'trigger' = 'auto'`,
+                IS_ACTIVE,
+                sql`${asyncJobs.payload}->>'rateLimited' = 'true'`,
             ),
         );
     return row?.count ?? 0;

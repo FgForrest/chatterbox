@@ -123,6 +123,9 @@ services:
         CODEX_VERSION: ${CODEX_VERSION:-latest}
     container_name: riffado-agent-bridge
     restart: unless-stopped
+    # Reaps what a killed CLI leaves behind (npm's codex is a wrapper whose
+    # real binary outlives it by a moment); node as PID 1 would not.
+    init: true
     # Deliberately no `ports:`. The bridge spends your subscription, so
     # it is reachable only from other services on this compose network --
     # publishing it would expose that to the host and anything routed to

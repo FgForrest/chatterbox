@@ -68,7 +68,13 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+// No backlog the hourly cap put off: the cap decides.
+vi.mock("@/db/queries/async-jobs", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/db/queries/async-jobs")>()),
+    countRateLimitedJobs: vi.fn().mockResolvedValue(0),
+}));
 vi.mock("@/lib/summary/summary-job", () => ({
+    SUMMARY_JOB_KIND: "summary",
     enqueueSummaryJob: vi.fn(),
 }));
 
@@ -92,6 +98,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { db } from "@/db";
+import { countRateLimitedJobs } from "@/db/queries/async-jobs";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
 import { upsertTranscription } from "@/lib/transcription/persist";
@@ -345,6 +352,36 @@ describe("Auto-summarize integration with transcribeRecording", () => {
             (c) => c[0] === "summary.completed",
         );
         expect(completedSummary).toBeUndefined();
+    });
+
+    it("queues behind a backlog the cap put off, without taking the window first", async () => {
+        mountSelectChain({
+            autoGenerateTitle: false,
+            syncTitleToPlaud: false,
+            autoSummarize: true,
+            autoSummarizePreset: null,
+        });
+        mountInsertTransaction();
+        (countRateLimitedJobs as Mock).mockResolvedValueOnce(2);
+        (enqueueSummaryJob as Mock).mockResolvedValue({
+            job: { id: "job-1" },
+            created: true,
+        });
+
+        const result = await transcribeRecording(mockUserId, mockRecordingId);
+
+        expect(result.success).toBe(true);
+        expect(consumeRateLimitBucket).not.toHaveBeenCalledWith(
+            `auto-summary:user:${mockUserId}`,
+            expect.anything(),
+        );
+        expect(enqueueSummaryJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                recordingId: mockRecordingId,
+                trigger: "auto",
+                rateLimited: true,
+            }),
+        );
     });
 
     it("skips auto-summary and emits summary.failed when rate limit is exhausted", async () => {

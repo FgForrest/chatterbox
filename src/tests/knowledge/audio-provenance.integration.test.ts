@@ -264,13 +264,27 @@ describeWithDatabase("audio provenance on transcripts (PostgreSQL)", () => {
             audioMd5: "a".repeat(32),
         });
 
-        // Made from "a" or from "b": nobody can say, so neither is claimed
-        // and the names are offered again rather than kept.
+        // Made from "a" or from "b": nobody can say, so the names are
+        // offered again rather than kept.
         expect(await speaker0()).toBe("suggested");
+        // It keeps "a", unlike the recording: a later change still counts.
         const [transcript] = await db()
             .select({ audioMd5: transcriptions.audioMd5 })
             .from(transcriptions);
-        expect(transcript?.audioMd5).toBeNull();
+        expect(transcript?.audioMd5).toBe("a".repeat(32));
+
+        // Confirmed again, then trimmed once more in Plaud.
+        await db()
+            .update(transcriptSpeakers)
+            .set({ status: "confirmed" })
+            .where(eq(transcriptSpeakers.label, "speaker_0"));
+        await db().transaction((tx) =>
+            audioReplacedInTx(tx, REC, {
+                from: "b".repeat(32),
+                to: "c".repeat(32),
+            }),
+        );
+        expect(await speaker0()).toBe("suggested");
     });
 
     it("stamps the audio a transcription began on when it is still there", async () => {
