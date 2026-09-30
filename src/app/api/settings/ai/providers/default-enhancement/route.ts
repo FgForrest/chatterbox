@@ -51,7 +51,7 @@ export const PUT = apiHandler(async (request: Request) => {
     if (isRiffadoIncludedProviderId(providerId)) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `${RIFFADO_INCLUDED_PROVIDER_LABEL} transcribes only. Pick another provider for AI enhancements.`,
+            `${RIFFADO_INCLUDED_PROVIDER_LABEL} transcribes only. Pick another provider for summaries.`,
             400,
             { field: "providerId" },
         );

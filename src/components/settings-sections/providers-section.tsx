@@ -1,6 +1,16 @@
 "use client";
 
-import { Bot, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+    Bot,
+    Copy,
+    FileText,
+    GraduationCap,
+    ListChecks,
+    type LucideIcon,
+    Pencil,
+    Plus,
+    Trash2,
+} from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -8,7 +18,16 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
 import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
@@ -29,7 +48,37 @@ interface Provider {
     available?: boolean;
 }
 
+type Role = "transcription" | "summaries" | "learn";
+
 const EMPTY_PROVIDERS: Provider[] = [];
+
+/**
+ * The Learn picker's "no provider of its own" choice. Radix Select needs a
+ * non-empty value for every item, so the fallback gets a sentinel that no
+ * credential id (a nanoid) can collide with.
+ */
+const LEARN_FOLLOWS_SUMMARIES = "__same-as-summaries__";
+
+/**
+ * Where each role is set on the server. Transcription and summaries have
+ * no "unset" here: clearing one is an explicit act in the edit dialog,
+ * not something a dropdown should make easy.
+ */
+const ROLE_ENDPOINTS: Record<Role, string> = {
+    transcription: "/api/settings/ai/providers/default-transcription",
+    summaries: "/api/settings/ai/providers/default-enhancement",
+    learn: "/api/settings/ai/providers/default-learn",
+};
+
+/**
+ * One line that tells two rows of the same provider apart: duplicates of
+ * Claude Code or Codex differ only by model.
+ */
+function providerLabel(provider: Provider): string {
+    return provider.defaultModel
+        ? `${provider.provider} · ${provider.defaultModel}`
+        : provider.provider;
+}
 
 interface ProvidersSectionProps {
     initialProviders?: Provider[];
@@ -39,11 +88,13 @@ interface ProvidersSectionProps {
 /**
  * AI Providers settings section.
  *
- * The configured AI providers (transcription / enhancement) plus the
- * AddProviderDialog and EditProviderDialog. Local state seeded from
- * `initialProviders` and updated in place by the dialogs. Prompt templates
- * live with the features that use them: title templates in Transcription,
- * summary templates in Summary.
+ * Two parts: which provider does each job (transcription, summaries and,
+ * where the instance has it, Learn), then the configured providers with
+ * duplicate/edit/delete. Each job belongs to one provider at a time, so it
+ * is chosen once, from a dropdown, rather than by a button on every row.
+ * Local state seeded from `initialProviders` and updated in place by the
+ * dialogs. Prompt templates live with the features that use them: title
+ * templates in Transcription, summary templates in Summary.
  *
  * Note: `initialProviders` is the server-rendered seed only. The local
  * `providers` state diverges from it after add/edit/delete actions; we do
@@ -79,7 +130,9 @@ export function ProvidersSection({
     const [editingProvider, setEditingProvider] = useState<Provider | null>(
         null,
     );
+    const [editMode, setEditMode] = useState<"edit" | "duplicate">("edit");
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [savingRole, setSavingRole] = useState<Role | null>(null);
 
     const refreshProviders = async () => {
         try {
@@ -94,74 +147,29 @@ export function ProvidersSection({
     };
 
     const handleEdit = (provider: Provider) => {
+        setEditMode("edit");
         setEditingProvider(provider);
         setIsEditProviderOpen(true);
     };
 
-    const handleSetDefaultTranscription = (providerId: string) => {
-        void (async () => {
-            try {
-                const res = await fetch(
-                    "/api/settings/ai/providers/default-transcription",
-                    {
-                        method: "PUT",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({ providerId }),
-                    },
-                );
-                if (!res.ok) {
-                    const b = (await res.json().catch(() => ({}))) as {
-                        error?: string;
-                    };
-                    throw new Error(b.error ?? `HTTP ${res.status}`);
-                }
-                toast.success(i18n("Default transcription provider updated"));
-                await refreshProviders();
-            } catch (e) {
-                toast.error(
-                    e instanceof Error
-                        ? e.message
-                        : i18n("Failed to update default"),
-                );
-            }
-        })();
+    /** Same form as edit, saved as a new row that reuses this one's key. */
+    const handleDuplicate = (provider: Provider) => {
+        setEditMode("duplicate");
+        setEditingProvider(provider);
+        setIsEditProviderOpen(true);
     };
 
-    const handleSetDefaultEnhancement = (providerId: string) => {
+    /**
+     * Give a role to a provider. For Learn, `null` hands it back to the
+     * summaries provider, which is what Learn uses when none is marked.
+     */
+    const handleAssignRole = (role: Role, providerId: string | null) => {
+        const chosen = providers.find((p) => p.id === providerId);
         void (async () => {
+            setSavingRole(role);
             try {
                 const res = await fetch(
-                    "/api/settings/ai/providers/default-enhancement",
-                    {
-                        method: "PUT",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({ providerId }),
-                    },
-                );
-                if (!res.ok) {
-                    const b = (await res.json().catch(() => ({}))) as {
-                        error?: string;
-                    };
-                    throw new Error(b.error ?? `HTTP ${res.status}`);
-                }
-                toast.success(i18n("Default AI enhancement provider updated"));
-                await refreshProviders();
-            } catch (e) {
-                toast.error(
-                    e instanceof Error
-                        ? e.message
-                        : i18n("Failed to update default"),
-                );
-            }
-        })();
-    };
-
-    /** Mark a provider for Learn, or (null) let Learn follow enhancements. */
-    const handleSetLearn = (providerId: string | null) => {
-        void (async () => {
-            try {
-                const res = await fetch(
-                    "/api/settings/ai/providers/default-learn",
+                    ROLE_ENDPOINTS[role],
                     providerId === null
                         ? { method: "DELETE" }
                         : {
@@ -176,10 +184,15 @@ export function ProvidersSection({
                     };
                     throw new Error(b.error ?? `HTTP ${res.status}`);
                 }
+                const name = chosen ? providerLabel(chosen) : "";
                 toast.success(
-                    providerId === null
-                        ? i18n("Learn uses the AI enhancement provider again")
-                        : i18n("Learn provider updated"),
+                    role === "transcription"
+                        ? i18n("Transcription now uses {name}", { name })
+                        : role === "summaries"
+                          ? i18n("Summaries now use {name}", { name })
+                          : providerId === null
+                            ? i18n("Learn uses the summaries provider again")
+                            : i18n("Learn now uses {name}", { name }),
                 );
                 await refreshProviders();
             } catch (e) {
@@ -188,6 +201,8 @@ export function ProvidersSection({
                         ? e.message
                         : i18n("Failed to update default"),
                 );
+            } finally {
+                setSavingRole(null);
             }
         })();
     };
@@ -199,7 +214,7 @@ export function ProvidersSection({
                 "Its API key will be removed from this account. Recordings transcribed or summarized through it keep their data, but you'll need to re-add the provider to use it again.",
             ),
             confirmLabel: i18n("Delete"),
-            pendingLabel: "Deleting…",
+            pendingLabel: i18n("Deleting…"),
             destructive: true,
             onConfirm: async () => {
                 setDeletingId(id);
@@ -209,7 +224,9 @@ export function ProvidersSection({
                         { method: "DELETE" },
                     );
                     if (!response.ok) {
-                        const error = (await response.json()) as {
+                        const error = (await response
+                            .json()
+                            .catch(() => ({}))) as {
                             error?: string;
                         };
                         throw new Error(error.error || "Failed to delete");
@@ -226,31 +243,37 @@ export function ProvidersSection({
     return (
         <>
             <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                    <SettingsSectionHeader
-                        title={i18n("AI Providers")}
-                        description={i18n(
-                            "Connect transcription and summary providers. Anything OpenAI-compatible works.",
-                        )}
-                        icon={Bot}
+                <SettingsSectionHeader
+                    title={i18n("AI Providers")}
+                    description={i18n(
+                        "Connect transcription and summary providers. Anything OpenAI-compatible works.",
+                    )}
+                    icon={Bot}
+                    action={
+                        <Button
+                            onClick={() => setIsAddProviderOpen(true)}
+                            size="sm"
+                        >
+                            <Plus className="size-4" /> {i18n("Add Provider")}
+                        </Button>
+                    }
+                />
+
+                {providers.length > 0 && (
+                    <RoleAssignments
+                        providers={providers}
+                        savingRole={savingRole}
+                        onAssign={handleAssignRole}
                     />
-                    <Button
-                        onClick={() => setIsAddProviderOpen(true)}
-                        size="sm"
-                    >
-                        <Plus className="size-4 mr-2" /> {i18n("Add Provider")}
-                    </Button>
-                </div>
+                )}
 
                 <ProvidersList
                     providers={providers}
                     deletingId={deletingId}
                     onAdd={() => setIsAddProviderOpen(true)}
                     onEdit={handleEdit}
+                    onDuplicate={handleDuplicate}
                     onDelete={handleDelete}
-                    onSetDefault={handleSetDefaultTranscription}
-                    onSetDefaultEnhancement={handleSetDefaultEnhancement}
-                    onSetLearn={handleSetLearn}
                 />
             </div>
 
@@ -273,6 +296,7 @@ export function ProvidersSection({
                     }
                 }}
                 provider={editingProvider}
+                mode={editMode}
                 isHosted={isHosted}
                 onSuccess={() => {
                     setIsEditProviderOpen(false);
@@ -285,7 +309,184 @@ export function ProvidersSection({
 }
 
 /**
- * Configured-providers list with edit/delete row actions. Pure
+ * Which provider does each job. Every role belongs to one provider at a
+ * time, so it is one dropdown per role, listing only the providers that
+ * can do that job.
+ */
+function RoleAssignments({
+    providers,
+    savingRole,
+    onAssign,
+}: {
+    providers: Provider[];
+    savingRole: Role | null;
+    onAssign: (role: Role, providerId: string | null) => void;
+}) {
+    const i18n = useExtracted();
+
+    const transcribers = providers.filter(
+        (p) => p.managed === true || !isEnhancementOnlyProvider(p.provider),
+    );
+    const summarizers = providers.filter(
+        (p) => p.managed !== true && !isTranscriptionOnlyProvider(p.provider),
+    );
+    // `isDefaultLearn` is absent on every row where this instance has no
+    // Learn, which is how the list says "don't offer the choice".
+    const hasLearn = providers.some((p) => p.isDefaultLearn !== undefined);
+    const learnProvider = providers.find((p) => p.isDefaultLearn === true);
+    const summariesProvider = providers.find((p) => p.isDefaultEnhancement);
+
+    return (
+        <SettingsCard
+            title={i18n("Used for")}
+            description={i18n(
+                "Each job runs on one provider. Only providers that can do the job are listed.",
+            )}
+        >
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
+                <RolePicker
+                    id="role-transcription"
+                    icon={FileText}
+                    label={i18n("Transcription")}
+                    options={transcribers}
+                    value={
+                        providers.find((p) => p.isDefaultTranscription)?.id ??
+                        ""
+                    }
+                    disabled={savingRole !== null}
+                    onChange={(id) => onAssign("transcription", id)}
+                />
+                <RolePicker
+                    id="role-summaries"
+                    icon={ListChecks}
+                    label={i18n("Summaries")}
+                    options={summarizers}
+                    value={summariesProvider?.id ?? ""}
+                    disabled={savingRole !== null}
+                    onChange={(id) => onAssign("summaries", id)}
+                />
+                {hasLearn && (
+                    <RolePicker
+                        id="role-learn"
+                        icon={GraduationCap}
+                        label={i18n("Learn")}
+                        options={summarizers}
+                        value={learnProvider?.id ?? LEARN_FOLLOWS_SUMMARIES}
+                        disabled={savingRole !== null}
+                        onChange={(id) =>
+                            onAssign(
+                                "learn",
+                                id === LEARN_FOLLOWS_SUMMARIES ? null : id,
+                            )
+                        }
+                        fallback={{
+                            value: LEARN_FOLLOWS_SUMMARIES,
+                            label: summariesProvider
+                                ? i18n("Same as summaries ({name})", {
+                                      name: providerLabel(summariesProvider),
+                                  })
+                                : i18n("Same as summaries"),
+                        }}
+                        hint={i18n(
+                            "Pick a provider only when Learn should use a different model than summaries, a stronger one for example.",
+                        )}
+                    />
+                )}
+            </div>
+        </SettingsCard>
+    );
+}
+
+function RolePicker({
+    id,
+    icon: Icon,
+    label,
+    options,
+    value,
+    disabled,
+    onChange,
+    fallback,
+    hint,
+}: {
+    id: string;
+    icon: LucideIcon;
+    label: string;
+    options: Provider[];
+    value: string;
+    disabled: boolean;
+    onChange: (id: string) => void;
+    /** An extra first item that means "no provider of its own". */
+    fallback?: { value: string; label: string };
+    hint?: string;
+}) {
+    const i18n = useExtracted();
+    const empty = options.length === 0 && !fallback;
+    return (
+        <>
+            {/* Height of the select, so a hint below it can't pull the label off its line. */}
+            <Label htmlFor={id} className="gap-2 sm:h-9">
+                <Icon
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                />
+                {label}
+            </Label>
+            <div className="min-w-0 space-y-1">
+                <Select
+                    value={value}
+                    onValueChange={(next) => {
+                        if (next !== value) onChange(next);
+                    }}
+                    disabled={disabled || empty}
+                >
+                    <SelectTrigger id={id} className="w-full">
+                        <SelectValue
+                            placeholder={
+                                empty
+                                    ? i18n("No provider can do this yet")
+                                    : i18n("Not chosen")
+                            }
+                        />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {fallback && (
+                            <SelectItem value={fallback.value}>
+                                {fallback.label}
+                            </SelectItem>
+                        )}
+                        {options.map((p) => (
+                            <SelectItem
+                                key={p.id}
+                                value={p.id}
+                                disabled={p.available === false}
+                            >
+                                {providerLabel(p)}
+                                {p.available === false &&
+                                    ` (${i18n("resubscribe to use")})`}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+                {hint && (
+                    <p className="text-xs text-muted-foreground">{hint}</p>
+                )}
+            </div>
+        </>
+    );
+}
+
+/** A role a provider currently holds, as a quiet status chip. */
+function RoleChip({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+    return (
+        <span className="inline-flex items-center gap-1 rounded-full border bg-muted/60 px-2 py-0.5 text-xs text-foreground">
+            <Icon className="size-3 text-muted-foreground" aria-hidden="true" />
+            {label}
+        </span>
+    );
+}
+
+/**
+ * Configured-providers list with duplicate/edit/delete row actions. Pure
  * presentation -- the parent owns the data + dialog state.
  */
 function ProvidersList({
@@ -293,19 +494,15 @@ function ProvidersList({
     deletingId,
     onAdd,
     onEdit,
+    onDuplicate,
     onDelete,
-    onSetDefault,
-    onSetDefaultEnhancement,
-    onSetLearn,
 }: {
     providers: Provider[];
     deletingId: string | null;
     onAdd: () => void;
     onEdit: (provider: Provider) => void;
+    onDuplicate: (provider: Provider) => void;
     onDelete: (id: string) => void;
-    onSetDefault: (id: string) => void;
-    onSetDefaultEnhancement: (id: string) => void;
-    onSetLearn: (id: string | null) => void;
 }) {
     const i18n = useExtracted();
     if (providers.length === 0) {
@@ -319,184 +516,155 @@ function ProvidersList({
                     {i18n("Add an AI provider to enable transcription")}
                 </p>
                 <Button onClick={onAdd} size="sm">
-                    <Plus className="size-4 mr-2" /> {i18n("Add Provider")}
+                    <Plus className="size-4" /> {i18n("Add Provider")}
                 </Button>
             </div>
         );
     }
     return (
-        <div className="space-y-3">
+        <ul className="space-y-2">
             {providers.map((provider) => {
+                const roles = (
+                    <>
+                        {provider.isDefaultTranscription && (
+                            <RoleChip
+                                icon={FileText}
+                                label={i18n("Transcription")}
+                            />
+                        )}
+                        {provider.isDefaultEnhancement && (
+                            <RoleChip
+                                icon={ListChecks}
+                                label={i18n("Summaries")}
+                            />
+                        )}
+                        {provider.isDefaultLearn && (
+                            <RoleChip
+                                icon={GraduationCap}
+                                label={i18n("Learn")}
+                            />
+                        )}
+                    </>
+                );
+
                 if (provider.managed === true) {
                     return (
-                        <div
+                        <li
                             key={provider.id}
-                            className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
+                            className="rounded-lg border px-4 py-3"
                         >
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                    <h3 className="font-semibold">
-                                        {provider.provider}
-                                    </h3>
-                                    <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded border border-primary/20">
-                                        {i18n("Included with your plan")}
-                                    </span>
-                                </div>
-                                <p className="text-sm text-muted-foreground">
-                                    {provider.includedSeconds
-                                        ? i18n(
-                                              "Up to {hours}h of transcription per month",
-                                              {
-                                                  hours: String(
-                                                      Math.round(
-                                                          provider.includedSeconds /
-                                                              3600,
-                                                      ),
-                                                  ),
-                                              },
-                                          )
-                                        : i18n(
-                                              "Included with your subscription",
-                                          )}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-2 ml-4">
-                                {provider.isDefaultTranscription ? (
-                                    <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded border border-primary/20">
-                                        {i18n("Default")}
-                                    </span>
-                                ) : (
-                                    <Button
-                                        onClick={() =>
-                                            onSetDefault(provider.id)
-                                        }
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={provider.available === false}
-                                    >
-                                        {provider.available === false
-                                            ? i18n("Resubscribe to use")
-                                            : i18n("Use for transcription")}
-                                    </Button>
-                                )}
-                            </div>
-                        </div>
-                    );
-                }
-
-                return (
-                    <div
-                        key={provider.id}
-                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
-                    >
-                        <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <h3 className="font-semibold">
                                     {provider.provider}
                                 </h3>
-                                {provider.isDefaultTranscription && (
-                                    <span className="text-xs px-2 py-0.5 bg-primary/10 text-primary rounded border border-primary/20">
-                                        {i18n("Transcription")}
-                                    </span>
-                                )}
-                                {provider.isDefaultEnhancement && (
-                                    <span className="text-xs px-2 py-0.5 bg-purple-500/10 text-purple-600 rounded border border-purple-500/20">
-                                        {i18n("Enhancement")}
-                                    </span>
-                                )}
-                                {provider.isDefaultLearn && (
-                                    <span className="text-xs px-2 py-0.5 bg-amber-500/10 text-amber-700 dark:text-amber-400 rounded border border-amber-500/20">
-                                        {i18n("Learn")}
-                                    </span>
-                                )}
+                                <span className="text-xs text-muted-foreground">
+                                    {provider.available === false
+                                        ? i18n(
+                                              "Not in your current plan. Resubscribe to use it.",
+                                          )
+                                        : provider.includedSeconds
+                                          ? i18n(
+                                                "Up to {hours}h of transcription per month",
+                                                {
+                                                    hours: String(
+                                                        Math.round(
+                                                            provider.includedSeconds /
+                                                                3600,
+                                                        ),
+                                                    ),
+                                                },
+                                            )
+                                          : i18n(
+                                                "Included with your subscription",
+                                            )}
+                                </span>
                             </div>
-                            {provider.defaultModel && (
-                                <p className="text-sm text-muted-foreground">
-                                    {i18n("Model:")} {provider.defaultModel}
-                                </p>
-                            )}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                <span className="inline-flex items-center rounded-full border bg-muted/60 px-2 py-0.5 text-xs text-foreground">
+                                    {i18n("Included with your plan")}
+                                </span>
+                                {roles}
+                            </div>
+                        </li>
+                    );
+                }
+
+                const deleting = deletingId === provider.id;
+                return (
+                    <li
+                        key={provider.id}
+                        className="flex flex-col gap-3 rounded-lg border px-4 py-3 sm:flex-row sm:items-start"
+                    >
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                            <h3 className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                                <span className="font-semibold">
+                                    {provider.provider}
+                                </span>
+                                {provider.defaultModel && (
+                                    <span className="min-w-0 break-all font-mono text-sm text-muted-foreground">
+                                        {provider.defaultModel}
+                                    </span>
+                                )}
+                            </h3>
                             {provider.baseUrl && (
-                                <p className="text-xs text-muted-foreground font-mono truncate">
+                                <p className="truncate font-mono text-xs text-muted-foreground">
                                     {provider.baseUrl}
                                 </p>
                             )}
-                        </div>
-                        <div className="flex items-center gap-2 ml-4">
-                            {!provider.isDefaultTranscription &&
-                                !isEnhancementOnlyProvider(
-                                    provider.provider,
-                                ) && (
-                                    <Button
-                                        onClick={() =>
-                                            onSetDefault(provider.id)
-                                        }
-                                        variant="outline"
-                                        size="sm"
-                                    >
-                                        {i18n("Use for transcription")}
-                                    </Button>
-                                )}
-                            {!provider.isDefaultEnhancement &&
-                                !isTranscriptionOnlyProvider(
-                                    provider.provider,
-                                ) && (
-                                    <Button
-                                        onClick={() =>
-                                            onSetDefaultEnhancement(provider.id)
-                                        }
-                                        variant="outline"
-                                        size="sm"
-                                    >
-                                        {i18n("Use for AI enhancements")}
-                                    </Button>
-                                )}
-                            {provider.isDefaultLearn === false &&
-                                !isTranscriptionOnlyProvider(
-                                    provider.provider,
-                                ) && (
-                                    <Button
-                                        onClick={() => onSetLearn(provider.id)}
-                                        variant="outline"
-                                        size="sm"
-                                        title={i18n(
-                                            "Learn runs on this provider and model instead of the AI enhancement one",
-                                        )}
-                                    >
-                                        {i18n("Use for Learn")}
-                                    </Button>
-                                )}
-                            {provider.isDefaultLearn === true && (
-                                <Button
-                                    onClick={() => onSetLearn(null)}
-                                    variant="outline"
-                                    size="sm"
-                                >
-                                    {i18n("Stop using for Learn")}
-                                </Button>
+                            {(provider.isDefaultTranscription ||
+                                provider.isDefaultEnhancement ||
+                                provider.isDefaultLearn) && (
+                                <div className="flex flex-wrap gap-1.5">
+                                    {roles}
+                                </div>
                             )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
+                            <Button
+                                onClick={() => onDuplicate(provider)}
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={i18n("Duplicate {name}", {
+                                    name: providerLabel(provider),
+                                })}
+                                title={i18n(
+                                    "Duplicate: another model on the same key",
+                                )}
+                            >
+                                <Copy className="size-4" />
+                            </Button>
                             <Button
                                 onClick={() => onEdit(provider)}
-                                variant="outline"
-                                size="icon"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={i18n("Edit {name}", {
+                                    name: providerLabel(provider),
+                                })}
+                                title={i18n("Edit")}
                             >
                                 <Pencil className="size-4" />
                             </Button>
                             <Button
                                 onClick={() => onDelete(provider.id)}
-                                variant="outline"
-                                size="icon"
-                                disabled={deletingId === provider.id}
+                                variant="ghost"
+                                size="icon-sm"
+                                disabled={deleting}
+                                aria-label={i18n("Delete {name}", {
+                                    name: providerLabel(provider),
+                                })}
+                                title={i18n("Delete")}
+                                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:text-destructive"
                             >
-                                {deletingId === provider.id ? (
+                                {deleting ? (
                                     <div className="animate-spin size-4 border-2 border-destructive border-t-transparent rounded-full" />
                                 ) : (
-                                    <Trash2 className="size-4 text-destructive" />
+                                    <Trash2 className="size-4" />
                                 )}
                             </Button>
                         </div>
-                    </div>
+                    </li>
                 );
             })}
-        </div>
+        </ul>
     );
 }

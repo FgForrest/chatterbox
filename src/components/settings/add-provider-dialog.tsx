@@ -51,6 +51,23 @@ export function AddProviderDialog({
     const [isDefaultEnhancement, setIsDefaultEnhancement] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
 
+    const resetForm = () => {
+        setProvider("");
+        setApiKey("");
+        setBaseUrl("");
+        setDefaultModel("");
+        setIsDefaultTranscription(false);
+        setIsDefaultEnhancement(false);
+    };
+
+    // Closing without saving -- Cancel, Esc, a click outside -- used to
+    // keep the form, so the next "Add Provider" opened with the last
+    // attempt's key still in it.
+    const handleOpenChange = (next: boolean) => {
+        if (!next) resetForm();
+        onOpenChange(next);
+    };
+
     const handleProviderChange = (value: string) => {
         setProvider(value);
         const preset = findPreset(value);
@@ -100,14 +117,7 @@ export function AddProviderDialog({
 
             toast.success(i18n("AI provider added successfully"));
             onSuccess();
-            onOpenChange(false);
-
-            setProvider("");
-            setApiKey("");
-            setBaseUrl("");
-            setDefaultModel("");
-            setIsDefaultTranscription(false);
-            setIsDefaultEnhancement(false);
+            handleOpenChange(false);
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -124,7 +134,7 @@ export function AddProviderDialog({
     const enhancementOnly = selectedPreset?.enhancementOnly === true;
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
                     <DialogTitle>{i18n("Add AI Provider")}</DialogTitle>
@@ -239,13 +249,15 @@ export function AddProviderDialog({
                         >
                             <input
                                 type="checkbox"
-                                checked={isDefaultEnhancement}
+                                checked={
+                                    isDefaultEnhancement && !transcriptionOnly
+                                }
                                 onChange={(e) =>
                                     setIsDefaultEnhancement(e.target.checked)
                                 }
                                 disabled={isLoading || transcriptionOnly}
                             />
-                            <span>{i18n("Use for AI enhancements")}</span>
+                            <span>{i18n("Use for summaries")}</span>
                         </label>
                         {transcriptionOnly && (
                             <p className="text-xs text-muted-foreground">
@@ -268,7 +280,7 @@ export function AddProviderDialog({
                     <div className="flex gap-2">
                         <MetalButton
                             type="button"
-                            onClick={() => onOpenChange(false)}
+                            onClick={() => handleOpenChange(false)}
                             disabled={isLoading}
                             className="flex-1"
                         >
