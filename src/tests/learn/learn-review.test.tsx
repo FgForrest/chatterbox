@@ -12,7 +12,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
 
 vi.mock("sonner", () => ({
-    toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
+    toast: {
+        error: vi.fn(),
+        success: vi.fn(),
+        warning: vi.fn(),
+        info: vi.fn(),
+    },
 }));
 
 const TURNS = [
@@ -67,10 +72,21 @@ const READY = {
     ],
 };
 
+/** Answers in turn, the last one from then on. */
+function inTurn(...bodies: unknown[]) {
+    return { inTurn: bodies };
+}
+
 function respond(routes: Record<string, unknown>) {
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
         const key = `${init?.method ?? "GET"} ${url}`;
-        const body = routes[key];
+        const route = routes[key] as { inTurn?: unknown[] } | undefined;
+        const body =
+            route?.inTurn !== undefined
+                ? route.inTurn.length > 1
+                    ? route.inTurn.shift()
+                    : route.inTurn[0]
+                : route;
         if (body === undefined) return new Response("{}", { status: 404 });
         return Response.json(body);
     });
@@ -550,5 +566,303 @@ describe("LearnReview", () => {
                 }) as HTMLInputElement
             ).disabled,
         ).toBe(false);
+    });
+
+    describe("once a run is over", () => {
+        const REVIEW = "GET /api/recordings/rec-1/review?source=riffado";
+        const LEARN = "POST /api/recordings/rec-1/learn?source=riffado";
+        const NONE = {
+            run: null,
+            items: [],
+            names: {},
+            types: {},
+            relations: {},
+            available: true,
+        };
+        const FINISHED = {
+            ...READY,
+            run: { id: "run-1", status: "finished", errorCode: null },
+            items: [
+                { ...READY.items[0], outcome: "applied" },
+                { ...READY.items[1], outcome: "speaker_not_named" },
+                {
+                    ...READY.items[1],
+                    id: "i-rejected",
+                    decision: "rejected",
+                    outcome: "rejected",
+                },
+            ],
+        };
+        const NOTHING = {
+            ...NONE,
+            run: { id: "run-1", status: "finished", errorCode: null },
+            known: { people: 3, things: 0 },
+        };
+
+        it("shows what the review did with each item, and offers Re-learn", async () => {
+            const fetch = respond({
+                [REVIEW]: FINISHED,
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            expect(screen.getByText(/"Tavesy" → Tavesi/)).toBeTruthy();
+            expect(screen.getByText("applied")).toBeTruthy();
+            expect(
+                screen.getByText("not applied: its speaker is not named yet"),
+            ).toBeTruthy();
+            expect(screen.getByText("rejected")).toBeTruthy();
+            // Read-only: the one checkbox is Re-learn's, not an item's.
+            expect(
+                screen
+                    .getAllByRole("checkbox")
+                    .map(
+                        (box) =>
+                            box.getAttribute("aria-label") ??
+                            box.closest("label")?.textContent,
+                    ),
+            ).toEqual([
+                "Re-learn: also propose again what I rejected on this recording",
+            ]);
+
+            fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/learn?source=riffado",
+                    { method: "POST" },
+                ),
+            );
+        });
+
+        it("says a run found nothing, and what it had to go on", async () => {
+            respond({ [REVIEW]: NOTHING });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Learned: nothing new",
+                }),
+            );
+            expect(
+                screen.getByText("Learn found nothing new in this transcript."),
+            ).toBeTruthy();
+            expect(
+                screen.getByText(/It knows 3 people and no things\./),
+            ).toBeTruthy();
+            expect(
+                screen
+                    .getByRole("link", { name: "Add people and things" })
+                    .getAttribute("href"),
+            ).toBe("/people");
+            expect(
+                screen.getByRole("button", { name: "Re-learn" }),
+            ).toBeTruthy();
+        });
+
+        it("says why a run failed, and offers Re-learn", async () => {
+            respond({
+                [REVIEW]: {
+                    ...NONE,
+                    run: {
+                        id: "run-1",
+                        status: "failed",
+                        errorCode: "AI_PROVIDER_API_ERROR",
+                    },
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn failed" }),
+            );
+            expect(
+                screen.getByText(
+                    /The provider's answer was not one Learn could use/,
+                ),
+            ).toBeTruthy();
+            expect(
+                screen.getByRole("button", { name: "Re-learn" }),
+            ).toBeTruthy();
+        });
+
+        it("still shows a finished review where Learn cannot run now, without Re-learn", async () => {
+            respond({ [REVIEW]: { ...FINISHED, available: false } });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            expect(
+                screen.queryByRole("button", { name: "Re-learn" }),
+            ).toBeNull();
+        });
+
+        it("shows a failed run where Learn cannot run now, without Re-learn", async () => {
+            respond({
+                [REVIEW]: {
+                    ...NONE,
+                    available: false,
+                    run: { id: "run-1", status: "failed", errorCode: null },
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn failed" }),
+            );
+            expect(
+                screen.getByText("Learn stopped on an error. Try again."),
+            ).toBeTruthy();
+            expect(
+                screen.queryByRole("button", { name: "Re-learn" }),
+            ).toBeNull();
+        });
+
+        it.each([
+            [
+                "every item rejected",
+                FINISHED.items.map((item) => ({
+                    ...item,
+                    decision: "rejected",
+                    outcome: "rejected",
+                })),
+                "Learned: nothing applied",
+            ],
+            [
+                "a review finished before outcomes were kept",
+                FINISHED.items.map((item) => ({ ...item, outcome: null })),
+                "Learned",
+            ],
+        ])("counts only what was applied: %s", async (_name, items, label) => {
+            respond({ [REVIEW]: { ...FINISHED, items } });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            expect(
+                await screen.findByRole("button", { name: label }),
+            ).toBeTruthy();
+        });
+
+        it("forgets the recording's rejections before Re-learn, when asked", async () => {
+            const fetch = respond({
+                [REVIEW]: FINISHED,
+                "DELETE /api/recordings/rec-1/review/dismissals": {
+                    forgotten: 1,
+                },
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Re-learn: also propose again what I rejected on this recording",
+                }),
+            );
+            fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/learn?source=riffado",
+                    { method: "POST" },
+                ),
+            );
+            const calls = fetch.mock.calls.map(
+                ([url, init]) => `${init?.method ?? "GET"} ${url}`,
+            );
+            expect(
+                calls.indexOf("DELETE /api/recordings/rec-1/review/dismissals"),
+            ).toBeLessThan(calls.indexOf(LEARN));
+            expect(
+                calls.indexOf("DELETE /api/recordings/rec-1/review/dismissals"),
+            ).toBeGreaterThan(-1);
+        });
+
+        it.each([
+            [
+                "suggestions to review",
+                { ...READY, run: { id: "run-2", status: "ready" } },
+                () =>
+                    expect(toast.success).toHaveBeenCalledWith(
+                        "Learn found 2 suggestions to review",
+                    ),
+                "Review (2)",
+            ],
+            [
+                "nothing new",
+                NOTHING,
+                () =>
+                    expect(toast.info).toHaveBeenCalledWith(
+                        "Learn found nothing new",
+                    ),
+                "Learned: nothing new",
+            ],
+            [
+                "a transcript changed meanwhile",
+                { ...NONE, run: { id: "run-2", status: "superseded" } },
+                () =>
+                    expect(toast.warning).toHaveBeenCalledWith(
+                        "The transcript changed while Learn ran. Run it again.",
+                    ),
+                "Learn",
+            ],
+        ])("tells how a run it started went: %s", async (_name, after, told, button) => {
+            respond({
+                [REVIEW]: inTurn(NONE, after),
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn" }),
+            );
+            await waitFor(told);
+            expect(
+                await screen.findByRole("button", { name: button }),
+            ).toBeTruthy();
+        });
     });
 });

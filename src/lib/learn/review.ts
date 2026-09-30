@@ -16,13 +16,15 @@
  * reported, not the whole review lost.
  */
 
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    knowledgeEntities,
     knowledgeFacts,
     learnDismissals,
     learnReviewItems,
     learnRuns,
+    people,
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
@@ -34,6 +36,7 @@ import { acceptCorrectionInTx } from "@/lib/knowledge/corrections";
 import { confirmFactFromRecordingInTx } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
+import { readableScopes } from "@/lib/knowledge/scope";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import {
     answerSpeakerInTx,
@@ -51,6 +54,7 @@ import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
+import { getOrgUserId } from "@/lib/org/config";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 
@@ -73,6 +77,8 @@ export interface ReviewItemView {
     choice: ReviewChoice | null;
     version: number;
     dependsOnLabel: string | null;
+    /** Once the review is finished: what became of it. */
+    outcome: ItemOutcome | null;
     payload: ReviewCandidate["payload"];
 }
 
@@ -82,8 +88,17 @@ export interface ReviewView {
         status: string;
         transcriptionId: string;
         createdAt: string;
+        finishedAt: string | null;
+        /** Why a failed run failed (`ErrorCode`). */
+        errorCode: string | null;
     } | null;
+    /** A ready run's items to decide, or a finished run's with outcomes. */
     items: ReviewItemView[];
+    /**
+     * A finished run that found nothing: how many people and things it
+     * could match what it heard against.
+     */
+    known?: { people: number; things: number };
     /** Names of the people and entities the items refer to, by id. */
     names: Record<string, string>;
     /** Their types (`person` for people), for "create as my relation". */
@@ -168,7 +183,11 @@ function idsIn(value: unknown, into: Set<string>): void {
     }
 }
 
-/** The latest run in the view and, when it is ready, what it proposed. */
+/**
+ * The latest run in the view and what it proposed: open for deciding when
+ * it is ready, with what became of each item once it is finished. A run
+ * that found nothing says how much it had to go on.
+ */
 export async function loadReview(
     access: RecordingViewContext,
     source?: ReviewSource,
@@ -184,8 +203,10 @@ export async function loadReview(
         status: run.status,
         transcriptionId: run.transcriptionId,
         createdAt: run.createdAt.toISOString(),
+        finishedAt: run.finishedAt?.toISOString() ?? null,
+        errorCode: run.errorCode,
     };
-    if (run.status !== "ready") {
+    if (run.status !== "ready" && run.status !== "finished") {
         return { run: summary, items: [], names: {}, types: {}, relations: {} };
     }
     const rows = await db
@@ -201,17 +222,28 @@ export async function loadReview(
         choice: row.choice ? decryptJsonField<ReviewChoice>(row.choice) : null,
         version: row.version,
         dependsOnLabel: row.dependsOnLabel,
+        outcome: (row.outcome as ItemOutcome | null) ?? null,
         payload: decryptJsonField<ReviewCandidate["payload"]>(
             row.payload,
         ) as ReviewCandidate["payload"],
     }));
-    const referenced = new Set<string>();
-    for (const item of items) idsIn([item.payload, item.choice], referenced);
+    if (items.length === 0) {
+        return {
+            run: summary,
+            items,
+            names: {},
+            types: {},
+            relations: {},
+            known: await knownCounts(run),
+        };
+    }
     const view = await knowledgeView({
         kind: "recording",
         ownerUserId: run.userId,
         shared: run.view === "org",
     });
+    const referenced = new Set<string>();
+    for (const item of items) idsIn([item.payload, item.choice], referenced);
     const names: Record<string, string> = {};
     const types: Record<string, string> = {};
     for (const item of view.items) {
@@ -227,6 +259,68 @@ export async function loadReview(
         relations[relation.key] = relation.label;
     }
     return { run: summary, items, names, types, relations };
+}
+
+/**
+ * How many people and things a run could match against: counted, not
+ * loaded, since an empty run is shown on every visit to its recording.
+ */
+async function knownCounts(run: {
+    userId: string;
+    view: "private" | "org";
+}): Promise<{ people: number; things: number }> {
+    const scopes = readableScopes(
+        {
+            kind: "recording",
+            ownerUserId: run.userId,
+            shared: run.view === "org",
+        },
+        await getOrgUserId(),
+    );
+    const [[person], [thing]] = await Promise.all([
+        db
+            .select({ n: count() })
+            .from(people)
+            .where(
+                and(
+                    inArray(people.userId, scopes),
+                    isNull(people.mergedIntoId),
+                ),
+            ),
+        db
+            .select({ n: count() })
+            .from(knowledgeEntities)
+            .where(
+                and(
+                    inArray(knowledgeEntities.userId, scopes),
+                    isNull(knowledgeEntities.mergedIntoId),
+                ),
+            ),
+    ]);
+    return { people: person?.n ?? 0, things: thing?.n ?? 0 };
+}
+
+/**
+ * Forget what was rejected on the recording in this view, so the next run
+ * may propose it again. Returns how many rejections were forgotten.
+ */
+export async function forgetDismissals(
+    access: RecordingViewContext,
+): Promise<number> {
+    const scopeUserId =
+        access.view === "org" && access.orgUserId
+            ? access.orgUserId
+            : access.ownerUserId;
+    const forgotten = await db
+        .delete(learnDismissals)
+        .where(
+            and(
+                eq(learnDismissals.userId, scopeUserId),
+                eq(learnDismissals.recordingId, access.recordingId),
+            ),
+        )
+        .returning({ id: learnDismissals.id });
+    return forgotten.length;
 }
 
 const MAX_ID_LENGTH = 64;
@@ -383,6 +477,9 @@ export type SkipCode =
     | "already_exists"
     | "changed"
     | "no_longer_fits";
+
+/** What finishing a review did with an item. */
+export type ItemOutcome = "applied" | "rejected" | SkipCode;
 
 export interface FinishedReview {
     status: "finished" | "superseded";
@@ -823,6 +920,27 @@ function finishInTx(
                     })),
                 )
                 .onConflictDoNothing();
+        }
+        // What became of each item, for the review to show once finished.
+        // Every ticked item was either applied or skipped with a code.
+        const skippedCode = new Map(
+            skipped.map((entry) => [entry.itemId, entry.code]),
+        );
+        const byOutcome = new Map<ItemOutcome, string[]>();
+        for (const item of items) {
+            const outcome: ItemOutcome = !item.accepted
+                ? "rejected"
+                : (skippedCode.get(item.id) ?? "applied");
+            byOutcome.set(outcome, [
+                ...(byOutcome.get(outcome) ?? []),
+                item.id,
+            ]);
+        }
+        for (const [outcome, ids] of byOutcome) {
+            await tx
+                .update(learnReviewItems)
+                .set({ outcome })
+                .where(inArray(learnReviewItems.id, ids));
         }
         await tx
             .update(learnRuns)

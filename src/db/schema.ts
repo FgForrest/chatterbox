@@ -1844,6 +1844,10 @@ export const learnReviewItems = pgTable(
         choice: jsonb("choice"),
         version: integer("version").notNull().default(0),
         dependsOnLabel: varchar("depends_on_label", { length: 64 }),
+        // What finishing the review did with it: applied, rejected, or why
+        // a ticked one was skipped (`SkipCode`). Null until then, and on
+        // reviews finished before it was kept.
+        outcome: varchar("outcome", { length: 32 }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -1858,7 +1862,7 @@ export const learnReviewItems = pgTable(
 );
 
 // What a person said no to on a recording, so the next run there does not
-// propose it again (a manual run still may). A keyed HMAC of the item's
+// propose it again, Re-learn included. A keyed HMAC of the item's
 // fingerprint, nothing readable.
 export const learnDismissals = pgTable(
     "learn_dismissals",
@@ -2167,8 +2171,8 @@ export const userSettings = pgTable("user_settings", {
     summaryPrompt: jsonb("summary_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // Topic detection: queued after a transcript with timings is written.
     autoDetectTopics: boolean("auto_detect_topics").notNull().default(false),
-    // Automatic Learn after a transcript with timings (offered where
-    // LEARN_AUTO is set); the title, summary and topics wait for its review.
+    // Automatic Learn after a transcript with timings (offered wherever
+    // Learn runs); the title, summary and topics wait for its review.
     autoLearn: boolean("auto_learn").notNull().default(false),
     topicPrompt: jsonb("topic_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // AI output language (applies to summaries, AI-generated titles and topics).

@@ -26,7 +26,8 @@
  * - a fact whose speaker a person already answered otherwise
  *   goes; at most `MAX_NEW_FACTS` new facts, and bounded corrections and
  *   phrases;
- * - what a person dismissed before goes, except on a manual run.
+ * - what a person dismissed before goes, on a run they asked for too
+ *   (Re-learn brings back only what is new).
  *
  * Two defaults (the design's fixed rule, never the model's confidence):
  * pre-ticked are a `correct` of a non-person a person confirmed before
@@ -93,7 +94,6 @@ export interface LearnRunFrame {
     turns: readonly TranscriptTurn[];
     language: string | null;
     provider: string | null;
-    manual: boolean;
     /** The people and entities in the run's scopes; a person's nicknames too. */
     people: ReadonlyMap<string, { name: string; aliases?: readonly string[] }>;
     entities: ReadonlyMap<string, { typeKey: string; name: string }>;
@@ -310,9 +310,7 @@ export function validateLearnOutput(
     const stored =
         frame.fingerprintKey ?? ((fingerprint: string) => fingerprint);
     const dismissed = (fingerprint: string) => {
-        if (frame.manual || !frame.dismissed.has(stored(fingerprint))) {
-            return false;
-        }
+        if (!frame.dismissed.has(stored(fingerprint))) return false;
         drop("dismissed");
         return true;
     };

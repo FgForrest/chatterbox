@@ -11,7 +11,10 @@ import { assertMayChange } from "@/lib/sharing/writer";
 
 type IdContext = { params: Promise<{ id: string }> };
 
-/** The latest Learn run in this view and, when ready, what it proposed. */
+/**
+ * The latest Learn run in this view and what it proposed: open when ready,
+ * with each item's outcome once finished, and why it failed when it did.
+ */
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { access, actorUserId } = await authorizeLearn(request, id);

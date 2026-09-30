@@ -582,6 +582,13 @@
       "when": 1790724223118,
       "tag": "0082_backfill_transcript_audio_md5",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1790791478764,
+      "tag": "0083_learn_item_outcome",
+      "breakpoints": true
     }
   ]
 }

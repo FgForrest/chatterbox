@@ -45,6 +45,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/review/route.ts": { GET: "view" },
     "recordings/[id]/review/items/[itemId]/route.ts": { PATCH: "view" },
     "recordings/[id]/review/finish/route.ts": { POST: "view" },
+    "recordings/[id]/review/dismissals/route.ts": { DELETE: "view" },
     // Corrections: read in either view; undone by whoever may change it.
     "recordings/[id]/corrections/route.ts": { GET: "view" },
     "recordings/[id]/corrections/[correctionId]/route.ts": { DELETE: "view" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { GraduationCap, Loader2 } from "lucide-react";
+import { AlertTriangle, GraduationCap, Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -8,6 +8,12 @@ import {
     type LearnMarks,
     learnMarksFrom,
 } from "@/components/learn/learn-marks";
+import {
+    LearnResults,
+    learnedCount,
+    useLearnFailure,
+    useSkipReason,
+} from "@/components/learn/learn-results";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { Button } from "@/components/ui/button";
@@ -38,13 +44,17 @@ interface ItemView {
     choice: Record<string, unknown> | null;
     version: number;
     dependsOnLabel: string | null;
+    /** Once the review is finished: what became of it. */
+    outcome?: string | null;
     // The shape follows the kind; read field by field below.
     payload: Record<string, unknown>;
 }
 
 interface ReviewState {
-    run: { id: string; status: string } | null;
+    run: { id: string; status: string; errorCode?: string | null } | null;
     items: ItemView[];
+    /** A finished run that found nothing: what it had to go on. */
+    known?: { people: number; things: number };
     names: Record<string, string>;
     types: Record<string, string>;
     relations: Record<string, string>;
@@ -59,7 +69,9 @@ const POLL_MS = 3_000;
  * defaults (pre-ticked: corrections a person confirmed before, known facts
  * mentioned again; everything else unticked). Drafts are kept on the server
  * as they are ticked; "Finish review" applies what is ticked and remembers
- * the rest. Only whoever may change the recording in the view sees it.
+ * the rest. Once a run is over the button shows how it went (learned,
+ * nothing new, failed) and opens what it did, with Re-learn. Only whoever
+ * may change the recording in the view sees it.
  */
 export function LearnReview({
     recordingId,
@@ -86,6 +98,8 @@ export function LearnReview({
     const i18n = useExtracted();
     const [state, setState] = useState<ReviewState | null>(null);
     const [open, setOpen] = useState(false);
+    // The last run's results, once it is over.
+    const [resultsOpen, setResultsOpen] = useState(false);
     const [running, setRunning] = useState(false);
     const [finishing, setFinishing] = useState(false);
     // The speaker item someone else is being picked for.
@@ -104,10 +118,12 @@ export function LearnReview({
         [recordingId, view, source],
     );
 
-    const load = useCallback(async () => {
+    const load = useCallback(async (): Promise<ReviewState | null> => {
         const response = await fetch(url("review"));
-        if (!response.ok) return;
-        setState((await response.json()) as ReviewState);
+        if (!response.ok) return null;
+        const next = (await response.json()) as ReviewState;
+        setState(next);
+        return next;
     }, [url]);
 
     useEffect(() => {
@@ -125,9 +141,32 @@ export function LearnReview({
         return () => clearInterval(timer);
     }, [learningElsewhere, load, pollMs]);
 
-    const learn = async () => {
+    const skipReason = useSkipReason();
+    const failure = useLearnFailure();
+
+    /** Start a run; `forget`: rejections on the recording go first. */
+    const learn = async (forget = false) => {
+        setResultsOpen(false);
         setRunning(true);
         try {
+            if (forget) {
+                const forgotten = await fetch(
+                    withRecordingView(
+                        `/api/recordings/${recordingId}/review/dismissals`,
+                        view,
+                    ),
+                    { method: "DELETE" },
+                );
+                if (!forgotten.ok) {
+                    toast.error(
+                        await getApiErrorMessage(
+                            forgotten,
+                            i18n("Could not forget the rejections"),
+                        ),
+                    );
+                    return;
+                }
+            }
             const response = await fetch(
                 withRecordingView(
                     `/api/recordings/${recordingId}/learn?source=${source}`,
@@ -144,13 +183,37 @@ export function LearnReview({
             const { jobId } = (await response.json()) as {
                 jobId: string | null;
             };
-            if (jobId) {
-                const job = await followJob(jobId, { pollMs: POLL_MS });
-                if (job?.status === "failed") {
-                    toast.error(job.error || i18n("Learn failed"));
-                }
+            const job = jobId
+                ? await followJob(jobId, { pollMs: POLL_MS })
+                : null;
+            const next = await load();
+            // How it went, so a run that found nothing is not mistaken for
+            // one that did not happen.
+            const status = next?.run?.status;
+            if (job?.status === "failed") {
+                toast.error(job.error || i18n("Learn failed"));
+            } else if (status === "failed") {
+                toast.error(failure(next?.run?.errorCode));
+            } else if (status === "ready") {
+                toast.success(
+                    i18n(
+                        "Learn found {count, plural, one {# suggestion} other {# suggestions}} to review",
+                        { count: next?.items.length ?? 0 },
+                    ),
+                );
+            } else if (status === "finished") {
+                toast.info(i18n("Learn found nothing new"));
+            } else if (status === "superseded") {
+                toast.warning(
+                    i18n(
+                        "The transcript changed while Learn ran. Run it again.",
+                    ),
+                );
+            } else if (status === "cancelled") {
+                toast.warning(
+                    i18n("Learn was stopped before it finished. Run it again."),
+                );
             }
-            await load();
         } finally {
             setRunning(false);
         }
@@ -300,25 +363,31 @@ export function LearnReview({
         }
     }
 
-    function skipReason(code: string | undefined): string {
-        switch (code) {
-            case "nobody_chosen":
-                return i18n("nobody was chosen");
-            case "answered_since":
-                return i18n("someone answered it since");
-            case "speaker_not_named":
-                return i18n("its speaker is not named yet");
-            case "known_elsewhere":
-                return i18n("it is known in another scope");
-            case "nothing_chosen":
-                return i18n("nothing was chosen for it");
-            case "already_exists":
-                return i18n("it exists already");
-            case "changed":
-                return i18n("it changed since Learn ran");
-            default:
-                return i18n("it no longer fits");
+    /** A finished item in a few words, with whom a speaker was named. */
+    function describeResult(item: ItemView): string {
+        const payload = item.payload as Record<string, unknown>;
+        if (item.kind === "speaker") {
+            const choice = item.choice;
+            const person =
+                choice && "unknown" in choice
+                    ? i18n("unknown")
+                    : choice && typeof choice.personId === "string"
+                      ? (state?.names[choice.personId] ?? "?")
+                      : choice && typeof choice.displayName === "string"
+                        ? choice.displayName
+                        : typeof payload.personId === "string"
+                          ? (state?.names[payload.personId] ?? "?")
+                          : "?";
+            return `${String(payload.label)} → ${person}`;
         }
+        if (item.kind === "correction") {
+            const replacement =
+                typeof payload.replacement === "string"
+                    ? payload.replacement
+                    : nameOf(payload.target as Side);
+            return `"${String(payload.heard)}" → ${replacement}`;
+        }
+        return describeItem(item);
     }
 
     const groups = useMemo(() => {
@@ -332,11 +401,18 @@ export function LearnReview({
         };
     }, [state]);
 
-    const ready = state?.run?.status === "ready";
-    if (!state?.available && !ready) return null;
-    const pending =
-        state?.run?.status === "queued" || state?.run?.status === "running";
+    const status = state?.run?.status;
+    const ready = status === "ready";
+    const finished = status === "finished";
+    const failed = status === "failed";
+    // Without Learn (no provider now) the last run's results still show;
+    // only starting one needs it.
+    if (!state?.available && !ready && !finished && !failed) return null;
     const count = state?.items.length ?? 0;
+    const learned = finished ? learnedCount(state?.items ?? []) : 0;
+    const pending = status === "queued" || status === "running";
+    const buttonClass =
+        "h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary";
 
     const seek = (ms: number, label?: string) => (
         <button
@@ -399,18 +475,43 @@ export function LearnReview({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
+                    className={buttonClass}
                     onClick={() => setOpen(true)}
                 >
                     <GraduationCap className="size-4" />
                     {i18n("Review ({count})", { count: String(count) })}
+                </Button>
+            ) : (finished || failed) && !running ? (
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className={buttonClass}
+                    onClick={() => setResultsOpen(true)}
+                >
+                    {failed ? (
+                        <AlertTriangle className="size-4 text-destructive" />
+                    ) : (
+                        <GraduationCap className="size-4" />
+                    )}
+                    {failed
+                        ? i18n("Learn failed")
+                        : count === 0
+                          ? i18n("Learned: nothing new")
+                          : learned === null
+                            ? i18n("Learned")
+                            : learned === 0
+                              ? i18n("Learned: nothing applied")
+                              : i18n("Learned ({count})", {
+                                    count: String(learned),
+                                })}
                 </Button>
             ) : (
                 <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
+                    className={buttonClass}
                     disabled={running || pending}
                     onClick={() => void learn()}
                 >
@@ -422,7 +523,9 @@ export function LearnReview({
                     {running || pending ? i18n("Learning…") : i18n("Learn")}
                 </Button>
             )}
-            <Dialog open={open} onOpenChange={setOpen}>
+            {/* Only a ready run is decided on; one finished meanwhile (in
+                another tab) shows its results instead. */}
+            <Dialog open={open && ready} onOpenChange={setOpen}>
                 <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>{i18n("Review")}</DialogTitle>
@@ -712,6 +815,22 @@ export function LearnReview({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            {(finished || failed) && (
+                <LearnResults
+                    open={resultsOpen}
+                    onOpenChange={setResultsOpen}
+                    status={failed ? "failed" : "finished"}
+                    errorCode={state?.run?.errorCode ?? null}
+                    items={state?.items ?? []}
+                    known={state?.known}
+                    describe={(item) => describeResult(item as ItemView)}
+                    onRelearn={
+                        state?.available
+                            ? (forget) => void learn(forget)
+                            : undefined
+                    }
+                />
+            )}
             {picking && (
                 <SpeakerPicker
                     label={(picking.payload as { label: string }).label}

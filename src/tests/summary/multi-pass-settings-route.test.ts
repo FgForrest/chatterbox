@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // demands DATABASE_URL. Out of scope for a route-shape test.
 // The route says whether automatic Learn is offered here.
 vi.mock("@/lib/knowledge/availability", () => ({
-    isAutoLearnOffered: () => false,
+    isAutoLearnOffered: async () => false,
 }));
 
 vi.mock("@/lib/posthog-server", () => ({

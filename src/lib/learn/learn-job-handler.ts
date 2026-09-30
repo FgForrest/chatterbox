@@ -515,7 +515,6 @@ async function frameFor(
         turns: transcript.turns,
         language: transcript.language,
         provider: transcript.provider,
-        manual: run.trigger === "manual",
         people,
         entities,
         relations: new Map(

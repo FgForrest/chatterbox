@@ -9,7 +9,7 @@ import { normalizeTopicPromptConfig } from "@/lib/topics/topic-presets";
 
 // The route says whether automatic Learn is offered here.
 vi.mock("@/lib/knowledge/availability", () => ({
-    isAutoLearnOffered: () => false,
+    isAutoLearnOffered: async () => false,
 }));
 
 vi.mock("@/lib/posthog-server", () => ({

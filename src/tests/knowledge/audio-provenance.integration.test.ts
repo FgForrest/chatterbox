@@ -55,7 +55,6 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         dbRef: ref,
         mockEnv: {
             IS_HOSTED: false,
-            LEARN_AUTO: true as boolean | undefined,
             SELF_HOST_MODE: "shared",
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: "organization-password",
