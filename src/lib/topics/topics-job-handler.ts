@@ -10,6 +10,7 @@ import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
+    admitRateLimitedAutoTopics,
     parseTopicsJobPayload,
     TOPICS_JOB_KIND,
     TOPICS_MAX_ATTEMPTS,
@@ -37,6 +38,7 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
         ) {
             return { skipped: "held" };
         }
+        if (payload.rateLimited) await admitRateLimitedAutoTopics(userId);
         let result: Awaited<ReturnType<typeof generateTopicsForTranscript>>;
         try {
             result = await generateTopicsForTranscript(

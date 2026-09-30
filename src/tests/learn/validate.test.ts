@@ -203,7 +203,10 @@ describe("validateLearnOutput", () => {
                     answeredLabels: new Map(),
                     people: new Map([
                         ["p-michal", { name: "Michal Bednář" }],
-                        ["p-vondra", { name: "Michal Vondra", aliases: ["Vonďa"] }],
+                        [
+                            "p-vondra",
+                            { name: "Michal Vondra", aliases: ["Vonďa"] },
+                        ],
                     ]),
                 }),
             );

@@ -57,6 +57,8 @@ export interface SummaryJobPayload {
     trigger: "manual" | "auto";
     /** Absent on the private view, which is every job queued before views existed. */
     view?: RecordingView;
+    /** Put off by the hourly cap: it passes the cap when it starts. */
+    rateLimited?: true;
 }
 
 /**
@@ -102,6 +104,7 @@ export function parseSummaryJobPayload(
         presetId: presetId ?? undefined,
         trigger,
         ...(raw.view === "org" ? { view: "org" as const } : {}),
+        ...(raw.rateLimited === true ? { rateLimited: true as const } : {}),
     };
 }
 
@@ -114,6 +117,8 @@ export interface EnqueueSummaryInput {
     view?: RecordingView;
     /** Not before this many ms from now (a rate limit's window). */
     delayMs?: number;
+    /** Put off by the hourly cap; it passes the cap when it starts. */
+    rateLimited?: boolean;
 }
 
 /**
@@ -128,6 +133,8 @@ export async function enqueueSummaryJob(
 ): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
         ...(input.delayMs ? { delayMs: input.delayMs } : {}),
+        // A click starts what a rate limit put off, not wait for it.
+        takeOverDelayed: input.trigger === "manual",
         userId: input.userId,
         kind: SUMMARY_JOB_KIND,
         subjectId: recordingJobSubject(
@@ -144,6 +151,7 @@ export async function enqueueSummaryJob(
             ...(input.presetId ? { presetId: input.presetId } : {}),
             trigger: input.trigger,
             ...(input.view === "org" ? { view: "org" } : {}),
+            ...(input.rateLimited ? { rateLimited: true } : {}),
         },
     });
     // Start it now rather than at the next sweep, when this process is the

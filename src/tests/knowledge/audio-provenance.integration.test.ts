@@ -216,7 +216,10 @@ describeWithDatabase("audio provenance on transcripts (PostgreSQL)", () => {
                 .update(recordings)
                 .set({ fileMd5: "b".repeat(32) })
                 .where(eq(recordings.id, REC));
-            await audioReplacedInTx(tx, REC, "b".repeat(32));
+            await audioReplacedInTx(tx, REC, {
+                from: "a".repeat(32),
+                to: "b".repeat(32),
+            });
         });
 
         expect(await speaker0()).toBe("suggested");
@@ -227,12 +230,50 @@ describeWithDatabase("audio provenance on transcripts (PostgreSQL)", () => {
         expect(transcript?.audioMd5).toBe("a".repeat(32));
     });
 
-    it("stamps the audio a transcription was made from, not what a sync put there meanwhile", async () => {
+    it("keeps the names confirmed after a trim when a later sync brings the same audio", async () => {
+        const trimmed = { from: "a".repeat(32), to: "b".repeat(32) };
+        await db().transaction((tx) => audioReplacedInTx(tx, REC, trimmed));
+        // The person confirms the speaker again on the kept transcript.
+        await db()
+            .update(transcriptSpeakers)
+            .set({ status: "confirmed" })
+            .where(eq(transcriptSpeakers.label, "speaker_0"));
+
+        // Renamed in the Plaud app: a new version, the same audio.
+        const renamed = { from: "b".repeat(32), to: "b".repeat(32) };
+        await db().transaction((tx) => audioReplacedInTx(tx, REC, renamed));
+
+        expect(await speaker0()).toBe("confirmed");
+    });
+
+    it("does not claim to know the audio when a sync replaced it while transcribing", async () => {
         await db()
             .update(recordings)
             .set({ fileMd5: "b".repeat(32) })
             .where(eq(recordings.id, REC));
         // Began on audio "a"; the trim landed before it finished.
+        await upsertTranscription({
+            userId: OWNER,
+            recordingId: REC,
+            text: "Ahoj. Čau.",
+            detectedLanguage: "cs",
+            source: "plaud",
+            provider: "plaud",
+            model: "plaud",
+            turns: TURNS,
+            audioMd5: "a".repeat(32),
+        });
+
+        // Made from "a" or from "b": nobody can say, so neither is claimed
+        // and the names are offered again rather than kept.
+        expect(await speaker0()).toBe("suggested");
+        const [transcript] = await db()
+            .select({ audioMd5: transcriptions.audioMd5 })
+            .from(transcriptions);
+        expect(transcript?.audioMd5).toBeNull();
+    });
+
+    it("stamps the audio a transcription began on when it is still there", async () => {
         await upsertTranscription({
             userId: OWNER,
             recordingId: REC,

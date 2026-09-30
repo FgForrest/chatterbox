@@ -24,7 +24,7 @@
  * Learn off, nothing here runs: the title follows the transcription.
  */
 
-import { and, eq, isNotNull, isNull, lte, notExists } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, lte, notExists, or } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
 import {
@@ -281,16 +281,34 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
 /**
  * Release the holds whose time is up, and those nothing holds any more (a
  * run whose job died is settled first: its hold would otherwise wait out
- * the 72 h), a batch at a time.
+ * the 72 h), a batch at a time. Only those: holds still waiting for their
+ * review are never read, so however many there are, none of them keeps a
+ * releasable one out of the batch.
  */
 export async function sweepAutoLearnHolds(
     now = new Date(),
     limit = 500,
 ): Promise<number> {
+    // Open as `learnRunOpen` says: a run whose job died holds nothing.
+    const open = db
+        .select({ id: learnRuns.id })
+        .from(learnRuns)
+        .where(
+            and(
+                eq(learnRuns.recordingId, recordings.id),
+                eq(learnRuns.view, "private"),
+                learnRunOpen(),
+            ),
+        );
     const held = await db
         .select({ id: recordings.id, dueAt: recordings.summaryDueAt })
         .from(recordings)
-        .where(isNotNull(recordings.summaryDueAt))
+        .where(
+            and(
+                isNotNull(recordings.summaryDueAt),
+                or(lte(recordings.summaryDueAt, now), notExists(open)),
+            ),
+        )
         .orderBy(recordings.summaryDueAt)
         .limit(limit);
     let released = 0;

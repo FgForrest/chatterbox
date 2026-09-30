@@ -64,7 +64,10 @@ import {
     buryExhaustedStaleJobs,
     claimDueJobs,
     completeJob,
+    countDelayedAutoJobs,
     countPendingJobs,
+    deferJob,
+    delayBehindBacklog,
     enqueueJob,
     failJobAttempt,
     getActiveJob,
@@ -210,6 +213,121 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
         it("holds a delayed job back from the queue", async () => {
             await queue({ delayMs: 60_000 });
             expect(await claimDueJobs("summary", 5)).toHaveLength(0);
+        });
+
+        it("lets a click take over an automatic job a rate limit put off", async () => {
+            const delayed = await queue({
+                delayMs: 55 * 60_000,
+                priority: 1,
+                payload: { recordingId: "rec-1", trigger: "auto" },
+            });
+
+            const clicked = await queue({
+                takeOverDelayed: true,
+                priority: 10,
+                payload: { recordingId: "rec-1", trigger: "manual" },
+            });
+
+            expect(clicked.created).toBe(true);
+            expect(clicked.job.id).toBe(delayed.job.id);
+            expect(clicked.job.priority).toBe(10);
+            expect(clicked.job.payload).toEqual({
+                recordingId: "rec-1",
+                trigger: "manual",
+            });
+            const [claimed] = await claimDueJobs("summary", 5);
+            expect(claimed?.id).toBe(delayed.job.id);
+        });
+
+        it("joins a job that is due without taking it over", async () => {
+            const due = await queue({
+                payload: { recordingId: "rec-1", trigger: "auto" },
+            });
+
+            const clicked = await queue({ takeOverDelayed: true });
+
+            expect(clicked.created).toBe(false);
+            expect(clicked.job.id).toBe(due.job.id);
+            expect(clicked.job.payload).toEqual({
+                recordingId: "rec-1",
+                trigger: "auto",
+            });
+        });
+
+        it("counts the automatic jobs a user has waiting to start", async () => {
+            await queue({
+                subjectId: "rec-1",
+                delayMs: 60_000,
+                payload: { trigger: "auto" },
+            });
+            await queue({
+                subjectId: "rec-2",
+                delayMs: 60_000,
+                payload: { trigger: "auto" },
+            });
+            await queue({ subjectId: "rec-3", payload: { trigger: "auto" } });
+            await queue({
+                subjectId: "rec-4",
+                delayMs: 60_000,
+                payload: { trigger: "manual" },
+            });
+
+            expect(await countDelayedAutoJobs(USER, "summary")).toBe(2);
+            expect(await countDelayedAutoJobs(USER, "topics")).toBe(0);
+        });
+    });
+
+    describe("deferJob", () => {
+        it("puts a claimed job back for later without counting the attempt", async () => {
+            await queue();
+            const [claimed] = await claimDueJobs("summary", 1);
+            expect(claimed?.attempts).toBe(1);
+
+            expect(
+                await deferJob({
+                    jobId: claimed?.id ?? "",
+                    claimToken: claimed?.claimToken ?? "",
+                    delayMs: 60_000,
+                }),
+            ).toBe(true);
+
+            if (!database) throw new Error("no database");
+            const [row] = await database.db
+                .select()
+                .from(asyncJobs)
+                .where(eq(asyncJobs.id, claimed?.id ?? ""));
+            expect(row?.status).toBe("pending");
+            expect(row?.attempts).toBe(0);
+            expect(row?.claimToken).toBeNull();
+            expect(await claimDueJobs("summary", 1)).toHaveLength(0);
+        });
+
+        it("writes nothing for a claim it no longer holds", async () => {
+            await queue();
+            const [claimed] = await claimDueJobs("summary", 1);
+
+            expect(
+                await deferJob({
+                    jobId: claimed?.id ?? "",
+                    claimToken: "someone-else",
+                    delayMs: 60_000,
+                }),
+            ).toBe(false);
+        });
+    });
+
+    describe("delayBehindBacklog", () => {
+        it("puts a backlog off one window per limit's worth", () => {
+            const resetAt = new Date(Date.now() + 10 * 60_000);
+            const windowMs = 60 * 60_000;
+            const at = (backlog: number) =>
+                delayBehindBacklog({ resetAt, backlog, limit: 3, windowMs });
+
+            expect(at(0)).toBeGreaterThan(9 * 60_000);
+            expect(at(0)).toBeLessThanOrEqual(10 * 60_000);
+            expect(at(2) - at(0)).toBeLessThan(1_000);
+            expect(at(3) - at(0)).toBeGreaterThanOrEqual(windowMs - 1_000);
+            expect(at(7) - at(0)).toBeGreaterThanOrEqual(2 * windowMs - 1_000);
         });
     });
 

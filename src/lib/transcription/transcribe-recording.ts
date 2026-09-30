@@ -226,6 +226,7 @@ export async function storeBrowserTranscription(
                         text,
                         turns: null,
                     }),
+                    audioMd5: null,
                 });
             } else {
                 await tx.insert(transcriptions).values({
@@ -242,11 +243,13 @@ export async function storeBrowserTranscription(
                     topicsInputFingerprint: null,
                     producedByUserId: userId,
                 });
-                // Which audio it was made from, for a later rewrite.
+                // Which audio the browser fetched is not known here; it
+                // has no turns, so no speaker rests on it.
                 await stampNewTranscriptAudioInTx(tx, {
                     recordingId,
                     userId,
                     source: "riffado",
+                    audioMd5: null,
                 });
             }
 

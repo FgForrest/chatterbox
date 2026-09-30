@@ -122,6 +122,8 @@ interface ImportCandidate {
     durationMs: number;
     transcriptSuppressed: boolean;
     summarySuppressed: boolean;
+    /** The audio Plaud listed with it, which its transcript is made from. */
+    audioMd5: string | null;
 }
 
 async function storagePathHeldByOtherRecording(
@@ -199,6 +201,7 @@ function buildImportCandidate(
         durationMs: plaudRecording.duration,
         transcriptSuppressed: suppression?.transcriptReapedAt != null,
         summarySuppressed: suppression?.summaryReapedAt != null,
+        audioMd5: plaudRecording.file_md5 ?? null,
     };
 }
 
@@ -528,6 +531,7 @@ async function processRecording(
                         deletedAt: recordings.deletedAt,
                         titleEditedAt: recordings.titleEditedAt,
                         filename: recordings.filename,
+                        fileMd5: recordings.fileMd5,
                     })
                     .from(recordings)
                     .where(
@@ -578,11 +582,10 @@ async function processRecording(
                         ),
                     );
                 // The transcripts it keeps were made from the old audio.
-                await audioReplacedInTx(
-                    tx,
-                    existingRecording.id,
-                    plaudRecording.file_md5,
-                );
+                await audioReplacedInTx(tx, existingRecording.id, {
+                    from: locked.fileMd5,
+                    to: plaudRecording.file_md5,
+                });
                 return true;
             });
 
@@ -1208,6 +1211,7 @@ async function importPlaudContent(
                         provider: "plaud",
                         model: "plaud-native",
                         turns,
+                        audioMd5: candidate.audioMd5,
                     });
                     if (committed) {
                         if (turns) {

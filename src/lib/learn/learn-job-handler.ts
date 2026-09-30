@@ -326,24 +326,31 @@ async function fenceOf(
     ]);
 }
 
-/** Everything the validation needs to know of the run's scopes, frozen now. */
-/** A heard form and the name its correction wrote, as compared. */
+/**
+ * A heard form and the name its correction wrote, as compared: in its own
+ * language and transcription provider, as a heard form is kept.
+ */
 function heardFormKey(
     target: { personId: string } | { entityId: string },
     heard: string,
     wrote: string,
+    language: string | null,
+    provider: string | null,
 ): string {
     const fold = (text: string) => text.trim().normalize("NFC").toLowerCase();
     return JSON.stringify([
         "personId" in target ? target.personId : target.entityId,
         fold(heard),
         fold(wrote),
+        language ?? "",
+        provider ?? "",
     ]);
 }
 
 /**
  * The heard forms in the run's scopes whose correction wrote the record's
- * name exactly (`heardFormKey` of heard, target and what it wrote).
+ * name exactly (`heardFormKey` of heard, target, what it wrote, language
+ * and provider).
  */
 async function heardFormsWritingName(
     run: RunRow,
@@ -358,6 +365,8 @@ async function heardFormsWritingName(
             text: knowledgeAliases.text,
             personId: knowledgeAliases.personId,
             entityId: knowledgeAliases.entityId,
+            language: knowledgeAliases.language,
+            provider: knowledgeAliases.provider,
             replacement: transcriptCorrections.replacement,
         })
         .from(knowledgeAliases)
@@ -382,12 +391,15 @@ async function heardFormsWritingName(
                 target,
                 decryptText(row.text),
                 decryptText(row.replacement),
+                row.language,
+                row.provider,
             ),
         );
     }
     return found;
 }
 
+/** Everything the validation needs to know of the run's scopes, frozen now. */
 async function frameFor(
     run: RunRow,
     transcript: {
@@ -446,7 +458,15 @@ async function frameFor(
         for (const name of item.names) {
             if (name.kind !== "heard_as") continue;
             if (
-                !wroteName.has(heardFormKey(name.target, name.text, item.name))
+                !wroteName.has(
+                    heardFormKey(
+                        name.target,
+                        name.text,
+                        item.name,
+                        name.language,
+                        name.provider,
+                    ),
+                )
             ) {
                 continue;
             }

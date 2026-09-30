@@ -1,7 +1,36 @@
+import {
+    countDelayedAutoJobs,
+    delayBehindBacklog,
+} from "@/db/queries/async-jobs";
 import { env } from "@/lib/env";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import { enqueueSummaryJob } from "@/lib/summary/summary-job";
+import { enqueueSummaryJob, SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { emitEvent } from "@/lib/webhooks/emit";
+
+/**
+ * An automatic summary the hourly cap put off, about to start: it counts
+ * against the cap now, and while the cap is still full it waits for the
+ * next window (`JobDeferredError`), so a released backlog never runs past
+ * the cap.
+ */
+export async function admitRateLimitedAutoSummary(
+    userId: string,
+): Promise<void> {
+    const rateLimit = await consumeRateLimitBucket(
+        `auto-summary:user:${userId}`,
+        {
+            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+            windowMs: 60 * 60 * 1000,
+        },
+    );
+    if (!rateLimit.allowed) {
+        throw new JobDeferredError(
+            Math.max(1_000, rateLimit.resetAt.getTime() - Date.now()),
+            "The hourly cap on automatic summaries is still full",
+        );
+    }
+}
 
 /**
  * Queue the automatic summary of a recording, as auto-summarize asks after
@@ -21,12 +50,13 @@ export async function queueAutoSummary(
     // toggles auto-summarize on with an expensive model. The manual
     // "Generate summary" button is not throttled -- the user is in the
     // loop there.
+    const window = {
+        limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+        windowMs: 60 * 60 * 1000,
+    };
     const rateLimit = await consumeRateLimitBucket(
         `auto-summary:user:${userId}`,
-        {
-            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-            windowMs: 60 * 60 * 1000,
-        },
+        window,
     );
 
     if (!rateLimit.allowed && strict) {
@@ -37,7 +67,12 @@ export async function queueAutoSummary(
             recordingId,
             presetId: presetId ?? undefined,
             trigger: "auto",
-            delayMs: Math.max(0, rateLimit.resetAt.getTime() - Date.now()),
+            rateLimited: true,
+            delayMs: delayBehindBacklog({
+                ...window,
+                resetAt: rateLimit.resetAt,
+                backlog: await countDelayedAutoJobs(userId, SUMMARY_JOB_KIND),
+            }),
         });
         return;
     }

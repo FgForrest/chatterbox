@@ -189,15 +189,28 @@ function execCli(
             reject(new BridgeError(499, "the client closed the request"));
             return;
         }
+        // Its own process group: npm's `codex` is a Node wrapper around the
+        // real binary and cannot pass a SIGKILL on, so killing the wrapper
+        // alone would leave the binary running, holding the slot and
+        // spending the subscription. Killing the group stops both.
         const child = spawn(bin, args, {
             cwd: WORKDIR,
             env: { ...process.env, ...extraEnv },
             stdio: ["pipe", "pipe", "pipe"],
+            detached: true,
         });
+        const killAll = () => {
+            try {
+                process.kill(-child.pid, "SIGKILL");
+            } catch {
+                // Already gone, or never started (the "error" event says so).
+                child.kill("SIGKILL");
+            }
+        };
         let abandoned = false;
         const onAbort = () => {
             abandoned = true;
-            child.kill("SIGKILL");
+            killAll();
         };
         signal?.addEventListener("abort", onAbort, { once: true });
 
@@ -207,7 +220,7 @@ function execCli(
 
         const timer = setTimeout(() => {
             timedOut = true;
-            child.kill("SIGKILL");
+            killAll();
             reject(
                 new BridgeError(
                     504,

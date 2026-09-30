@@ -22,6 +22,7 @@ import {
 import {
     apiCredentials,
     asyncJobs,
+    knowledgeAliases,
     learnDismissals,
     learnReviewItems,
     learnRuns,
@@ -1051,6 +1052,82 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             // Accepted in another form: nothing learned about the name.
             await confirm("Tavesiho");
             expect(await proposeSecond()).toEqual([false]);
+        });
+
+        it("does not pre-tick on an acceptance in another provider's transcripts", async () => {
+            const tavesi = (
+                await createEntity(OWNER, {
+                    typeKey: "organization",
+                    name: "Tavesi",
+                })
+            ).id;
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Máme tu Tavesy a Tavesy a Tavesy zase.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            const confirm = (charStart: number, replacement: string) =>
+                acceptCorrection({
+                    userId: OWNER,
+                    transcriptionId: transcriptId,
+                    revision: 0,
+                    actorUserId: OWNER,
+                    orgUserId,
+                    anchor: {
+                        turnIndex: 0,
+                        charStart,
+                        charEnd: charStart + 6,
+                        heard: "Tavesy",
+                    },
+                    kind: "correct",
+                    target: { entityId: tavesi },
+                    replacement,
+                });
+            // Word for word, but as another provider hears it.
+            await confirm(8, "Tavesi");
+            await db()
+                .update(knowledgeAliases)
+                .set({ provider: "another-provider" })
+                .where(eq(knowledgeAliases.kind, "heard_as"));
+            // In this transcript's own provider, only in another form.
+            await confirm(17, "Tavesiho");
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [{ text: "Tavesy", turn: 0 }] });
+            reply({
+                speakers: [],
+                corrections: [
+                    {
+                        turnIndex: 0,
+                        charStart: 26,
+                        charEnd: 32,
+                        heard: "Tavesy",
+                        kind: "correct",
+                        target: { entityId: tavesi },
+                        replacement: "Tavesi",
+                    },
+                ],
+                facts: [],
+                relationPhrases: [],
+            });
+            await runJob(runId);
+            expect(
+                (
+                    await db()
+                        .select({ preTicked: learnReviewItems.preTicked })
+                        .from(learnReviewItems)
+                        .where(eq(learnReviewItems.runId, runId))
+                ).map((item) => item.preTicked),
+            ).toEqual([false]);
         });
 
         it("pre-ticks the same rewrite the person accepted before", async () => {

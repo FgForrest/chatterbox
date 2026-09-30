@@ -6,10 +6,16 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
+import {
+    countDelayedAutoJobs,
+    delayBehindBacklog,
+    type EnqueueJobResult,
+    enqueueJob,
+} from "@/db/queries/async-jobs";
 import { userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
@@ -32,6 +38,8 @@ export interface TopicsJobPayload {
     trigger: "manual" | "auto";
     /** Absent on the private view, which is every job queued before views. */
     view?: RecordingView;
+    /** Put off by the hourly cap: it passes the cap when it starts. */
+    rateLimited?: true;
 }
 
 export function parseTopicsJobPayload(
@@ -65,6 +73,7 @@ export function parseTopicsJobPayload(
         source: raw.source,
         trigger: raw.trigger === "manual" ? "manual" : "auto",
         ...(raw.view === "org" ? { view: "org" as const } : {}),
+        ...(raw.rateLimited === true ? { rateLimited: true as const } : {}),
     };
 }
 
@@ -86,9 +95,13 @@ export async function enqueueTopicsJob(input: {
     view?: RecordingView;
     /** Not before this many ms from now (a rate limit's window). */
     delayMs?: number;
+    /** Put off by the hourly cap; it passes the cap when it starts. */
+    rateLimited?: boolean;
 }): Promise<EnqueueJobResult> {
     const enqueued = await enqueueJob({
         ...(input.delayMs ? { delayMs: input.delayMs } : {}),
+        // A click starts what a rate limit put off, not wait for it.
+        takeOverDelayed: input.trigger === "manual",
         userId: input.userId,
         kind: TOPICS_JOB_KIND,
         subjectId: recordingJobSubject(
@@ -105,10 +118,33 @@ export async function enqueueTopicsJob(input: {
             source: input.source,
             trigger: input.trigger,
             ...(input.view === "org" ? { view: "org" } : {}),
+            ...(input.rateLimited ? { rateLimited: true } : {}),
         },
     });
     if (enqueued.created) nudge();
     return enqueued;
+}
+
+/**
+ * Automatic topics the hourly cap put off, about to start: they count
+ * against the cap now, or wait for the next window (`JobDeferredError`).
+ */
+export async function admitRateLimitedAutoTopics(
+    userId: string,
+): Promise<void> {
+    const rateLimit = await consumeRateLimitBucket(
+        `auto-topics:user:${userId}`,
+        {
+            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+            windowMs: 60 * 60 * 1000,
+        },
+    );
+    if (!rateLimit.allowed) {
+        throw new JobDeferredError(
+            Math.max(1_000, rateLimit.resetAt.getTime() - Date.now()),
+            "The hourly cap on automatic topics is still full",
+        );
+    }
 }
 
 /**
@@ -133,12 +169,13 @@ export async function queueAutoTopics(
 
         // Same ceiling as auto-summary, in its own bucket: a sync replaying
         // many recordings must not run up a provider bill unattended.
+        const window = {
+            limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+            windowMs: 60 * 60 * 1000,
+        };
         const rateLimit = await consumeRateLimitBucket(
             `auto-topics:user:${userId}`,
-            {
-                limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-                windowMs: 60 * 60 * 1000,
-            },
+            window,
         );
         if (!rateLimit.allowed) {
             // Strict (what was held for Learn): queued for when the window
@@ -149,10 +186,15 @@ export async function queueAutoTopics(
                     recordingId,
                     source,
                     trigger: "auto",
-                    delayMs: Math.max(
-                        0,
-                        rateLimit.resetAt.getTime() - Date.now(),
-                    ),
+                    rateLimited: true,
+                    delayMs: delayBehindBacklog({
+                        ...window,
+                        resetAt: rateLimit.resetAt,
+                        backlog: await countDelayedAutoJobs(
+                            userId,
+                            TOPICS_JOB_KIND,
+                        ),
+                    }),
                 });
                 return;
             }

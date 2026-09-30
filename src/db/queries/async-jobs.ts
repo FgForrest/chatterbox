@@ -87,6 +87,13 @@ export interface EnqueueJobInput {
     maxAttempts?: number;
     /** Delay before the job first becomes claimable. */
     delayMs?: number;
+    /**
+     * A job of this kind and subject queued to start later (an automatic
+     * one a rate limit put off) is taken over by this one: it starts now,
+     * as this caller asks. A person clicking does not wait for the window
+     * a background job was waiting for.
+     */
+    takeOverDelayed?: boolean;
 }
 
 export interface EnqueueJobResult {
@@ -166,11 +173,69 @@ export async function enqueueJob(
         if (row) return { job: row as AsyncJobRow, created: true };
         // Only a subject can conflict: NULLs are distinct in the index.
         if (!input.subjectId) break;
+        if (input.takeOverDelayed) {
+            const [taken] = await db
+                .update(asyncJobs)
+                .set({ ...values, nextAttemptAt: new Date() })
+                .where(
+                    and(
+                        eq(asyncJobs.kind, input.kind),
+                        eq(asyncJobs.subjectId, input.subjectId),
+                        eq(asyncJobs.status, "pending"),
+                        eq(asyncJobs.attempts, 0),
+                        sql`${asyncJobs.nextAttemptAt} > now()`,
+                    ),
+                )
+                .returning();
+            if (taken) return { job: taken as AsyncJobRow, created: true };
+        }
         const active = await getActiveJob(input.kind, input.subjectId);
         if (active) return { job: active, created: false };
     }
     throw new Error(
         `Could not queue a ${input.kind} job for ${input.subjectId ?? "no subject"}`,
+    );
+}
+
+/**
+ * How many automatic jobs of a kind a user has queued to start later: the
+ * backlog a rate limit put off, which the next ones queue behind.
+ */
+export async function countDelayedAutoJobs(
+    userId: string,
+    kind: string,
+): Promise<number> {
+    const [row] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.userId, userId),
+                eq(asyncJobs.kind, kind),
+                eq(asyncJobs.status, "pending"),
+                sql`${asyncJobs.nextAttemptAt} > now()`,
+                sql`${asyncJobs.payload}->>'trigger' = 'auto'`,
+            ),
+        );
+    return row?.count ?? 0;
+}
+
+/**
+ * When a rate-limited automatic job may start: when the window opens again,
+ * behind the backlog already waiting, `limit` of it per window. The jobs
+ * themselves do not count against the cap, so without the spread a
+ * released backlog would all start together at the window's edge.
+ */
+export function delayBehindBacklog(input: {
+    resetAt: Date;
+    backlog: number;
+    limit: number;
+    windowMs: number;
+}): number {
+    const windows = Math.floor(input.backlog / Math.max(1, input.limit));
+    return (
+        Math.max(0, input.resetAt.getTime() - Date.now()) +
+        windows * input.windowMs
     );
 }
 
@@ -503,6 +568,31 @@ export async function releaseClaimedJobs(
         returning id
     `);
     return rowsOf<{ id: string }>(result).length;
+}
+
+/**
+ * Put a claimed job back to start again after `delayMs`, its attempt not
+ * counted: it did not fail, it was not time yet (`JobDeferredError`).
+ */
+export async function deferJob(input: {
+    jobId: string;
+    claimToken: string;
+    delayMs: number;
+}): Promise<boolean> {
+    const result = await db.execute(sql`
+        update ${asyncJobs}
+        set status = 'pending',
+            claim_token = null,
+            started_at = null,
+            next_attempt_at = now() + make_interval(secs => ${input.delayMs / 1000}::double precision),
+            attempts = greatest(attempts - 1, 0),
+            updated_at = now()
+        where id = ${input.jobId}
+          and claim_token = ${input.claimToken}
+          and status = 'processing'
+        returning id
+    `);
+    return rowsOf<{ id: string }>(result).length > 0;
 }
 
 /**

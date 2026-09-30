@@ -75,6 +75,27 @@ const ENDINGS = new Set([
     "ete",
     "eti",
 ]);
+/**
+ * Endings only an adjective takes ("Dubových stolů", "Zeleného"). A word
+ * starting a sentence is written with a capital whatever it is, so there a
+ * capital with one of these is no sign of a surname.
+ */
+const ADJECTIVAL = new Set([
+    "ym",
+    "ymi",
+    "ych",
+    "eho",
+    "emu",
+    "yho",
+    "ymu",
+    "iho",
+    "imu",
+    "ich",
+    "imi",
+    "ovym",
+    "ovych",
+    "ovymi",
+]);
 const VOWELS = /[aeiouy]+$/;
 const DROPPED_E = /^(.*[^aeiouy])e([^aeiouy])$/;
 /** Consonants that change before an ending: "Procházka" → "Procházce". */
@@ -94,16 +115,31 @@ export function nameWords(text: string): string[] {
         .filter(Boolean);
 }
 
-/** A transcript's words, as `nameWords` gives them, each with its capital. */
-export function nameTokens(text: string): { word: string; capital: boolean }[] {
-    return text
-        .split(/[^\p{L}\p{N}\p{M}]+/u)
-        .filter(Boolean)
-        .map((raw) => ({
-            word: nameWords(raw).join(""),
-            capital: /^\p{Lu}/u.test(raw),
-        }))
-        .filter((token) => token.word);
+export interface NameToken {
+    word: string;
+    capital: boolean;
+    /** The first word of a sentence, capitalized whatever it is. */
+    initial: boolean;
+}
+
+/**
+ * A transcript's words, as `nameWords` gives them, each with its capital
+ * and whether it starts a sentence.
+ */
+export function nameTokens(text: string): NameToken[] {
+    const tokens: NameToken[] = [];
+    let initial = true;
+    for (const [raw] of text.matchAll(/[\p{L}\p{N}\p{M}]+|[.!?…]/gu)) {
+        if (/^[.!?…]$/u.test(raw)) {
+            initial = true;
+            continue;
+        }
+        const word = nameWords(raw).join("");
+        if (!word) continue;
+        tokens.push({ word, capital: /^\p{Lu}/u.test(raw), initial });
+        initial = false;
+    }
+    return tokens;
 }
 
 /** A name's own words: no titles, no initials. */
@@ -128,12 +164,19 @@ function stems(part: string): string[] {
     return [...found].filter((stem) => stem.length >= 3);
 }
 
+/** The ending a transcript word puts after `part`'s stem, if it is `part`. */
+function endingOf(word: string, part: string): string | null {
+    if (word === part) return "";
+    for (const stem of stems(part)) {
+        const ending = word.slice(stem.length);
+        if (word.startsWith(stem) && ENDINGS.has(ending)) return ending;
+    }
+    return null;
+}
+
 /** Whether a transcript word is `part` (one word of a name), inflected. */
 export function isNameWord(word: string, part: string): boolean {
-    if (word === part) return true;
-    return stems(part).some(
-        (stem) => word.startsWith(stem) && ENDINGS.has(word.slice(stem.length)),
-    );
+    return endingOf(word, part) !== null;
 }
 
 /**
@@ -194,22 +237,21 @@ export function heardIsFirstNameOnly(
 /**
  * Whether more than a first name backs naming this person in these words
  * (`nameTokens` of a transcript): their surname (any word of the name
- * after the first, written with a capital) or a nickname of theirs is
- * among them. A one-word name is a first name alone unless a nickname is
- * heard.
+ * after the first, written with a capital, and not merely an adjective
+ * starting a sentence) or a nickname of theirs is among them. A one-word
+ * name is a first name alone unless a nickname is heard.
  */
 export function moreThanFirstName(
-    tokens: readonly { word: string; capital: boolean }[],
+    tokens: readonly NameToken[],
     person: { name: string; aliases?: readonly string[] },
 ): boolean {
     const rest = nameParts(person.name).slice(1);
-    if (
-        rest.some((part) =>
-            tokens.some(
-                (token) => token.capital && isNameWord(token.word, part),
-            ),
-        )
-    ) {
+    const surname = (token: NameToken, part: string) => {
+        if (!token.capital) return false;
+        const ending = endingOf(token.word, part);
+        return ending !== null && !(token.initial && ADJECTIVAL.has(ending));
+    };
+    if (rest.some((part) => tokens.some((token) => surname(token, part)))) {
         return true;
     }
     const words = tokens.map((token) => token.word);

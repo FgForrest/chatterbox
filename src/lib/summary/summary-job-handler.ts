@@ -22,6 +22,7 @@ import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { generateSummaryForRecording } from "./generate-summary";
 import {
@@ -66,6 +67,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
         ) {
             return { skipped: "held" };
         }
+        if (payload.rateLimited) await admitRateLimitedAutoSummary(userId);
         try {
             // The owner's erase marker governs only the owner's rows; the
             // Organization view is re-authorized inside the run instead.

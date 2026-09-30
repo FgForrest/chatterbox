@@ -359,6 +359,40 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual(["learn.release"]);
     });
 
+    it("does not let holds still waiting for their review crowd out one to release", async () => {
+        // First in line: a review waiting, its time not up.
+        await hold();
+        await run("ready");
+        // Behind it: a hold nothing holds any more.
+        await db()
+            .insert(recordings)
+            .values({
+                id: "rec-free",
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: "plaud-free",
+                filename: encryptText("Free"),
+                duration: 5_000,
+                startTime: new Date("2026-09-01T11:00:00Z"),
+                endTime: new Date("2026-09-01T11:00:05Z"),
+                filesize: 11,
+                fileMd5: "1".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/free.mp3`,
+                plaudVersion: "1",
+                summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS + 1_000),
+            });
+
+        // A batch of one.
+        expect(await sweepAutoLearnHolds(new Date(), 1)).toBe(1);
+        const [free] = await db()
+            .select({ at: recordings.summaryDueAt })
+            .from(recordings)
+            .where(eq(recordings.id, "rec-free"));
+        expect(free?.at).toBeNull();
+        expect(await dueAt()).not.toBeNull();
+    });
+
     it("never lets an expired sweep release a hold that was renewed", async () => {
         await hold();
         const later = new Date(Date.now() + AUTO_LEARN_HOLD_MS + 60_000);

@@ -36,6 +36,31 @@ describe("name matching, as Czech says names", () => {
         expect(isNameWord("marketing", "marks")).toBe(false);
     });
 
+    it("does not take an adjective starting a sentence for a surname", () => {
+        const words = (text: string) => nameTokens(text);
+        // Capitalized only because the sentence starts there.
+        expect(
+            moreThanFirstName(words("Dubových stolů je dost."), {
+                name: "Jan Dub",
+            }),
+        ).toBe(false);
+        expect(
+            moreThanFirstName(words("Hotovo. Zeleného ráno nebaví."), {
+                name: "Martin Zelený",
+            }),
+        ).toBe(false);
+        // Inside a sentence the capital is the name's.
+        expect(
+            moreThanFirstName(words("To Zeleného nebaví."), {
+                name: "Martin Zelený",
+            }),
+        ).toBe(true);
+        // A noun's ending starting a sentence still names them.
+        expect(
+            moreThanFirstName(words("Dubovi to pošlu."), { name: "Jan Dub" }),
+        ).toBe(true);
+    });
+
     it("hears more than a first name only in a surname or a real nickname", () => {
         const words = (text: string) => nameTokens(text);
         expect(
@@ -101,9 +126,7 @@ describe("name matching, as Czech says names", () => {
             false,
         );
         // A one-word record: nothing to tell a first name from.
-        expect(heardIsFirstNameOnly("Bednař", { name: "Bednář" })).toBe(
-            false,
-        );
+        expect(heardIsFirstNameOnly("Bednař", { name: "Bednář" })).toBe(false);
         expect(
             moreThanFirstName(nameTokens("Ing. Jan, DiS., tady"), {
                 name: "Ing. Jan Novák, DiS.",

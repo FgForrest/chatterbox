@@ -80,10 +80,30 @@ export async function transcriptRewrittenInTx(
 }
 
 /**
- * Record on a transcript the audio it is made from now (the recording's
- * `fileMd5`), in the transaction that writes it. Returns whether that audio
- * differs from what it was made from before; unknown before (older
- * transcripts, no md5) is not a change.
+ * Which audio a transcript written now is made from. `audioMd5` is the md5
+ * its maker read when it began (undefined: the recording's current one;
+ * null: not known, as for a browser's). The writer holds the recording's
+ * lock, so `current` is what a sync committed: when it differs, the audio
+ * was replaced while the transcript was being made, and which one the text
+ * came from is not known (null), nor whether its speakers are the same.
+ */
+function madeFrom(
+    audioMd5: string | null | undefined,
+    current: string | null,
+): { md5: string | null; moved: boolean } {
+    if (audioMd5 === undefined) return { md5: current, moved: false };
+    if (audioMd5 && current && audioMd5 !== current) {
+        return { md5: null, moved: true };
+    }
+    return { md5: audioMd5, moved: false };
+}
+
+/**
+ * Record on a transcript the audio it is made from now (see `madeFrom`), in
+ * the transaction that writes it, under the recording's lock. Returns
+ * whether that audio differs from what it was made from before, or may:
+ * replaced while it was being made. Unknown before (older transcripts, no
+ * md5) is not a change.
  */
 export async function stampTranscriptAudioInTx(
     tx: Tx,
@@ -93,21 +113,22 @@ export async function stampTranscriptAudioInTx(
     const [row] = await tx
         .select({
             before: transcriptions.audioMd5,
-            now: recordings.fileMd5,
+            current: recordings.fileMd5,
         })
         .from(transcriptions)
         .innerJoin(recordings, eq(recordings.id, transcriptions.recordingId))
         .where(eq(transcriptions.id, transcriptionId))
         .limit(1);
     if (!row) return false;
-    const now = audioMd5 ?? row.now;
-    if (row.before !== now) {
+    const now = madeFrom(audioMd5, row.current);
+    if (row.before !== now.md5) {
         await tx
             .update(transcriptions)
-            .set({ audioMd5: now })
+            .set({ audioMd5: now.md5 })
             .where(eq(transcriptions.id, transcriptionId));
     }
-    return Boolean(row.before && now && row.before !== now);
+    if (!row.before) return false;
+    return now.moved || Boolean(now.md5 && row.before !== now.md5);
 }
 
 /** `stampTranscriptAudioInTx` for a transcript just inserted. */
@@ -122,16 +143,21 @@ export async function stampNewTranscriptAudioInTx(
         recordingId: string;
         userId: string;
         source: string;
-        /** The md5 of the audio it was made from; the recording's by default. */
+        /** The md5 of the audio it was made from (see `madeFrom`). */
         audioMd5?: string | null;
     },
 ): Promise<void> {
+    // `madeFrom`, in the one statement: the recording's md5 is read there.
+    const current = sql`(select ${recordings.fileMd5} from ${recordings} where ${recordings.id} = ${recordingId})`;
     await tx
         .update(transcriptions)
         .set({
             audioMd5:
-                audioMd5 ??
-                sql`(select ${recordings.fileMd5} from ${recordings} where ${recordings.id} = ${recordingId})`,
+                audioMd5 === undefined
+                    ? current
+                    : audioMd5 === null
+                      ? null
+                      : sql`case when ${current} <> ${audioMd5} then null else ${audioMd5} end`,
         })
         .where(
             and(
@@ -149,14 +175,19 @@ export async function stampNewTranscriptAudioInTx(
  * certain any more. Every speaker pair becomes a suggestion at best and
  * evidence tied to a speaker is marked for review, as a rewrite over other
  * audio does; the transcripts keep the md5 of the audio they were made from.
- * In the transaction that writes the new audio, under the recording lock.
+ * Only when this sync changed the audio (`from` → `to`): a later sync of
+ * Plaud's metadata alone (a rename, the trash) brings the same audio again
+ * and must not demote the names a person confirmed since. Unknown audio on
+ * either side is no change. In the transaction that writes the new audio,
+ * under the recording lock.
  */
 export async function audioReplacedInTx(
     tx: Tx,
     recordingId: string,
-    audioMd5: string | null,
+    audio: { from: string | null; to: string | null },
 ): Promise<void> {
-    if (!audioMd5) return;
+    const audioMd5 = audio.to;
+    if (!audio.from || !audioMd5 || audio.from === audioMd5) return;
     const rows = await tx
         .select({
             id: transcriptions.id,

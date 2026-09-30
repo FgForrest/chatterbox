@@ -809,6 +809,8 @@ describe("Transcription", () => {
                     transcriptionId: "trans-existing",
                     previous: { turns: null, labels: ["speaker_0"] },
                     next: { turns: null, labels: [] },
+                    // Which audio the browser fetched is not known.
+                    audioMd5: null,
                 },
             );
             expect(emitEvent).toHaveBeenCalledWith(
