@@ -206,8 +206,10 @@ export async function enqueueJob(
 }
 
 /**
- * How many jobs of a kind a rate limit put off for a user and have not run
- * yet (payload `rateLimited`): the backlog the next ones queue behind.
+ * How many jobs of a kind a rate limit put off for a user and have not
+ * passed the cap yet (payload `rateLimited`, never attempted: a deferral
+ * refunds its attempt): the backlog the next ones queue behind. One that
+ * passed it, running or waiting out a retry, needs no window any more.
  */
 export async function countRateLimitedJobs(
     userId: string,
@@ -220,7 +222,8 @@ export async function countRateLimitedJobs(
             and(
                 eq(asyncJobs.userId, userId),
                 eq(asyncJobs.kind, kind),
-                IS_ACTIVE,
+                eq(asyncJobs.status, "pending"),
+                eq(asyncJobs.attempts, 0),
                 sql`${asyncJobs.payload}->>'rateLimited' = 'true'`,
             ),
         );

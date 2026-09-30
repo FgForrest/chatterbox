@@ -54,40 +54,6 @@ export async function queueAutoSummary(
         limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
         windowMs: 60 * 60 * 1000,
     };
-    // Behind a backlog the cap put off, in turn: fresh work taking each new
-    // window first could keep that backlog waiting for ever. The backlog's
-    // jobs pass the cap when they start, oldest first.
-    const backlog = await countRateLimitedJobs(userId, SUMMARY_JOB_KIND);
-    let putOff: number | null = null;
-    if (backlog > 0) {
-        putOff = delayBehindBacklog({
-            ...window,
-            resetAt: new Date(),
-            backlog,
-        });
-    } else {
-        const rateLimit = await consumeRateLimitBucket(
-            `auto-summary:user:${userId}`,
-            window,
-        );
-        if (!rateLimit.allowed && strict) {
-            // What was held for Learn: queued for when the window opens
-            // again, not dropped.
-            putOff = delayBehindBacklog({
-                ...window,
-                resetAt: rateLimit.resetAt,
-                backlog,
-            });
-        } else if (!rateLimit.allowed) {
-            console.warn(
-                `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
-            );
-            await emitEvent("summary.failed", userId, recordingId, {
-                error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
-            });
-            return;
-        }
-    }
     // Queued rather than run inline. This is the unattended path -- a sync
     // can trigger a dozen of these with nobody watching -- and inline it
     // inherited the lifetime of whatever process happened to be
@@ -98,19 +64,48 @@ export async function queueAutoSummary(
     // `summary.completed` and `summary.failed` come from the job handler,
     // which keeps their meaning intact: the event still fires after the
     // summary is written and readable, just from the worker.
+    let dropped = false;
     try {
-        await enqueueSummaryJob({
-            userId,
-            recordingId,
-            presetId: presetId ?? undefined,
-            trigger: "auto",
-            ...(putOff === null ? {} : { rateLimited: true, delayMs: putOff }),
-        });
+        // A backlog the cap put off means the cap is full. Held work waits
+        // behind it, in turn: fresh work taking each new window first could
+        // keep that backlog waiting for ever. Its jobs pass the cap when
+        // they start, oldest first.
+        const backlog = await countRateLimitedJobs(userId, SUMMARY_JOB_KIND);
+        let full: Date | null = backlog > 0 ? new Date() : null;
+        if (!full) {
+            const rateLimit = await consumeRateLimitBucket(
+                `auto-summary:user:${userId}`,
+                window,
+            );
+            if (!rateLimit.allowed) full = rateLimit.resetAt;
+        }
+        // What was held for Learn is queued for when the window opens
+        // again, not dropped; anything else is dropped, as the cap says.
+        if (full && !strict) {
+            dropped = true;
+        } else {
+            await enqueueSummaryJob({
+                userId,
+                recordingId,
+                presetId: presetId ?? undefined,
+                trigger: "auto",
+                ...(full
+                    ? {
+                          rateLimited: true,
+                          delayMs: delayBehindBacklog({
+                              ...window,
+                              resetAt: full,
+                              backlog,
+                          }),
+                      }
+                    : {}),
+            });
+        }
     } catch (error) {
         if (strict) throw error;
         // Only a failure to QUEUE reaches here, which means the database
-        // refused the insert -- the summary itself has not been attempted
-        // yet. Never roll back the transcript over it: the user wants the
+        // refused the backlog count, the cap or the insert -- the summary
+        // itself has not been attempted yet. Never roll back the transcript over it: the user wants the
         // transcript regardless.
         console.error(
             `Could not queue auto-summary for recording ${recordingId}:`,
@@ -118,6 +113,15 @@ export async function queueAutoSummary(
         );
         await emitEvent("summary.failed", userId, recordingId, {
             error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+    }
+    if (dropped) {
+        console.warn(
+            `Auto-summary rate limit hit for user ${userId} (recording ${recordingId})`,
+        );
+        await emitEvent("summary.failed", userId, recordingId, {
+            error: `Auto-summary rate limit exceeded (${env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR}/hour). Manual summary still works.`,
         });
     }
 }

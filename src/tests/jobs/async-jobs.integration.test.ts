@@ -280,7 +280,7 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
             });
         });
 
-        it("counts the jobs a rate limit put off that have not run yet", async () => {
+        it("counts the jobs a rate limit put off that have not passed the cap yet", async () => {
             await queue({
                 subjectId: "rec-1",
                 delayMs: 60_000,
@@ -300,6 +300,17 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
 
             expect(await countRateLimitedJobs(USER, "summary")).toBe(2);
             expect(await countRateLimitedJobs(USER, "topics")).toBe(0);
+
+            // Past the cap: running, or waiting out a retry.
+            const [running] = await claimDueJobs("summary", 1);
+            expect(running?.subjectId).toBe("rec-2");
+            expect(await countRateLimitedJobs(USER, "summary")).toBe(1);
+            if (!database) throw new Error("no database");
+            await database.db
+                .update(asyncJobs)
+                .set({ status: "pending", attempts: 1 })
+                .where(eq(asyncJobs.subjectId, "rec-2"));
+            expect(await countRateLimitedJobs(USER, "summary")).toBe(1);
         });
     });
 

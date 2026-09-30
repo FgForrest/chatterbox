@@ -354,7 +354,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         expect(completedSummary).toBeUndefined();
     });
 
-    it("queues behind a backlog the cap put off, without taking the window first", async () => {
+    it("drops a fresh summary behind a backlog the cap put off, as a full cap does", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -363,25 +363,53 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         });
         mountInsertTransaction();
         (countRateLimitedJobs as Mock).mockResolvedValueOnce(2);
-        (enqueueSummaryJob as Mock).mockResolvedValue({
-            job: { id: "job-1" },
-            created: true,
-        });
 
         const result = await transcribeRecording(mockUserId, mockRecordingId);
 
         expect(result.success).toBe(true);
+        // Nor does it take the next window from the backlog.
         expect(consumeRateLimitBucket).not.toHaveBeenCalledWith(
             `auto-summary:user:${mockUserId}`,
             expect.anything(),
         );
-        expect(enqueueSummaryJob).toHaveBeenCalledWith(
-            expect.objectContaining({
-                recordingId: mockRecordingId,
-                trigger: "auto",
-                rateLimited: true,
-            }),
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+        expect(emitEvent).toHaveBeenCalledWith(
+            "summary.failed",
+            mockUserId,
+            mockRecordingId,
+            {
+                error: expect.stringContaining(
+                    "Auto-summary rate limit exceeded",
+                ),
+            },
         );
+    });
+
+    it("keeps transcript success when the backlog cannot be counted", async () => {
+        mountSelectChain({
+            autoGenerateTitle: false,
+            syncTitleToPlaud: false,
+            autoSummarize: true,
+            autoSummarizePreset: null,
+        });
+        mountInsertTransaction();
+        (countRateLimitedJobs as Mock).mockRejectedValueOnce(
+            new Error("Connection reset"),
+        );
+
+        const result = await transcribeRecording(mockUserId, mockRecordingId);
+
+        expect(result.success).toBe(true);
+        expect(emitEvent).toHaveBeenCalledWith(
+            "summary.failed",
+            mockUserId,
+            mockRecordingId,
+            { error: "Connection reset" },
+        );
+        const failedTranscription = (emitEvent as Mock).mock.calls.find(
+            (c) => c[0] === "transcription.failed",
+        );
+        expect(failedTranscription).toBeUndefined();
     });
 
     it("skips auto-summary and emits summary.failed when rate limit is exhausted", async () => {

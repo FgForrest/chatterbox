@@ -61,6 +61,12 @@ describe("name matching, as Czech says names", () => {
                 name: "Martin Zelený",
             }),
         ).toBe(true);
+        // A number's period does.
+        expect(
+            moreThanFirstName(words("Bylo to 5. Zeleného ráno nebaví."), {
+                name: "Martin Zelený",
+            }),
+        ).toBe(false);
         // A noun's ending starting a sentence still names them.
         expect(
             moreThanFirstName(words("Dubovi to pošlu."), { name: "Jan Dub" }),

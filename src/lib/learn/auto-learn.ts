@@ -26,7 +26,7 @@
 
 import { and, eq, isNotNull, isNull, lte, notExists, or } from "drizzle-orm";
 import { db } from "@/db";
-import { enqueueJobInTx } from "@/db/queries/async-jobs";
+import { enqueueJobInTx, getActiveJob } from "@/db/queries/async-jobs";
 import {
     aiEnhancements,
     learnRuns,
@@ -50,7 +50,9 @@ import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
+import { recordingJobSubject } from "@/lib/sharing/view";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
+import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 
 /** How long the title, summary and topics wait for Learn's review. */
@@ -225,8 +227,15 @@ async function queueReleased(
     // summary first, and only while no summary of the transcript as it
     // reads now exists, so a retry does not pay for one twice. A summary a
     // person made while it waited is kept; one made from an older reading
-    // (an automatic job that ran before a newer hold) is not.
-    if (settings?.autoSummarize) {
+    // (an automatic job that ran before a newer hold) is not. One already
+    // queued (a retry, or a release put off behind the other transcript's
+    // topics) reads the transcript when it runs; queueing it again would
+    // only spend the hourly cap.
+    const queuedSummary = await getActiveJob(
+        SUMMARY_JOB_KIND,
+        recordingJobSubject(recordingId, "private"),
+    );
+    if (settings?.autoSummarize && !queuedSummary) {
         const [made] = await db
             .select({ id: aiEnhancements.id })
             .from(aiEnhancements)

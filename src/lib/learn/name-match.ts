@@ -132,11 +132,12 @@ export function nameTokens(text: string): NameToken[] {
     let previous = "";
     for (const [raw] of text.matchAll(/[\p{L}\p{N}\p{M}]+|[.!?…]/gu)) {
         if (/^[.!?…]$/u.test(raw)) {
-            // Not the period of a title or an initial ("Ing. Novák").
+            // Not the period of a title or an initial ("Ing. Novák"); a
+            // number's is ("Bylo to 5. Zeleného…").
             if (
                 !(
                     raw === "." &&
-                    (previous.length === 1 || TITLES.has(previous))
+                    (/^\p{L}$/u.test(previous) || TITLES.has(previous))
                 )
             ) {
                 initial = true;

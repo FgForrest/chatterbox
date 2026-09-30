@@ -7,10 +7,12 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    type AsyncJobRow,
     countRateLimitedJobs,
     delayBehindBacklog,
     type EnqueueJobResult,
     enqueueJob,
+    getActiveJob,
 } from "@/db/queries/async-jobs";
 import { userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -170,49 +172,73 @@ export async function queueAutoTopics(
             .limit(1);
         if (!settings?.autoDetectTopics) return;
 
+        // The job is per recording: one queued for this transcript is this
+        // one; one for the other transcript leaves no room for it until it
+        // finishes. What was held for Learn waits for it and is queued
+        // after it; unheld topics are left to a click. Looked at before the
+        // cap, which topics never queued must not spend.
+        const taken = (job: AsyncJobRow) => {
+            if (job.payload.source === source) return;
+            if (strict) {
+                throw new JobDeferredError(
+                    Math.max(60_000, job.nextAttemptAt.getTime() - Date.now()),
+                    "Topics are being detected on the recording's other transcript",
+                );
+            }
+            console.warn(
+                `Topics of recording ${recordingId} (${source}) not queued: the other transcript's job is queued`,
+            );
+        };
+        const queued = await getActiveJob(
+            TOPICS_JOB_KIND,
+            recordingJobSubject(recordingId, "private"),
+        );
+        if (queued) {
+            taken(queued);
+            return;
+        }
+
         // Same ceiling as auto-summary, in its own bucket: a sync replaying
         // many recordings must not run up a provider bill unattended.
         const window = {
             limit: env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
             windowMs: 60 * 60 * 1000,
         };
-        // Behind a backlog the cap put off, in turn (see queueAutoSummary).
+        // A backlog the cap put off means the cap is full: held work waits
+        // behind it in turn, the rest is dropped (see queueAutoSummary).
         const backlog = await countRateLimitedJobs(userId, TOPICS_JOB_KIND);
-        let putOff: number | null = null;
-        if (backlog > 0) {
-            putOff = delayBehindBacklog({
-                ...window,
-                resetAt: new Date(),
-                backlog,
-            });
-        } else {
+        let full: Date | null = backlog > 0 ? new Date() : null;
+        if (!full) {
             const rateLimit = await consumeRateLimitBucket(
                 `auto-topics:user:${userId}`,
                 window,
             );
-            if (!rateLimit.allowed && !strict) {
-                console.warn(
-                    `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
-                );
-                return;
-            }
-            // Strict (what was held for Learn): queued for when the window
-            // opens again, not dropped.
-            if (!rateLimit.allowed) {
-                putOff = delayBehindBacklog({
-                    ...window,
-                    resetAt: rateLimit.resetAt,
-                    backlog,
-                });
-            }
+            if (!rateLimit.allowed) full = rateLimit.resetAt;
         }
-        await enqueueTopicsJob({
+        if (full && !strict) {
+            console.warn(
+                `Auto-topics rate limit hit for user ${userId} (recording ${recordingId})`,
+            );
+            return;
+        }
+        const { job, created } = await enqueueTopicsJob({
             userId,
             recordingId,
             source,
             trigger: "auto",
-            ...(putOff === null ? {} : { rateLimited: true, delayMs: putOff }),
+            ...(full
+                ? {
+                      rateLimited: true,
+                      delayMs: delayBehindBacklog({
+                          ...window,
+                          resetAt: full,
+                          backlog,
+                      }),
+                  }
+                : {}),
         });
+        // One queued since.
+        if (!created) taken(job);
     } catch (error) {
         if (strict) throw error;
         console.error(

@@ -20,6 +20,7 @@ import {
 import {
     aiEnhancements,
     apiCredentials,
+    apiRateLimitBuckets,
     asyncJobs,
     learnRuns,
     recordings,
@@ -93,6 +94,7 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import {
     AUTO_LEARN_HOLD_MS,
     holdForAutoLearn,
@@ -103,6 +105,7 @@ import {
 import { ensureOrgAccount } from "@/lib/org/account";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
+import { enqueueTopicsJob } from "@/lib/topics/topics-job";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -519,6 +522,39 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(summary?.nextAttemptAt.getTime()).toBeGreaterThan(
             Date.now() + 30 * 60 * 1000,
         );
+    });
+
+    it("waits for the other transcript's topics job, spending the caps once", async () => {
+        await db().delete(apiRateLimitBuckets);
+        await enqueueTopicsJob({
+            userId: OWNER,
+            recordingId: REC,
+            source: "plaud",
+            trigger: "auto",
+        });
+        await hold();
+        expect(await releaseAutoLearnHold(REC)).toBe(true);
+
+        // Put off while the Plaud topics are detected, twice.
+        await expect(runRelease()).rejects.toBeInstanceOf(JobDeferredError);
+        await expect(runRelease()).rejects.toBeInstanceOf(JobDeferredError);
+        await db().delete(asyncJobs).where(eq(asyncJobs.kind, "topics"));
+        await runRelease();
+
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+        const [topics] = await db()
+            .select({ payload: asyncJobs.payload })
+            .from(asyncJobs)
+            .where(eq(asyncJobs.kind, "topics"));
+        expect(topics?.payload.source).toBe("riffado");
+        for (const cap of ["auto-summary", "auto-topics"]) {
+            const next = await consumeRateLimitBucket(`${cap}:user:${OWNER}`, {
+                limit: 20,
+                windowMs: 60 * 60 * 1000,
+            });
+            // The release's one, and this one.
+            expect(next.remaining).toBe(18);
+        }
     });
 
     it("keeps a summary the person made while it waited", async () => {
