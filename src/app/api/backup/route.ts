@@ -7,6 +7,7 @@ import {
     listExportJobsForUser,
 } from "@/db/queries/export-jobs";
 import { requireApiSession } from "@/lib/auth-server";
+import { env } from "@/lib/env";
 import { apiHandler } from "@/lib/errors";
 import { serializeExportJob as serializeJob } from "@/lib/export/serialize-job";
 import { captureServerEvent } from "@/lib/posthog-server";
@@ -19,9 +20,11 @@ import { captureServerEvent } from "@/lib/posthog-server";
  * storage.
  *
  * Guardrails: at most one active (pending/processing) job per user, and
- * a cooldown against re-requesting right after a completed job -- both
- * enforced here rather than in the worker, since the worker's job is to
- * process the queue, not police who's allowed to add to it.
+ * on hosted a cooldown against re-requesting right after a completed job
+ * -- both enforced here rather than in the worker, since the worker's job
+ * is to process the queue, not police who's allowed to add to it. A
+ * self-hosted instance pays for its own disk, so there a new backup is
+ * always built: the last one may be exactly the archive to replace.
  */
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
@@ -35,7 +38,9 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
-    const recent = await getRecentCompletedExportJobForUser(userId);
+    const recent = env.IS_HOSTED
+        ? await getRecentCompletedExportJobForUser(userId)
+        : null;
     if (recent) {
         const sinceCompletion = recent.completedAt
             ? Date.now() - recent.completedAt.getTime()

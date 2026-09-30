@@ -79,6 +79,7 @@ export async function listUsersDueForScheduledBackup(
  * into a retained zip) -- there's no legitimate reason to rebuild one
  * more than about once a day, so this is set for cost control rather
  * than UX (the "get my data before I leave" case needs exactly one).
+ * Hosted only: a self-hosted instance's disk is its operator's own.
  */
 export const EXPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 /** A build attempt failing this many times in a row stops retrying and sticks as `failed`. */
