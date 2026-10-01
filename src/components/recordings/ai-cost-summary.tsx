@@ -59,6 +59,14 @@ export function AiCostSummary({
             </span>
         );
     }
+    const hasSubscriptionEstimate = [
+        ...Object.keys(summary.byService),
+        ...Object.keys(summary.unknownByService),
+    ].some(
+        (service) =>
+            service.startsWith("Claude Code · ") ||
+            service.startsWith("Codex · "),
+    );
     return (
         <details className="relative text-sm text-muted-foreground">
             <summary className="cursor-pointer">
@@ -100,7 +108,14 @@ export function AiCostSummary({
                 {summary.unknownCount > 0 && (
                     <p className="mt-2 text-xs">
                         {i18n(
-                            "Some provider rates are unavailable; the total is incomplete.",
+                            "Some requests lack usable cost data; the total is incomplete.",
+                        )}
+                    </p>
+                )}
+                {hasSubscriptionEstimate && (
+                    <p className="mt-2 text-xs">
+                        {i18n(
+                            "Claude Code and Codex amounts estimate equivalent API usage, not subscription charges.",
                         )}
                     </p>
                 )}

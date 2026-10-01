@@ -27,6 +27,14 @@ export function splitArgs(value) {
  * caller forge log lines (CodeQL: js/log-injection) or pad argv.
  */
 const MODEL_ID_PATTERN = /^[A-Za-z0-9._:+/-]{1,128}$/;
+const CODEX_MODELS = {
+    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, cacheWriteInput: 0.25, output: 1.2 },
+    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 12 },
+    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
+    "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWriteInput: 0.125, output: 0.5 },
+    "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 10 },
+    "gpt-6-astra": { input: 10, cachedInput: 1, cacheWriteInput: 12.5, output: 50 },
+};
 
 /**
  * Strip anything that could break out of a single log line.
@@ -70,7 +78,8 @@ export function resolveBackend(model) {
     const id = model.trim();
     if (!MODEL_ID_PATTERN.test(id)) return null;
     if (id.startsWith("claude")) return "claude";
-    if (id.startsWith("codex") || id.startsWith("gpt-5")) return "codex";
+    if (Object.hasOwn(CODEX_MODELS, id) || id.startsWith("codex") || id.startsWith("gpt-5"))
+        return "codex";
     return null;
 }
 
@@ -453,16 +462,14 @@ export function buildArgs(
         ];
     }
     if (backend === "codex") {
-        // `--output-last-message` writes just the final assistant message
-        // to a file. Parsing `--json` JSONL instead would mean depending
-        // on event shapes that move between releases; a file with one
-        // string in it does not.
+        // Keep the final answer in a file and read usage from JSONL events.
         //
         // `--sandbox read-only` stays even with the shell gone: Codex
         // still offers `apply_patch`, which no flag in these versions
         // removes, and the sandbox is what refuses its writes.
         return [
             "exec",
+            "--json",
             "--skip-git-repo-check",
             "--sandbox",
             "read-only",
@@ -511,8 +518,15 @@ export function diagnosticTail(stderr, prompt = "", maxLines = 5, maxChars = 600
         .slice(0, maxChars);
 }
 
-/** Shape a successful reply as an OpenAI chat completion. */
-export function chatCompletion(model, content, id, createdMs = Date.now()) {
+/**
+ * Shape a successful reply as an OpenAI chat completion.
+ * @param {string} model
+ * @param {string} content
+ * @param {string} id
+ * @param {number} [createdMs]
+ * @param {Record<string, number> | null} [usage]
+ */
+export function chatCompletion(model, content, id, createdMs = Date.now(), usage = null) {
     return {
         id: `chatcmpl-${id}`,
         object: "chat.completion",
@@ -525,11 +539,14 @@ export function chatCompletion(model, content, id, createdMs = Date.now()) {
                 finish_reason: "stop",
             },
         ],
-        // The CLIs bill against a subscription, not per token, and report
-        // no usable per-request counts. Zeros keep the response shape
-        // valid for clients that read it; they are not a measurement.
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        ...(usage ? { usage } : {}),
     };
+}
+
+function nonnegativeNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : null;
 }
 
 /**
@@ -558,16 +575,85 @@ export function parseClaudeEnvelope(
         );
     }
 
+    let content;
     if (
         structured &&
         envelope.structured_output &&
         typeof envelope.structured_output === "object"
     ) {
-        return JSON.stringify(envelope.structured_output);
+        content = JSON.stringify(envelope.structured_output);
+    } else {
+        const text = typeof envelope.result === "string" ? envelope.result : "";
+        if (!text.trim()) {
+            throw new BridgeError(502, `${bin} returned an empty result`);
+        }
+        content = text;
     }
-    const text = typeof envelope.result === "string" ? envelope.result : "";
-    if (!text.trim()) {
-        throw new BridgeError(502, `${bin} returned an empty result`);
+
+    const cliUsage = envelope.usage;
+    const input = nonnegativeNumber(cliUsage?.input_tokens);
+    const output = nonnegativeNumber(cliUsage?.output_tokens);
+    const cacheCreation = nonnegativeNumber(cliUsage?.cache_creation_input_tokens);
+    const cacheRead = nonnegativeNumber(cliUsage?.cache_read_input_tokens);
+    const promptTokens =
+        input === null && cacheCreation === null && cacheRead === null
+            ? null
+            : (input ?? 0) + (cacheCreation ?? 0) + (cacheRead ?? 0);
+    const reportedCost = nonnegativeNumber(envelope.total_cost_usd);
+    const cost =
+        reportedCost === 0 && (promptTokens ?? 0) + (output ?? 0) > 0
+            ? null
+            : reportedCost;
+    const usage =
+        promptTokens !== null || output !== null || cost !== null
+            ? {
+                  ...(promptTokens !== null ? { prompt_tokens: promptTokens } : {}),
+                  ...(output !== null ? { completion_tokens: output } : {}),
+                  ...(promptTokens !== null && output !== null
+                      ? { total_tokens: promptTokens + output }
+                      : {}),
+                  ...(cost !== null ? { cost } : {}),
+              }
+            : null;
+    return { content, usage };
+}
+
+/** Read the completed turn's usage and estimate its API-equivalent cost. */
+export function parseCodexUsage(stdout, model) {
+    let counts = null;
+    for (const line of stdout.split("\n")) {
+        if (!line.trim()) continue;
+        let event;
+        try {
+            event = JSON.parse(line);
+        } catch {
+            continue;
+        }
+        if (event.type === "turn.completed") counts = event.usage;
     }
-    return text;
+    const input = nonnegativeNumber(counts?.input_tokens);
+    const output = nonnegativeNumber(counts?.output_tokens);
+    if (input === null || output === null) return null;
+    const cached = nonnegativeNumber(counts?.cached_input_tokens);
+    const cacheWrite = nonnegativeNumber(counts?.cache_write_input_tokens);
+    const rates = Object.hasOwn(CODEX_MODELS, model)
+        ? CODEX_MODELS[model]
+        : null;
+    const cost =
+        rates &&
+        cached !== null &&
+        cacheWrite !== null &&
+        cached + cacheWrite <= input
+            ? ((input - cached - cacheWrite) * rates.input +
+                  cached * rates.cachedInput +
+                  cacheWrite * rates.cacheWriteInput +
+                  output * rates.output) /
+              1_000_000
+            : null;
+    return {
+        prompt_tokens: input,
+        completion_tokens: output,
+        total_tokens: input + output,
+        ...(cost !== null ? { cost } : {}),
+    };
 }

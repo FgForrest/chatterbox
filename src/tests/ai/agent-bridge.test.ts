@@ -12,6 +12,7 @@ import {
     extractJson,
     MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseCodexUsage,
     parseLearnRequest,
     redact,
     resolveBackend,
@@ -36,9 +37,11 @@ describe("agent-bridge", () => {
             expect(resolveBackend("claude-haiku-4-5-20251001")).toBe("claude");
         });
 
-        it("routes codex and gpt-5 ids to the Codex CLI", () => {
+        it("routes registered Codex models and existing generic ids", () => {
             expect(resolveBackend("codex")).toBe("codex");
             expect(resolveBackend("gpt-5-codex")).toBe("codex");
+            expect(resolveBackend("gpt-6-sol")).toBe("codex");
+            expect(resolveBackend("gpt-6-unlisted")).toBeNull();
         });
 
         it("refuses ids carrying whitespace or control characters", () => {
@@ -206,6 +209,7 @@ describe("agent-bridge", () => {
         it("gives Codex a file to write its final message to", () => {
             const args = buildArgs("codex", "gpt-5-codex", [], "/tmp/out.txt");
             expect(args[0]).toBe("exec");
+            expect(args).toContain("--json");
             expect(args).toContain("--output-last-message");
             expect(args).toContain("/tmp/out.txt");
             // Trailing "-" makes Codex read the prompt from stdin.
@@ -398,7 +402,47 @@ describe("agent-bridge", () => {
                 parseClaudeEnvelope(
                     JSON.stringify({ type: "result", result: "hello" }),
                 ),
-            ).toBe("hello");
+            ).toEqual({ content: "hello", usage: null });
+        });
+
+        it("forwards measured tokens and Claude's estimated cost", () => {
+            expect(
+                parseClaudeEnvelope(
+                    JSON.stringify({
+                        result: "hello",
+                        total_cost_usd: 0.0123,
+                        usage: {
+                            input_tokens: 100,
+                            cache_creation_input_tokens: 20,
+                            cache_read_input_tokens: 300,
+                            output_tokens: 50,
+                        },
+                    }),
+                ),
+            ).toEqual({
+                content: "hello",
+                usage: {
+                    prompt_tokens: 420,
+                    completion_tokens: 50,
+                    total_tokens: 470,
+                    cost: 0.0123,
+                },
+            });
+        });
+
+        it("does not report a zero cost when Claude consumed tokens", () => {
+            const result = parseClaudeEnvelope(
+                JSON.stringify({
+                    result: "hello",
+                    total_cost_usd: 0,
+                    usage: { input_tokens: 100, output_tokens: 50 },
+                }),
+            );
+            expect(result.usage).toEqual({
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                total_tokens: 150,
+            });
         });
 
         it("raises on an error envelope, unparseable output, or an empty result", () => {
@@ -469,13 +513,84 @@ describe("agent-bridge", () => {
             expect(body.created).toBe(1_700_000_000);
         });
 
-        it("reports zero usage rather than inventing counts", () => {
+        it("omits usage when the CLI provided no counts or cost", () => {
             const body = chatCompletion("claude-sonnet-5", "hi", "abc");
-            expect(body.usage).toEqual({
-                prompt_tokens: 0,
-                completion_tokens: 0,
-                total_tokens: 0,
+            expect(body).not.toHaveProperty("usage");
+        });
+
+        it("includes the CLI's reported usage and cost", () => {
+            const usage = {
+                prompt_tokens: 100,
+                completion_tokens: 50,
+                total_tokens: 150,
+                cost: 0.0123,
+            };
+            expect(
+                chatCompletion("claude-opus-5-5", "hi", "abc", 0, usage).usage,
+            ).toEqual(usage);
+        });
+    });
+
+    describe("parseCodexUsage", () => {
+        it("prices completed usage with the published cached-input rate", () => {
+            const stdout = [
+                JSON.stringify({ type: "thread.started", thread_id: "t" }),
+                JSON.stringify({
+                    type: "turn.completed",
+                    usage: {
+                        input_tokens: 1_000_000,
+                        cached_input_tokens: 800_000,
+                        cache_write_input_tokens: 0,
+                        output_tokens: 100_000,
+                    },
+                }),
+            ].join("\n");
+            expect(parseCodexUsage(stdout, "gpt-5.6-luna")).toEqual({
+                prompt_tokens: 1_000_000,
+                completion_tokens: 100_000,
+                total_tokens: 1_100_000,
+                cost: 0.176,
             });
+        });
+
+        it("prices cache writes separately from uncached input", () => {
+            const stdout = JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                    input_tokens: 1_000_000,
+                    cached_input_tokens: 800_000,
+                    cache_write_input_tokens: 100_000,
+                    output_tokens: 100_000,
+                },
+            });
+            expect(parseCodexUsage(stdout, "gpt-6-sol")).toEqual({
+                prompt_tokens: 1_000_000,
+                completion_tokens: 100_000,
+                total_tokens: 1_100_000,
+                cost: 1.61,
+            });
+        });
+
+        it("keeps unknown models and incomplete usage unpriced", () => {
+            const stdout = JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                    input_tokens: 10,
+                    cached_input_tokens: 0,
+                    output_tokens: 5,
+                },
+            });
+            expect(parseCodexUsage(stdout, "codex")).toEqual({
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+            });
+            expect(parseCodexUsage(stdout, "gpt-6-sol")).toEqual({
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+            });
+            expect(parseCodexUsage("", "gpt-5.6-luna")).toBeNull();
         });
     });
 
@@ -636,8 +751,11 @@ describe("agent-bridge", () => {
             });
             expect(
                 parseClaudeEnvelope(stdout, "claude", { structured: true }),
-            ).toBe('{"speakers":[]}');
-            expect(parseClaudeEnvelope(stdout)).toBe("Done.");
+            ).toEqual({ content: '{"speakers":[]}', usage: null });
+            expect(parseClaudeEnvelope(stdout)).toEqual({
+                content: "Done.",
+                usage: null,
+            });
         });
 
         it("gives Codex the schema without regex patterns, on which it stalls", () => {
