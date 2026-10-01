@@ -65,6 +65,8 @@ export interface TranscriptViewProps {
     topics?: TranscriptTopic[] | null;
     /** Topic to highlight briefly, after a jump to it. */
     highlightedTopic?: number | null;
+    /** Turn selected by speaker playback navigation. */
+    highlightedTurnIndex?: number | null;
     /**
      * A ready Learn review's proposals, shown in place for its reviewer:
      * provisional speaker names and underlined corrections, each ticked or
@@ -123,6 +125,7 @@ export function TranscriptView({
     onSeekToTurn,
     topics,
     highlightedTopic = null,
+    highlightedTurnIndex = null,
     learnMarks = null,
     corrections = null,
 }: TranscriptViewProps) {
@@ -264,7 +267,7 @@ export function TranscriptView({
                         })}
                         <div
                             data-turn-index={index}
-                            className={`space-y-1 rounded-md transition-colors duration-700 ${highlightedTurn === index ? "bg-primary/10" : ""}`}
+                            className={`space-y-1 rounded-md transition-colors duration-700 ${highlightedTurn === index || highlightedTurnIndex === index ? "bg-primary/10" : ""}`}
                         >
                             {!turn.label && canSeek && (
                                 <button

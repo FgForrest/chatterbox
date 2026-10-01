@@ -43,7 +43,10 @@ import {
 } from "@/hooks/use-transcription-summary";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
-import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
+import {
+    speakerKey,
+    speakerLabelsForTranscript,
+} from "@/lib/knowledge/speaker-label-rules";
 import {
     inferSummarySpeakerNumberOffset,
     type SpeakerAttributions,
@@ -106,6 +109,8 @@ interface TranscriptionPanelProps {
     onTranscriptStale?: () => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
+    /** Seek and start playback for speaker navigation. */
+    onPlayFromTurn?: (startMs: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
     /**
@@ -226,6 +231,7 @@ export function TranscriptionPanel({
     onTranscribeComplete,
     onTranscriptStale,
     onSeekToTurn,
+    onPlayFromTurn,
     getPlaybackMs,
     readOnly = false,
 }: TranscriptionPanelProps) {
@@ -286,6 +292,14 @@ export function TranscriptionPanel({
         view,
     );
     const transcriptSectionRef = useRef<HTMLElement>(null);
+    const speakerCursorRef = useRef<{
+        transcript: string;
+        speaker: string;
+        index: number;
+    } | null>(null);
+    const [speakerJump, setSpeakerJump] = useState<{ index: number } | null>(
+        null,
+    );
     // A fresh object per jump, so jumping to the same topic twice scrolls
     // and highlights twice.
     const [topicJump, setTopicJump] = useState<{ index: number } | null>(null);
@@ -396,6 +410,18 @@ export function TranscriptionPanel({
         const timer = setTimeout(() => setTopicJump(null), 2000);
         return () => clearTimeout(timer);
     }, [topicJump, transcriptExpanded]);
+    useEffect(() => {
+        if (!speakerJump || !transcriptExpanded) return;
+        const section = transcriptSectionRef.current;
+        const turn = section?.querySelector(
+            `[data-turn-index="${speakerJump.index}"]`,
+        );
+        if (section && turn instanceof HTMLElement) {
+            section.scrollTo({ top: turn.offsetTop - 8, behavior: "smooth" });
+        }
+        const timer = setTimeout(() => setSpeakerJump(null), 2000);
+        return () => clearTimeout(timer);
+    }, [speakerJump, transcriptExpanded]);
     const attributionKey = activeTranscript
         ? `${recording.id}:${activeTranscript.source}`
         : "";
@@ -403,6 +429,30 @@ export function TranscriptionPanel({
         Record<string, SpeakerAttributions>
     >({});
     const speakerAttributions = attributionsByKey[attributionKey] ?? {};
+    const handlePlaySpeaker = (speaker: string): boolean => {
+        const turns = activeTranscript?.turns;
+        if (!turns?.length || !onPlayFromTurn) return false;
+        const matching = turns.flatMap((turn, index) =>
+            speakerKey(turn.speaker) === speaker &&
+            Number.isFinite(turn.startMs) &&
+            turn.startMs >= 0
+                ? [index]
+                : [],
+        );
+        if (matching.length === 0) return false;
+        const transcript = `${attributionKey}:${activeTranscriptKey}`;
+        const cursor = speakerCursorRef.current;
+        const nextPosition =
+            cursor?.transcript === transcript && cursor.speaker === speaker
+                ? (matching.indexOf(cursor.index) + 1) % matching.length
+                : 0;
+        const index = matching[nextPosition];
+        speakerCursorRef.current = { transcript, speaker, index };
+        onPlayFromTurn(turns[index].startMs);
+        setTranscriptExpanded(true);
+        setSpeakerJump({ index });
+        return true;
+    };
     const handleAttributionsChange = useCallback(
         (values: SpeakerAttributions) => {
             setAttributionsByKey((current) => ({
@@ -684,6 +734,11 @@ export function TranscriptionPanel({
                             onAttributionsChange={handleAttributionsChange}
                             view={view}
                             onSeek={onSeekToTurn}
+                            onPlaySpeaker={
+                                onPlayFromTurn && activeTranscript.turns?.length
+                                    ? handlePlaySpeaker
+                                    : undefined
+                            }
                             shownVersion={activeTranscript.version}
                             onStale={onTranscriptStale}
                             readOnly={readOnly}
@@ -780,6 +835,9 @@ export function TranscriptionPanel({
                                             topics={topics}
                                             highlightedTopic={
                                                 topicJump?.index ?? null
+                                            }
+                                            highlightedTurnIndex={
+                                                speakerJump?.index ?? null
                                             }
                                             // A mix is not the transcript
                                             // Learn read.

@@ -265,6 +265,14 @@ export function RecordingWorkstation({
                                               startMs / 1000,
                                           )
                             }
+                            onPlayFromTurn={
+                                recording.audioReaped
+                                    ? undefined
+                                    : (startMs) =>
+                                          playerRef.current?.playFrom(
+                                              startMs / 1000,
+                                          )
+                            }
                             getPlaybackMs={() =>
                                 (playerRef.current?.getCurrentTime() ?? 0) *
                                 1000
