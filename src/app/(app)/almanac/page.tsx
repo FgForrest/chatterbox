@@ -7,6 +7,7 @@ import { PeopleList } from "@/components/people/people-list";
 import { db } from "@/db";
 import { recordings, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listPeople } from "@/lib/knowledge/people";
 import { pendingReviewCount } from "@/lib/learn/pending";
@@ -25,8 +26,9 @@ export default async function PeoplePage() {
     // The names on shared recordings count too, which everyone may see.
     const orgUserId = await getOrgUserId();
 
-    const [rows, appearances, pendingReviews] = await Promise.all([
+    const [rows, nicknames, appearances, pendingReviews] = await Promise.all([
         listPeople(userId),
+        aliasTextsVisibleTo(userId, "person"),
         // How many recordings each person appears in, and when they were last
         // heard. Both come from the attribution overlay joined back to the
         // recording, which is the only place that link exists.
@@ -98,6 +100,7 @@ export default async function PeoplePage() {
                     recordingCount: stats.get(row.id)?.recordingCount ?? 0,
                     lastSeen:
                         stats.get(row.id)?.lastSeen?.toISOString() ?? null,
+                    nicknames: nicknames.get(row.id) ?? [],
                 }))}
             />
         </div>

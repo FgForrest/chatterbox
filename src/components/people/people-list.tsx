@@ -20,6 +20,8 @@ export interface PersonSummary {
     recordingCount: number;
     /** ISO 8601 timestamp, or null if the person has no confirmed appearance yet. */
     lastSeen: string | null;
+    /** Their other names the viewer may see; searched too. */
+    nicknames?: string[];
 }
 
 export function PeopleList({ people }: { people: PersonSummary[] }) {
@@ -37,7 +39,10 @@ export function PeopleList({ people }: { people: PersonSummary[] }) {
         return people.filter(
             (person) =>
                 person.displayName.toLowerCase().includes(needle) ||
-                person.primaryEmail?.toLowerCase().includes(needle),
+                person.primaryEmail?.toLowerCase().includes(needle) ||
+                person.nicknames?.some((nickname) =>
+                    nickname.toLowerCase().includes(needle),
+                ),
         );
     }, [people, query]);
 

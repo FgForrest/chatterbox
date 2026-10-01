@@ -1,5 +1,6 @@
 import { ThingsList } from "@/components/almanac/things-list";
 import { requireAuth } from "@/lib/auth-server";
+import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
 import { listEntities } from "@/lib/knowledge/entities";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
@@ -15,8 +16,9 @@ export const dynamic = "force-dynamic";
 export default async function ThingsPage() {
     const session = await requireAuth();
     const userId = session.user.id;
-    const [things, vocabulary, organization] = await Promise.all([
+    const [things, nicknames, vocabulary, organization] = await Promise.all([
         listEntities(userId),
+        aliasTextsVisibleTo(userId, "entity"),
         vocabularyVisibleTo(userId),
         isOrgAccount(userId),
     ]);
@@ -29,6 +31,7 @@ export default async function ThingsPage() {
                 typeKey: thing.typeKey,
                 description: thing.description,
                 scope: thing.scope,
+                nicknames: nicknames.get(thing.id) ?? [],
             }))}
             typeLabels={almanac.typeLabels}
             types={almanac.entityTypes

@@ -14,6 +14,7 @@ import { EntityActions } from "@/components/almanac/entity-actions";
 import { FactDialog } from "@/components/almanac/fact-dialog";
 import { ImportDialog } from "@/components/almanac/import-dialog";
 import { ThingsList } from "@/components/almanac/things-list";
+import { PeopleList } from "@/components/people/people-list";
 
 const refresh = vi.fn();
 const push = vi.fn();
@@ -113,6 +114,7 @@ describe("ThingsList", () => {
             typeKey: "organization",
             description: null,
             scope: "org" as const,
+            nicknames: ["Akmeho"],
         },
     ];
     const LABELS = { project: "Project", organization: "Organization" };
@@ -136,6 +138,15 @@ describe("ThingsList", () => {
         expect(
             screen.getByRole("link", { name: /Orion/ }).getAttribute("href"),
         ).toBe("/almanac/things/e-orion");
+        fireEvent.change(
+            screen.getByRole("textbox", { name: "Search things" }),
+            {
+                target: { value: "akmeh" },
+            },
+        );
+        expect(
+            screen.getByRole("link", { name: /Acme/ }).getAttribute("href"),
+        ).toBe("/almanac/things/e-acme");
         fireEvent.change(
             screen.getByRole("textbox", { name: "Search things" }),
             {
@@ -187,6 +198,38 @@ describe("ThingsList", () => {
             ),
         );
         await waitFor(() => expect(refresh).toHaveBeenCalled());
+    });
+});
+
+describe("PeopleList", () => {
+    it("searches by name, email or nickname", () => {
+        render(
+            <PeopleList
+                people={[
+                    {
+                        id: "p-vilem",
+                        displayName: "Vilém Brázda",
+                        primaryEmail: "vilem@example.test",
+                        recordingCount: 0,
+                        lastSeen: null,
+                        nicknames: ["Vilda"],
+                    },
+                    {
+                        id: "p-jana",
+                        displayName: "Jana Malá",
+                        primaryEmail: null,
+                        recordingCount: 0,
+                        lastSeen: null,
+                    },
+                ]}
+            />,
+        );
+        const search = screen.getByRole("textbox", { name: "Search people" });
+        fireEvent.change(search, { target: { value: "vild" } });
+        expect(screen.getByText("Vilém Brázda")).toBeTruthy();
+        expect(screen.queryByText("Jana Malá")).toBeNull();
+        fireEvent.change(search, { target: { value: "example.test" } });
+        expect(screen.getByText("Vilém Brázda")).toBeTruthy();
     });
 });
 

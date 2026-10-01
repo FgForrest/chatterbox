@@ -11,7 +11,7 @@
  * Organization's aliases are everyone's.
  */
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     knowledgeAliases,
@@ -253,6 +253,34 @@ export async function listAliases(
         text: decryptText(row.text),
         scope: ownerRole === "org" ? "org" : "personal",
     }));
+}
+
+/**
+ * The other names `viewerUserId` may see of people, or of entities, by the
+ * id of the record each names, each name once: a list is searched by
+ * nickname too.
+ */
+export async function aliasTextsVisibleTo(
+    viewerUserId: string,
+    of: "person" | "entity",
+): Promise<Map<string, string[]>> {
+    const column =
+        of === "person" ? knowledgeAliases.personId : knowledgeAliases.entityId;
+    const rows = await db
+        .select({ text: knowledgeAliases.text, id: column })
+        .from(knowledgeAliases)
+        .where(and(isNotNull(column), aliasesVisibleTo(viewerUserId)));
+    const byTarget = new Map<string, Set<string>>();
+    for (const row of rows) {
+        if (!row.id) continue;
+        const text = decryptText(row.text);
+        const held = byTarget.get(row.id);
+        if (held) held.add(text);
+        else byTarget.set(row.id, new Set([text]));
+    }
+    return new Map(
+        [...byTarget].map(([id, texts]) => [id, [...texts]] as const),
+    );
 }
 
 /**

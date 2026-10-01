@@ -262,11 +262,13 @@ export function NewRecordItem({
                         </Button>
                     </div>
                 )}
-                {payload.onlyFirstName && payload.kind === "person" && (
-                    <div className="text-xs text-amber-700 dark:text-amber-400">
-                        {i18n("Only a first name: add the surname.")}
-                    </div>
-                )}
+                {payload.onlyFirstName &&
+                    payload.kind === "person" &&
+                    !linked && (
+                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                            {i18n("Only a first name: add the surname.")}
+                        </div>
+                    )}
                 <div className="text-xs text-muted-foreground">
                     {payload.kind === "person"
                         ? i18n("Person")

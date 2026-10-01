@@ -111,7 +111,11 @@ import { POST as postFactRoute } from "@/app/api/knowledge/facts/route";
 import { POST as importRoute } from "@/app/api/knowledge/import/route";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
-import { listAliases } from "@/lib/knowledge/aliases";
+import {
+    addAlias,
+    aliasTextsVisibleTo,
+    listAliases,
+} from "@/lib/knowledge/aliases";
 import { createEntity, getEntity } from "@/lib/knowledge/entities";
 import { confirmManualFact, listFacts } from "@/lib/knowledge/facts";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
@@ -209,6 +213,13 @@ describeWithDatabase("editing the Almanac (PostgreSQL)", () => {
                     .map((alias) => alias.text)
                     .sort(),
             ).toEqual(["ORN", "Orión"]);
+            // The Things list searches them; nobody else sees them.
+            expect(
+                (await aliasTextsVisibleTo(OWNER, "entity")).get(id)?.sort(),
+            ).toEqual(["ORN", "Orión"]);
+            expect((await aliasTextsVisibleTo(OTHER, "entity")).has(id)).toBe(
+                false,
+            );
 
             // The same name in another case and spacing is the same name.
             const same = await call(postEntityRoute, OWNER, "POST", {
@@ -593,6 +604,28 @@ describeWithDatabase("editing the Almanac (PostgreSQL)", () => {
                 ).status,
             ).toBe(200);
             expect(await db().select().from(knowledgeAliases)).toEqual([]);
+        });
+
+        it("searches a member's own nicknames and the Organization's, each once", async () => {
+            const acme = await createEntity(orgUserId, {
+                typeKey: "organization",
+                name: "Acme",
+            });
+            await addAlias(orgUserId, { entityId: acme.id }, "Akme");
+            await addAlias(OWNER, { entityId: acme.id }, "Akme");
+            await addAlias(OWNER, { entityId: acme.id }, "Ajkme");
+            await addAlias(OTHER, { entityId: acme.id }, "Ejkm");
+            expect(
+                (await aliasTextsVisibleTo(OWNER, "entity"))
+                    .get(acme.id)
+                    ?.sort(),
+            ).toEqual(["Ajkme", "Akme"]);
+            expect(
+                (await aliasTextsVisibleTo(OTHER, "entity"))
+                    .get(acme.id)
+                    ?.sort(),
+            ).toEqual(["Akme", "Ejkm"]);
+            expect((await aliasTextsVisibleTo(OWNER, "person")).size).toBe(0);
         });
     });
 

@@ -15,7 +15,7 @@
   - See the Learn section of the environment variables page.
 - **The Almanac** (was People): the people and things Riffado knows, in tabs People · Things · Vocabulary · Review. Old `/people` links redirect. See the Almanac guide.
   - **Things**: organizations, teams, projects, products, terms, locations and documents, with search and a type filter. Add, edit, change the type of, merge and erase them (`/api/knowledge/entities`). A type change that one of your facts would no longer fit is refused, naming that fact's relation.
-  - **Nicknames** added and removed on a person's or thing's page (`/api/knowledge/aliases`).
+  - **Nicknames** added and removed on a person's or thing's page (`/api/knowledge/aliases`). Searching People or Things finds a record by its nicknames too.
   - **Facts by hand**: add, change and erase facts, picking the other side from the Almanac or typing text (`/api/knowledge/facts`). A relation that holds one value asks before replacing it. Text about a person on health, family, personality, performance or demographics is refused.
   - **Import a list** of people and things, one line per type with nicknames in parentheses, previewed before anything is written (`POST /api/knowledge/import`).
   - Members keep private notes on Organization things; only the organization account changes them.

@@ -17,12 +17,14 @@ export interface ThingSummary {
     typeKey: string;
     description: string | null;
     scope: "personal" | "org";
+    /** Its other names the viewer may see; searched too. */
+    nicknames?: string[];
 }
 
 /**
  * The things the viewer's Almanac knows: organizations, projects, products,
- * terms and the rest. Searched by name, narrowed by type; a thing is added
- * here, or many at once from a pasted list.
+ * terms and the rest. Searched by name, nickname or description, narrowed
+ * by type; a thing is added here, or many at once from a pasted list.
  */
 export function ThingsList({
     things,
@@ -57,7 +59,10 @@ export function ThingsList({
                 (!activeType || thing.typeKey === activeType) &&
                 (!needle ||
                     thing.name.toLowerCase().includes(needle) ||
-                    thing.description?.toLowerCase().includes(needle)),
+                    thing.description?.toLowerCase().includes(needle) ||
+                    thing.nicknames?.some((nickname) =>
+                        nickname.toLowerCase().includes(needle),
+                    )),
         );
     }, [things, query, activeType]);
     // Only the types some thing has, to filter by.

@@ -1217,6 +1217,62 @@ describe("LearnReview", () => {
             );
         });
 
+        it("drops the first-name note once the name is a known person", async () => {
+            const honza = item({
+                id: "i-honza",
+                kind: "new_record",
+                payload: {
+                    ref: "n3",
+                    kind: "person",
+                    typeKey: null,
+                    name: "Honza",
+                    evidenceMs: [1000],
+                    reason: "Named in passing.",
+                    onlyFirstName: true,
+                    maybe: { personId: "p-jan" },
+                },
+            });
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": inTurn(
+                    { ...READY, entityTypes, items: [honza] },
+                    {
+                        ...READY,
+                        entityTypes,
+                        items: [
+                            {
+                                ...honza,
+                                decision: "accepted",
+                                choice: { personId: "p-jan" },
+                                version: 1,
+                            },
+                        ],
+                    },
+                ),
+                "PATCH /api/recordings/rec-1/review/items/i-honza?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            expect(
+                screen.getByText("Only a first name: add the surname."),
+            ).toBeTruthy();
+            fireEvent.click(
+                screen.getByRole("button", { name: "Yes, it is Jan" }),
+            );
+            await screen.findByText("Honza is Jan, in the Almanac");
+            expect(
+                screen.queryByText("Only a first name: add the surname."),
+            ).toBeNull();
+        });
+
         it("shows what the finished review did with them", async () => {
             respond({
                 "GET /api/recordings/rec-1/review?source=riffado": {
