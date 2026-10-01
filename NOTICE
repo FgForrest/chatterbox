@@ -1,0 +1,38 @@
+Riffado
+Copyright (c) Riffado contributors. Licensed under the GNU Affero General
+Public License, version 3 (see LICENSE).
+
+This product includes software derived from the following projects.
+
+evitaDB stemmers
+----------------
+
+src/lib/knowledge/stemming/czech.ts, slovak.ts, polish.ts and romanian.ts
+are TypeScript ports of the variant stemmers in evitaDB
+(https://github.com/FgForrest/evitaDB, io.evitadb.index.fulltext.analysis:
+CzechVariantStemmer, SlovakVariantStemmer, PolishVariantStemmer,
+RomanianVariantStemmer; pull request #1453), copyright (c) 2026 FG Forrest,
+a.s. FG Forrest, a.s., the copyright holder, contributes these ports to
+Riffado under Riffado's license.
+
+Apache Lucene
+-------------
+
+The Czech stemmer's ending tables are those of Lucene's CzechStemmer
+(org.apache.lucene.analysis.cz), an implementation of the light stemmer of
+Ljiljana Dolamic and Jacques Savoy, "Indexing and stemming approaches for
+the Czech language" (Information Processing & Management 45(6), 2009).
+The Polish and Romanian stemmers read the rules of the Snowball stemmers as
+Lucene ships them. Apache Lucene, copyright The Apache Software Foundation,
+is licensed under the Apache License, Version 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Snowball
+--------
+
+The Polish and Romanian rules come from the Snowball project
+(https://snowballstem.org), copyright (c) Dr Martin Porter and Richard
+Boulton and others, licensed under the BSD 3-Clause License.
+
+Other languages are stemmed by the snowball-stemmers package (ISC License),
+a JavaScript port of the Snowball stemmers, used as a dependency.

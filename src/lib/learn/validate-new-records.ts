@@ -22,6 +22,12 @@
  */
 
 import { anchorMatches } from "@/lib/knowledge/correction-anchors";
+import {
+    type MatchReason,
+    NameIndex,
+    type WordStemmer,
+} from "@/lib/knowledge/name-match";
+import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import { deniedTopicOf } from "@/lib/knowledge/vocabulary-core";
 import { isNameWord, nameParts, nameWords } from "@/lib/learn/name-match";
 import { type RecordTarget, recordNameKey } from "@/lib/learn/new-refs";
@@ -32,6 +38,16 @@ export const MAX_NEW_RECORDS = 20;
 
 /** Turns either side of an evidence turn the name may be said in. */
 const EVIDENCE_RADIUS = 1;
+/**
+ * Lookup matches that may make a new record a known one, misheard. Not a
+ * known name inside a longer one ("Google" in "Google Cloud Platform"),
+ * nor trigrams alone; and for a person not word forms either, which join
+ * "Martina Nováková" with Martin Novák and "Pavla" with Pavel.
+ */
+const MAYBE_REASONS: Record<"person" | "entity", ReadonlySet<MatchReason>> = {
+    person: new Set(["exact", "token", "edit"]),
+    entity: new Set(["exact", "token", "edit", "stem"]),
+};
 
 export interface NewRecordPayload {
     ref: string;
@@ -79,6 +95,8 @@ export interface NewRecordsFrame {
     >;
     /** The types a new thing may take in the run's scope. */
     entityTypes?: ReadonlySet<string>;
+    /** The transcript's language: names are compared in their forms. */
+    language?: string | null;
 }
 
 export interface NewRecords {
@@ -116,18 +134,15 @@ export function newRecordFingerprint(
 }
 
 /**
- * Whether two names (letters only, lower case) are one misheard or
- * shortened: one starts the other (four letters at least), or they differ
- * by an edit (two, from seven letters on).
+ * Whether a heard name `a` is a known name `b` (letters only, lower case)
+ * misheard or shortened: they differ by an edit (two, from seven letters
+ * on), or, with `shortened`, `a` starts `b` (four letters at least: "evita"
+ * for "evitadb"). Never `b` starting `a`: "orbitaserver" is something
+ * besides Orbita, and "holubova" someone besides Holub.
  */
-export function close(a: string, b: string): boolean {
+export function close(a: string, b: string, shortened = true): boolean {
     if (!a || !b || a === b) return a === b && a.length > 0;
-    if (
-        Math.min(a.length, b.length) >= 4 &&
-        (a.startsWith(b) || b.startsWith(a))
-    ) {
-        return true;
-    }
+    if (shortened && a.length >= 4 && b.startsWith(a)) return true;
     const limit = Math.min(a.length, b.length) >= 7 ? 2 : 1;
     if (
         Math.min(a.length, b.length) < 4 ||
@@ -241,42 +256,75 @@ export function validateNewRecords(
                 })
             );
         });
+    // Known names, matched as the lookups match them: by word forms in the
+    // transcript's language, a letter off, or inside a longer name.
+    const index = new NameIndex([
+        ...[...frame.people].map(([id, person]) => ({
+            id,
+            names: [person.name, ...(person.aliases ?? [])],
+        })),
+        ...[...frame.entities].map(([id, entity]) => ({
+            id,
+            names: [entity.name, ...(entity.aliases ?? [])],
+        })),
+    ]);
+    const language = stemmingLanguage(frame.language);
+    const stemmer: WordStemmer | undefined = language
+        ? { key: language, stem: (word) => stemVariants(word, language) }
+        : undefined;
     /**
      * The one known record of that kind whose name is close to `name` (of
      * the same type, for a thing, when one is): none when several are.
+     * Close is a match the lookups make (`MAYBE_REASONS`: a first name
+     * only one person has, a letter off, a thing's word forms: "Forest"
+     * for FG Forrest), a surname or a thing's name a letter or two off, or
+     * one starting the other ("Evita" for evitaDB).
      */
     const maybeOf = (
         kind: "person" | "entity",
         typeKey: string | null,
         name: string,
     ): { maybe?: RecordTarget } => {
+        const found = new Set(
+            index
+                .match(name, stemmer)
+                .filter((match) => MAYBE_REASONS[kind].has(match.reason))
+                .map((match) => match.id),
+        );
         if (kind === "person") {
             const surname = nameWords(name).at(-1) ?? "";
-            if (nameParts(name).length < 2) return {};
-            const found = [...frame.people].filter(
-                ([, person]) =>
+            for (const [id, person] of frame.people) {
+                if (
+                    nameParts(name).length >= 2 &&
                     nameParts(person.name).length >= 2 &&
-                    close(surname, nameWords(person.name).at(-1) ?? ""),
-            );
-            const [only] = found;
-            return found.length === 1 && only
-                ? { maybe: { personId: only[0] } }
+                    close(surname, nameWords(person.name).at(-1) ?? "", false)
+                ) {
+                    found.add(id);
+                }
+            }
+            const people = [...found].filter((id) => frame.people.has(id));
+            const [only] = people;
+            return people.length === 1 && only
+                ? { maybe: { personId: only } }
                 : {};
         }
         const mine = nameWords(name).join("");
-        const found = [...frame.entities].filter(([, entity]) =>
-            [entity.name, ...(entity.aliases ?? [])].some((theirs) =>
-                close(mine, nameWords(theirs).join("")),
-            ),
+        for (const [id, entity] of frame.entities) {
+            if (
+                [entity.name, ...(entity.aliases ?? [])].some((theirs) =>
+                    close(mine, nameWords(theirs).join("")),
+                )
+            ) {
+                found.add(id);
+            }
+        }
+        const things = [...found].filter((id) => frame.entities.has(id));
+        const sameType = things.filter(
+            (id) => frame.entities.get(id)?.typeKey === typeKey,
         );
-        const sameType = found.filter(
-            ([, entity]) => entity.typeKey === typeKey,
-        );
-        const match = sameType.length > 0 ? sameType : found;
+        const match = sameType.length > 0 ? sameType : things;
         const [only] = match;
-        return match.length === 1 && only
-            ? { maybe: { entityId: only[0] } }
-            : {};
+        return match.length === 1 && only ? { maybe: { entityId: only } } : {};
     };
     const turnsSaying = (name: string) =>
         turns.filter((turn) => nameSaidIn(name, [turn.text])).length;

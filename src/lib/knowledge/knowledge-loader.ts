@@ -32,12 +32,17 @@ import {
     type KnownName,
     type LoadedScope,
 } from "@/lib/knowledge/memory-store";
-import type { NameIndex, NameMatch } from "@/lib/knowledge/name-match";
+import type {
+    NameIndex,
+    NameMatch,
+    WordStemmer,
+} from "@/lib/knowledge/name-match";
 import { type ReadContext, readableScopes } from "@/lib/knowledge/scope";
 import {
     KNOWLEDGE_CHANNEL,
     readScopeGenerations,
 } from "@/lib/knowledge/scope-generation";
+import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import {
     buildMatrix,
     decodeVector,
@@ -391,11 +396,22 @@ export async function searchByMeaning(
     }
 }
 
-/** The people and entities in a view a name may mean, best first, with why. */
-export function findByName(view: KnowledgeView, query: string): NameMatch[] {
+/**
+ * The people and entities in a view a name may mean, best first, with why.
+ * With the language it was said in, inflected forms meet too.
+ */
+export function findByName(
+    view: KnowledgeView,
+    query: string,
+    language: string | null = null,
+): NameMatch[] {
+    const key = stemmingLanguage(language);
+    const stemmer: WordStemmer | undefined = key
+        ? { key, stem: (word) => stemVariants(word, key) }
+        : undefined;
     const best = new Map<string, NameMatch>();
     for (const index of view.indexes) {
-        for (const match of index.match(query)) {
+        for (const match of index.match(query, stemmer)) {
             const held = best.get(match.id);
             if (!held || match.score > held.score) best.set(match.id, match);
         }

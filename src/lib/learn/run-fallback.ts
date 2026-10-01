@@ -20,6 +20,7 @@
 
 import { z } from "zod";
 import { anchorMatches } from "@/lib/knowledge/correction-anchors";
+import { normalizeName, trigramSimilarity } from "@/lib/knowledge/name-match";
 import {
     LearnOutputUnusable,
     LearnToolBudgetExhausted,
@@ -49,7 +50,23 @@ export interface LearnLookup {
     findEntities(query: {
         text: string;
         type?: string;
+        /** By its words alone, not by meaning. */
+        byName?: boolean;
     }): Promise<{ entities: FoundEntity[] }>;
+}
+
+/**
+ * Whether the model's other form of a mention is a reading of it, not a
+ * name from nowhere: sharing letters with it ("Forestu" -> "Forest"), or
+ * one name for one name (the nickname "Honza" -> "Jan"). Anything else
+ * would look up, and show the model, what the transcript never named.
+ */
+function formOf(form: string, text: string): boolean {
+    const a = normalizeName(form);
+    const b = normalizeName(text);
+    if (!a || !b) return false;
+    if (!a.includes(" ") && !b.includes(" ")) return true;
+    return trigramSimilarity(a, b) >= 0.2;
 }
 
 export interface LearnRelationChoice {
@@ -69,6 +86,11 @@ export interface LearnEntityTypeChoice {
 export interface FallbackInput {
     chat: LearnChat;
     lookup: LearnLookup;
+    /**
+     * Lookups the run may make: a mention's other forms are looked up only
+     * while the windows still to come keep one for each of their mentions.
+     */
+    lookupBudget?: number;
     turns: readonly TranscriptTurn[];
     language: string | null;
     relations: readonly LearnRelationChoice[];
@@ -96,7 +118,9 @@ export { LearnOutputUnusable } from "@/lib/learn/errors";
 
 const WINDOW_CHARS = 30_000;
 const MAX_MENTIONS = 40;
-const MENTIONS_MAX_TOKENS = 1_500;
+const MENTIONS_MAX_TOKENS = 2_500;
+/** Other forms of one mention looked up when it finds nothing as said. */
+const MAX_FORMS = 2;
 const ANSWER_MAX_TOKENS = 6_000;
 
 /** One line per turn: its index, its start and its label, as quoted back. */
@@ -122,8 +146,9 @@ export const NEW_RECORDS_RULE =
 const MENTIONS_SYSTEM = [
     "You read a meeting transcript and list the words that name people, organizations, teams, projects, products or systems, places, documents and specialist terms.",
     "Copy each exactly as it is written in the transcript, even where it looks misheard or misspelled, and give the index of the turn (T<n>) it is in.",
+    `Where it differs, add forms: at most ${MAX_FORMS} other ways the knowledge base may write it: its base form (the nominative, spelled right where it sounds misheard: "Forestu" -> "Forest", "Honzou Šimákem" -> "Honza Šimák"), and for a nickname or short form the full name it stands for ("Honza" -> "Jan").`,
     DATA_RULE,
-    `Answer with one raw JSON object and nothing else: {"mentions":[{"text":string,"turn":number}]}. At most ${MAX_MENTIONS} mentions; each distinct spelling once.`,
+    `Answer with one raw JSON object and nothing else: {"mentions":[{"text":string,"turn":number,"forms":[string]}]}. At most ${MAX_MENTIONS} mentions; each distinct spelling once.`,
 ].join(" ");
 
 // The exact shape, not only prose: described in words alone, a model names
@@ -149,6 +174,23 @@ const mentionsSchema = z.object({
             z.object({
                 text: z.string().trim().min(1).max(LEARN_LIMITS.text),
                 turn: z.number().int().min(0),
+                forms: z
+                    .array(z.string())
+                    .optional()
+                    .catch(undefined)
+                    .transform((forms) =>
+                        [
+                            ...new Set(
+                                (forms ?? [])
+                                    .map((form) => form.trim())
+                                    .filter(
+                                        (form) =>
+                                            form.length > 0 &&
+                                            form.length <= LEARN_LIMITS.text,
+                                    ),
+                            ),
+                        ].slice(0, MAX_FORMS),
+                    ),
             }),
         )
         .max(200),
@@ -275,10 +317,8 @@ export async function runFallbackPass(
     const found = new Map<string, FoundEntity>();
     const lookedUp = new Map<string, FoundEntity[]>();
 
-    for (const window of windowsOf(
-        input.turns,
-        input.windowChars ?? WINDOW_CHARS,
-    )) {
+    const windows = windowsOf(input.turns, input.windowChars ?? WINDOW_CHARS);
+    for (const [windowIndex, window] of windows.entries()) {
         input.signal?.throwIfAborted();
         result.windows++;
         const transcript = renderLearnTranscript(window.turns, window.first);
@@ -298,40 +338,95 @@ export async function runFallbackPass(
         // this transcript never touches.
         const inWindow = (turn: number) =>
             turn >= window.first && turn < window.first + window.turns.length;
-        const texts = [
-            ...new Set(
-                mentions
-                    .filter(
-                        (mention) =>
-                            inWindow(mention.turn) &&
-                            (input.turns[mention.turn]?.text ?? "").includes(
-                                mention.text,
-                            ),
-                    )
-                    .map((mention) => mention.text),
-            ),
-        ].slice(0, MAX_MENTIONS);
+        // Its other forms (base form, the name a nickname stands for) are
+        // the model's reading of the words said: looked up only when the
+        // words themselves find nothing.
+        const formsOf = new Map<string, string[]>();
+        for (const mention of mentions) {
+            if (
+                !inWindow(mention.turn) ||
+                !(input.turns[mention.turn]?.text ?? "").includes(mention.text)
+            ) {
+                continue;
+            }
+            const forms = formsOf.get(mention.text) ?? [];
+            for (const form of mention.forms) {
+                if (form !== mention.text && !forms.includes(form)) {
+                    forms.push(form);
+                }
+            }
+            formsOf.set(mention.text, forms.slice(0, MAX_FORMS));
+        }
+        const texts = [...formsOf.keys()].slice(0, MAX_MENTIONS);
 
-        const candidates = new Map<string, FoundEntity>();
+        /**
+         * What one text finds, looked up once a run; undefined when spent.
+         * `byName`: by its words alone, not by meaning.
+         */
+        const lookUp = async (
+            text: string,
+            byName = false,
+        ): Promise<FoundEntity[] | undefined> => {
+            const key = `${byName ? "name" : "any"}\u0000${text}`;
+            const held = lookedUp.get(key);
+            if (held) return held;
+            // Spent: the rest is adjudicated with what was found.
+            if (lookupsSpent) return undefined;
+            try {
+                const entities = (
+                    await input.lookup.findEntities(
+                        byName ? { text, byName } : { text },
+                    )
+                ).entities;
+                result.lookups++;
+                lookedUp.set(key, entities);
+                return entities;
+            } catch (error) {
+                if (!(error instanceof LearnToolBudgetExhausted)) throw error;
+                lookupsSpent = true;
+                return undefined;
+            }
+        };
+        /** Found by name: a meaning alone may be anything. */
+        const named = (entities: readonly FoundEntity[] | undefined) =>
+            (entities ?? []).some((entity) =>
+                entity.reasons.some((reason) => reason !== "meaning"),
+            );
+        const byText = new Map<string, FoundEntity[]>();
+        // The words as said first, every mention of the window.
         for (const text of texts) {
             input.signal?.throwIfAborted();
-            let entities = lookedUp.get(text);
-            if (!entities) {
-                // Spent: the rest is adjudicated with what was found.
-                if (lookupsSpent) break;
-                try {
-                    entities = (await input.lookup.findEntities({ text }))
-                        .entities;
-                } catch (error) {
-                    if (!(error instanceof LearnToolBudgetExhausted)) {
-                        throw error;
-                    }
-                    lookupsSpent = true;
+            const entities = await lookUp(text);
+            if (entities === undefined) break;
+            byText.set(text, entities);
+        }
+        // Then the other forms of those no name was found for, as long as
+        // the windows still to come keep a lookup for each of theirs.
+        const reserve = MAX_MENTIONS * (windows.length - windowIndex - 1);
+        retries: for (const text of texts) {
+            const held = byText.get(text);
+            if (held === undefined || named(held)) continue;
+            for (const form of formsOf.get(text) ?? []) {
+                if (
+                    (input.lookupBudget ?? Infinity) - result.lookups <=
+                    reserve
+                ) {
+                    break retries;
+                }
+                if (!formOf(form, text)) continue;
+                input.signal?.throwIfAborted();
+                const entities = await lookUp(form, true);
+                if (entities === undefined) break retries;
+                if (named(entities)) {
+                    byText.set(text, [...held, ...entities]);
                     break;
                 }
-                result.lookups++;
-                lookedUp.set(text, entities);
             }
+        }
+        const candidates = new Map<string, FoundEntity>();
+        const notFound: string[] = [];
+        for (const [text, entities] of byText) {
+            if (!named(entities)) notFound.push(text);
             for (const entity of entities) {
                 candidates.set(entity.id, entity);
                 found.set(entity.id, entity);
@@ -340,7 +435,7 @@ export async function runFallbackPass(
 
         const context = {
             language: input.language,
-            notFound: texts.filter((text) => lookedUp.get(text)?.length === 0),
+            notFound,
             candidates: [...candidates.values()].map((entity) => ({
                 id: entity.id,
                 kind: entity.kind,

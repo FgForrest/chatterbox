@@ -18,6 +18,7 @@ import {
     vi,
 } from "vitest";
 import {
+    knowledgeAliases,
     knowledgeEntities,
     knowledgeFacts,
     knowledgeRelationTypes,
@@ -113,7 +114,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { addRecordingToFolder } from "@/lib/folders/folders";
-import { createEntity } from "@/lib/knowledge/entities";
+import { createEntity, mergeEntities } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { createPerson } from "@/lib/knowledge/people";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
@@ -543,6 +544,62 @@ describeWithDatabase("finishing a review with new records (PostgreSQL)", () => {
             objectEntityId: veltrix,
         });
         expect(await db().select().from(knowledgeEntities)).toHaveLength(1);
+        // What Learn heard is the person's nickname from now on.
+        const aliases = await db().select().from(knowledgeAliases);
+        expect(
+            aliases.map((alias) => [
+                alias.personId,
+                alias.kind,
+                decryptText(alias.text),
+            ]),
+        ).toEqual([[vilem, "alias", "Vilda"]]);
+    });
+
+    it("keeps no misheard spelling as a nickname, and follows a record merged meanwhile", async () => {
+        const veltrix = (
+            await createEntity(OWNER, {
+                typeKey: "organization",
+                name: "Veltrix",
+            })
+        ).id;
+        const twin = (
+            await createEntity(OWNER, {
+                typeKey: "organization",
+                name: "Veltrix Group",
+            })
+        ).id;
+        await readyRun([
+            record("n1", "Velltrix", { choice: { entityId: veltrix } }),
+            record("n2", "Kometa", { choice: { entityId: twin } }),
+        ]);
+        // Merged after the reviewer picked it.
+        await mergeEntities(OWNER, veltrix, twin);
+        await finish();
+        expect(await outcomes()).toEqual([
+            "new_record:applied",
+            "new_record:applied",
+        ]);
+        // "Velltrix" is Veltrix a letter off: no nickname. "Kometa" goes to
+        // the record the picked one was merged into.
+        const aliases = await db().select().from(knowledgeAliases);
+        expect(
+            aliases.map((alias) => [alias.entityId, decryptText(alias.text)]),
+        ).toEqual([[veltrix, "Kometa"]]);
+    });
+
+    it("keeps no nickname a record's own name already says", async () => {
+        const vilem = (
+            await createPerson({ userId: OWNER, displayName: "Vilém Brázda" })
+        ).id;
+        await readyRun([
+            record("n1", "Vilém", {
+                kind: "person",
+                choice: { personId: vilem },
+            }),
+        ]);
+        await finish();
+        expect(await outcomes()).toEqual(["new_record:applied"]);
+        expect(await db().select().from(knowledgeAliases)).toEqual([]);
     });
 
     it("refuses a record of the other kind, and what refers to it", async () => {

@@ -31,6 +31,8 @@ export interface LearnToolContext {
     read: Extract<ReadContext, { kind: "recording" }>;
     /** Calls left to the run; each tool call spends one. */
     budget: { remaining: number };
+    /** The transcript's language: names are matched in their word forms. */
+    language?: string | null;
 }
 
 export interface FoundEntity {
@@ -40,7 +42,10 @@ export interface FoundEntity {
     typeKey: string;
     name: string;
     scope: "personal" | "org";
-    /** Why it matched: `exact`, `token`, `edit`, `trigram`, `meaning`. */
+    /**
+     * Why it matched: `exact`, `token`, `edit`, `trigram`, `stem` (by its
+     * word forms), `part` (the name is part of the text), `meaning`.
+     */
     reasons: string[];
     score: number;
 }
@@ -59,7 +64,16 @@ async function viewFor(context: LearnToolContext): Promise<KnowledgeView> {
  */
 export async function findEntities(
     context: LearnToolContext,
-    { text, type }: { text: string; type?: string },
+    {
+        text,
+        type,
+        byName = false,
+    }: {
+        text: string;
+        type?: string;
+        /** By its words alone, not by meaning. */
+        byName?: boolean;
+    },
 ): Promise<{ byMeaning: boolean; entities: FoundEntity[] }> {
     const view = await viewFor(context);
     const items = new Map(view.items.map((item) => [item.id, item]));
@@ -85,10 +99,12 @@ export async function findEntities(
             score,
         });
     };
-    for (const match of findByName(view, text)) {
+    for (const match of findByName(view, text, context.language ?? null)) {
         add(match.id, match.reason, match.score);
     }
-    const meaning = await searchByMeaning(view, text, MAX_FOUND);
+    const meaning = byName
+        ? { available: false, hits: [] }
+        : await searchByMeaning(view, text, MAX_FOUND);
     for (const hit of meaning.hits) {
         if (hit.kind === "entity") add(hit.id, "meaning", hit.score);
     }

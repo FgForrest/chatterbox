@@ -20,8 +20,8 @@ import {
     type LearnToolContext,
 } from "@/lib/learn/tools";
 
-/** Lookups one run may make over MCP. */
-export const MCP_TOOL_BUDGET = 160;
+/** Lookups one run may make over MCP (with the base forms it retries). */
+export const MCP_TOOL_BUDGET = 320;
 /** The largest request body read; a tool call needs a few hundred bytes. */
 export const MCP_MAX_BODY_BYTES = 64 * 1024;
 const MAX_ID_LENGTH = 200;
@@ -31,6 +31,8 @@ export interface McpRun {
     id: string;
     userId: string;
     view: "private" | "org";
+    /** Its transcript's language, which names are matched in. */
+    language?: string | null;
 }
 
 type JsonRpcId = string | number | null;
@@ -179,6 +181,7 @@ export async function handleLearnMcp(
                     shared: run.view === "org",
                 },
                 budget: { remaining: 1 },
+                language: run.language ?? null,
             };
             if (name === "find_entities") {
                 return answer(

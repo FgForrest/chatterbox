@@ -39,7 +39,11 @@ import {
     encryptJsonField,
 } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
-import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
+import {
+    addAliasInTx,
+    type KnowledgeTarget,
+    resolveTargetInTx,
+} from "@/lib/knowledge/aliases";
 import { wordsAt } from "@/lib/knowledge/correction-anchors";
 import { acceptCorrectionInTx } from "@/lib/knowledge/corrections";
 import {
@@ -49,6 +53,7 @@ import {
 import { confirmFactFromRecordingInTx } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { matchNames } from "@/lib/knowledge/name-match";
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
@@ -57,6 +62,7 @@ import {
     answerSpeakerInTx,
     type SpeakerAnswer,
 } from "@/lib/knowledge/speaker-changes";
+import { stemmingLanguage, stemVariants } from "@/lib/knowledge/stemming";
 import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import {
     bumpVocabularyVersionInTx,
@@ -413,16 +419,16 @@ async function existingRecordInTx(
     return null;
 }
 
-/** Whether a live record is in one of these scopes. */
-async function recordReadableInTx(
+/** A live record's name, when it is in one of these scopes; else null. */
+async function readableRecordNameInTx(
     tx: Tx,
     target: RecordTarget,
     scopes: readonly string[],
-): Promise<boolean> {
+): Promise<string | null> {
     const [row] =
         "personId" in target
             ? await tx
-                  .select({ id: people.id })
+                  .select({ name: people.displayName })
                   .from(people)
                   .where(
                       and(
@@ -432,7 +438,7 @@ async function recordReadableInTx(
                       ),
                   )
             : await tx
-                  .select({ id: knowledgeEntities.id })
+                  .select({ name: knowledgeEntities.name })
                   .from(knowledgeEntities)
                   .where(
                       and(
@@ -441,7 +447,29 @@ async function recordReadableInTx(
                           isNull(knowledgeEntities.mergedIntoId),
                       ),
                   );
-    return row !== undefined;
+    return row ? decryptText(row.name) : null;
+}
+
+/**
+ * Whether a name Learn heard is worth keeping as the record's nickname:
+ * only one the lookups would not find it by anyway. "Honza" for Jan
+ * Novotný is; "Milan" for Milan Petrák is not (it would make every Milan
+ * him), nor "MCP server" for MCP (every "server" would be MCP), nor a
+ * misspelling or a word form ("Velltrix", "Šimákem").
+ */
+function nicknameWorthKeeping(
+    heard: string,
+    name: string,
+    language: string | null,
+): boolean {
+    const key = stemmingLanguage(language);
+    return (
+        matchNames(
+            heard,
+            [{ id: "record", names: [name] }],
+            key ? { key, stem: (word) => stemVariants(word, key) } : undefined,
+        ).length === 0
+    );
 }
 
 /** A string with something in it, and not too much. */
@@ -844,24 +872,62 @@ function finishInTx(
             personNames.length > 0
                 ? await peopleNamedInTx(tx, readScopes)
                 : new Map<string, string[]>();
+        /** The transcript's language, read once a nickname may be kept. */
+        let language: string | null | undefined;
         for (const item of records) {
             const payload = item.payload as NewRecordPayload;
             const choice = item.choice;
             if (choice && ("personId" in choice || "entityId" in choice)) {
-                // The reviewer said which record it is.
-                const target: RecordTarget =
+                // The reviewer said which record it is (or the one it was
+                // merged into since).
+                const chosen: RecordTarget =
                     "personId" in choice
                         ? { personId: choice.personId }
                         : { entityId: choice.entityId };
-                if (
-                    "personId" in target !== (payload.kind === "person") ||
-                    !(await recordReadableInTx(tx, target, readScopes))
-                ) {
+                const target = await resolveTargetInTx(
+                    tx,
+                    actorUserId,
+                    chosen,
+                ).catch((error: unknown) => {
+                    if (error instanceof AppError) return null;
+                    throw error;
+                });
+                const known =
+                    target &&
+                    "personId" in target === (payload.kind === "person")
+                        ? await readableRecordNameInTx(tx, target, readScopes)
+                        : null;
+                if (known === null || !target) {
                     skip(item.id, "no_longer_fits", "No such record here");
                     continue;
                 }
                 refs.set(payload.ref, target);
                 applied++;
+                // What Learn heard becomes the record's nickname, so the
+                // next run finds it ("Honza" for Jan). A name it already
+                // has, or one the actor cannot name, is no loss.
+                language ??= (
+                    await tx
+                        .select({ language: transcriptions.detectedLanguage })
+                        .from(transcriptions)
+                        .where(eq(transcriptions.id, latest.transcriptionId))
+                )[0]?.language;
+                if (
+                    nicknameWorthKeeping(payload.name, known, language ?? null)
+                ) {
+                    try {
+                        await tx.transaction(async (sp) => {
+                            await addAliasInTx(
+                                sp as Tx,
+                                actorUserId,
+                                target,
+                                payload.name,
+                            );
+                        });
+                    } catch (error) {
+                        if (!(error instanceof AppError)) throw error;
+                    }
+                }
                 continue;
             }
             const renamed = choice && "name" in choice ? choice : null;

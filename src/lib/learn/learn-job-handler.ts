@@ -80,11 +80,13 @@ import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 const FINGERPRINT_DOMAIN = "learn-fingerprint";
 /**
  * Knowledge lookups one run may make: room for every distinct mention of a
- * long recording (up to 40 a window, four windows for about two hours).
- * The pilot's 60 ran out on every recording over half an hour, and the
- * later windows were adjudicated knowing nothing.
+ * long recording (up to 40 a window, four windows for about two hours),
+ * and for two other forms of each (`runFallbackPass` keeps the later
+ * windows' share). The pilot's 60 ran
+ * out on every recording over half an hour, and the later windows were
+ * adjudicated knowing nothing.
  */
-const TOOL_BUDGET = 160;
+const TOOL_BUDGET = 480;
 const CALL_RETRY_ATTEMPTS = 3;
 /** A Learn call through the bridge, tools and all; the job allows 20 min. */
 const BRIDGE_CALL_TIMEOUT_MS = 18 * 60 * 1000;
@@ -680,6 +682,7 @@ async function runLearnJob({
         const tools: LearnToolContext = {
             read: { kind: "recording", ownerUserId: run.userId, shared },
             budget: { remaining: TOOL_BUDGET },
+            language: transcript.detectedLanguage,
         };
         const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
             sharedOnly: shared,
@@ -727,6 +730,7 @@ async function runLearnJob({
                       lookup: {
                           findEntities: (query) => findEntities(tools, query),
                       },
+                      lookupBudget: TOOL_BUDGET,
                       turns,
                       language: transcript.detectedLanguage,
                       relations,

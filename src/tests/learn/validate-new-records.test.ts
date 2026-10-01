@@ -329,6 +329,57 @@ describe("Learn's new records", () => {
         expect(result.items[1]?.payload).not.toHaveProperty("maybe");
     });
 
+    it("hints a known record behind a first name, or a letter off, and not behind a longer name or another person's forms", () => {
+        const result = validateLearnOutput(
+            output({
+                newRecords: [
+                    record("n1", "Marek", "0:00", {
+                        kind: "person",
+                        typeKey: null,
+                    }),
+                    record("n2", "Orbita server", "0:00", {
+                        typeKey: "product",
+                    }),
+                    record("n3", "Velltrix", "0:00"),
+                    record("n4", "Marie Holubová", "0:00", {
+                        kind: "person",
+                        typeKey: null,
+                    }),
+                ],
+            }),
+            frame({
+                turns: [
+                    {
+                        speaker: "speaker_0",
+                        startMs: 0,
+                        endMs: 10_000,
+                        text: "Marek pustil Orbita server pro Velltrix, ptala se Marie Holubová.",
+                    },
+                ],
+                entities: new Map([
+                    ["e-orbita", { typeKey: "project", name: "Orbita" }],
+                    ["e-veltrix", { typeKey: "organization", name: "Veltrix" }],
+                ]),
+            }),
+        );
+        expect(
+            result.items.map((item) => {
+                const payload = item.payload as {
+                    name: string;
+                    maybe?: unknown;
+                };
+                return [payload.name, payload.maybe];
+            }),
+        ).toEqual([
+            ["Marek", { personId: "p-marek" }],
+            // "Orbita" names a project: the server is something else.
+            ["Orbita server", undefined],
+            ["Velltrix", { entityId: "e-veltrix" }],
+            // Holubová is not Marek Holub, whatever her stem.
+            ["Marie Holubová", undefined],
+        ]);
+    });
+
     it("hints the known thing of the same type, and none where two fit", () => {
         const said = frame({
             turns: [
