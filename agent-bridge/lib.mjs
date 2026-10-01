@@ -453,16 +453,14 @@ export function buildArgs(
         ];
     }
     if (backend === "codex") {
-        // `--output-last-message` writes just the final assistant message
-        // to a file. Parsing `--json` JSONL instead would mean depending
-        // on event shapes that move between releases; a file with one
-        // string in it does not.
+        // Keep the final answer in a file and read usage from JSONL events.
         //
         // `--sandbox read-only` stays even with the shell gone: Codex
         // still offers `apply_patch`, which no flag in these versions
         // removes, and the sandbox is what refuses its writes.
         return [
             "exec",
+            "--json",
             "--skip-git-repo-check",
             "--sandbox",
             "read-only",
@@ -511,8 +509,15 @@ export function diagnosticTail(stderr, prompt = "", maxLines = 5, maxChars = 600
         .slice(0, maxChars);
 }
 
-/** Shape a successful reply as an OpenAI chat completion. */
-export function chatCompletion(model, content, id, createdMs = Date.now()) {
+/**
+ * Shape a successful reply as an OpenAI chat completion.
+ * @param {string} model
+ * @param {string} content
+ * @param {string} id
+ * @param {number} [createdMs]
+ * @param {Record<string, number> | null} [usage]
+ */
+export function chatCompletion(model, content, id, createdMs = Date.now(), usage = null) {
     return {
         id: `chatcmpl-${id}`,
         object: "chat.completion",
@@ -525,11 +530,14 @@ export function chatCompletion(model, content, id, createdMs = Date.now()) {
                 finish_reason: "stop",
             },
         ],
-        // The CLIs bill against a subscription, not per token, and report
-        // no usable per-request counts. Zeros keep the response shape
-        // valid for clients that read it; they are not a measurement.
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        ...(usage ? { usage } : {}),
     };
+}
+
+function nonnegativeNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0
+        ? value
+        : null;
 }
 
 /**
@@ -558,16 +566,87 @@ export function parseClaudeEnvelope(
         );
     }
 
+    let content;
     if (
         structured &&
         envelope.structured_output &&
         typeof envelope.structured_output === "object"
     ) {
-        return JSON.stringify(envelope.structured_output);
+        content = JSON.stringify(envelope.structured_output);
+    } else {
+        const text = typeof envelope.result === "string" ? envelope.result : "";
+        if (!text.trim()) {
+            throw new BridgeError(502, `${bin} returned an empty result`);
+        }
+        content = text;
     }
-    const text = typeof envelope.result === "string" ? envelope.result : "";
-    if (!text.trim()) {
-        throw new BridgeError(502, `${bin} returned an empty result`);
+
+    const cliUsage = envelope.usage;
+    const input = nonnegativeNumber(cliUsage?.input_tokens);
+    const output = nonnegativeNumber(cliUsage?.output_tokens);
+    const cacheCreation = nonnegativeNumber(cliUsage?.cache_creation_input_tokens);
+    const cacheRead = nonnegativeNumber(cliUsage?.cache_read_input_tokens);
+    const promptTokens =
+        input === null && cacheCreation === null && cacheRead === null
+            ? null
+            : (input ?? 0) + (cacheCreation ?? 0) + (cacheRead ?? 0);
+    const reportedCost = nonnegativeNumber(envelope.total_cost_usd);
+    const cost =
+        reportedCost === 0 && (promptTokens ?? 0) + (output ?? 0) > 0
+            ? null
+            : reportedCost;
+    const usage =
+        promptTokens !== null || output !== null || cost !== null
+            ? {
+                  ...(promptTokens !== null ? { prompt_tokens: promptTokens } : {}),
+                  ...(output !== null ? { completion_tokens: output } : {}),
+                  ...(promptTokens !== null && output !== null
+                      ? { total_tokens: promptTokens + output }
+                      : {}),
+                  ...(cost !== null ? { cost } : {}),
+              }
+            : null;
+    return { content, usage };
+}
+
+const CODEX_API_RATES = {
+    "gpt-5.6-luna": [0.2, 0.02, 1.2],
+    "gpt-5.6-terra": [2, 0.2, 12],
+    "gpt-5.6-sol": [4, 0.4, 20],
+    "gpt-6-luna": [0.1, 0.01, 0.5],
+    "gpt-6-sol": [2, 0.2, 10],
+    "gpt-6-astra": [10, 1, 50],
+};
+
+/** Read the completed turn's usage and estimate its API-equivalent cost. */
+export function parseCodexUsage(stdout, model) {
+    let counts = null;
+    for (const line of stdout.split("\n")) {
+        if (!line.trim()) continue;
+        let event;
+        try {
+            event = JSON.parse(line);
+        } catch {
+            continue;
+        }
+        if (event.type === "turn.completed") counts = event.usage;
     }
-    return text;
+    const input = nonnegativeNumber(counts?.input_tokens);
+    const output = nonnegativeNumber(counts?.output_tokens);
+    if (input === null || output === null) return null;
+    const cached = nonnegativeNumber(counts?.cached_input_tokens);
+    const rates = Object.hasOwn(CODEX_API_RATES, model)
+        ? CODEX_API_RATES[model]
+        : null;
+    const cost =
+        rates && cached !== null && cached <= input
+            ? ((input - cached) * rates[0] + cached * rates[1] + output * rates[2]) /
+              1_000_000
+            : null;
+    return {
+        prompt_tokens: input,
+        completion_tokens: output,
+        total_tokens: input + output,
+        ...(cost !== null ? { cost } : {}),
+    };
 }

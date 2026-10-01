@@ -378,7 +378,7 @@ That is a real trade, not a free win -- N concurrent agent sessions draw on the 
 
 **Multi-pass merges are capped by the agent, not by Riffado.** Riffado asks for a higher `max_tokens` on the merge than on a pass, because the merged output is the union of every pass and so is longer than any one of them. The bridge drops `max_tokens` (see above), so on this provider the merge is bounded by the agent's own default instead. If merged summaries come back visibly cut off, that is the reason -- not the merge prompt.
 
-**Usage numbers are zeros.** The CLIs bill against a subscription and don't report usable per-request counts. The `usage` block keeps the response shape valid; it is not a measurement.
+**Usage and cost are estimates.** Claude Code's JSON result supplies token counts and `total_cost_usd`; the bridge forwards them. Codex's JSONL `turn.completed` event supplies token counts, and the bridge applies published API rates for the listed GPT-5.6 and GPT-6 models, including cached input. These are API-equivalent values, not an allocation of your subscription fee or an authoritative bill. If a CLI omits usable data or a Codex model has no known rate, Riffado leaves the request unpriced. Recordings processed by an older bridge remain unpriced because their per-request usage was not saved.
 
 **Terms.** Both subscriptions are licensed for the individual subscriber's use, and neither vendor documents the headless token as a backend integration path. Summarizing your own recordings on your own box is personal use, but there's no SLA on the token flow and either vendor can change it. Keeping one API-key provider configured as a fallback is cheap insurance.
 

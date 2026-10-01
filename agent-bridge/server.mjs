@@ -41,6 +41,7 @@ import {
     diagnosticTail,
     MCP_TOKEN_ENV,
     parseClaudeEnvelope,
+    parseCodexUsage,
     parseLearnRequest,
     redact,
     resolveBackend,
@@ -146,7 +147,7 @@ async function runCodex(model, prompt, learn, signal) {
     const outPath = join(dir, "last-message.txt");
     try {
         const { options, env } = await learnOptions("codex", dir, learn);
-        await execCli(
+        const { stdout } = await execCli(
             CODEX_BIN,
             buildArgs("codex", model, CODEX_EXTRA_ARGS, outPath, options),
             prompt,
@@ -162,7 +163,7 @@ async function runCodex(model, prompt, learn, signal) {
                 `${CODEX_BIN} finished without producing a final message`,
             );
         }
-        return text;
+        return { content: text, usage: parseCodexUsage(stdout, model) };
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
@@ -416,7 +417,7 @@ async function handleChatCompletions(req, res) {
     });
 
     const startedAt = Date.now();
-    const content = await withSlot(
+    const { content, usage } = await withSlot(
         () => RUNNERS[backend](model, prompt, learn, abandon.signal),
         abandon.signal,
     );
@@ -435,7 +436,7 @@ async function handleChatCompletions(req, res) {
             (learn.schema ? " schema=1" : ""),
     );
 
-    sendJson(res, 200, chatCompletion(model, content, randomUUID()));
+    sendJson(res, 200, chatCompletion(model, content, randomUUID(), Date.now(), usage));
 }
 
 const server = createServer(async (req, res) => {
