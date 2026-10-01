@@ -104,10 +104,18 @@ export async function geminiTranscribe({
         );
     }
 
+    const usage = response.response.usageMetadata as
+        | (typeof response.response.usageMetadata & {
+              thoughtsTokenCount?: number;
+          })
+        | undefined;
     return {
         text: text.trim(),
         detectedLanguage: language ?? null,
-        inputTokens: response.response.usageMetadata?.promptTokenCount,
-        outputTokens: response.response.usageMetadata?.candidatesTokenCount,
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage
+            ? (usage.candidatesTokenCount ?? 0) +
+              (usage.thoughtsTokenCount ?? 0)
+            : undefined,
     };
 }

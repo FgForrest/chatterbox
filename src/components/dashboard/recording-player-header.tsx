@@ -90,6 +90,7 @@ export function RecordingPlayerHeader({
                 </div>
                 <div className="mt-1.5">
                     <AiCostSummary
+                        key={`${recording.id}:${recording.view ?? "private"}`}
                         recordingId={recording.id}
                         view={recording.view}
                     />

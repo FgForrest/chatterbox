@@ -135,7 +135,12 @@ export async function buildAndUploadExportArchive(input: {
             ? await db
                   .select()
                   .from(aiUsageEvents)
-                  .where(eq(aiUsageEvents.payerUserId, userId))
+                  .where(
+                      and(
+                          inArray(aiUsageEvents.recordingId, recordingIds),
+                          eq(aiUsageEvents.payerUserId, userId),
+                      ),
+                  )
             : [];
     const usageMap = new Map<string, typeof userUsage>();
     for (const usage of userUsage) {
