@@ -28,6 +28,7 @@ interface RecordingPlayerProps {
 
 export interface RecordingPlayerHandle {
     seekTo: (seconds: number) => void;
+    playFrom: (seconds: number) => void;
     /** Playback position in seconds, read from the audio element. */
     getCurrentTime: () => number;
 }
@@ -74,9 +75,13 @@ export function RecordingPlayer({
         ref,
         () => ({
             seekTo: seekToTime,
+            playFrom: (seconds) => {
+                seekToTime(seconds);
+                if (!isPlaying) togglePlayPause();
+            },
             getCurrentTime: () => audioRef.current?.currentTime ?? 0,
         }),
-        [seekToTime, audioRef],
+        [seekToTime, togglePlayPause, isPlaying, audioRef],
     );
 
     usePlaybackKeyboard({

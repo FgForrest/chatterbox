@@ -40,6 +40,8 @@ interface SpeakerTagsProps {
     view?: RecordingView;
     /** Play the recording from a moment, to hear a suggestion's evidence. */
     onSeek?: (ms: number) => void;
+    /** Play a speaker's next timed turn; false leaves the browser menu alone. */
+    onPlaySpeaker?: (speaker: string) => boolean;
     /**
      * The version of the transcript on screen, from the page's data. Every
      * change names it; without it, the version the speakers were read at.
@@ -149,6 +151,7 @@ export function SpeakerTags({
     onAttributionsChange,
     view,
     onSeek,
+    onPlaySpeaker,
     shownVersion,
     onStale,
     readOnly = false,
@@ -302,11 +305,20 @@ export function SpeakerTags({
 
     if (speakers.length === 0) return null;
 
+    const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const speaker =
+            target.closest<HTMLElement>("[data-speaker]")?.dataset.speaker;
+        if (speaker && onPlaySpeaker?.(speaker)) event.preventDefault();
+    };
+
     if (readOnly) {
         return (
             <fieldset
                 className="flex flex-wrap items-center gap-2 pt-3"
                 aria-label={i18n("Transcript speakers")}
+                onContextMenu={handleContextMenu}
             >
                 {speakers.map((speaker, index) => {
                     const attribution = attributions[speaker.speaker];
@@ -320,6 +332,7 @@ export function SpeakerTags({
                             <Link
                                 key={speaker.speaker}
                                 id={speakerAnchorId(speaker.speaker)}
+                                data-speaker={speaker.speaker}
                                 href={`/almanac/${attribution.personId}`}
                                 className="inline-flex h-8 items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-medium transition-colors hover:bg-primary/20"
                             >
@@ -332,6 +345,7 @@ export function SpeakerTags({
                         <span
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
+                            data-speaker={speaker.speaker}
                             className="inline-flex h-8 items-center gap-2 rounded-full border bg-muted/30 px-3 text-xs font-medium text-muted-foreground"
                         >
                             {dot}
@@ -346,6 +360,11 @@ export function SpeakerTags({
                 <span className="text-xs text-muted-foreground">
                     {i18n("Managed by the Organization")}
                 </span>
+                {onPlaySpeaker && (
+                    <span className="text-xs text-muted-foreground">
+                        {i18n("Right-click a speaker to hear their next turn")}
+                    </span>
+                )}
             </fieldset>
         );
     }
@@ -358,6 +377,7 @@ export function SpeakerTags({
         <fieldset
             className="flex flex-wrap items-center gap-2 pt-3"
             aria-label={i18n("Transcript speakers")}
+            onContextMenu={handleContextMenu}
         >
             {speakers.map((speaker, index) => {
                 const attribution = attributions[speaker.speaker];
@@ -369,6 +389,7 @@ export function SpeakerTags({
                         <span
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
+                            data-speaker={speaker.speaker}
                             className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed bg-muted/30 text-xs font-medium text-muted-foreground"
                         >
                             <span className="inline-flex h-full items-center gap-2 pl-3 pr-2">
@@ -411,6 +432,7 @@ export function SpeakerTags({
                         <span
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
+                            data-speaker={speaker.speaker}
                             className="inline-flex h-8 items-center overflow-hidden rounded-full border border-dashed border-primary/40 text-xs font-medium"
                         >
                             {onSeek && evidenceMs !== null && (
@@ -493,6 +515,7 @@ export function SpeakerTags({
                         <button
                             key={speaker.speaker}
                             id={speakerAnchorId(speaker.speaker)}
+                            data-speaker={speaker.speaker}
                             type="button"
                             onClick={() => setOpenLabel(speaker.speaker)}
                             disabled={saving}
@@ -513,6 +536,7 @@ export function SpeakerTags({
                     <span
                         key={speaker.speaker}
                         id={speakerAnchorId(speaker.speaker)}
+                        data-speaker={speaker.speaker}
                         className="inline-flex h-8 items-center overflow-hidden rounded-full border border-primary/30 bg-primary/10 text-xs font-medium"
                     >
                         <Link
@@ -548,6 +572,12 @@ export function SpeakerTags({
                     </span>
                 );
             })}
+
+            {onPlaySpeaker && (
+                <span className="text-xs text-muted-foreground">
+                    {i18n("Right-click a speaker to hear their next turn")}
+                </span>
+            )}
 
             {openSpeaker && (
                 <SpeakerPicker
