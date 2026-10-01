@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
     pickEnhancementCredential,
     pickLearnCredential,
+    pickTopicsCredential,
 } from "@/lib/ai/enhancement-provider";
+import { topicsProviderId } from "@/lib/ai/topics-provider";
 
 describe("pickEnhancementCredential", () => {
     it("prefers the enhancement default among providers that can summarize", () => {
@@ -51,6 +53,31 @@ describe("pickEnhancementCredential", () => {
 
     it("returns undefined for an empty list", () => {
         expect(pickEnhancementCredential([])).toBeUndefined();
+    });
+});
+
+describe("pickTopicsCredential", () => {
+    const providers = [
+        { id: "summary", provider: "OpenAI", isDefaultEnhancement: true },
+        { id: "topics", provider: "Groq", isDefaultEnhancement: false },
+        { id: "audio", provider: "ElevenLabs", isDefaultEnhancement: false },
+    ];
+
+    it("uses the independent Topics selection", () => {
+        expect(pickTopicsCredential(providers, "topics")?.id).toBe("topics");
+        expect(pickEnhancementCredential(providers)?.id).toBe("summary");
+    });
+
+    it("falls back to summaries for missing or incompatible selections", () => {
+        expect(pickTopicsCredential(providers, null)?.id).toBe("summary");
+        expect(pickTopicsCredential(providers, "missing")?.id).toBe("summary");
+        expect(pickTopicsCredential(providers, "audio")?.id).toBe("summary");
+    });
+
+    it("reads only a valid Topics preference", () => {
+        expect(topicsProviderId({ topics: "topics" })).toBe("topics");
+        expect(topicsProviderId({ topics: 123 })).toBeNull();
+        expect(topicsProviderId(null)).toBeNull();
     });
 });
 

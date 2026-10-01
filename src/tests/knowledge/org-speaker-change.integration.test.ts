@@ -10,7 +10,7 @@
  * create scratch databases on.
  */
 
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -22,7 +22,6 @@ import {
 } from "vitest";
 import {
     people,
-    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,

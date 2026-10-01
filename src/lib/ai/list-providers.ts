@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
+import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import {
     getManagedTranscriptionProvider,
@@ -14,6 +15,7 @@ export interface ProviderListItem {
     defaultModel: string | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
+    isDefaultTopics?: boolean;
     /**
      * Whether Learn runs on it; absent where this instance has no Learn,
      * so the list offers the choice only where it means something.
@@ -42,11 +44,15 @@ export async function listUserProviders(
     userId: string,
 ): Promise<ProviderListItem[]> {
     const [settings] = await db
-        .select({ pointer: userSettings.defaultTranscriptionProviderId })
+        .select({
+            pointer: userSettings.defaultTranscriptionProviderId,
+            defaultProviders: userSettings.defaultProviders,
+        })
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
         .limit(1);
     const pointer = settings?.pointer ?? null;
+    const topicsPointer = topicsProviderId(settings?.defaultProviders);
 
     const rows = await db
         .select({
@@ -72,6 +78,7 @@ export async function listUserProviders(
         ({ isDefaultLearn, ...row }) => ({
             ...row,
             isDefaultTranscription: row.id === pointer,
+            isDefaultTopics: row.id === topicsPointer,
             ...(learn ? { isDefaultLearn } : {}),
         }),
     );
