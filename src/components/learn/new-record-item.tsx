@@ -1,7 +1,7 @@
 "use client";
 
 import { useExtracted } from "next-intl";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
     type PickedRecord,
     RecordPicker,
@@ -109,6 +109,10 @@ export function NewRecordItem({
     const i18n = useExtracted();
     const current = newRecordAs(payload, choice);
     const [name, setName] = useState(current.name);
+    // The type as last chosen, ahead of its save: a name saved meanwhile
+    // keeps it rather than the type the server still has.
+    const [typeKey, setTypeKey] = useState(current.typeKey);
+    useEffect(() => setTypeKey(current.typeKey), [current.typeKey]);
     const [picking, setPicking] = useState(false);
     const linked = linkedRecordId(choice);
     const typeLabel = (key: string | null) =>
@@ -185,10 +189,7 @@ export function NewRecordItem({
                                     return;
                                 }
                                 if (trimmed !== current.name) {
-                                    void keep({
-                                        name: trimmed,
-                                        typeKey: current.typeKey,
-                                    });
+                                    void keep({ name: trimmed, typeKey });
                                 }
                             }}
                         />
@@ -196,14 +197,15 @@ export function NewRecordItem({
                             <select
                                 className="h-8 rounded-md border bg-background px-2 text-sm"
                                 aria-label={i18n("Kind of thing")}
-                                value={current.typeKey ?? ""}
+                                value={typeKey ?? ""}
                                 disabled={disabled}
-                                onChange={(event) =>
+                                onChange={(event) => {
+                                    setTypeKey(event.target.value);
                                     void keep({
                                         name: name.trim() || current.name,
                                         typeKey: event.target.value,
-                                    })
-                                }
+                                    });
+                                }}
                             >
                                 {entityTypes.map((type) => (
                                     <option key={type.key} value={type.key}>

@@ -805,7 +805,9 @@ function finishInTx(
         );
         // People have no unique name: two reviews adding one person at once
         // take turns by name (in one order, so they never wait on each
-        // other), and each looks for the person once its turn comes.
+        // other), and each looks for the person once its turn comes. A
+        // name is locked in every scope this review reads, so a member's
+        // review and the Organization's take turns too.
         const personNames = [
             ...new Set(
                 records.flatMap((item) => {
@@ -822,9 +824,18 @@ function finishInTx(
                     ];
                 }),
             ),
+        ];
+        const personLocks = [
+            ...new Set(
+                personNames.flatMap((nameKey) =>
+                    [...new Set([actorUserId, ...readScopes])].map(
+                        (scope) =>
+                            `riffado:learn-person:${domainLookupHash("learn-person", `${scope}\u0000${nameKey}`)}`,
+                    ),
+                ),
+            ),
         ].sort();
-        for (const nameKey of personNames) {
-            const key = `riffado:learn-person:${domainLookupHash("learn-person", `${actorUserId}\u0000${nameKey}`)}`;
+        for (const key of personLocks) {
             await tx.execute(
                 sql`select pg_advisory_xact_lock(hashtext(${key}))`,
             );

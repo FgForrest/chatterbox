@@ -269,7 +269,10 @@ export function LearnReview({
     ): Promise<void> => {
         setSaving((count) => count + 1);
         const before = queues.current.get(item.id) ?? Promise.resolve();
+        // After the save before it, however that went: one failure must
+        // not swallow the edits made after it.
         const sent = before
+            .catch(() => undefined)
             .then(() => keep(item, decision, choice))
             .finally(() => setSaving((count) => count - 1));
         queues.current.set(item.id, sent);
@@ -287,15 +290,23 @@ export function LearnReview({
         decision: "accepted" | "rejected" | null,
         choice: Record<string, unknown> | null,
     ) => {
-        const response = await fetch(url(`review/items/${item.id}`), {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                decision,
-                version: versions.current.get(item.id) ?? item.version,
-                choice,
-            }),
-        });
+        let response: Response;
+        try {
+            response = await fetch(url(`review/items/${item.id}`), {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    decision,
+                    version: versions.current.get(item.id) ?? item.version,
+                    choice,
+                }),
+            });
+        } catch {
+            // Offline: not kept, and Finish must not go ahead without it.
+            refused.current++;
+            toast.error(i18n("Could not keep that decision"));
+            return;
+        }
         if (!response.ok) {
             refused.current++;
             toast.error(

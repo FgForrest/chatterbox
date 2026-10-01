@@ -88,6 +88,7 @@ function respond(routes: Record<string, unknown>) {
                     : route.inTurn[0]
                 : route;
         if (body === undefined) return new Response("{}", { status: 404 });
+        if (body instanceof Error) throw body;
         return Response.json(body);
     });
     vi.stubGlobal("fetch", fetch);
@@ -1045,6 +1046,87 @@ describe("LearnReview", () => {
                     choice: { name: "Veltrix a.s.", typeKey: "product" },
                 },
             ]);
+        });
+
+        it("keeps the type just chosen when the name is saved before that type's save comes back", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            const name = screen.getByRole("textbox", { name: "Name" });
+            fireEvent.change(name, { target: { value: "Veltrix a.s." } });
+            fireEvent.blur(name);
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
+            const choices = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)).choice);
+            expect(choices).toEqual([
+                { name: "Veltrix", typeKey: "product" },
+                { name: "Veltrix a.s.", typeKey: "product" },
+            ]);
+        });
+
+        it("goes on saving an item after one of its saves failed", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn(new TypeError("offline"), { version: 1 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Veltrix to the Almanac",
+                }),
+            );
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
         });
 
         it("rejects one outright, for every recording, and takes that back", async () => {

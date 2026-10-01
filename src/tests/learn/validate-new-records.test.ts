@@ -329,6 +329,38 @@ describe("Learn's new records", () => {
         expect(result.items[1]?.payload).not.toHaveProperty("maybe");
     });
 
+    it("hints the known thing of the same type, and none where two fit", () => {
+        const said = frame({
+            turns: [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 10_000,
+                    text: "Apolo a Kometta jedou.",
+                },
+            ],
+            entities: new Map([
+                ["e-apollo-org", { typeKey: "organization", name: "Apollo" }],
+                ["e-apollo-prj", { typeKey: "project", name: "Apollo" }],
+                ["e-kometa", { typeKey: "project", name: "Kometa" }],
+                ["e-komet", { typeKey: "project", name: "Kometta s.r.o." }],
+            ]),
+        });
+        const result = validateLearnOutput(
+            output({
+                newRecords: [
+                    record("n1", "Apolo", "0:00", { typeKey: "project" }),
+                    record("n2", "Kometta", "0:00", { typeKey: "project" }),
+                ],
+            }),
+            said,
+        );
+        expect(result.items[0]?.payload).toMatchObject({
+            maybe: { entityId: "e-apollo-prj" },
+        });
+        expect(result.items[1]?.payload).not.toHaveProperty("maybe");
+    });
+
     it("finds a name inflected as Czech says it", () => {
         const result = validateLearnOutput(
             output({
@@ -572,6 +604,50 @@ describe("Learn's new records", () => {
         );
         expect(kinds(mentioned)).toEqual(["new_record"]);
         expect(mentioned.items[0]?.payload).not.toHaveProperty("speakerLabel");
+    });
+
+    it("does not link a speaker through a turn that does not say the name", () => {
+        const turns: TranscriptTurn[] = [
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 10_000,
+                text: "Volala Alena Brabcová, že to posune.",
+            },
+            {
+                speaker: "speaker_2",
+                startMs: 10_000,
+                endMs: 20_000,
+                text: "A co říkala dál?",
+            },
+            {
+                speaker: "speaker_0",
+                startMs: 20_000,
+                endMs: 30_000,
+                text: "Nic moc.",
+            },
+            {
+                speaker: "speaker_1",
+                startMs: 30_000,
+                endMs: 40_000,
+                text: "Jo, chápu.",
+            },
+        ];
+        const result = validateLearnOutput(
+            output({
+                newRecords: [
+                    record("n1", "Alena Brabcová", "0:00", {
+                        kind: "person",
+                        typeKey: null,
+                        speakerLabel: "speaker_1",
+                        evidence: ["0:00", "0:20"],
+                    }),
+                ],
+            }),
+            frame({ turns }),
+        );
+        expect(kinds(result)).toEqual(["new_record"]);
+        expect(result.items[0]?.payload).not.toHaveProperty("speakerLabel");
     });
 
     it("names no speaker a person answered, nor one the answer names otherwise", () => {

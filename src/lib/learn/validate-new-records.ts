@@ -219,42 +219,64 @@ export function validateNewRecords(
      * introduction) or answers next (addressed by name). A name said
      * elsewhere is about someone, not proof of who speaks; and whether
      * more than a first name backs the speaker is judged on these alone.
+     * The turn itself must say the name (any word of it, or of `names`):
+     * the label speaking near the name proves nothing.
      */
-    const speakingAs = (label: string, evidenceMs: readonly number[]) =>
+    const speakingAs = (
+        label: string,
+        names: readonly string[],
+        evidenceMs: readonly number[],
+    ) =>
         evidenceMs.filter((ms) => {
             const at = turnAt(ms);
+            const text = turns[at]?.text ?? "";
             return (
-                turns[at]?.speaker === label || turns[at + 1]?.speaker === label
+                (turns[at]?.speaker === label ||
+                    turns[at + 1]?.speaker === label) &&
+                names.some((name) => {
+                    const parts = nameParts(name);
+                    return parts.length === 0
+                        ? nameSaidIn(name, [text])
+                        : parts.some((part) => nameSaidIn(part, [text]));
+                })
             );
         });
-    /** A known record of that kind whose name is close to `name`. */
+    /**
+     * The one known record of that kind whose name is close to `name` (of
+     * the same type, for a thing, when one is): none when several are.
+     */
     const maybeOf = (
         kind: "person" | "entity",
+        typeKey: string | null,
         name: string,
     ): { maybe?: RecordTarget } => {
         if (kind === "person") {
             const surname = nameWords(name).at(-1) ?? "";
             if (nameParts(name).length < 2) return {};
-            for (const [id, person] of frame.people) {
-                const theirs = nameWords(person.name).at(-1) ?? "";
-                if (
+            const found = [...frame.people].filter(
+                ([, person]) =>
                     nameParts(person.name).length >= 2 &&
-                    close(surname, theirs)
-                ) {
-                    return { maybe: { personId: id } };
-                }
-            }
-            return {};
+                    close(surname, nameWords(person.name).at(-1) ?? ""),
+            );
+            const [only] = found;
+            return found.length === 1 && only
+                ? { maybe: { personId: only[0] } }
+                : {};
         }
         const mine = nameWords(name).join("");
-        for (const [id, entity] of frame.entities) {
-            for (const theirs of [entity.name, ...(entity.aliases ?? [])]) {
-                if (close(mine, nameWords(theirs).join(""))) {
-                    return { maybe: { entityId: id } };
-                }
-            }
-        }
-        return {};
+        const found = [...frame.entities].filter(([, entity]) =>
+            [entity.name, ...(entity.aliases ?? [])].some((theirs) =>
+                close(mine, nameWords(theirs).join("")),
+            ),
+        );
+        const sameType = found.filter(
+            ([, entity]) => entity.typeKey === typeKey,
+        );
+        const match = sameType.length > 0 ? sameType : found;
+        const [only] = match;
+        return match.length === 1 && only
+            ? { maybe: { entityId: only[0] } }
+            : {};
     };
     const turnsSaying = (name: string) =>
         turns.filter((turn) => nameSaidIn(name, [turn.text])).length;
@@ -307,7 +329,17 @@ export function validateNewRecords(
                     const evidenceMs = record.evidence
                         .map(startOf)
                         .filter((ms): ms is number => ms !== null);
-                    const heard = speakingAs(record.speakerLabel, evidenceMs);
+                    const person = frame.people.get(ids[0]);
+                    const heard = speakingAs(
+                        record.speakerLabel,
+                        [
+                            record.name,
+                            ...(person
+                                ? [person.name, ...(person.aliases ?? [])]
+                                : []),
+                        ],
+                        evidenceMs,
+                    );
                     if (heard.length > 0) {
                         speakers.push({
                             label: record.speakerLabel,
@@ -447,7 +479,7 @@ export function validateNewRecords(
             ...(record.kind === "person" && nameParts(record.name).length <= 1
                 ? { onlyFirstName: true as const }
                 : {}),
-            ...maybeOf(record.kind, record.name),
+            ...maybeOf(record.kind, typeKey, record.name),
         };
         identities.set(identity, record.ref);
         keys.set(record.ref, `new:${identity}`);
@@ -462,7 +494,11 @@ export function validateNewRecords(
 
     for (const payload of kept.values()) {
         if (payload.kind !== "person" || !payload.speakerLabel) continue;
-        const heard = speakingAs(payload.speakerLabel, payload.evidenceMs);
+        const heard = speakingAs(
+            payload.speakerLabel,
+            [payload.name],
+            payload.evidenceMs,
+        );
         if (heard.length === 0) {
             // Named, but never where that speaker speaks or answers.
             delete payload.speakerLabel;
