@@ -21,6 +21,7 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
+import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -402,6 +403,18 @@ export async function generateSummaryForRecording(
                         temperature: label === "merge" ? 0.2 : 0.5,
                         maxTokens: requestMaxTokens,
                     }),
+                );
+                await recordChatCompletionUsage(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        payerUserId: ctx.actorUserId,
+                        operation: "summary",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    response,
                 );
                 return response.choices[0]?.message?.content?.trim() || "";
             });

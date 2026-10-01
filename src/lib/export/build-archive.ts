@@ -3,7 +3,9 @@ import { ZipArchive } from "archiver";
 import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    aiCostRates,
     aiEnhancements,
+    aiUsageEvents,
     knowledgeAliases,
     knowledgeEntities,
     knowledgeEntityNotes,
@@ -53,6 +55,7 @@ interface ManifestRecording {
     };
     summary: { included: boolean; path: string | null };
     summaries: { included: boolean; path: string | null; count: number };
+    aiUsage?: { included: boolean; path: string | null; count: number };
 }
 
 // Which transcript `transcript.txt` renders when a recording has more than
@@ -126,6 +129,20 @@ export async function buildAndUploadExportArchive(input: {
         );
 
     const recordingIds = userRecordings.map((r) => r.id);
+
+    const userUsage =
+        recordingIds.length > 0
+            ? await db
+                  .select()
+                  .from(aiUsageEvents)
+                  .where(eq(aiUsageEvents.payerUserId, userId))
+            : [];
+    const usageMap = new Map<string, typeof userUsage>();
+    for (const usage of userUsage) {
+        const group = usageMap.get(usage.recordingId) ?? [];
+        group.push(usage);
+        usageMap.set(usage.recordingId, group);
+    }
 
     const userTranscriptions =
         recordingIds.length > 0
@@ -259,6 +276,7 @@ export async function buildAndUploadExportArchive(input: {
         entities?: { entities: number; aliases: number; notes: number };
         facts?: { facts: number; evidence: number };
         learn?: { runs: number; items: number };
+        aiCostRates?: { count: number; path: string };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -294,6 +312,7 @@ export async function buildAndUploadExportArchive(input: {
             transcripts: { included: false, path: null, count: 0 },
             summary: { included: false, path: null },
             summaries: { included: false, path: null, count: 0 },
+            aiUsage: { included: false, path: null, count: 0 },
         };
 
         const audioExists = await sourceStorage
@@ -476,6 +495,29 @@ export async function buildAndUploadExportArchive(input: {
             };
         }
 
+        const recordingUsage = usageMap.get(recording.id) ?? [];
+        if (recordingUsage.length > 0) {
+            const usagePath = `${folder}/ai-usage.json`;
+            archive.append(
+                Buffer.from(
+                    JSON.stringify(
+                        recordingUsage.map((usage) => ({
+                            ...usage,
+                            createdAt: usage.createdAt.toISOString(),
+                        })),
+                        null,
+                        2,
+                    ),
+                ),
+                { name: usagePath },
+            );
+            entry.aiUsage = {
+                included: true,
+                path: usagePath,
+                count: recordingUsage.length,
+            };
+        }
+
         manifest.recordings.push(entry);
     }
 
@@ -631,6 +673,29 @@ export async function buildAndUploadExportArchive(input: {
             runs: learn.runs.length,
             items: learn.items.length,
         };
+    }
+
+    const costRates = await db
+        .select()
+        .from(aiCostRates)
+        .where(eq(aiCostRates.userId, userId));
+    if (costRates.length > 0) {
+        const path = "ai/cost-rates.json";
+        archive.append(
+            Buffer.from(
+                JSON.stringify(
+                    costRates.map((rate) => ({
+                        ...rate,
+                        createdAt: rate.createdAt.toISOString(),
+                        updatedAt: rate.updatedAt.toISOString(),
+                    })),
+                    null,
+                    2,
+                ),
+            ),
+            { name: path },
+        );
+        manifest.aiCostRates = { count: costRates.length, path };
     }
 
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {

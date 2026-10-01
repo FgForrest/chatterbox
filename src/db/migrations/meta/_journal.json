@@ -596,6 +596,20 @@
       "when": 1790798232584,
       "tag": "0084_learn_new_records",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1790862289536,
+      "tag": "0085_broad_gauntlet",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1790862723433,
+      "tag": "0086_left_power_pack",
+      "breakpoints": true
     }
   ]
 }

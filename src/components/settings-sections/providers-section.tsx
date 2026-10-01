@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
+import { AiCostRates } from "@/components/settings/ai-cost-rates";
 import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -274,6 +275,9 @@ export function ProvidersSection({
                     onEdit={handleEdit}
                     onDuplicate={handleDuplicate}
                     onDelete={handleDelete}
+                />
+                <AiCostRates
+                    providers={providers.map((item) => item.provider)}
                 />
             </div>
 

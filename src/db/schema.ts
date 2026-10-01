@@ -8,6 +8,7 @@ import {
     index,
     integer,
     jsonb,
+    numeric,
     pgEnum,
     pgTable,
     primaryKey,
@@ -1957,6 +1958,73 @@ export const aiEnhancements = pgTable(
         transcriptionIdIdx: index("ai_enhancements_transcription_id_idx").on(
             table.transcriptionId,
         ),
+    }),
+);
+
+export const aiUsageEvents = pgTable(
+    "ai_usage_events",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        payerUserId: text("payer_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        operation: varchar("operation", { length: 24 }).notNull(),
+        provider: varchar("provider", { length: 100 }).notNull(),
+        model: varchar("model", { length: 100 }).notNull(),
+        inputTokens: integer("input_tokens"),
+        outputTokens: integer("output_tokens"),
+        audioSeconds: numeric("audio_seconds", { precision: 16, scale: 3 }),
+        costUsd: numeric("cost_usd", { precision: 18, scale: 9 }),
+        priceSource: varchar("price_source", { length: 32 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        recordingPayerIdx: index("ai_usage_events_recording_payer_idx").on(
+            table.recordingId,
+            table.payerUserId,
+        ),
+        userIdx: index("ai_usage_events_user_id_idx").on(table.userId),
+    }),
+);
+
+export const aiCostRates = pgTable(
+    "ai_cost_rates",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        provider: varchar("provider", { length: 100 }).notNull(),
+        model: varchar("model", { length: 100 }).notNull(),
+        inputUsdPerMillion: numeric("input_usd_per_million", {
+            precision: 16,
+            scale: 6,
+        }),
+        outputUsdPerMillion: numeric("output_usd_per_million", {
+            precision: 16,
+            scale: 6,
+        }),
+        audioUsdPerHour: numeric("audio_usd_per_hour", {
+            precision: 16,
+            scale: 6,
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userProviderModelUnique: unique(
+            "ai_cost_rates_user_provider_model_unique",
+        ).on(table.userId, table.provider, table.model),
     }),
 );
 

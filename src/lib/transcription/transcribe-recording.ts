@@ -12,6 +12,7 @@ import {
     getDefaultTranscriptionModel,
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
+import { recordAiUsage } from "@/lib/ai/usage-cost";
 import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
@@ -560,6 +561,17 @@ async function transcribeRecordingInner(
                 filename: decryptText(recording.filename),
             };
             const result = await transcribeViaMynah(input);
+            await recordAiUsage(
+                {
+                    recordingId,
+                    ownerUserId: ctx.ownerUserId,
+                    payerUserId: ctx.actorUserId,
+                    operation: "transcription",
+                    provider: "Mynah",
+                    model: "parakeet",
+                },
+                { reportedCostUsd: 0, audioSeconds: recording.duration / 1000 },
+            );
             return {
                 text: result.text,
                 detectedLanguage: result.detectedLanguage,
@@ -636,6 +648,21 @@ async function transcribeRecordingInner(
                     contentType,
                     language: defaultLanguage,
                 });
+                await recordAiUsage(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        payerUserId: ctx.actorUserId,
+                        operation: "transcription",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    {
+                        inputTokens: result.inputTokens,
+                        outputTokens: result.outputTokens,
+                    },
+                );
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
             } else if (transcriptionStyle === "elevenlabs") {
@@ -648,6 +675,18 @@ async function transcribeRecordingInner(
                     language: defaultLanguage,
                     baseUrl: credentials.baseUrl,
                 });
+                await recordAiUsage(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        payerUserId: ctx.actorUserId,
+                        operation: "transcription",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    { audioSeconds: recording.duration / 1000 },
+                );
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
                 turns = result.turns;
@@ -661,6 +700,18 @@ async function transcribeRecordingInner(
                     language: defaultLanguage,
                     baseUrl: credentials.baseUrl,
                 });
+                await recordAiUsage(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        payerUserId: ctx.actorUserId,
+                        operation: "transcription",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    { audioSeconds: recording.duration / 1000 },
+                );
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
                 turns = result.turns;
@@ -679,6 +730,22 @@ async function transcribeRecordingInner(
                         contentType,
                         language: defaultLanguage,
                     });
+                    await recordAiUsage(
+                        {
+                            recordingId,
+                            ownerUserId: ctx.ownerUserId,
+                            payerUserId: ctx.actorUserId,
+                            operation: "transcription",
+                            provider: credentials.provider,
+                            model,
+                            baseUrl: credentials.baseUrl,
+                        },
+                        {
+                            inputTokens: result.inputTokens,
+                            outputTokens: result.outputTokens,
+                            reportedCostUsd: result.reportedCostUsd,
+                        },
+                    );
                     transcriptionText = result.text;
                     detectedLanguage = result.detectedLanguage;
                 } else {
@@ -715,6 +782,35 @@ async function transcribeRecordingInner(
                             }),
                             { timeout: env.WHISPER_REQUEST_TIMEOUT_MS },
                         );
+                    const measured =
+                        typeof transcription === "string"
+                            ? null
+                            : (
+                                  transcription as {
+                                      usage?: {
+                                          input_tokens?: number;
+                                          output_tokens?: number;
+                                          seconds?: number;
+                                      };
+                                  }
+                              ).usage;
+                    await recordAiUsage(
+                        {
+                            recordingId,
+                            ownerUserId: ctx.ownerUserId,
+                            payerUserId: ctx.actorUserId,
+                            operation: "transcription",
+                            provider: credentials.provider,
+                            model,
+                            baseUrl: credentials.baseUrl,
+                        },
+                        {
+                            inputTokens: measured?.input_tokens,
+                            outputTokens: measured?.output_tokens,
+                            audioSeconds:
+                                measured?.seconds ?? recording.duration / 1000,
+                        },
+                    );
                     const parsed = parseTranscriptionResponse(
                         transcription,
                         responseFormat,

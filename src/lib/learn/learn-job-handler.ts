@@ -33,6 +33,7 @@ import {
     enhancementChatModel,
     pickLearnCredential,
 } from "@/lib/ai/enhancement-provider";
+import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
@@ -146,7 +147,7 @@ async function setStatus(
  * for Learn, else the enhancement default.
  */
 async function chatFor(
-    actorUserId: string,
+    run: RunRow,
     signal: AbortSignal,
 ): Promise<{
     chat: LearnChat;
@@ -155,6 +156,7 @@ async function chatFor(
     baseUrl: string | null;
     model: string;
 }> {
+    const actorUserId = run.actorUserId ?? "";
     const configured = await db
         .select()
         .from(apiCredentials)
@@ -214,6 +216,18 @@ async function chatFor(
                     >[0] & { stream?: false },
                     { signal },
                 );
+                await recordChatCompletionUsage(
+                    {
+                        recordingId: run.recordingId,
+                        ownerUserId: run.userId,
+                        payerUserId: actorUserId,
+                        operation: "learn",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    response,
+                );
                 return response.choices[0]?.message?.content?.trim() || "";
             },
         },
@@ -235,6 +249,18 @@ async function chatFor(
                                 maxTokens,
                             }),
                             { signal },
+                        );
+                        await recordChatCompletionUsage(
+                            {
+                                recordingId: run.recordingId,
+                                ownerUserId: run.userId,
+                                payerUserId: actorUserId,
+                                operation: "learn",
+                                provider: credentials.provider,
+                                model,
+                                baseUrl: credentials.baseUrl,
+                            },
+                            response,
                         );
                         return (
                             response.choices[0]?.message?.content?.trim() || ""
@@ -700,7 +726,7 @@ async function runLearnJob({
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
         const { chat, bridge, provider, baseUrl, model } = await chatFor(
-            run.actorUserId ?? "",
+            run,
             signal,
         );
         // Path 1: the bridge's CLI looks things up itself over MCP;

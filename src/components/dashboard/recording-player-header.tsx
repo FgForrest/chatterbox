@@ -3,6 +3,7 @@
 import { AudioWaveform, Loader2 } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
+import { AiCostSummary } from "@/components/recordings/ai-cost-summary";
 import { RecordingTitle } from "@/components/recordings/recording-title";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
@@ -86,6 +87,12 @@ export function RecordingPlayerHeader({
                             <span>{part}</span>
                         </span>
                     ))}
+                </div>
+                <div className="mt-1.5">
+                    <AiCostSummary
+                        recordingId={recording.id}
+                        view={recording.view}
+                    />
                 </div>
             </div>
             {action && <div className="shrink-0">{action}</div>}

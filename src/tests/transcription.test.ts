@@ -40,6 +40,10 @@ vi.mock("@/lib/entitlements", () => ({
     isHostedLockedOut: vi.fn().mockResolvedValue(false),
 }));
 
+vi.mock("@/lib/ai/usage-cost", () => ({
+    recordAiUsage: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: {
         WHISPER_MAX_BYTES: 24 * 1024 * 1024,
