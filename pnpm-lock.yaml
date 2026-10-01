@@ -145,6 +145,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
+      snowball-stemmers:
+        specifier: 0.6.0
+        version: 0.6.0
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -5095,6 +5098,9 @@ packages:
 
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
+  snowball-stemmers@0.6.0:
+    resolution: {integrity: sha512-47VTJvsZzEme3VxhbUFc9wR0CX8fYKNMgL7AiBdJcHUrwbmN7htFroeX+8ESIAaoNgwEgwI2wnv1HIcqQqAdcA==}
 
   socket.io-adapter@2.5.5:
     resolution: {integrity: sha512-eLDQas5dzPgOWCk9GuuJC2lBqItuhKI4uxGgo9aIV7MYbk2h9Q6uULEh8WBzThoI7l+qU9Ast9fVUmkqPP9wYg==}
@@ -10508,6 +10514,8 @@ snapshots:
       is-arrayish: 0.3.4
 
   sisteransi@1.0.5: {}
+
+  snowball-stemmers@0.6.0: {}
 
   socket.io-adapter@2.5.5:
     dependencies:

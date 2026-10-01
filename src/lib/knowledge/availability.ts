@@ -37,11 +37,11 @@ export async function isLearnAvailableFor(userId: string): Promise<boolean> {
 }
 
 /**
- * Automatic Learn is offered here: Learn is, and the operator turned it on
- * (`LEARN_AUTO`) once the evaluation's thresholds were met.
+ * Automatic Learn is offered to `userId`: wherever Learn can run for them.
+ * It stays off until they turn it on.
  */
-export function isAutoLearnOffered(): boolean {
-    return isLearnDeploymentAvailable() && env.LEARN_AUTO === true;
+export function isAutoLearnOffered(userId: string): Promise<boolean> {
+    return isLearnAvailableFor(userId);
 }
 
 /** Names can be matched by meaning too: an embedding service is configured. */

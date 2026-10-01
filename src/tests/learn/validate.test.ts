@@ -44,7 +44,6 @@ function frame(overrides: Partial<LearnRunFrame> = {}): LearnRunFrame {
         turns: TURNS,
         language: "cs",
         provider: "openai",
-        manual: false,
         people: new Map([
             ["p-alice", { name: "Alice Dvořák" }],
             ["p-jan", { name: "Jan Novotný" }],
@@ -89,6 +88,7 @@ function frame(overrides: Partial<LearnRunFrame> = {}): LearnRunFrame {
 
 function output(overrides: Partial<LearnOutput> = {}): LearnOutput {
     return {
+        newRecords: [],
         speakers: [],
         corrections: [],
         facts: [],
@@ -723,7 +723,7 @@ describe("validateLearnOutput", () => {
         });
     });
 
-    it("drops what a person dismissed before, except on a manual run", () => {
+    it("drops what a person dismissed before, on every run", () => {
         const first = validateLearnOutput(
             output({ corrections: [correctTavesi()] }),
             frame(),
@@ -736,11 +736,6 @@ describe("validateLearnOutput", () => {
         );
         expect(again.items).toEqual([]);
         expect(again.dropped.dismissed).toBe(1);
-        const manual = validateLearnOutput(
-            output({ corrections: [correctTavesi()] }),
-            frame({ dismissed: new Set([fingerprint]), manual: true }),
-        );
-        expect(manual.items).toHaveLength(1);
     });
 
     it("treats a transcript's instructions as data: an answer following them validates to nothing", () => {

@@ -11,7 +11,7 @@
  * Organization's aliases are everyone's.
  */
 
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, isNotNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     knowledgeAliases,
@@ -160,23 +160,10 @@ export async function addAlias(
     target: KnowledgeTarget,
     text: string,
 ): Promise<string> {
-    const clean = cleanText(text);
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const resolved = await resolveTargetInTx(tx, actorUserId, target);
-        const [row] = await tx
-            .insert(knowledgeAliases)
-            .values({
-                userId: actorUserId,
-                ...targetColumns(resolved),
-                kind: "alias",
-                text: encryptText(clean),
-                textHmac: domainLookupHash(TEXT_DOMAIN, clean),
-                createdByUserId: actorUserId,
-            })
-            .onConflictDoNothing()
-            .returning({ id: knowledgeAliases.id });
-        if (!row) {
+        const id = await addAliasInTx(tx, actorUserId, target, text);
+        if (!id) {
             throw new AppError(
                 ErrorCode.CONFLICT,
                 "They already have that name",
@@ -185,8 +172,36 @@ export async function addAlias(
             );
         }
         await bumpScopeInTx(tx, [actorUserId]);
-        return row.id;
+        return id;
     });
+}
+
+/**
+ * `addAlias` inside a caller's transaction, which holds the
+ * Organization-people lock (shared suffices) and bumps the actor's scope.
+ * Null when the actor already gave them that name.
+ */
+export async function addAliasInTx(
+    tx: Tx,
+    actorUserId: string,
+    target: KnowledgeTarget,
+    text: string,
+): Promise<string | null> {
+    const clean = cleanText(text);
+    const resolved = await resolveTargetInTx(tx, actorUserId, target);
+    const [row] = await tx
+        .insert(knowledgeAliases)
+        .values({
+            userId: actorUserId,
+            ...targetColumns(resolved),
+            kind: "alias",
+            text: encryptText(clean),
+            textHmac: domainLookupHash(TEXT_DOMAIN, clean),
+            createdByUserId: actorUserId,
+        })
+        .onConflictDoNothing()
+        .returning({ id: knowledgeAliases.id });
+    return row?.id ?? null;
 }
 
 /**
@@ -238,6 +253,34 @@ export async function listAliases(
         text: decryptText(row.text),
         scope: ownerRole === "org" ? "org" : "personal",
     }));
+}
+
+/**
+ * The other names `viewerUserId` may see of people, or of entities, by the
+ * id of the record each names, each name once: a list is searched by
+ * nickname too.
+ */
+export async function aliasTextsVisibleTo(
+    viewerUserId: string,
+    of: "person" | "entity",
+): Promise<Map<string, string[]>> {
+    const column =
+        of === "person" ? knowledgeAliases.personId : knowledgeAliases.entityId;
+    const rows = await db
+        .select({ text: knowledgeAliases.text, id: column })
+        .from(knowledgeAliases)
+        .where(and(isNotNull(column), aliasesVisibleTo(viewerUserId)));
+    const byTarget = new Map<string, Set<string>>();
+    for (const row of rows) {
+        if (!row.id) continue;
+        const text = decryptText(row.text);
+        const held = byTarget.get(row.id);
+        if (held) held.add(text);
+        else byTarget.set(row.id, new Set([text]));
+    }
+    return new Map(
+        [...byTarget].map(([id, texts]) => [id, [...texts]] as const),
+    );
 }
 
 /**

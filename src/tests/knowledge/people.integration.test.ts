@@ -37,6 +37,15 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
+// Runs once right after the route reads the person it names, to merge
+// that person away before the route's own merge.
+const afterRead = vi.hoisted(() => ({
+    current: null as null | {
+        id: string;
+        run: () => Promise<void>;
+    },
+}));
+
 const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
@@ -84,6 +93,24 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 vi.mock("@/lib/export/document-sidecars", () => ({
     refreshExistingRecordingSidecars: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/knowledge/people", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/knowledge/people")>();
+    return {
+        ...actual,
+        getPerson: async (
+            ...args: Parameters<typeof actual.getPerson>
+        ): ReturnType<typeof actual.getPerson> => {
+            const found = await actual.getPerson(...args);
+            const hook = afterRead.current;
+            if (hook && hook.id === args[1]) {
+                afterRead.current = null;
+                await hook.run();
+            }
+            return found;
+        },
+    };
+});
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -424,6 +451,30 @@ describeWithDatabase("knowledge base (PostgreSQL)", () => {
             );
             const body = (await landed.json()) as { person: { id: string } };
             expect(body.person.id).toBe(c);
+        });
+
+        it("reports the winner when the target is merged away after it was read", async () => {
+            const target = await person(ALICE, "Target");
+            const winner = await person(ALICE, "Winner");
+            const loser = await person(ALICE, "Loser");
+            afterRead.current = {
+                id: target,
+                run: () => mergePeople(ALICE, winner, target),
+            };
+            const landed = await call(
+                mergePersonRoute,
+                ALICE,
+                `/api/people/${loser}`,
+                {
+                    method: "POST",
+                    params: { id: loser },
+                    ...json({ mergeIntoId: target }),
+                },
+            );
+            expect(afterRead.current).toBeNull();
+            const body = (await landed.json()) as { person: { id: string } };
+            expect(body.person.id).toBe(winner);
+            expect((await getPerson(ALICE, loser))?.mergedIntoId).toBe(winner);
         });
     });
 

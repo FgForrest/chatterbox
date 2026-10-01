@@ -21,6 +21,22 @@ const nextConfig: NextConfig = {
     // `src/lib/posthog/proxy.ts`), which run per-request and read live
     // env, same pattern as the Rybbit proxy.
     skipTrailingSlashRedirect: true,
+    // People became the Almanac (people and things): old links and
+    // bookmarks land on the new pages. Entity pages are Things now.
+    async redirects() {
+        return [
+            {
+                source: "/people/entities/:id",
+                destination: "/almanac/things/:id",
+                permanent: true,
+            },
+            {
+                source: "/people/:path*",
+                destination: "/almanac/:path*",
+                permanent: true,
+            },
+        ];
+    },
     // `scripts/install.sh` is read from disk at request time by the
     // /install.sh routes; declare it so the standalone tracer ships it.
     outputFileTracingIncludes: {

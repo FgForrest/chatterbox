@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { learnRuns } from "@/db/schema";
+import { learnRuns, transcriptions } from "@/db/schema";
 import { handleLearnMcp, readMcpBody } from "@/lib/learn/mcp";
 import { verifyLearnRunToken } from "@/lib/learn/run-token";
 
@@ -24,8 +24,13 @@ export async function POST(request: Request): Promise<Response> {
             id: learnRuns.id,
             userId: learnRuns.userId,
             view: learnRuns.view,
+            language: transcriptions.detectedLanguage,
         })
         .from(learnRuns)
+        .innerJoin(
+            transcriptions,
+            eq(transcriptions.id, learnRuns.transcriptionId),
+        )
         .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")))
         .limit(1);
     if (!run) return unauthorized();

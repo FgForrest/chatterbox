@@ -1,5 +1,3 @@
-import { ArrowLeft } from "lucide-react";
-import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { VocabularyList } from "@/components/people/vocabulary-list";
 import { requireAuth } from "@/lib/auth-server";
@@ -40,13 +38,7 @@ export default async function VocabularyPage() {
     );
 
     return (
-        <div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
-            <Link
-                href="/people/review"
-                className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-            >
-                <ArrowLeft className="size-4" /> {i18n("Waiting for review")}
-            </Link>
+        <div className="mx-auto max-w-3xl space-y-6">
             <section className="space-y-2">
                 <h1 className="text-xl font-semibold">
                     {organization

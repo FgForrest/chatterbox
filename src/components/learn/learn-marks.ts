@@ -10,7 +10,7 @@ import { anchorMatches, wordsAt } from "@/lib/knowledge/correction-anchors";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { OverlayCorrection, RenderedSegment } from "@/lib/learn/render";
 
-type Target = { personId: string } | { entityId: string };
+type Target = { personId: string } | { entityId: string } | { newRef: string };
 
 export interface LearnCorrectionMark {
     itemId: string;
@@ -51,6 +51,28 @@ export function learnMarksFrom(
     decide: LearnMarks["decide"],
 ): LearnMarks | null {
     if (state?.run?.status !== "ready") return null;
+    // A person or thing the review proposes to add, by its ref: the name
+    // the reviewer left it, or the record they said it is.
+    const recordNames = new Map<string, string | undefined>();
+    for (const item of state.items) {
+        if (item.kind !== "new_record") continue;
+        const payload = item.payload as { ref: string; name: string };
+        const choice = item.choice ?? null;
+        const linked =
+            typeof choice?.personId === "string"
+                ? choice.personId
+                : typeof choice?.entityId === "string"
+                  ? choice.entityId
+                  : null;
+        recordNames.set(
+            payload.ref,
+            linked
+                ? state.names[linked]
+                : typeof choice?.name === "string"
+                  ? choice.name
+                  : payload.name,
+        );
+    }
     const speakers: LearnMarks["speakers"] = {};
     const corrections: LearnCorrectionMark[] = [];
     for (const item of state.items) {
@@ -61,6 +83,7 @@ export function learnMarksFrom(
             const payload = item.payload as {
                 label: string;
                 personId: string | null;
+                newRef?: string;
             };
             // As the reviewer chose (someone known, or someone new), else
             // as Learn proposed; answered unknown, nobody is shown.
@@ -73,7 +96,9 @@ export function learnMarksFrom(
                       ? choice.displayName
                       : payload.personId
                         ? state.names[payload.personId]
-                        : undefined;
+                        : payload.newRef
+                          ? recordNames.get(payload.newRef)
+                          : undefined;
             if (!name) continue;
             speakers[speakerKey(payload.label)] = {
                 itemId: item.id,
@@ -92,13 +117,16 @@ export function learnMarksFrom(
                     charEnd: number;
                 }[];
             };
-            const targetId =
-                "personId" in payload.target
-                    ? payload.target.personId
-                    : payload.target.entityId;
+            const target = payload.target;
             const suggestion =
                 (payload.kind === "correct" ? payload.replacement : null) ??
-                state.names[targetId];
+                ("newRef" in target
+                    ? recordNames.get(target.newRef)
+                    : state.names[
+                          "personId" in target
+                              ? target.personId
+                              : target.entityId
+                      ]);
             if (!suggestion) continue;
             for (const anchor of payload.anchors) {
                 corrections.push({

@@ -22,7 +22,9 @@ import {
 import {
     anchorCorrections,
     type FallbackResult,
+    type LearnEntityTypeChoice,
     type LearnRelationChoice,
+    NEW_RECORDS_RULE,
     renderLearnTranscript,
 } from "@/lib/learn/run-fallback";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -45,6 +47,8 @@ export interface BridgeInput {
     turns: readonly TranscriptTurn[];
     language: string | null;
     relations: readonly LearnRelationChoice[];
+    /** The types a new thing may take. */
+    entityTypes?: readonly LearnEntityTypeChoice[];
     unnamedLabels: readonly string[];
     signal?: AbortSignal;
 }
@@ -56,14 +60,15 @@ const DATA_RULE =
 
 const BRIDGE_SYSTEM = [
     "You help keep a knowledge base of the people and things a team talks about.",
-    "You get a meeting transcript, the relation types you may use, and the speaker labels nobody has named yet.",
+    "You get a meeting transcript, the relation types and entity types you may use, and the speaker labels nobody has named yet.",
     DATA_RULE,
-    "Look things up with the knowledge base tools: find_entities for words that may name a person, organization, project, product or term (as written, misheard or not), get_entity and find_facts for what a record says. Use only ids the tools returned.",
+    "Look things up with the knowledge base tools: find_entities for words that may name a person, organization, project, product or term (as written, misheard or not), get_entity and find_facts for what a record says. Use only ids the tools returned. Before proposing a new record, look its name up again in its base form (the nominative, spelled right where it sounds misheard) and, for a nickname or short form, by the full name it stands for (Honza: Jan); only a name none of these finds may be a new record.",
     "Propose only what the transcript itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
     "speakers: for an unnamed label only. Name a known person (personId) only on direct evidence in the transcript: the speaker introduces themselves, or is addressed by name and answers in the next turn, or confirms a name said about them. Never from what they talk about, and never because another label is someone else. The meeting may include people the knowledge base does not know: a first name alone (or its inflected form, such as a vocative) fits a known person only when no other known person has that first name, and even then it may be someone else; when in doubt answer null. evidence is 1-3 times copied from the transcript lines where the name is said or answered.",
-    "corrections: only for a known record. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
-    'facts: lasting work facts the transcript states about known people and things: who works on, leads or works for what, which client uses which product, what a term means. Not a current task, a to-do of this meeting, a version or release number. Use only the listed relation keys and shapes; start and end are times copied from the transcript lines where it is said; speakerLabel is the label whose speaker the fact is about or depends on, else null. What a speaker says about themselves takes the subject {"speakerLabel":label}, never a person you guess for that label. sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
-    "relationPhrases: a relation between known people or things that none of the listed keys expresses, as a short phrase in the transcript's language.",
+    NEW_RECORDS_RULE,
+    "corrections: only for a known record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
+    'facts: lasting work facts the transcript states about known or new people and things: who works on, leads or works for what, which client uses which product, what a term means. Not a current task, a to-do of this meeting, a version or release number. Use only the listed relation keys and shapes; start and end are times copied from the transcript lines where it is said; speakerLabel is the label whose speaker the fact is about or depends on, else null. What a speaker says about themselves takes the subject {"speakerLabel":label}, never a person you guess for that label. sensitivity is `none` for work facts, and names the category (health, family, personality, performance, demographics, other_private) for anything else.',
+    "relationPhrases: a relation between known or new people or things that none of the listed keys expresses, as a short phrase in the transcript's language.",
     "Answer in the JSON Schema you were given.",
 ].join(" ");
 
@@ -83,11 +88,13 @@ export async function runBridgePass(
                     ? "text"
                     : relation.objectTypes,
         })),
+        entityTypes: input.entityTypes ?? [],
         unnamedSpeakerLabels: input.unnamedLabels,
     };
     const user = `CHOICES (JSON):\n${JSON.stringify(context)}\n\nTRANSCRIPT:\n${renderLearnTranscript(input.turns, 0)}`;
     const result: FallbackResult = {
         output: {
+            newRecords: [],
             speakers: [],
             corrections: [],
             facts: [],

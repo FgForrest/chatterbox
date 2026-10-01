@@ -2,7 +2,7 @@
  * A recording can hold two transcripts -- the user's own and a Plaud import
  * -- and the same person can be confirmed in both. The person page must
  * still list the recording once and count it once, and it must agree with
- * the number `/people` shows for the same person.
+ * the number `/almanac` shows for the same person.
  */
 
 // @vitest-environment jsdom

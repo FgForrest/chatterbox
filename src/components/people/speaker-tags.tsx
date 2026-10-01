@@ -320,7 +320,7 @@ export function SpeakerTags({
                             <Link
                                 key={speaker.speaker}
                                 id={speakerAnchorId(speaker.speaker)}
-                                href={`/people/${attribution.personId}`}
+                                href={`/almanac/${attribution.personId}`}
                                 className="inline-flex h-8 items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs font-medium transition-colors hover:bg-primary/20"
                             >
                                 {dot}
@@ -516,7 +516,7 @@ export function SpeakerTags({
                         className="inline-flex h-8 items-center overflow-hidden rounded-full border border-primary/30 bg-primary/10 text-xs font-medium"
                     >
                         <Link
-                            href={`/people/${attribution.personId}`}
+                            href={`/almanac/${attribution.personId}`}
                             className="inline-flex h-full items-center gap-2 pl-3 pr-2 transition-colors hover:bg-primary/10"
                         >
                             <span

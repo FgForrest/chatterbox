@@ -1,0 +1,1 @@
+ALTER TABLE "learn_review_items" ADD COLUMN "outcome" varchar(32);

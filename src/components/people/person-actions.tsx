@@ -125,7 +125,7 @@ export function PersonActions({ person }: PersonActionsProps) {
                 return;
             }
             const body = (await response.json()) as { person?: { id: string } };
-            router.push(`/people/${body.person?.id ?? targetId}`);
+            router.push(`/almanac/${body.person?.id ?? targetId}`);
             router.refresh();
         } finally {
             setSaving(false);

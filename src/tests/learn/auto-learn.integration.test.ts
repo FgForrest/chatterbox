@@ -58,7 +58,6 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         dbRef: ref,
         mockEnv: {
             IS_HOSTED: false,
-            LEARN_AUTO: true as boolean | undefined,
             SELF_HOST_MODE: "shared",
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: "organization-password",
@@ -139,7 +138,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
     }, 30_000);
 
     beforeEach(async () => {
-        mockEnv.LEARN_AUTO = true;
         await db().delete(users);
         await db().delete(asyncJobs);
         await db().insert(users).values({ id: OWNER, email: "o@example.test" });
@@ -287,14 +285,11 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(runs).toEqual([{ trigger: "auto", status: "queued" }]);
     });
 
-    it("holds nothing when the person, the operator or the transcript does not allow it", async () => {
+    it("holds nothing when the person or the transcript does not allow it", async () => {
         const tryHold = (timed = true) =>
             holdForAutoLearn({ userId: OWNER, recordingId: REC, timed });
 
         expect(await tryHold(false)).toBe(false);
-        mockEnv.LEARN_AUTO = undefined;
-        expect(await tryHold()).toBe(false);
-        mockEnv.LEARN_AUTO = true;
         await db()
             .update(userSettings)
             .set({ autoLearn: false })

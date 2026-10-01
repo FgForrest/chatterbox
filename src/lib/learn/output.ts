@@ -16,6 +16,8 @@ export const LEARN_LIMITS = {
     corrections: 200,
     facts: 50,
     relationPhrases: 20,
+    /** New people and things one answer may name (a window's, in path 2). */
+    newRecords: 40,
     /** Characters of any free text: a name, a replacement, a phrase. */
     text: 200,
     /** Characters of a speaker suggestion's reason. */
@@ -41,12 +43,32 @@ const label = z.string().min(1).max(64);
 
 const person = z.strictObject({ personId: id });
 const entity = z.strictObject({ entityId: id });
+/** A person or thing the answer proposes to add (`newRecords`), by its ref. */
+const ref = z.string().min(1).max(16);
+const newRecordRef = z.strictObject({ newRef: ref });
 /** Whoever speaks under a label, for a fact about the voice itself. */
 const speaker = z.strictObject({ speakerLabel: label });
 const literal = z.strictObject({ literal: text });
 
-const subject = z.union([person, entity, speaker]);
-const object = z.union([person, entity, literal]);
+const subject = z.union([person, entity, newRecordRef, speaker]);
+const object = z.union([person, entity, newRecordRef, literal]);
+
+/**
+ * Someone or something the transcript names that the knowledge base does
+ * not have: added only if a person ticks it in the review.
+ */
+const newRecord = z.strictObject({
+    ref,
+    kind: z.enum(["person", "entity"]),
+    /** One of the entity types for an entity; null for a person. */
+    typeKey: label.nullable(),
+    /** The name as it is written, in its base form. */
+    name: text,
+    /** The label this person speaks under, when they speak here. */
+    speakerLabel: label.nullable(),
+    evidence: z.array(clock).min(1).max(3),
+    reason: z.string().trim().max(LEARN_LIMITS.reason),
+});
 
 const speakerSuggestion = z.strictObject({
     label,
@@ -62,7 +84,7 @@ const correction = z.strictObject({
     charEnd: z.number().int().min(1),
     heard: text,
     kind: z.enum(["correct", "link"]),
-    target: z.union([person, entity]),
+    target: z.union([person, entity, newRecordRef]),
     /** The name as it should read; null on a link, which keeps the words. */
     replacement: text.nullable(),
 });
@@ -88,6 +110,9 @@ const relationPhrase = z.strictObject({
 });
 
 export const learnOutputSchema = z.strictObject({
+    // First, so an answer names what it adds before it refers to it. An
+    // answer from before there were any may leave it out.
+    newRecords: z.array(newRecord).max(LEARN_LIMITS.newRecords).default([]),
     speakers: z.array(speakerSuggestion).max(LEARN_LIMITS.speakers),
     corrections: z.array(correction).max(LEARN_LIMITS.corrections),
     facts: z.array(fact).max(LEARN_LIMITS.facts),
@@ -95,6 +120,7 @@ export const learnOutputSchema = z.strictObject({
 });
 
 export type LearnOutput = z.infer<typeof learnOutputSchema>;
+export type LearnNewRecord = LearnOutput["newRecords"][number];
 export type LearnSpeaker = LearnOutput["speakers"][number];
 export type LearnCorrection = LearnOutput["corrections"][number];
 export type LearnFact = LearnOutput["facts"][number];
@@ -102,9 +128,26 @@ export type LearnRelationPhrase = LearnOutput["relationPhrases"][number];
 export type LearnSubject = z.infer<typeof subject>;
 export type LearnObject = z.infer<typeof object>;
 
-/** The JSON Schema the bridge's CLIs enforce (`--json-schema`, `--output-schema`). */
+/**
+ * The JSON Schema the bridge's CLIs enforce (`--json-schema`,
+ * `--output-schema`): every field required, and no `default`, which a
+ * strict schema does not take (the parse above still tolerates its lack).
+ */
 export function learnOutputJsonSchema(): Record<string, unknown> {
-    return z.toJSONSchema(learnOutputSchema) as Record<string, unknown>;
+    return withoutDefaults(z.toJSONSchema(learnOutputSchema)) as Record<
+        string,
+        unknown
+    >;
+}
+
+function withoutDefaults(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(withoutDefaults);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+        Object.entries(value)
+            .filter(([key]) => key !== "default")
+            .map(([key, inner]) => [key, withoutDefaults(inner)]),
+    );
 }
 
 /** The JSON object in a reply: the whole text, or the first `{`..last `}`. */

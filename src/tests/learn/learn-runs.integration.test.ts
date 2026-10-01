@@ -199,7 +199,10 @@ import {
     createPrivateType,
     seedCoreVocabulary,
 } from "@/lib/knowledge/vocabulary";
-import { learnJobHandler } from "@/lib/learn/learn-job-handler";
+import {
+    learnFingerprintHmac,
+    learnJobHandler,
+} from "@/lib/learn/learn-job-handler";
 import { llmRendering } from "@/lib/learn/llm-input";
 import {
     pendingReviewCount,
@@ -207,6 +210,7 @@ import {
     reviewQueue,
 } from "@/lib/learn/pending";
 import { finishReview } from "@/lib/learn/review";
+import { newRecordFingerprint } from "@/lib/learn/validate-new-records";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { requireRecordingView } from "@/lib/sharing/access";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -798,6 +802,113 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 decryptJsonField<{ anchors: unknown[] }>(item?.payload)
                     ?.anchors,
             ).toEqual([{ turnIndex: 0, charStart: 19, charEnd: 25 }]);
+        });
+
+        it("proposes a new thing it heard, and not one rejected on another recording", async () => {
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Dobrý den, pro firmu Veltrix chystáme Lumenku.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            const answer = {
+                newRecords: [
+                    {
+                        ref: "n1",
+                        kind: "entity",
+                        typeKey: "organization",
+                        name: "Veltrix",
+                        speakerLabel: null,
+                        evidence: ["00:00"],
+                        reason: "the client",
+                    },
+                    {
+                        ref: "n2",
+                        kind: "entity",
+                        typeKey: "project",
+                        name: "Lumenka",
+                        speakerLabel: null,
+                        evidence: ["00:00"],
+                        reason: "the project",
+                    },
+                ],
+                speakers: [],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            };
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [{ text: "Veltrix", turn: 0 }] });
+            reply(answer);
+            await expect(runJob(runId)).resolves.toMatchObject({
+                status: "ready",
+                items: 2,
+            });
+            expect(await statusAndStats(runId)).toMatchObject({
+                stats: expect.objectContaining({ items_new_record: 2 }),
+            });
+            const prompt = JSON.stringify(createCompletion.mock.calls[1]?.[0]);
+            expect(prompt).toContain("newRecords");
+            expect(prompt).toContain('\\"notFound\\":[\\"Veltrix\\"]');
+
+            // Veltrix rejected on another recording of the owner's.
+            await db()
+                .insert(recordings)
+                .values({
+                    id: "rec-other",
+                    userId: OWNER,
+                    deviceSn: "SN-1",
+                    plaudFileId: "plaud-2",
+                    filename: encryptText("Other"),
+                    duration: 5_000,
+                    startTime: new Date("2026-09-02T10:00:00Z"),
+                    endTime: new Date("2026-09-02T10:00:05Z"),
+                    filesize: 11,
+                    fileMd5: "1".repeat(32),
+                    storageType: "local",
+                    storagePath: `${OWNER}/other.mp3`,
+                    plaudVersion: "1",
+                });
+            await db()
+                .insert(learnDismissals)
+                .values({
+                    userId: OWNER,
+                    recordingId: "rec-other",
+                    fingerprintHmac: learnFingerprintHmac(
+                        newRecordFingerprint(
+                            "entity",
+                            "organization",
+                            "Veltrix",
+                        ),
+                    ),
+                    scopeWide: true,
+                });
+            await db().delete(learnRuns);
+            const again = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [] });
+            reply(answer);
+            await expect(runJob(again.runId)).resolves.toMatchObject({
+                status: "ready",
+                items: 1,
+            });
+            const items = await db().select().from(learnReviewItems);
+            expect(
+                items.map(
+                    (item) =>
+                        decryptJsonField<{ name: string }>(item.payload)?.name,
+                ),
+            ).toEqual(["Lumenka"]);
         });
 
         it("validates again when knowledge changed after it validated, and keeps what the tools counted", async () => {

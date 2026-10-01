@@ -236,7 +236,7 @@ export const GET = apiHandler(async (request: Request) => {
             ...DEFAULT_SETTINGS,
             titleGenerationPrompt: null,
             topicPrompt: null,
-            autoLearnOffered: isAutoLearnOffered(),
+            autoLearnOffered: await isAutoLearnOffered(session.user.id),
             barkPushUrl: null,
             barkPushUrlSet: false,
             userEmail,
@@ -247,7 +247,7 @@ export const GET = apiHandler(async (request: Request) => {
 
     const settingsData = extractSettings(settings);
     // The switch is shown only where automatic Learn is offered.
-    settingsData.autoLearnOffered = isAutoLearnOffered();
+    settingsData.autoLearnOffered = await isAutoLearnOffered(session.user.id);
     if (settings.titleGenerationPrompt) {
         settingsData.titleGenerationPrompt = decryptJsonField(
             settings.titleGenerationPrompt,

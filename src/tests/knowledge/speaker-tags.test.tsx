@@ -160,7 +160,7 @@ describe("SpeakerTags", () => {
         renderTags();
 
         const personLink = await screen.findByRole("link", { name: "Jan" });
-        expect(personLink.getAttribute("href")).toBe("/people/person-1");
+        expect(personLink.getAttribute("href")).toBe("/almanac/person-1");
 
         fireEvent.click(
             screen.getByRole("button", {
@@ -213,7 +213,7 @@ describe("SpeakerTags", () => {
         );
 
         const personLink = await screen.findByRole("link", { name: "Jan" });
-        expect(personLink.getAttribute("href")).toBe("/people/person-1");
+        expect(personLink.getAttribute("href")).toBe("/almanac/person-1");
         expect(await screen.findByText("Speaker 1: unknown")).toBeDefined();
         expect(screen.getByText("Speaker 2")).toBeDefined();
         expect(screen.getByText("Managed by the Organization")).toBeDefined();

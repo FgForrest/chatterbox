@@ -157,7 +157,7 @@ export function Markdown({
             if (attribution) {
                 return (
                     <Link
-                        href={`/people/${attribution.personId}`}
+                        href={`/almanac/${attribution.personId}`}
                         className="text-primary underline underline-offset-2 hover:no-underline"
                     >
                         {attribution.name}

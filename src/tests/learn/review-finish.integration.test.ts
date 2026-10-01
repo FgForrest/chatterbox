@@ -21,6 +21,7 @@ import {
     apiCredentials,
     knowledgeFactEvidence,
     knowledgeFacts,
+    learnDismissals,
     learnReviewItems,
     learnRuns,
     recordings,
@@ -103,6 +104,7 @@ vi.mock("@/lib/auth-server", async () => {
 });
 
 import { POST as postLearnRoute } from "@/app/api/recordings/[id]/learn/route";
+import { DELETE as deleteDismissalsRoute } from "@/app/api/recordings/[id]/review/dismissals/route";
 import { POST as postFinishRoute } from "@/app/api/recordings/[id]/review/finish/route";
 import { PATCH as patchItemRoute } from "@/app/api/recordings/[id]/review/items/[itemId]/route";
 import { GET as getReviewRoute } from "@/app/api/recordings/[id]/review/route";
@@ -370,6 +372,164 @@ describeWithDatabase("finishing a Learn review (PostgreSQL)", () => {
         },
         dependsOnLabel: "speaker_1",
         decision: "accepted" as const,
+    });
+
+    const review = async () => {
+        const response = await getReviewRoute(
+            new Request(`http://localhost/api/recordings/${REC}/review`, {
+                headers: { "x-test-user": OWNER },
+            }),
+            { params: Promise.resolve({ id: REC }) },
+        );
+        return (await response.json()) as {
+            run: Record<string, unknown> | null;
+            items: { id: string; kind: string; outcome: string | null }[];
+            names: Record<string, string>;
+            known?: { people: number; things: number };
+        };
+    };
+
+    it("keeps what became of each item, and shows the finished review with it", async () => {
+        const { jan, orion } = await janAndOrion();
+        await readyRun([
+            {
+                kind: "speaker",
+                payload: {
+                    label: "speaker_1",
+                    personId: jan,
+                    evidenceMs: [5000],
+                    reason: "x",
+                },
+                decision: "accepted",
+            },
+            leads({ speakerLabel: "speaker_1" }, orion, "speaker_1"),
+            // Ticked, but about a speaker nobody named.
+            { ...leads({ speakerLabel: "speaker_0" }, orion, "speaker_0") },
+            {
+                kind: "fact",
+                payload: {
+                    subject: { personId: jan },
+                    relationKey: "works_on",
+                    object: { entityId: orion },
+                    startMs: 5000,
+                    endMs: 10000,
+                    speakerLabel: null,
+                },
+                decision: "rejected",
+            },
+        ]);
+        expect((await finish()).body).toMatchObject({ applied: 2 });
+
+        const shown = await review();
+        expect(shown.run).toMatchObject({
+            status: "finished",
+            errorCode: null,
+        });
+        expect(shown.items.map((item) => item.outcome)).toEqual([
+            "applied",
+            "applied",
+            "speaker_not_named",
+            "rejected",
+        ]);
+        expect(shown.names[jan]).toBe("Jan Novotný");
+        expect(shown.known).toBeUndefined();
+    });
+
+    it("says how much a run that found nothing had to go on", async () => {
+        await janAndOrion();
+        const [run] = await db()
+            .insert(learnRuns)
+            .values({
+                userId: OWNER,
+                scopeUserId: OWNER,
+                recordingId: REC,
+                transcriptionId: transcriptId,
+                view: "private",
+                actorUserId: OWNER,
+                trigger: "manual",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status: "finished",
+                finishedAt: new Date(),
+            })
+            .returning({ id: learnRuns.id });
+        const shown = await review();
+        expect(shown.run).toMatchObject({ id: run?.id, status: "finished" });
+        expect(shown.items).toEqual([]);
+        expect(shown.known).toEqual({ people: 1, things: 1 });
+    });
+
+    it("forgets the rejections on this recording in this view, and nothing else", async () => {
+        const other = "rec-other";
+        await db()
+            .insert(recordings)
+            .values({
+                id: other,
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: "plaud-2",
+                filename: encryptText("Other"),
+                duration: 10_000,
+                startTime: new Date("2026-09-02T10:00:00Z"),
+                endTime: new Date("2026-09-02T10:00:10Z"),
+                filesize: 11,
+                fileMd5: "1".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/other.mp3`,
+                plaudVersion: "1",
+            });
+        await db()
+            .insert(learnDismissals)
+            .values([
+                { userId: OWNER, recordingId: REC, fingerprintHmac: "a" },
+                { userId: OWNER, recordingId: REC, fingerprintHmac: "b" },
+                { userId: OWNER, recordingId: other, fingerprintHmac: "a" },
+                { userId: orgUserId, recordingId: REC, fingerprintHmac: "a" },
+            ]);
+        const response = await deleteDismissalsRoute(
+            new Request(
+                `http://localhost/api/recordings/${REC}/review/dismissals`,
+                { method: "DELETE", headers: { "x-test-user": OWNER } },
+            ),
+            { params: Promise.resolve({ id: REC }) },
+        );
+        expect(await response.json()).toEqual({ forgotten: 2 });
+        const left = await db()
+            .select({
+                userId: learnDismissals.userId,
+                recordingId: learnDismissals.recordingId,
+            })
+            .from(learnDismissals);
+        expect(left).toHaveLength(2);
+        expect(left).toEqual(
+            expect.arrayContaining([
+                { userId: OWNER, recordingId: other },
+                { userId: orgUserId, recordingId: REC },
+            ]),
+        );
+    });
+
+    it("says why a run failed, and shows no items", async () => {
+        await db().insert(learnRuns).values({
+            userId: OWNER,
+            scopeUserId: OWNER,
+            recordingId: REC,
+            transcriptionId: transcriptId,
+            view: "private",
+            actorUserId: OWNER,
+            trigger: "manual",
+            transcriptRevision: 0,
+            vocabularyVersion: 0,
+            status: "failed",
+            errorCode: "AI_PROVIDER_API_ERROR",
+            finishedAt: new Date(),
+        });
+        const shown = await review();
+        expect(shown.run).toMatchObject({
+            status: "failed",
+            errorCode: "AI_PROVIDER_API_ERROR",
+        });
+        expect(shown.items).toEqual([]);
     });
 
     it("skips a fact whose speaker was not named: the suggestion rejected, or answered unknown", async () => {

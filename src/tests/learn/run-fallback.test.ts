@@ -125,6 +125,141 @@ describe("runFallbackPass", () => {
         expect(result).toMatchObject({ windows: 1, repairs: 0 });
     });
 
+    it("looks up a mention's other forms only when its words find nothing", async () => {
+        const lookup = {
+            findEntities: vi.fn(async ({ text }: { text: string }) => ({
+                byMeaning: false,
+                entities: text === "Tavesi" ? [tavesi] : [],
+            })),
+        };
+        const { chat, calls } = fakeChat([
+            JSON.stringify({
+                mentions: [
+                    { text: "Tavesy", turn: 0, forms: ["Tavesi", "Tavesy"] },
+                    {
+                        text: "Jan",
+                        turn: 1,
+                        forms: ["Honza", "Jenda", "Jeník"],
+                    },
+                    { text: "Orion", turn: 1, forms: "not a list" },
+                ],
+            }),
+            JSON.stringify({
+                speakers: [],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            }),
+        ]);
+        await runFallbackPass({
+            chat,
+            lookup,
+            turns: TURNS,
+            language: "cs",
+            relations,
+            unnamedLabels: [],
+        });
+        // The words as said first; then other forms, by name alone.
+        expect(lookup.findEntities.mock.calls.map((call) => call[0])).toEqual([
+            { text: "Tavesy" },
+            { text: "Jan" },
+            { text: "Orion" },
+            { text: "Tavesi", byName: true },
+            { text: "Honza", byName: true },
+            { text: "Jenda", byName: true },
+        ]);
+        const adjudication = JSON.parse(
+            (calls[1]?.[1]?.content ?? "").split("\n")[1] ?? "{}",
+        );
+        expect(adjudication.notFound).toEqual(["Jan", "Orion"]);
+        expect(JSON.stringify(adjudication.candidates)).toContain("e-tavesi");
+    });
+
+    it("takes a meaning alone for nothing found, and no form from nowhere", async () => {
+        const meaningOnly: FoundEntity = {
+            ...tavesi,
+            id: "e-other",
+            reasons: ["meaning"],
+        };
+        const lookup = {
+            findEntities: vi.fn(async ({ text }: { text: string }) => ({
+                byMeaning: true,
+                entities: text === "Tavesy" ? [meaningOnly] : [],
+            })),
+        };
+        const { chat, calls } = fakeChat([
+            JSON.stringify({
+                mentions: [
+                    {
+                        text: "Tavesy",
+                        turn: 0,
+                        forms: ["Project Falcon Internal", "Tavesi"],
+                    },
+                ],
+            }),
+            JSON.stringify({
+                speakers: [],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            }),
+        ]);
+        await runFallbackPass({
+            chat,
+            lookup,
+            turns: TURNS,
+            language: "cs",
+            relations,
+            unnamedLabels: [],
+        });
+        expect(lookup.findEntities.mock.calls.map((call) => call[0])).toEqual([
+            { text: "Tavesy" },
+            { text: "Tavesi", byName: true },
+        ]);
+        const adjudication = JSON.parse(
+            (calls[1]?.[1]?.content ?? "").split("\n")[1] ?? "{}",
+        );
+        expect(adjudication.notFound).toEqual(["Tavesy"]);
+    });
+
+    it("leaves other forms for later windows' lookups", async () => {
+        const lookup = {
+            findEntities: vi.fn(async (_query: { text: string }) => ({
+                byMeaning: false,
+                entities: [],
+            })),
+        };
+        const empty = JSON.stringify({
+            speakers: [],
+            corrections: [],
+            facts: [],
+            relationPhrases: [],
+        });
+        const { chat } = fakeChat([
+            JSON.stringify({
+                mentions: [{ text: "Tavesy", turn: 0, forms: ["Tavesi"] }],
+            }),
+            empty,
+            JSON.stringify({ mentions: [{ text: "Orion", turn: 1 }] }),
+            empty,
+        ]);
+        await runFallbackPass({
+            chat,
+            lookup,
+            turns: TURNS,
+            language: "cs",
+            relations,
+            unnamedLabels: [],
+            windowChars: 60,
+            // One for this window's mention, the rest kept for the next.
+            lookupBudget: 1 + 40,
+        });
+        expect(lookup.findEntities.mock.calls.map((call) => call[0])).toEqual([
+            { text: "Tavesy" },
+            { text: "Orion" },
+        ]);
+    });
+
     it("asks once to repair an answer that is not the shape, and gives up on a second", async () => {
         const lookup = {
             findEntities: vi.fn(async () => ({
@@ -249,6 +384,81 @@ describe("runFallbackPass", () => {
             "phrase 0",
             "phrase 3",
         ]);
+    });
+
+    it("keeps each window's new-record refs apart, and says which words found nothing", async () => {
+        const long: TranscriptTurn[] = Array.from({ length: 6 }, (_, i) => ({
+            speaker: `speaker_${i % 2}`,
+            startMs: i * 10_000,
+            endMs: (i + 1) * 10_000,
+            text: `Turn ${i} Veltrix ${"x".repeat(40)}`,
+        }));
+        const answer = JSON.stringify({
+            newRecords: [
+                {
+                    ref: "n1",
+                    kind: "entity",
+                    typeKey: "organization",
+                    name: "Veltrix",
+                    speakerLabel: null,
+                    evidence: ["00:00"],
+                    reason: "a client",
+                },
+            ],
+            speakers: [],
+            corrections: [],
+            facts: [
+                {
+                    subject: { speakerLabel: "speaker_0" },
+                    relationKey: "works_for",
+                    object: { newRef: "n1" },
+                    start: "00:00",
+                    end: "00:10",
+                    speakerLabel: "speaker_0",
+                    sensitivity: "none",
+                },
+            ],
+            relationPhrases: [],
+        });
+        const mentions = (turn: number) =>
+            JSON.stringify({ mentions: [{ text: "Veltrix", turn }] });
+        const { chat, calls } = fakeChat([
+            mentions(0),
+            answer,
+            mentions(3),
+            answer,
+        ]);
+        const result = await runFallbackPass({
+            chat,
+            lookup: {
+                findEntities: vi.fn(async () => ({
+                    byMeaning: false,
+                    entities: [],
+                })),
+            },
+            turns: long,
+            language: "en",
+            relations,
+            entityTypes: [{ key: "organization", label: "Organization" }],
+            unnamedLabels: [],
+            windowChars: 260,
+        });
+        expect(result.windows).toBe(2);
+        expect(result.output.newRecords.map((record) => record.ref)).toEqual([
+            "w1:n1",
+            "w2:n1",
+        ]);
+        expect(result.output.facts.map((fact) => fact.object)).toEqual([
+            { newRef: "w1:n1" },
+            { newRef: "w2:n1" },
+        ]);
+        const adjudication = JSON.parse(
+            (calls[1]?.[1]?.content ?? "").split("\n")[1] ?? "{}",
+        );
+        expect(adjudication).toMatchObject({
+            notFound: ["Veltrix"],
+            entityTypes: [{ key: "organization", label: "Organization" }],
+        });
     });
 
     describe("found in review", () => {

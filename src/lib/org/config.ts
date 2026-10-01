@@ -91,3 +91,12 @@ export async function assertNotOrgAccount(userId: string): Promise<void> {
         );
     }
 }
+
+/**
+ * Reject a change to `userId`'s own knowledge while it cannot be made: the
+ * organization account's own is the Organization's, read-only when the
+ * scope is switched off.
+ */
+export async function assertOwnScopeWritable(userId: string): Promise<void> {
+    if (await isOrgAccount(userId)) assertOrgScopeWritable();
+}

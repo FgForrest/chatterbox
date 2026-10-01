@@ -12,7 +12,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LearnReview } from "@/components/learn/learn-review";
 
 vi.mock("sonner", () => ({
-    toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
+    toast: {
+        error: vi.fn(),
+        success: vi.fn(),
+        warning: vi.fn(),
+        info: vi.fn(),
+    },
 }));
 
 const TURNS = [
@@ -67,11 +72,23 @@ const READY = {
     ],
 };
 
+/** Answers in turn, the last one from then on. */
+function inTurn(...bodies: unknown[]) {
+    return { inTurn: bodies };
+}
+
 function respond(routes: Record<string, unknown>) {
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
         const key = `${init?.method ?? "GET"} ${url}`;
-        const body = routes[key];
+        const route = routes[key] as { inTurn?: unknown[] } | undefined;
+        const body =
+            route?.inTurn !== undefined
+                ? route.inTurn.length > 1
+                    ? route.inTurn.shift()
+                    : route.inTurn[0]
+                : route;
         if (body === undefined) return new Response("{}", { status: 404 });
+        if (body instanceof Error) throw body;
         return Response.json(body);
     });
     vi.stubGlobal("fetch", fetch);
@@ -550,5 +567,751 @@ describe("LearnReview", () => {
                 }) as HTMLInputElement
             ).disabled,
         ).toBe(false);
+    });
+
+    describe("once a run is over", () => {
+        const REVIEW = "GET /api/recordings/rec-1/review?source=riffado";
+        const LEARN = "POST /api/recordings/rec-1/learn?source=riffado";
+        const NONE = {
+            run: null,
+            items: [],
+            names: {},
+            types: {},
+            relations: {},
+            available: true,
+        };
+        const FINISHED = {
+            ...READY,
+            run: { id: "run-1", status: "finished", errorCode: null },
+            items: [
+                { ...READY.items[0], outcome: "applied" },
+                { ...READY.items[1], outcome: "speaker_not_named" },
+                {
+                    ...READY.items[1],
+                    id: "i-rejected",
+                    decision: "rejected",
+                    outcome: "rejected",
+                },
+            ],
+        };
+        const NOTHING = {
+            ...NONE,
+            run: { id: "run-1", status: "finished", errorCode: null },
+            known: { people: 3, things: 0 },
+        };
+
+        it("shows what the review did with each item, and offers Re-learn", async () => {
+            const fetch = respond({
+                [REVIEW]: FINISHED,
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            expect(screen.getByText(/"Tavesy" → Tavesi/)).toBeTruthy();
+            expect(screen.getByText("applied")).toBeTruthy();
+            expect(
+                screen.getByText("not applied: its speaker is not named yet"),
+            ).toBeTruthy();
+            expect(screen.getByText("rejected")).toBeTruthy();
+            // Read-only: the one checkbox is Re-learn's, not an item's.
+            expect(
+                screen
+                    .getAllByRole("checkbox")
+                    .map(
+                        (box) =>
+                            box.getAttribute("aria-label") ??
+                            box.closest("label")?.textContent,
+                    ),
+            ).toEqual([
+                "Re-learn: also propose again what I rejected on this recording",
+            ]);
+
+            fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/learn?source=riffado",
+                    { method: "POST" },
+                ),
+            );
+        });
+
+        it("says a run found nothing, and what it had to go on", async () => {
+            respond({ [REVIEW]: NOTHING });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Learned: nothing new",
+                }),
+            );
+            expect(
+                screen.getByText("Learn found nothing new in this transcript."),
+            ).toBeTruthy();
+            expect(
+                screen.getByText(/It knows 3 people and no things\./),
+            ).toBeTruthy();
+            expect(
+                screen
+                    .getByRole("link", { name: "Add people and things" })
+                    .getAttribute("href"),
+            ).toBe("/almanac/things");
+            expect(
+                screen.getByRole("button", { name: "Re-learn" }),
+            ).toBeTruthy();
+        });
+
+        it("says why a run failed, and offers Re-learn", async () => {
+            respond({
+                [REVIEW]: {
+                    ...NONE,
+                    run: {
+                        id: "run-1",
+                        status: "failed",
+                        errorCode: "AI_PROVIDER_API_ERROR",
+                    },
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn failed" }),
+            );
+            expect(
+                screen.getByText(
+                    /The provider's answer was not one Learn could use/,
+                ),
+            ).toBeTruthy();
+            expect(
+                screen.getByRole("button", { name: "Re-learn" }),
+            ).toBeTruthy();
+        });
+
+        it("still shows a finished review where Learn cannot run now, without Re-learn", async () => {
+            respond({ [REVIEW]: { ...FINISHED, available: false } });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            expect(
+                screen.queryByRole("button", { name: "Re-learn" }),
+            ).toBeNull();
+        });
+
+        it("shows a failed run where Learn cannot run now, without Re-learn", async () => {
+            respond({
+                [REVIEW]: {
+                    ...NONE,
+                    available: false,
+                    run: { id: "run-1", status: "failed", errorCode: null },
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn failed" }),
+            );
+            expect(
+                screen.getByText("Learn stopped on an error. Try again."),
+            ).toBeTruthy();
+            expect(
+                screen.queryByRole("button", { name: "Re-learn" }),
+            ).toBeNull();
+        });
+
+        it.each([
+            [
+                "every item rejected",
+                FINISHED.items.map((item) => ({
+                    ...item,
+                    decision: "rejected",
+                    outcome: "rejected",
+                })),
+                "Learned: nothing applied",
+            ],
+            [
+                "a review finished before outcomes were kept",
+                FINISHED.items.map((item) => ({ ...item, outcome: null })),
+                "Learned",
+            ],
+        ])("counts only what was applied: %s", async (_name, items, label) => {
+            respond({ [REVIEW]: { ...FINISHED, items } });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            expect(
+                await screen.findByRole("button", { name: label }),
+            ).toBeTruthy();
+        });
+
+        it("forgets the recording's rejections before Re-learn, when asked", async () => {
+            const fetch = respond({
+                [REVIEW]: FINISHED,
+                "DELETE /api/recordings/rec-1/review/dismissals": {
+                    forgotten: 1,
+                },
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learned (1)" }),
+            );
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Re-learn: also propose again what I rejected on this recording",
+                }),
+            );
+            fireEvent.click(screen.getByRole("button", { name: "Re-learn" }));
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/learn?source=riffado",
+                    { method: "POST" },
+                ),
+            );
+            const calls = fetch.mock.calls.map(
+                ([url, init]) => `${init?.method ?? "GET"} ${url}`,
+            );
+            expect(
+                calls.indexOf("DELETE /api/recordings/rec-1/review/dismissals"),
+            ).toBeLessThan(calls.indexOf(LEARN));
+            expect(
+                calls.indexOf("DELETE /api/recordings/rec-1/review/dismissals"),
+            ).toBeGreaterThan(-1);
+        });
+
+        it.each([
+            [
+                "suggestions to review",
+                { ...READY, run: { id: "run-2", status: "ready" } },
+                () =>
+                    expect(toast.success).toHaveBeenCalledWith(
+                        "Learn found 2 suggestions to review",
+                    ),
+                "Review (2)",
+            ],
+            [
+                "nothing new",
+                NOTHING,
+                () =>
+                    expect(toast.info).toHaveBeenCalledWith(
+                        "Learn found nothing new",
+                    ),
+                "Learned: nothing new",
+            ],
+            [
+                "a transcript changed meanwhile",
+                { ...NONE, run: { id: "run-2", status: "superseded" } },
+                () =>
+                    expect(toast.warning).toHaveBeenCalledWith(
+                        "The transcript changed while Learn ran. Run it again.",
+                    ),
+                "Learn",
+            ],
+        ])("tells how a run it started went: %s", async (_name, after, told, button) => {
+            respond({
+                [REVIEW]: inTurn(NONE, after),
+                [LEARN]: { runId: "run-2", jobId: null, created: true },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Learn" }),
+            );
+            await waitFor(told);
+            expect(
+                await screen.findByRole("button", { name: button }),
+            ).toBeTruthy();
+        });
+    });
+
+    describe("new records", () => {
+        const item = (overrides: Record<string, unknown>) => ({
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            outcome: null,
+            ...overrides,
+        });
+        const records = [
+            item({
+                id: "i-veltrix",
+                kind: "new_record",
+                payload: {
+                    ref: "n1",
+                    kind: "entity",
+                    typeKey: "organization",
+                    name: "Veltrix",
+                    evidenceMs: [0],
+                    reason: "the client",
+                },
+            }),
+            item({
+                id: "i-petra",
+                kind: "new_record",
+                payload: {
+                    ref: "n2",
+                    kind: "person",
+                    typeKey: null,
+                    name: "Petra Kolářová",
+                    evidenceMs: [5_000],
+                    reason: "introduces herself",
+                    speakerLabel: "speaker_1",
+                },
+            }),
+            item({
+                id: "i-speaker",
+                kind: "speaker",
+                payload: {
+                    label: "speaker_1",
+                    personId: null,
+                    newRef: "n2",
+                    evidenceMs: [5_000],
+                    reason: "introduces herself",
+                },
+            }),
+            item({
+                id: "i-works",
+                kind: "fact",
+                payload: {
+                    subject: { newRef: "n2" },
+                    relationKey: "works_for",
+                    object: { newRef: "n1" },
+                    startMs: 5_000,
+                    endMs: 9_000,
+                    speakerLabel: null,
+                },
+            }),
+        ];
+        const entityTypes = [
+            { key: "organization", label: "Organization" },
+            { key: "product", label: "Product or system" },
+        ];
+
+        it("lists them first, and holds what refers to one until it is ticked", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: records,
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    { version: 1 },
+                "PATCH /api/recordings/rec-1/review/items/i-petra?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (4)" }),
+            );
+            const headings = screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent);
+            expect(headings[0]).toBe("New in the Almanac");
+            const fact = screen.getByRole("checkbox", {
+                name: "Petra Kolářová — works_for — Veltrix",
+            }) as HTMLInputElement;
+            const speaker = screen.getByRole("checkbox", {
+                name: "Accept speaker_1 as Petra Kolářová",
+            }) as HTMLInputElement;
+            expect(fact.disabled).toBe(true);
+            expect(speaker.disabled).toBe(true);
+            expect(
+                screen.getByText(
+                    "waits for Petra Kolářová, Veltrix to be added",
+                ),
+            ).toBeTruthy();
+
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Veltrix to the Almanac",
+                }),
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByText("waits for Petra Kolářová to be added"),
+                ).toBeTruthy(),
+            );
+            expect(fact.disabled).toBe(true);
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Petra Kolářová to the Almanac",
+                }),
+            );
+            await waitFor(() => expect(fact.disabled).toBe(false));
+            expect(speaker.disabled).toBe(false);
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/items/i-petra?source=riffado",
+                expect.objectContaining({ method: "PATCH" }),
+            );
+        });
+
+        it("keeps a name and a type the reviewer corrects at once, one save after the other, ticking the record", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            const name = screen.getByRole("textbox", { name: "Name" });
+            fireEvent.change(name, { target: { value: "Veltrix a.s." } });
+            // The type changed at once, before the name's save came back.
+            fireEvent.blur(name);
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
+            const bodies = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)));
+            expect(bodies).toEqual([
+                {
+                    decision: "accepted",
+                    version: 0,
+                    choice: { name: "Veltrix a.s.", typeKey: "organization" },
+                },
+                {
+                    decision: "accepted",
+                    version: 1,
+                    choice: { name: "Veltrix a.s.", typeKey: "product" },
+                },
+            ]);
+        });
+
+        it("keeps the type just chosen when the name is saved before that type's save comes back", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            const name = screen.getByRole("textbox", { name: "Name" });
+            fireEvent.change(name, { target: { value: "Veltrix a.s." } });
+            fireEvent.blur(name);
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
+            const choices = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)).choice);
+            expect(choices).toEqual([
+                { name: "Veltrix", typeKey: "product" },
+                { name: "Veltrix a.s.", typeKey: "product" },
+            ]);
+        });
+
+        it("goes on saving an item after one of its saves failed", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn(new TypeError("offline"), { version: 1 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Veltrix to the Almanac",
+                }),
+            );
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
+        });
+
+        it("rejects one outright, for every recording, and takes that back", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            const never = screen.getByRole("button", {
+                name: "Never propose it",
+            });
+            expect(never.getAttribute("aria-pressed")).toBe("false");
+            fireEvent.click(never);
+            await waitFor(() =>
+                expect(never.getAttribute("aria-pressed")).toBe("true"),
+            );
+            fireEvent.click(never);
+            await waitFor(() =>
+                expect(never.getAttribute("aria-pressed")).toBe("false"),
+            );
+            const decisions = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)).decision);
+            expect(decisions).toEqual(["rejected", null]);
+        });
+
+        it("offers the known record a name is close to, in one click", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": inTurn({
+                    ...READY,
+                    entityTypes,
+                    items: [
+                        {
+                            ...records[0],
+                            payload: {
+                                ...(
+                                    records[0] as unknown as { payload: object }
+                                ).payload,
+                                maybe: { entityId: "e-tavesi" },
+                            },
+                        },
+                    ],
+                }),
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            expect(
+                screen.getByText("Maybe it is Tavesi, misheard?"),
+            ).toBeTruthy();
+            fireEvent.click(
+                screen.getByRole("button", { name: "Yes, it is Tavesi" }),
+            );
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/review/items/i-veltrix?source=riffado",
+                    expect.objectContaining({
+                        body: JSON.stringify({
+                            decision: "accepted",
+                            version: 0,
+                            choice: { entityId: "e-tavesi" },
+                        }),
+                    }),
+                ),
+            );
+        });
+
+        it("drops the first-name note once the name is a known person", async () => {
+            const honza = item({
+                id: "i-honza",
+                kind: "new_record",
+                payload: {
+                    ref: "n3",
+                    kind: "person",
+                    typeKey: null,
+                    name: "Honza",
+                    evidenceMs: [1000],
+                    reason: "Named in passing.",
+                    onlyFirstName: true,
+                    maybe: { personId: "p-jan" },
+                },
+            });
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": inTurn(
+                    { ...READY, entityTypes, items: [honza] },
+                    {
+                        ...READY,
+                        entityTypes,
+                        items: [
+                            {
+                                ...honza,
+                                decision: "accepted",
+                                choice: { personId: "p-jan" },
+                                version: 1,
+                            },
+                        ],
+                    },
+                ),
+                "PATCH /api/recordings/rec-1/review/items/i-honza?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            expect(
+                screen.getByText("Only a first name: add the surname."),
+            ).toBeTruthy();
+            fireEvent.click(
+                screen.getByRole("button", { name: "Yes, it is Jan" }),
+            );
+            await screen.findByText("Honza is Jan, in the Almanac");
+            expect(
+                screen.queryByText("Only a first name: add the surname."),
+            ).toBeNull();
+        });
+
+        it("shows what the finished review did with them", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    run: { id: "run-1", status: "finished" },
+                    entityTypes,
+                    items: [
+                        {
+                            ...records[0],
+                            decision: "rejected",
+                            outcome: "rejected",
+                        },
+                        {
+                            ...records[3],
+                            decision: "accepted",
+                            outcome: "record_not_added",
+                        },
+                    ],
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Learned: nothing applied",
+                }),
+            );
+            expect(screen.getByText("New in the Almanac")).toBeTruthy();
+            expect(screen.getByText(/Veltrix \(Organization\)/)).toBeTruthy();
+            expect(
+                screen.getByText(
+                    "not applied: a person or thing it needs was not added",
+                ),
+            ).toBeTruthy();
+        });
     });
 });

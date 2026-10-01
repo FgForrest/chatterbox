@@ -149,15 +149,17 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     await mergePeople(session.user.id, mergeIntoId, id);
     await replanExports(affected);
 
-    // The target may itself have been merged away since the caller read it,
-    // in which case the rows land on the person it redirects to. Report that
-    // person rather than the tombstone the request happened to name, so the
-    // response describes where the data actually went.
-    const winner = target.mergedIntoId
-        ? await getPerson(session.user.id, target.mergedIntoId)
-        : target;
+    // The target may itself have been merged away, even after it was read
+    // above, in which case the rows land on the person it redirects to.
+    // Read it again and report that person rather than the tombstone the
+    // request happened to name, so the response describes where the data
+    // actually went.
+    const after = (await getPerson(session.user.id, mergeIntoId)) ?? target;
+    const winner = after.mergedIntoId
+        ? await getPerson(session.user.id, after.mergedIntoId)
+        : after;
 
-    return NextResponse.json({ person: winner ?? target });
+    return NextResponse.json({ person: winner ?? after });
 });
 
 /**

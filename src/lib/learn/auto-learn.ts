@@ -40,10 +40,7 @@ import {
     type JobHandler,
     type JobResult,
 } from "@/lib/jobs/types";
-import {
-    isAutoLearnOffered,
-    isLearnAvailableFor,
-} from "@/lib/knowledge/availability";
+import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
@@ -73,7 +70,7 @@ export async function holdForAutoLearn(input: {
 }): Promise<boolean> {
     const { userId, recordingId, timed } = input;
     try {
-        if (!timed || !isAutoLearnOffered()) return false;
+        if (!timed) return false;
         const [settings] = await db
             .select({ autoLearn: userSettings.autoLearn })
             .from(userSettings)

@@ -1,0 +1,118 @@
+---
+title: The Almanac
+description: The people and things Riffado knows, how to edit them, how Learn adds to them, and importing a list.
+---
+
+The **Almanac** is what Riffado knows about the people and things your
+recordings talk about. It names speakers, corrects misheard names in
+transcripts, and keeps facts ("Jana works on Orion"). Open it from the top
+navigation. It has four tabs:
+
+- **People**: everyone who speaks or is spoken of.
+- **Things**: organizations, teams, projects, products, terms, locations and
+  documents.
+- **Vocabulary**: the kinds of things and relations your knowledge uses,
+  beyond the built-in ones.
+- **Review**: Learn's proposals waiting for you (self-hosted instances).
+
+## People and things
+
+Add a person on the People tab, and a thing on the Things tab: pick its
+type, give it a name, and optionally nicknames and a description. On a
+record's page you can:
+
+- **Edit** its name (and a thing's description). Transcripts that link to
+  it read the new name.
+- **Change type** of a thing, say a product that is really a project. If a
+  fact of yours about it would no longer fit (nobody *leads* a term), the
+  change is refused, naming that fact's relation: change or erase it
+  first.
+- **Merge into…** another record of its type, when two records are one.
+  Nicknames, facts and links move to the one you keep.
+- **Erase** it, with its nicknames and facts. For a thing, the corrections
+  linking to it go too, and transcripts show those words as they were
+  heard.
+
+## Nicknames
+
+**Also known as** lists a record's other names: the nicknames people gave,
+and how transcription heard the name (from corrections you accepted). Add a
+nickname there, and remove the ones you added. Learn uses nicknames to
+recognize a name however it is said, and searching People or Things finds
+a record by them too.
+
+Names are also recognized in their word forms, in the transcript's
+language: "Šimákem" finds Šimák, "Forestu" finds Forest, with or
+without accents. Czech, Slovak, Polish and Romanian are covered for
+missing accents too; English, German, French, Spanish, Italian, Dutch,
+the Nordic languages, Finnish, Hungarian, Russian, Slovene, Turkish and
+others by their stems.
+
+## Facts
+
+**What is known** lists the facts about a record, each with the recordings
+that support it. **Add a fact** picks a relation that fits the record (a
+person *works for* an organization, a term *means* some text), then the
+other side: someone or something from the Almanac, or text.
+
+A relation that holds one value at a time (*works for*) asks before a new
+value replaces the current one. Facts you type are kept until you change or
+erase them; facts from recordings stay while a recording supports them.
+
+Riffado does not keep knowledge about people's health, family,
+personality, performance or demographics. Text typed about a person that
+names such a topic is refused, by a fixed word list.
+
+## Learn
+
+**Learn** on a recording's transcript proposes names for unnamed speakers,
+corrections of misheard names, and facts, from what the Almanac already
+knows. Nothing changes until you review the proposals. After a run, the
+Learn button says how it went and opens what the review did with each
+proposal, with **Re-learn**.
+
+Learn also proposes **new people and things** it hears: a client, a
+project, a product, a term the team uses, or someone mentioned by their
+full name. They are listed first in the review, under **New in the
+Almanac**, unticked. Tick one to add it, correcting its name or its type
+first if needed, or say which record it already is (**It is someone
+known…**). Proposals that refer to a new record (a speaker who introduces
+themselves, a fact about a new client) wait until that record is ticked.
+
+A proposal close to something the Almanac has asks **Maybe it is …,
+misheard?**: a name a letter off, a first name only one known person has,
+or a known name inside a longer one. When you say which record a proposal
+is, what Learn heard becomes that record's nickname ("Honza" for Jan), so
+the next run recognizes it. A name the record's own name already says
+("Milan" for Milan Petrák) is not kept: it would make every Milan him.
+
+A new record you mark **Never propose it** is not proposed again on any
+recording; one you only leave unticked is not proposed again on that
+recording. Re-learn with "also propose again what I rejected" brings back
+the ones rejected on that recording.
+
+## Import a list
+
+On the Things tab, **Import a list** takes one line per type: the type, a
+colon, and names separated by commas. Nicknames go in parentheses.
+
+```text
+product: Alpha, Beta (Béta, B2)
+organization: Acme
+person: Jana Nováková (Janička)
+```
+
+The type is a type's name or key, in English or Czech, singular or plural.
+A preview shows what each name would do: be added, exist already (its new
+nicknames are added to it), or be skipped because its type is unknown or
+several people have that name (give those nicknames on the person's page). An
+import never creates types: add them in the vocabulary first. Up to 500
+names at once.
+
+## Your records and the Organization's
+
+On an instance with an Organization, the Almanac shows your own records and
+the Organization's. Only the organization account changes the
+Organization's; you can keep private notes on them, add your own nicknames,
+and fold a private duplicate into one. See
+[Organization](../self-hosting/organization#people-and-things).

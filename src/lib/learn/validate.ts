@@ -26,7 +26,11 @@
  * - a fact whose speaker a person already answered otherwise
  *   goes; at most `MAX_NEW_FACTS` new facts, and bounded corrections and
  *   phrases;
- * - what a person dismissed before goes, except on a manual run.
+ * - what a person dismissed before goes, on a run they asked for too
+ *   (Re-learn brings back only what is new);
+ * - people and things the answer proposes to add are kept as
+ *   `validate-new-records.ts` says; what refers to one it dropped goes,
+ *   and what refers to one the Almanac has refers to that record.
  *
  * Two defaults (the design's fixed rule, never the model's confidence):
  * pre-ticked are a `correct` of a non-person a person confirmed before
@@ -54,6 +58,7 @@ import {
     nameParts,
     nameTokens,
 } from "@/lib/learn/name-match";
+import { replaceRefs } from "@/lib/learn/new-refs";
 import type {
     LearnCorrection,
     LearnFact,
@@ -61,6 +66,11 @@ import type {
     LearnOutput,
     LearnSubject,
 } from "@/lib/learn/output";
+import {
+    type NewRecordCandidate,
+    type NewRecordDrop,
+    validateNewRecords,
+} from "@/lib/learn/validate-new-records";
 import { parseClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -93,10 +103,14 @@ export interface LearnRunFrame {
     turns: readonly TranscriptTurn[];
     language: string | null;
     provider: string | null;
-    manual: boolean;
-    /** The people and entities in the run's scopes; a person's nicknames too. */
+    /** The people and entities in the run's scopes, with their nicknames. */
     people: ReadonlyMap<string, { name: string; aliases?: readonly string[] }>;
-    entities: ReadonlyMap<string, { typeKey: string; name: string }>;
+    entities: ReadonlyMap<
+        string,
+        { typeKey: string; name: string; aliases?: readonly string[] }
+    >;
+    /** The types a new thing may take in the run's scope. */
+    entityTypes?: ReadonlySet<string>;
     /** The relations visible to the run's scope, active. */
     relations: ReadonlyMap<string, VisibleRelation>;
     /** Labels a person already answered: the person named, or null for unknown. */
@@ -122,7 +136,10 @@ export interface LearnRunFrame {
      * run's view): nothing is proposed on those words again.
      */
     corrected?: readonly AnchorPosition[];
-    /** Items a person dismissed on this recording, as `fingerprintKey` gives them. */
+    /**
+     * Items a person dismissed on this recording, and new records they
+     * rejected on any, as `fingerprintKey` gives them.
+     */
     dismissed: ReadonlySet<string>;
     /** How a fingerprint is stored (a keyed HMAC); as is by default. */
     fingerprintKey?: (fingerprint: string) => string;
@@ -146,6 +163,8 @@ export type DropReason =
     | "conflicting"
     | "firstNameOnly"
     | "ambiguousFirstName"
+    | "unknownRef"
+    | NewRecordDrop
     | "budget";
 
 interface AnchorPosition {
@@ -155,8 +174,11 @@ interface AnchorPosition {
 }
 
 type Target = { personId: string } | { entityId: string };
+/** A known record, or a new one the same run proposes. */
+type TargetOrNew = Target | { newRef: string };
 
 export type ReviewCandidate =
+    | NewRecordCandidate
     | {
           kind: "speaker";
           fingerprint: string;
@@ -164,6 +186,8 @@ export type ReviewCandidate =
           payload: {
               label: string;
               personId: string | null;
+              /** A person the same run proposes to add, when it is them. */
+              newRef?: string;
               evidenceMs: number[];
               reason: string;
               /** Heard by a first name alone: no surname or nickname near it. */
@@ -177,7 +201,7 @@ export type ReviewCandidate =
           payload: {
               kind: "correct" | "link";
               heard: string;
-              target: Target;
+              target: TargetOrNew;
               replacement: string | null;
               anchors: AnchorPosition[];
           };
@@ -211,7 +235,7 @@ export type ReviewCandidate =
               phrase: string;
               subject: LearnSubject;
               /** The thing it relates to; absent where that was text. */
-              object?: Target;
+              object?: TargetOrNew;
               objectKind: "entity" | "literal";
               startMs: number;
               endMs: number;
@@ -310,24 +334,67 @@ export function validateLearnOutput(
     const stored =
         frame.fingerprintKey ?? ((fingerprint: string) => fingerprint);
     const dismissed = (fingerprint: string) => {
-        if (frame.manual || !frame.dismissed.has(stored(fingerprint))) {
-            return false;
-        }
+        if (!frame.dismissed.has(stored(fingerprint))) return false;
         drop("dismissed");
         return true;
     };
-    const inScope = (node: Target) =>
-        "personId" in node
-            ? frame.people.has(node.personId)
-            : frame.entities.has(node.entityId);
     const denied = (...texts: (string | undefined)[]) =>
         texts.some((text) => text !== undefined && deniedTopicOf(text));
+
+    // New people and things first: what refers to them is checked against
+    // what they became (a known record, one of them, or nothing).
+    const news = validateNewRecords(
+        output.newRecords,
+        output.corrections,
+        frame,
+        { startOf: time.start, dismissed, drop },
+    );
+    items.push(...news.items);
+    const withRefs = <T>(value: T): T | null => {
+        const resolved = replaceRefs(value, news.resolve);
+        if (resolved === null) drop("unknownRef");
+        return resolved;
+    };
+    const inScope = (node: TargetOrNew) =>
+        "newRef" in node
+            ? news.record(node.newRef) !== undefined
+            : "personId" in node
+              ? frame.people.has(node.personId)
+              : frame.entities.has(node.entityId);
+    const keyOf = (node: TargetOrNew) =>
+        "newRef" in node ? news.keyOf(node.newRef) : nodeKey(node);
+    const typeOf = (node: TargetOrNew): string => {
+        if ("personId" in node) return "person";
+        if ("entityId" in node) {
+            return frame.entities.get(node.entityId)?.typeKey ?? "";
+        }
+        const record = news.record(node.newRef);
+        return record?.kind === "entity" ? (record.typeKey ?? "") : "person";
+    };
+    /** A person, known or new, as a name is matched against them. */
+    const personOf = (node: TargetOrNew) => {
+        if ("personId" in node) return frame.people.get(node.personId);
+        if (!("newRef" in node)) return undefined;
+        const record = news.record(node.newRef);
+        return record?.kind === "person" ? { name: record.name } : undefined;
+    };
+    const nameOf = (node: TargetOrNew) =>
+        "entityId" in node
+            ? frame.entities.get(node.entityId)?.name
+            : "newRef" in node
+              ? news.record(node.newRef)?.name
+              : frame.people.get(node.personId)?.name;
 
     // Speakers: one per label a person has not answered, the label's
     // suggestions (a run makes one per window) joined.
     const perLabel = new Map<
         string,
-        { personId: string | null; evidenceMs: number[]; reason: string }[]
+        {
+            personId: string | null;
+            newRef?: string;
+            evidenceMs: number[];
+            reason: string;
+        }[]
     >();
     for (const speaker of output.speakers) {
         if (!labels.has(speaker.label)) {
@@ -357,9 +424,29 @@ export function validateLearnOutput(
         });
         perLabel.set(speaker.label, held);
     }
+    // The people the answer adds, or found known, where it said they speak.
+    for (const link of news.speakers) {
+        if (!labels.has(link.label) || frame.answeredLabels.has(link.label)) {
+            continue;
+        }
+        const held = perLabel.get(link.label) ?? [];
+        held.push({
+            personId: "personId" in link.target ? link.target.personId : null,
+            ...("newRef" in link.target ? { newRef: link.target.newRef } : {}),
+            evidenceMs: link.evidenceMs,
+            reason: link.reason,
+        });
+        perLabel.set(link.label, held);
+    }
     for (const [label, suggestions] of perLabel) {
-        const named = suggestions.filter((one) => one.personId !== null);
-        const people = new Set(named.map((one) => one.personId));
+        const named = suggestions.filter(
+            (one) => one.personId !== null || one.newRef !== undefined,
+        );
+        const people = new Set(
+            named.map(
+                (one) => one.personId ?? keyOf({ newRef: one.newRef ?? "" }),
+            ),
+        );
         if (people.size > 1) {
             // Windows that disagree: no side is shown as Learn's answer.
             for (const _ of named) drop("conflicting");
@@ -369,6 +456,7 @@ export function validateLearnOutput(
         // evidence may have said.
         const kept = named.length > 0 ? named : suggestions;
         const personId = kept[0]?.personId ?? null;
+        const newRef = personId === null ? kept[0]?.newRef : undefined;
         const evidenceMs = [
             ...new Set(kept.flatMap((one) => one.evidenceMs)),
         ].sort((a, b) => a - b);
@@ -379,10 +467,14 @@ export function validateLearnOutput(
             "speaker",
             transcriptKey,
             label,
-            personId,
+            personId ?? (newRef ? keyOf({ newRef }) : null),
         ]);
         if (dismissed(fingerprint)) continue;
-        const person = personId ? frame.people.get(personId) : undefined;
+        const person = personId
+            ? frame.people.get(personId)
+            : newRef
+              ? personOf({ newRef })
+              : undefined;
         const onlyFirstName =
             person !== undefined &&
             !fullNameNear(person, frame.turns, evidenceMs);
@@ -404,6 +496,7 @@ export function validateLearnOutput(
             payload: {
                 label,
                 personId,
+                ...(newRef ? { newRef } : {}),
                 evidenceMs,
                 reason,
                 ...(onlyFirstName ? { onlyFirstName: true as const } : {}),
@@ -417,13 +510,15 @@ export function validateLearnOutput(
         string,
         Extract<ReviewCandidate, { kind: "correction" }>
     >();
-    for (const correction of output.corrections) {
+    for (const proposed of output.corrections) {
+        const correction = withRefs(proposed);
+        if (!correction) continue;
         const replacement =
             correction.kind === "link" ? null : (correction.replacement ?? "");
         const group = JSON.stringify([
             "correction",
             correction.kind,
-            nodeKey(correction.target),
+            keyOf(correction.target),
             normalizeText(correction.heard),
             replacement === null ? null : normalizeText(replacement),
         ]);
@@ -440,9 +535,10 @@ export function validateLearnOutput(
             drop("budget");
             continue;
         }
+        const target = correction.target;
         const entity =
-            "entityId" in correction.target
-                ? frame.entities.get(correction.target.entityId)
+            "entityId" in target
+                ? frame.entities.get(target.entityId)
                 : undefined;
         const item: Extract<ReviewCandidate, { kind: "correction" }> = {
             kind: "correction",
@@ -452,11 +548,12 @@ export function validateLearnOutput(
             preTicked:
                 correction.kind === "correct" &&
                 entity !== undefined &&
+                "entityId" in target &&
                 replacement !== null &&
                 normalizeText(replacement) === normalizeText(entity.name) &&
                 frame.confirmedHeardAs.has(
                     heardAsKey(
-                        correction.target,
+                        target,
                         correction.heard,
                         frame.language,
                         frame.provider,
@@ -491,10 +588,7 @@ export function validateLearnOutput(
             drop("outOfScope");
             return null;
         }
-        const person =
-            "personId" in correction.target
-                ? frame.people.get(correction.target.personId)
-                : undefined;
+        const person = personOf(correction.target);
         // A person named by their first name alone is a guess among
         // everyone of that name (the meeting may hold someone nobody
         // knows): not proposed, as a link or as a rewrite.
@@ -503,11 +597,7 @@ export function validateLearnOutput(
             return null;
         }
         // Linking the name itself, as said, tells nobody anything.
-        const name =
-            person?.name ??
-            ("entityId" in correction.target
-                ? frame.entities.get(correction.target.entityId)?.name
-                : undefined);
+        const name = nameOf(correction.target);
         if (
             correction.kind === "link" &&
             name !== undefined &&
@@ -568,13 +658,7 @@ export function validateLearnOutput(
             drop("outOfScope");
             return null;
         }
-        return {
-            type:
-                "personId" in subject
-                    ? "person"
-                    : (frame.entities.get(subject.entityId)?.typeKey ?? ""),
-            key: nodeKey(subject),
-        };
+        return { type: typeOf(subject), key: keyOf(subject) };
     };
     const objectOf = (
         object: LearnObject,
@@ -586,13 +670,7 @@ export function validateLearnOutput(
             drop("outOfScope");
             return null;
         }
-        return {
-            type:
-                "personId" in object
-                    ? "person"
-                    : (frame.entities.get(object.entityId)?.typeKey ?? ""),
-            key: nodeKey(object),
-        };
+        return { type: typeOf(object), key: keyOf(object) };
     };
     const span = (start: string, end: string) => {
         const startMs = time.start(start);
@@ -664,7 +742,9 @@ export function validateLearnOutput(
 
     const known = new Set<string>();
     let newFacts = 0;
-    for (const fact of output.facts) {
+    for (const proposed of output.facts) {
+        const fact = withRefs(proposed);
+        if (!fact) continue;
         if (fact.sensitivity !== "none") {
             drop("sensitive");
             continue;
@@ -801,7 +881,9 @@ export function validateLearnOutput(
         });
     }
 
-    for (const proposed of output.relationPhrases) {
+    for (const phrase of output.relationPhrases) {
+        const proposed = withRefs(phrase);
+        if (!proposed) continue;
         if (proposed.sensitivity !== "none") {
             drop("sensitive");
             continue;

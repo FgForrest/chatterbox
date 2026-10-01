@@ -170,13 +170,6 @@ const baseEnvSchema = z.object({
                 "KNOWLEDGE_MEMORY_MB must be a whole number from 16 to 16384",
         }),
     /**
-     * Offer automatic Learn (Task 5.5): after a transcript with timings,
-     * Learn runs by itself and the title, summary and topics wait for its
-     * review (72 h at most). Off until the evaluation's thresholds are met
-     * on this instance's recordings; the person still opts in per account.
-     */
-    LEARN_AUTO: optionalStrictBoolean,
-    /**
      * This instance's agent bridge (its base URL, as a provider names it,
      * e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex
      * provider pointing exactly here takes Learn's bridge path and is sent
@@ -952,7 +945,6 @@ function validateEnv(): Env {
             EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
             EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
             LEARN_MCP_URL: process.env.LEARN_MCP_URL,
-            LEARN_AUTO: process.env.LEARN_AUTO,
             LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
             KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
             GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
