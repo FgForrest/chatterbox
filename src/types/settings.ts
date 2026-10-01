@@ -7,6 +7,8 @@ export type SettingsSection =
     | "api-keys"
     | "webhooks"
     | "transcription"
+    | "topics"
+    | "learning"
     | "summary"
     | "storage"
     | "sync"

@@ -59,6 +59,10 @@ export function SettingsContent({
             return <WebhooksSection />;
         case "transcription":
             return <TranscriptionSection />;
+        case "topics":
+            return <TranscriptionSection mode="topics" />;
+        case "learning":
+            return <TranscriptionSection mode="learning" />;
         case "summary":
             return <SummarySection />;
         case "sync":

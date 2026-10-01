@@ -4,6 +4,7 @@ import { ListChecks, Pencil } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ProviderRoleSelect } from "@/components/settings/provider-role-select";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { TemplateList } from "@/components/settings/template-list";
 import { Button } from "@/components/ui/button";
@@ -273,6 +274,7 @@ export function SummarySection() {
                 )}
                 icon={ListChecks}
             />
+            <ProviderRoleSelect purpose="summary" />
             <div className="space-y-4">
                 <div className="space-y-2">
                     <Label htmlFor="ai-output-language">

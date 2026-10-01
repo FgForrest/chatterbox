@@ -40,6 +40,10 @@ export function SettingsNavMobile({
                 return i18n("Providers");
             case "transcription":
                 return i18n("Transcription");
+            case "topics":
+                return i18n("Topics");
+            case "learning":
+                return i18n("Learning");
             case "summary":
                 return i18n("Summary");
             case "plaud-account":
