@@ -251,6 +251,81 @@ describe("runFallbackPass", () => {
         ]);
     });
 
+    it("keeps each window's new-record refs apart, and says which words found nothing", async () => {
+        const long: TranscriptTurn[] = Array.from({ length: 6 }, (_, i) => ({
+            speaker: `speaker_${i % 2}`,
+            startMs: i * 10_000,
+            endMs: (i + 1) * 10_000,
+            text: `Turn ${i} Veltrix ${"x".repeat(40)}`,
+        }));
+        const answer = JSON.stringify({
+            newRecords: [
+                {
+                    ref: "n1",
+                    kind: "entity",
+                    typeKey: "organization",
+                    name: "Veltrix",
+                    speakerLabel: null,
+                    evidence: ["00:00"],
+                    reason: "a client",
+                },
+            ],
+            speakers: [],
+            corrections: [],
+            facts: [
+                {
+                    subject: { speakerLabel: "speaker_0" },
+                    relationKey: "works_for",
+                    object: { newRef: "n1" },
+                    start: "00:00",
+                    end: "00:10",
+                    speakerLabel: "speaker_0",
+                    sensitivity: "none",
+                },
+            ],
+            relationPhrases: [],
+        });
+        const mentions = (turn: number) =>
+            JSON.stringify({ mentions: [{ text: "Veltrix", turn }] });
+        const { chat, calls } = fakeChat([
+            mentions(0),
+            answer,
+            mentions(3),
+            answer,
+        ]);
+        const result = await runFallbackPass({
+            chat,
+            lookup: {
+                findEntities: vi.fn(async () => ({
+                    byMeaning: false,
+                    entities: [],
+                })),
+            },
+            turns: long,
+            language: "en",
+            relations,
+            entityTypes: [{ key: "organization", label: "Organization" }],
+            unnamedLabels: [],
+            windowChars: 260,
+        });
+        expect(result.windows).toBe(2);
+        expect(result.output.newRecords.map((record) => record.ref)).toEqual([
+            "w1:n1",
+            "w2:n1",
+        ]);
+        expect(result.output.facts.map((fact) => fact.object)).toEqual([
+            { newRef: "w1:n1" },
+            { newRef: "w2:n1" },
+        ]);
+        const adjudication = JSON.parse(
+            (calls[1]?.[1]?.content ?? "").split("\n")[1] ?? "{}",
+        );
+        expect(adjudication).toMatchObject({
+            notFound: ["Veltrix"],
+            entityTypes: [{ key: "organization", label: "Organization" }],
+        });
+    });
+
     describe("found in review", () => {
         const empty = JSON.stringify({
             speakers: [],

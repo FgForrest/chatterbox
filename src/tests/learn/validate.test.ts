@@ -88,6 +88,7 @@ function frame(overrides: Partial<LearnRunFrame> = {}): LearnRunFrame {
 
 function output(overrides: Partial<LearnOutput> = {}): LearnOutput {
     return {
+        newRecords: [],
         speakers: [],
         corrections: [],
         facts: [],

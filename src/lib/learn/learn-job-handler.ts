@@ -12,7 +12,7 @@
  * the bridge path lands (Task 3.6).
  */
 
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
@@ -60,6 +60,7 @@ import { chooseLearnPath } from "@/lib/learn/provider";
 import { type LearnBridgeChat, runBridgePass } from "@/lib/learn/run-bridge";
 import {
     type LearnChat,
+    type LearnEntityTypeChoice,
     type LearnRelationChoice,
     runFallbackPass,
 } from "@/lib/learn/run-fallback";
@@ -100,6 +101,20 @@ export function learnFingerprintHmac(fingerprint: string): string {
 }
 
 type RunRow = typeof learnRuns.$inferSelect;
+
+/**
+ * What a person rejected that a run in their scope must not propose again:
+ * on this recording, and new records on any.
+ */
+function dismissalsFor(run: RunRow) {
+    return and(
+        eq(learnDismissals.userId, run.scopeUserId),
+        or(
+            eq(learnDismissals.recordingId, run.recordingId),
+            eq(learnDismissals.scopeWide, true),
+        ),
+    );
+}
 type Outcome =
     | "ready"
     | "finished"
@@ -311,12 +326,7 @@ async function fenceOf(
     const dismissed = await executor
         .select({ hmac: learnDismissals.fingerprintHmac })
         .from(learnDismissals)
-        .where(
-            and(
-                eq(learnDismissals.recordingId, run.recordingId),
-                eq(learnDismissals.userId, run.scopeUserId),
-            ),
-        )
+        .where(dismissalsFor(run))
         .orderBy(asc(learnDismissals.fingerprintHmac));
     return JSON.stringify([
         [...generations.entries()].sort(),
@@ -430,14 +440,12 @@ async function frameFor(
     const dismissed = await db
         .select({ hmac: learnDismissals.fingerprintHmac })
         .from(learnDismissals)
-        .where(
-            and(
-                eq(learnDismissals.recordingId, run.recordingId),
-                eq(learnDismissals.userId, run.scopeUserId),
-            ),
-        );
+        .where(dismissalsFor(run));
     const people = new Map<string, { name: string; aliases: string[] }>();
-    const entities = new Map<string, { typeKey: string; name: string }>();
+    const entities = new Map<
+        string,
+        { typeKey: string; name: string; aliases: string[] }
+    >();
     // A heard form pre-ticks only a rewrite the person accepted word for
     // word: their correction wrote exactly the record's name. One they
     // accepted in another grammatical form ("Terradomě" for "Terra doma")
@@ -445,15 +453,17 @@ async function frameFor(
     const wroteName = await heardFormsWritingName(run, shared);
     const confirmedHeardAs = new Set<string>();
     for (const item of view.items) {
+        const aliases = item.names
+            .filter((name) => name.kind === "alias")
+            .map((name) => name.text);
         if (item.kind === "person") {
-            people.set(item.id, {
-                name: item.name,
-                aliases: item.names
-                    .filter((name) => name.kind === "alias")
-                    .map((name) => name.text),
-            });
+            people.set(item.id, { name: item.name, aliases });
         } else {
-            entities.set(item.id, { typeKey: item.typeKey, name: item.name });
+            entities.set(item.id, {
+                typeKey: item.typeKey,
+                name: item.name,
+                aliases,
+            });
         }
         for (const name of item.names) {
             if (name.kind !== "heard_as") continue;
@@ -517,6 +527,7 @@ async function frameFor(
         provider: transcript.provider,
         people,
         entities,
+        entityTypes: new Set(newThingTypes(vocabulary).map((type) => type.key)),
         relations: new Map(
             vocabulary.relationTypes
                 .filter((relation) => !relation.adoptedAsKey)
@@ -551,6 +562,15 @@ async function frameFor(
         fingerprintKey: learnFingerprintHmac,
         literalKey,
     };
+}
+
+/** The types a new thing may take: the scope's, but no adopted private one. */
+function newThingTypes(
+    vocabulary: Awaited<ReturnType<typeof vocabularyVisibleTo>>,
+): LearnEntityTypeChoice[] {
+    return vocabulary.entityTypes
+        .filter((type) => type.key !== "person" && !type.adoptedAsKey)
+        .map((type) => ({ key: type.key, label: type.label }));
 }
 
 function counts(
@@ -668,6 +688,7 @@ async function runLearnJob({
             vocabulary.relationTypes.filter(
                 (relation) => !relation.adoptedAsKey,
             );
+        const entityTypes = newThingTypes(vocabulary);
         const frameBefore = await frameFor(run, {
             revision: transcript.revision,
             turns,
@@ -697,6 +718,7 @@ async function runLearnJob({
                       turns,
                       language: transcript.detectedLanguage,
                       relations,
+                      entityTypes,
                       unnamedLabels,
                       signal,
                   })
@@ -708,6 +730,7 @@ async function runLearnJob({
                       turns,
                       language: transcript.detectedLanguage,
                       relations,
+                      entityTypes,
                       unnamedLabels,
                       signal,
                   });

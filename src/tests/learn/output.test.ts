@@ -70,10 +70,47 @@ describe("Learn output", () => {
     it("parses a well-formed answer", () => {
         const parsed = parseLearnOutput(JSON.stringify(valid));
         expect(parsed.ok).toBe(true);
-        if (parsed.ok) expect(parsed.output).toEqual(valid);
+        if (parsed.ok)
+            expect(parsed.output).toEqual({ newRecords: [], ...valid });
     });
 
-    it("accepts an answer with nothing found", () => {
+    it("takes new records, and refers to them by ref", () => {
+        const parsed = parseLearnOutput(
+            JSON.stringify({
+                ...valid,
+                newRecords: [
+                    {
+                        ref: "n1",
+                        kind: "entity",
+                        typeKey: "product",
+                        name: "Orbitex",
+                        speakerLabel: null,
+                        evidence: ["13:00"],
+                        reason: "named as the product the client uses",
+                    },
+                ],
+                facts: [
+                    {
+                        ...valid.facts[0],
+                        object: { newRef: "n1" },
+                    },
+                ],
+            }),
+        );
+        expect(parsed.ok).toBe(true);
+        if (parsed.ok) {
+            expect(parsed.output.newRecords[0]?.name).toBe("Orbitex");
+            expect(parsed.output.facts[0]?.object).toEqual({ newRef: "n1" });
+        }
+    });
+
+    it("gives the CLIs a schema that requires new records, with no default", () => {
+        const schema = learnOutputJsonSchema();
+        expect(schema.required).toContain("newRecords");
+        expect(JSON.stringify(schema)).not.toContain('"default"');
+    });
+
+    it("accepts an answer from before new records, with nothing found", () => {
         expect(
             parseLearnOutput(
                 '{"speakers":[],"corrections":[],"facts":[],"relationPhrases":[]}',
@@ -81,6 +118,7 @@ describe("Learn output", () => {
         ).toEqual({
             ok: true,
             output: {
+                newRecords: [],
                 speakers: [],
                 corrections: [],
                 facts: [],

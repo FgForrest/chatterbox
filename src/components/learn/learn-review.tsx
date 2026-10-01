@@ -2,7 +2,14 @@
 
 import { AlertTriangle, GraduationCap, Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    type ReactNode,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import { toast } from "sonner";
 import {
     type LearnMarks,
@@ -14,6 +21,12 @@ import {
     useLearnFailure,
     useSkipReason,
 } from "@/components/learn/learn-results";
+import {
+    linkedRecordId,
+    NewRecordItem,
+    type NewRecordView,
+    newRecordAs,
+} from "@/components/learn/new-record-item";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { Button } from "@/components/ui/button";
@@ -28,17 +41,28 @@ import {
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
+import { refsIn } from "@/lib/learn/new-refs";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
 import { formatClock } from "@/lib/topics/timeline";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
-type Target = { personId: string } | { entityId: string };
+type Target =
+    | { personId: string }
+    | { entityId: string }
+    /** A person or thing the same review proposes to add. */
+    | { newRef: string };
 type Side = Target | { speakerLabel: string } | { literal: string };
 
 interface ItemView {
     id: string;
-    kind: "speaker" | "correction" | "known_fact" | "fact" | "relation_phrase";
+    kind:
+        | "new_record"
+        | "speaker"
+        | "correction"
+        | "known_fact"
+        | "fact"
+        | "relation_phrase";
     preTicked: boolean;
     decision: "accepted" | "rejected" | null;
     choice: Record<string, unknown> | null;
@@ -58,6 +82,8 @@ interface ReviewState {
     names: Record<string, string>;
     types: Record<string, string>;
     relations: Record<string, string>;
+    /** The types a new thing may take. */
+    entityTypes?: { key: string; label: string }[];
     available: boolean;
 }
 
@@ -107,6 +133,16 @@ export function LearnReview({
     // Drafts on their way to the server: Finish waits for them, so what
     // it applies is what the person ticked.
     const [saving, setSaving] = useState(0);
+    // The same drafts, for a Finish clicked before they re-rendered (a
+    // name typed and Finish clicked at once).
+    const drafts = useRef(new Set<Promise<unknown>>());
+    // One item's drafts go one after another, each on the version the one
+    // before it left (a name, then a type, changed at once).
+    const queues = useRef(new Map<string, Promise<unknown>>());
+    const versions = useRef(new Map<string, number>());
+    // Drafts refused: a Finish waiting for them stops, and shows the
+    // review as it is now instead.
+    const refused = useRef(0);
 
     // Each transcript has its own review.
     const url = useCallback(
@@ -122,6 +158,9 @@ export function LearnReview({
         const response = await fetch(url("review"));
         if (!response.ok) return null;
         const next = (await response.json()) as ReviewState;
+        versions.current = new Map(
+            (next.items ?? []).map((item) => [item.id, item.version]),
+        );
         setState(next);
         return next;
     }, [url]);
@@ -223,18 +262,42 @@ export function LearnReview({
         (item.decision ?? (item.preTicked ? "accepted" : "rejected")) ===
         "accepted";
 
-    const decide = async (
+    const decide = (
         item: ItemView,
-        decision: "accepted" | "rejected",
+        decision: "accepted" | "rejected" | null,
         choice: Record<string, unknown> | null = item.choice,
-    ) => {
+    ): Promise<void> => {
         setSaving((count) => count + 1);
+        const before = queues.current.get(item.id) ?? Promise.resolve();
+        const sent = before
+            .then(() => keep(item, decision, choice))
+            .finally(() => setSaving((count) => count - 1));
+        queues.current.set(item.id, sent);
+        drafts.current.add(sent);
+        return sent.finally(() => {
+            drafts.current.delete(sent);
+            if (queues.current.get(item.id) === sent) {
+                queues.current.delete(item.id);
+            }
+        });
+    };
+
+    const keep = async (
+        item: ItemView,
+        decision: "accepted" | "rejected" | null,
+        choice: Record<string, unknown> | null,
+    ) => {
         const response = await fetch(url(`review/items/${item.id}`), {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ decision, version: item.version, choice }),
-        }).finally(() => setSaving((count) => count - 1));
+            body: JSON.stringify({
+                decision,
+                version: versions.current.get(item.id) ?? item.version,
+                choice,
+            }),
+        });
         if (!response.ok) {
+            refused.current++;
             toast.error(
                 await getApiErrorMessage(
                     response,
@@ -245,6 +308,7 @@ export function LearnReview({
             return;
         }
         const { version } = (await response.json()) as { version: number };
+        versions.current.set(item.id, version);
         setState((current) =>
             current
                 ? {
@@ -276,12 +340,23 @@ export function LearnReview({
         if (!state) return;
         setFinishing(true);
         try {
+            // Drafts sent since the last render land first, and the review
+            // is finished as they left it.
+            let seen = state;
+            if (drafts.current.size > 0) {
+                const refusedBefore = refused.current;
+                await Promise.allSettled([...drafts.current]);
+                seen = (await load()) ?? state;
+                // One was refused: the reviewer sees why, and finishes
+                // again on the review as it is now.
+                if (refused.current !== refusedBefore) return;
+            }
             const response = await fetch(url("review/finish"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     versions: Object.fromEntries(
-                        state.items.map((item) => [item.id, item.version]),
+                        seen.items.map((item) => [item.id, item.version]),
                     ),
                 }),
             });
@@ -334,15 +409,43 @@ export function LearnReview({
         }
     };
 
+    // The new records of the review, by the ref other items use.
+    const records = useMemo(
+        () =>
+            new Map(
+                (state?.items ?? [])
+                    .filter((item) => item.kind === "new_record")
+                    .map((item) => [
+                        (item.payload as unknown as NewRecordView).ref,
+                        item,
+                    ]),
+            ),
+        [state],
+    );
+    /** A new record's name as the reviewer left it, or the record it is. */
+    const recordName = useCallback(
+        (ref: string): string => {
+            const item = records.get(ref);
+            if (!item) return "?";
+            const linked = linkedRecordId(item.choice);
+            if (linked) return state?.names[linked] ?? "?";
+            return newRecordAs(
+                item.payload as unknown as NewRecordView,
+                item.choice,
+            ).name;
+        },
+        [records, state],
+    );
     const nameOf = useCallback(
         (side: Side | undefined): string => {
             if (!side) return "?";
             if ("literal" in side) return `"${side.literal}"`;
             if ("speakerLabel" in side) return side.speakerLabel;
+            if ("newRef" in side) return recordName(side.newRef);
             const id = "personId" in side ? side.personId : side.entityId;
             return state?.names[id] ?? "?";
         },
-        [state],
+        [state, recordName],
     );
     const turnStart = (turnIndex: number) => turns[turnIndex]?.startMs ?? 0;
 
@@ -350,6 +453,8 @@ export function LearnReview({
     function describeItem(item: ItemView): string {
         const payload = item.payload as Record<string, unknown>;
         switch (item.kind) {
+            case "new_record":
+                return recordName(String(payload.ref));
             case "speaker":
                 return String(payload.label);
             case "correction":
@@ -377,8 +482,24 @@ export function LearnReview({
                         ? choice.displayName
                         : typeof payload.personId === "string"
                           ? (state?.names[payload.personId] ?? "?")
-                          : "?";
+                          : typeof payload.newRef === "string"
+                            ? recordName(payload.newRef)
+                            : "?";
             return `${String(payload.label)} → ${person}`;
+        }
+        if (item.kind === "new_record") {
+            const record = payload as unknown as NewRecordView;
+            const kind =
+                record.kind === "person"
+                    ? i18n("Person")
+                    : (state?.entityTypes?.find(
+                          (type) =>
+                              type.key ===
+                              newRecordAs(record, item.choice).typeKey,
+                      )?.label ??
+                      newRecordAs(record, item.choice).typeKey ??
+                      "");
+            return `${recordName(record.ref)} (${kind})`;
         }
         if (item.kind === "correction") {
             const replacement =
@@ -393,6 +514,7 @@ export function LearnReview({
     const groups = useMemo(() => {
         const items = state?.items ?? [];
         return {
+            records: items.filter((item) => item.kind === "new_record"),
             speakers: items.filter((item) => item.kind === "speaker"),
             corrections: items.filter((item) => item.kind === "correction"),
             known: items.filter((item) => item.kind === "known_fact"),
@@ -425,6 +547,23 @@ export function LearnReview({
         </button>
     );
 
+    /** The new records an item refers to that are not ticked, by name. */
+    const waitingFor = (item: ItemView): string[] => {
+        const refs =
+            item.kind === "speaker"
+                ? // A speaker the reviewer named otherwise needs no record.
+                  item.choice
+                    ? []
+                    : refsIn(item.payload)
+                : refsIn(item.payload);
+        return refs
+            .filter((ref) => {
+                const record = records.get(ref);
+                return !record || !ticked(record);
+            })
+            .map(recordName);
+    };
+
     /**
      * Whether a fact waits for its speaker: one the review proposes to
      * name, and nobody ticked yet (or ticked as unknown).
@@ -448,8 +587,30 @@ export function LearnReview({
                   : Boolean(
                         (speaker.payload as { personId: string | null })
                             .personId,
-                    );
+                    ) ||
+                    // Someone the review adds, once that is ticked.
+                    (Boolean((speaker.payload as { newRef?: string }).newRef) &&
+                        waitingFor(speaker).length === 0);
         return !(ticked(speaker) && named);
+    };
+
+    /** "waits for …", under an item a new record holds up. */
+    const waitsNote = (item: ItemView) => {
+        const names = waitingFor(item);
+        if (names.length === 0) return null;
+        return (
+            <div className="text-xs text-muted-foreground">
+                {item.kind === "relation_phrase"
+                    ? // The relation is made anyway; only its first fact
+                      // needs the record.
+                      i18n("its first fact waits for {names} to be added", {
+                          names: names.join(", "),
+                      })
+                    : i18n("waits for {names} to be added", {
+                          names: names.join(", "),
+                      })}
+            </div>
+        );
     };
 
     const checkbox = (item: ItemView, label: string, blocked = false) => (
@@ -536,6 +697,37 @@ export function LearnReview({
                         </DialogDescription>
                     </DialogHeader>
 
+                    {groups.records.length > 0 && (
+                        <section className="space-y-2">
+                            <h3 className="text-xs font-semibold uppercase text-muted-foreground">
+                                {i18n("New in the Almanac")}
+                            </h3>
+                            {groups.records.map((item) => (
+                                <NewRecordItem
+                                    key={item.id}
+                                    payload={
+                                        item.payload as unknown as NewRecordView
+                                    }
+                                    choice={item.choice}
+                                    ticked={ticked(item)}
+                                    rejected={item.decision === "rejected"}
+                                    disabled={finishing}
+                                    names={state?.names ?? {}}
+                                    entityTypes={state?.entityTypes ?? []}
+                                    seek={(ms) => seek(ms)}
+                                    onDecide={(decision, choice) =>
+                                        decide(item, decision, choice)
+                                    }
+                                    onLinked={async (choice) => {
+                                        await decide(item, "accepted", choice);
+                                        // Names the record chosen.
+                                        await load();
+                                    }}
+                                />
+                            ))}
+                        </section>
+                    )}
+
                     {groups.speakers.length > 0 && (
                         <section className="space-y-2">
                             <h3 className="text-xs font-semibold uppercase text-muted-foreground">
@@ -545,6 +737,7 @@ export function LearnReview({
                                 const payload = item.payload as {
                                     label: string;
                                     personId: string | null;
+                                    newRef?: string;
                                     evidenceMs: number[];
                                     reason: string;
                                     onlyFirstName?: boolean;
@@ -567,7 +760,11 @@ export function LearnReview({
                                         : payload.personId
                                           ? (state?.names[payload.personId] ??
                                             null)
-                                          : null;
+                                          : payload.newRef
+                                            ? recordName(payload.newRef)
+                                            : null;
+                                // Someone the review adds, not ticked.
+                                const waits = waitingFor(item).length > 0;
                                 return (
                                     <div
                                         key={item.id}
@@ -580,7 +777,7 @@ export function LearnReview({
                                                 name: person ?? "?",
                                             }),
                                             // Nobody to accept yet.
-                                            person === null,
+                                            person === null || waits,
                                         )}
                                         <div className="min-w-0 space-y-0.5">
                                             <div className="flex flex-wrap items-center gap-2">
@@ -636,6 +833,7 @@ export function LearnReview({
                                                         )}
                                                     </div>
                                                 )}
+                                            {waitsNote(item)}
                                             <div className="text-xs text-muted-foreground">
                                                 {payload.reason}{" "}
                                                 {payload.evidenceMs.map(
@@ -679,6 +877,7 @@ export function LearnReview({
                                             i18n("Correct {heard}", {
                                                 heard: payload.heard,
                                             }),
+                                            waitingFor(item).length > 0,
                                         )}
                                         <div className="min-w-0">
                                             "{payload.heard}" ×
@@ -700,6 +899,7 @@ export function LearnReview({
                                                         )}
                                                     </span>
                                                 ))}
+                                            {waitsNote(item)}
                                         </div>
                                     </div>
                                 );
@@ -731,7 +931,9 @@ export function LearnReview({
                                             startMs: number;
                                             replaces?: { object: Side };
                                         };
-                                        const blocked = waitsForSpeaker(item);
+                                        const blocked =
+                                            waitsForSpeaker(item) ||
+                                            waitingFor(item).length > 0;
                                         const relation =
                                             state?.relations[
                                                 payload.relationKey
@@ -770,6 +972,7 @@ export function LearnReview({
                                                             )}
                                                         </div>
                                                     )}
+                                                    {waitsNote(item)}
                                                 </div>
                                             </div>
                                         );
@@ -787,6 +990,19 @@ export function LearnReview({
                                 <PhraseItem
                                     key={item.id}
                                     item={item}
+                                    recordType={(ref) => {
+                                        const record = records.get(ref);
+                                        if (!record) return null;
+                                        const payload =
+                                            record.payload as unknown as NewRecordView;
+                                        return payload.kind === "person"
+                                            ? "person"
+                                            : newRecordAs(
+                                                  payload,
+                                                  record.choice,
+                                              ).typeKey;
+                                    }}
+                                    waits={waitsNote(item)}
                                     organization={view === "org"}
                                     types={state?.types ?? {}}
                                     describe={nameOf}
@@ -855,12 +1071,18 @@ export function LearnReview({
 /** A relation phrase: create it as the reviewer's own, suggest it, or dismiss it. */
 function PhraseItem({
     item,
+    recordType,
+    waits,
     organization,
     types,
     describe,
     onDecide,
 }: {
     item: ItemView;
+    /** The type of a new record the review proposes, by its ref. */
+    recordType: (ref: string) => string | null;
+    /** What it waits for, when a new record holds it up. */
+    waits: ReactNode;
     /**
      * On the Organization view: the relation is created as the
      * Organization's, and there is nobody to suggest it to.
@@ -889,6 +1111,7 @@ function PhraseItem({
     const typeOf = (side: Side): string | null => {
         if ("literal" in side) return null;
         if ("speakerLabel" in side) return "person";
+        if ("newRef" in side) return recordType(side.newRef);
         return (
             types["personId" in side ? side.personId : side.entityId] ?? null
         );
@@ -907,6 +1130,7 @@ function PhraseItem({
                 "{payload.phrase}" ({payload.count}×):{" "}
                 {describe(payload.subject)} →{" "}
                 {payload.object ? describe(payload.object) : i18n("a text")}
+                {waits}
             </div>
             <div className="flex flex-wrap items-center gap-2">
                 <Input

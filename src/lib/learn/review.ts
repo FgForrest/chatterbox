@@ -14,9 +14,14 @@
  * saw. Each ticked item is applied in a savepoint, so one that no longer
  * holds (its target deleted, its words corrected meanwhile) is skipped and
  * reported, not the whole review lost.
+ *
+ * New people and things go first: each ticked one is added to the run's
+ * scope (or found there, when another review added it meanwhile, or taken
+ * as the record the reviewer said it is), and what refers to it by its ref
+ * is applied to that record. What refers to one left unticked is skipped.
  */
 
-import { and, count, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     knowledgeEntities,
@@ -28,14 +33,24 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
-import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
+import {
+    decryptJsonField,
+    decryptText,
+    encryptJsonField,
+} from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
 import { wordsAt } from "@/lib/knowledge/correction-anchors";
 import { acceptCorrectionInTx } from "@/lib/knowledge/corrections";
+import {
+    createEntityInTx,
+    findEntityByNameInTx,
+} from "@/lib/knowledge/entities";
 import { confirmFactFromRecordingInTx } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
+import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
+import { createPersonInTx } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import {
@@ -52,9 +67,15 @@ import {
 } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
+import {
+    type RecordTarget,
+    recordNameKey,
+    replaceRefs,
+} from "@/lib/learn/new-refs";
 import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
-import { getOrgUserId } from "@/lib/org/config";
+import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
+import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 
@@ -64,7 +85,10 @@ type ItemKind = ReviewCandidate["kind"];
 /** What a person chose along with a decision, where the kind needs one. */
 export type ReviewChoice =
     | { personId: string }
+    | { entityId: string }
     | { displayName: string }
+    /** A new record under another name, or of another type. */
+    | { name: string; typeKey: string | null }
     | { unknown: true }
     | { action: "create"; spec: Extract<NewTypeSpec, { kind: "relation" }> }
     | { action: "suggest" };
@@ -105,6 +129,8 @@ export interface ReviewView {
     types: Record<string, string>;
     /** Labels of the relations the items use, by key. */
     relations: Record<string, string>;
+    /** The types a new thing may take, for a new record's type. */
+    entityTypes?: { key: string; label: string }[];
 }
 
 /** A unique index refused a row another transaction wrote meanwhile. */
@@ -258,7 +284,10 @@ export async function loadReview(
     for (const relation of vocabulary.relationTypes) {
         relations[relation.key] = relation.label;
     }
-    return { run: summary, items, names, types, relations };
+    const entityTypes = vocabulary.entityTypes
+        .filter((type) => type.key !== "person" && !type.adoptedAsKey)
+        .map((type) => ({ key: type.key, label: type.label }));
+    return { run: summary, items, names, types, relations, entityTypes };
 }
 
 /**
@@ -327,12 +356,105 @@ const MAX_ID_LENGTH = 64;
 const MAX_NAME_LENGTH = 200;
 const MAX_TYPES = 20;
 
+function recordMissing(): AppError {
+    return new AppError(
+        ErrorCode.INVALID_INPUT,
+        "A record it needs was not added",
+        400,
+    );
+}
+
+/** Live people of these scopes by their name as compared (`recordNameKey`). */
+async function peopleNamedInTx(
+    tx: Tx,
+    scopes: readonly string[],
+): Promise<Map<string, string[]>> {
+    const rows = await tx
+        .select({ id: people.id, name: people.displayName })
+        .from(people)
+        .where(
+            and(
+                inArray(people.userId, [...scopes]),
+                isNull(people.mergedIntoId),
+            ),
+        );
+    const named = new Map<string, string[]>();
+    for (const row of rows) {
+        const key = recordNameKey(decryptText(row.name));
+        named.set(key, [...(named.get(key) ?? []), row.id]);
+    }
+    return named;
+}
+
+/**
+ * The record a new one turns out to be: a thing of that name and type in
+ * a scope the run reads (its own first), or the one person of that name.
+ */
+async function existingRecordInTx(
+    tx: Tx,
+    record: { kind: "person" | "entity"; typeKey: string | null; name: string },
+    scopes: readonly string[],
+    peopleByName: ReadonlyMap<string, string[]>,
+): Promise<RecordTarget | null> {
+    if (record.kind === "person") {
+        const ids = peopleByName.get(recordNameKey(record.name)) ?? [];
+        return ids.length === 1 && ids[0] ? { personId: ids[0] } : null;
+    }
+    if (!record.typeKey) return null;
+    for (const scope of [...scopes].reverse()) {
+        const id = await findEntityByNameInTx(
+            tx,
+            scope,
+            record.typeKey,
+            record.name,
+        );
+        if (id) return { entityId: id };
+    }
+    return null;
+}
+
+/** Whether a live record is in one of these scopes. */
+async function recordReadableInTx(
+    tx: Tx,
+    target: RecordTarget,
+    scopes: readonly string[],
+): Promise<boolean> {
+    const [row] =
+        "personId" in target
+            ? await tx
+                  .select({ id: people.id })
+                  .from(people)
+                  .where(
+                      and(
+                          eq(people.id, target.personId),
+                          inArray(people.userId, [...scopes]),
+                          isNull(people.mergedIntoId),
+                      ),
+                  )
+            : await tx
+                  .select({ id: knowledgeEntities.id })
+                  .from(knowledgeEntities)
+                  .where(
+                      and(
+                          eq(knowledgeEntities.id, target.entityId),
+                          inArray(knowledgeEntities.userId, [...scopes]),
+                          isNull(knowledgeEntities.mergedIntoId),
+                      ),
+                  );
+    return row !== undefined;
+}
+
 /** A string with something in it, and not too much. */
 function short(value: unknown, max: number): value is string {
     return typeof value === "string" && value.length > 0 && value.length <= max;
 }
 
-function validChoice(kind: ItemKind, choice: unknown): ReviewChoice | null {
+function validChoice(
+    kind: ItemKind,
+    choice: unknown,
+    /** A new record's kind: what it may be named, typed or taken as. */
+    recordKind?: "person" | "entity",
+): ReviewChoice | null {
     if (choice === null || choice === undefined) return null;
     if (typeof choice !== "object") return invalidChoice();
     const value = choice as Record<string, unknown>;
@@ -345,6 +467,28 @@ function validChoice(kind: ItemKind, choice: unknown): ReviewChoice | null {
         if (typeof value.displayName === "string") {
             const displayName = value.displayName.trim();
             if (short(displayName, MAX_NAME_LENGTH)) return { displayName };
+        }
+        return invalidChoice();
+    }
+    if (kind === "new_record") {
+        // The record the Almanac has that it is: a person for a person,
+        // a thing for a thing.
+        if (recordKind === "person" && short(value.personId, MAX_ID_LENGTH)) {
+            return { personId: value.personId };
+        }
+        if (recordKind === "entity" && short(value.entityId, MAX_ID_LENGTH)) {
+            return { entityId: value.entityId };
+        }
+        // Another name; a thing's type, a person none.
+        const name = typeof value.name === "string" ? value.name.trim() : "";
+        if (
+            short(name, MAX_NAME_LENGTH) &&
+            (recordKind === "person"
+                ? value.typeKey === null
+                : recordKind === "entity" &&
+                  short(value.typeKey, MAX_ID_LENGTH))
+        ) {
+            return { name, typeKey: value.typeKey as string | null };
         }
         return invalidChoice();
     }
@@ -432,7 +576,10 @@ async function keepDraft(
     },
 ): Promise<{ version: number }> {
     const [item] = await tx
-        .select({ kind: learnReviewItems.kind })
+        .select({
+            kind: learnReviewItems.kind,
+            payload: learnReviewItems.payload,
+        })
         .from(learnReviewItems)
         .where(
             and(
@@ -441,7 +588,13 @@ async function keepDraft(
             ),
         );
     if (!item) throw reviewNotFound();
-    const choice = validChoice(item.kind, input.choice);
+    const choice = validChoice(
+        item.kind,
+        input.choice,
+        item.kind === "new_record"
+            ? decryptJsonField<NewRecordPayload>(item.payload)?.kind
+            : undefined,
+    );
     const [updated] = await tx
         .update(learnReviewItems)
         .set({
@@ -476,7 +629,9 @@ export type SkipCode =
     | "nothing_chosen"
     | "already_exists"
     | "changed"
-    | "no_longer_fits";
+    | "no_longer_fits"
+    /** It refers to a new record that was not added. */
+    | "record_not_added";
 
 /** What finishing a review did with an item. */
 export type ItemOutcome = "applied" | "rejected" | SkipCode;
@@ -507,7 +662,22 @@ export async function finishReview(
     const orgUserId = await sharingOrgUserId();
     const latest = await latestRun(access, source);
     if (!latest || latest.status !== "ready") throw reviewNotFound();
-    const finished = await finishInTx(latest, actorUserId, orgUserId, versions);
+    // Where a new record may be found already: what the run could read.
+    const readScopes = readableScopes(
+        {
+            kind: "recording",
+            ownerUserId: latest.userId,
+            shared: latest.view === "org",
+        },
+        await getOrgUserId(),
+    );
+    const finished = await finishInTx(
+        latest,
+        actorUserId,
+        orgUserId,
+        versions,
+        readScopes,
+    );
     // The last review done releases what automatic Learn held back.
     await releaseAutoLearnHold(access.recordingId);
     return finished;
@@ -518,6 +688,7 @@ function finishInTx(
     actorUserId: string,
     orgUserId: Awaited<ReturnType<typeof sharingOrgUserId>>,
     versions: Record<string, number>,
+    readScopes: readonly string[],
 ): Promise<FinishedReview> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
@@ -569,6 +740,8 @@ function finishInTx(
             id: row.id,
             kind: row.kind,
             fingerprintHmac: row.fingerprintHmac,
+            /** Rejected by the reviewer, not merely left unticked. */
+            rejectedOutright: row.decision === "rejected",
             accepted:
                 (row.decision ?? (row.preTicked ? "accepted" : "rejected")) ===
                 "accepted",
@@ -581,13 +754,15 @@ function finishInTx(
         const scopes = new Set<string>([actorUserId]);
         const skipped: FinishedReview["skipped"] = [];
         let applied = 0;
+        /** Apply one item in a savepoint; false when it was skipped. */
         const attempt = async (
             itemId: string,
             apply: (sp: Tx) => Promise<void>,
-        ) => {
+        ): Promise<boolean> => {
             try {
                 await tx.transaction(async (sp) => apply(sp as Tx));
                 applied++;
+                return true;
             } catch (error) {
                 if (error instanceof AppError) {
                     skipped.push({
@@ -598,7 +773,7 @@ function finishInTx(
                                 : "no_longer_fits",
                         reason: error.message,
                     });
-                    return;
+                    return false;
                 }
                 // A name taken meanwhile by another transaction.
                 if (isUniqueViolation(error)) {
@@ -607,10 +782,13 @@ function finishInTx(
                         code: "already_exists",
                         reason: "Already exists",
                     });
-                    return;
+                    return false;
                 }
                 throw error;
             }
+        };
+        const skip = (itemId: string, code: SkipCode, reason: string) => {
+            skipped.push({ itemId, code, reason });
         };
         const writer = { actorUserId, orgUserId };
         const transcript = {
@@ -619,7 +797,127 @@ function finishInTx(
             revision,
         };
 
-        // Speakers first: the facts that depend on them read their answer.
+        // New people and things first: the items that refer to one by its
+        // ref are applied to the record it became.
+        const refs = new Map<string, RecordTarget>();
+        const records = items.filter(
+            (item) => item.kind === "new_record" && item.accepted,
+        );
+        // People have no unique name: two reviews adding one person at once
+        // take turns by name (in one order, so they never wait on each
+        // other), and each looks for the person once its turn comes.
+        const personNames = [
+            ...new Set(
+                records.flatMap((item) => {
+                    const payload = item.payload as NewRecordPayload;
+                    const choice = item.choice;
+                    if (payload.kind !== "person") return [];
+                    if (choice && "personId" in choice) return [];
+                    return [
+                        recordNameKey(
+                            choice && "name" in choice
+                                ? choice.name
+                                : payload.name,
+                        ),
+                    ];
+                }),
+            ),
+        ].sort();
+        for (const nameKey of personNames) {
+            const key = `riffado:learn-person:${domainLookupHash("learn-person", `${actorUserId}\u0000${nameKey}`)}`;
+            await tx.execute(
+                sql`select pg_advisory_xact_lock(hashtext(${key}))`,
+            );
+        }
+        const peopleByName =
+            personNames.length > 0
+                ? await peopleNamedInTx(tx, readScopes)
+                : new Map<string, string[]>();
+        for (const item of records) {
+            const payload = item.payload as NewRecordPayload;
+            const choice = item.choice;
+            if (choice && ("personId" in choice || "entityId" in choice)) {
+                // The reviewer said which record it is.
+                const target: RecordTarget =
+                    "personId" in choice
+                        ? { personId: choice.personId }
+                        : { entityId: choice.entityId };
+                if (
+                    "personId" in target !== (payload.kind === "person") ||
+                    !(await recordReadableInTx(tx, target, readScopes))
+                ) {
+                    skip(item.id, "no_longer_fits", "No such record here");
+                    continue;
+                }
+                refs.set(payload.ref, target);
+                applied++;
+                continue;
+            }
+            const renamed = choice && "name" in choice ? choice : null;
+            const name = renamed?.name ?? payload.name;
+            const typeKey =
+                payload.kind === "person"
+                    ? null
+                    : (renamed?.typeKey ?? payload.typeKey);
+            // Added since the run looked (by hand, or another review).
+            const existing = await existingRecordInTx(
+                tx,
+                { kind: payload.kind, typeKey, name },
+                readScopes,
+                peopleByName,
+            );
+            if (existing) {
+                refs.set(payload.ref, existing);
+                skip(item.id, "already_exists", "Already in the Almanac");
+                continue;
+            }
+            if (payload.kind === "entity" && !typeKey) {
+                skip(item.id, "no_longer_fits", "A thing needs a type");
+                continue;
+            }
+            const made: { target?: RecordTarget } = {};
+            const added = await attempt(item.id, async (sp) => {
+                await assertOwnScopeWritable(actorUserId);
+                if (payload.kind === "person" || !typeKey) {
+                    const person = await createPersonInTx(sp, {
+                        userId: actorUserId,
+                        displayName: name,
+                        createdByUserId: actorUserId,
+                    });
+                    made.target = { personId: person.id };
+                    // Another ticked record of that name is this person.
+                    peopleByName.set(recordNameKey(name), [person.id]);
+                } else {
+                    made.target = {
+                        entityId: await createEntityInTx(sp, actorUserId, {
+                            typeKey,
+                            name,
+                        }),
+                    };
+                }
+            });
+            if (added && made.target) {
+                refs.set(payload.ref, made.target);
+                continue;
+            }
+            // Its name taken meanwhile: that thing is the one.
+            const taken =
+                typeKey !== null && payload.kind === "entity"
+                    ? await findEntityByNameInTx(tx, actorUserId, typeKey, name)
+                    : null;
+            if (taken) {
+                refs.set(payload.ref, { entityId: taken });
+                const entry = skipped.find((one) => one.itemId === item.id);
+                if (entry) entry.code = "already_exists";
+            }
+        }
+        /** An item's payload on the records its refs became, or null. */
+        const onRecords = <T>(payload: T): T | null =>
+            replaceRefs(payload, (ref) => refs.get(ref));
+        const notAdded = (itemId: string) =>
+            skip(itemId, "record_not_added", "A record it needs was not added");
+
+        // Speakers next: the facts that depend on them read their answer.
         for (const item of items) {
             if (item.kind !== "speaker" || !item.accepted) continue;
             const payload = item.payload as Extract<
@@ -627,6 +925,8 @@ function finishInTx(
                 { kind: "speaker" }
             >["payload"];
             const choice = item.choice;
+            // A person the same review adds, whom the run heard speak.
+            const added = payload.newRef ? refs.get(payload.newRef) : undefined;
             const answer: SpeakerAnswer | null =
                 choice && "unknown" in choice
                     ? { kind: "unknown" }
@@ -636,8 +936,14 @@ function finishInTx(
                         ? { kind: "name", displayName: choice.displayName }
                         : payload.personId
                           ? { kind: "name", personId: payload.personId }
-                          : null;
+                          : added && "personId" in added
+                            ? { kind: "name", personId: added.personId }
+                            : null;
             if (!answer) {
+                if (payload.newRef) {
+                    notAdded(item.id);
+                    continue;
+                }
                 skipped.push({
                     itemId: item.id,
                     code: "nobody_chosen",
@@ -688,10 +994,21 @@ function finishInTx(
 
         for (const item of items) {
             if (item.kind !== "correction" || !item.accepted) continue;
-            const payload = item.payload as Extract<
-                ReviewCandidate,
-                { kind: "correction" }
-            >["payload"];
+            const payload = onRecords(
+                item.payload as Extract<
+                    ReviewCandidate,
+                    { kind: "correction" }
+                >["payload"],
+            );
+            if (!payload) {
+                notAdded(item.id);
+                continue;
+            }
+            const target = payload.target;
+            if ("newRef" in target) {
+                notAdded(item.id);
+                continue;
+            }
             // All its occurrences or none. The item groups them by their
             // words in any case; each is applied at its own.
             await attempt(item.id, async (sp) => {
@@ -710,7 +1027,7 @@ function finishInTx(
                                 ) ?? payload.heard,
                         },
                         kind: payload.kind,
-                        target: payload.target,
+                        target,
                         replacement: payload.replacement,
                     });
                 }
@@ -738,6 +1055,8 @@ function finishInTx(
         const resolveSubject = async (
             subject: LearnSubject,
         ): Promise<KnowledgeTarget | null> => {
+            // Only once `onRecords` replaced it, which it did or skipped.
+            if ("newRef" in subject) return null;
             if (!("speakerLabel" in subject)) return subject;
             const personId = await speakerPerson(subject.speakerLabel);
             return personId ? { personId } : null;
@@ -754,6 +1073,7 @@ function finishInTx(
             },
             expectedCurrentFactId: string | null,
         ) => {
+            if ("newRef" in object) throw recordMissing();
             await confirmFactFromRecordingInTx(sp, {
                 ...writer,
                 ownerUserId: run.userId,
@@ -778,10 +1098,16 @@ function finishInTx(
             ) {
                 continue;
             }
-            const payload = item.payload as Extract<
-                ReviewCandidate,
-                { kind: "fact" | "known_fact" }
-            >["payload"];
+            const payload = onRecords(
+                item.payload as Extract<
+                    ReviewCandidate,
+                    { kind: "fact" | "known_fact" }
+                >["payload"],
+            );
+            if (!payload) {
+                notAdded(item.id);
+                continue;
+            }
             // A known fact of another scope (the Organization's, on a
             // private recording) is not copied into the actor's.
             if (item.kind === "known_fact" && payload.factId) {
@@ -831,20 +1157,17 @@ function finishInTx(
         }
 
         const organization = orgUserId !== null && actorUserId === orgUserId;
-        const phrases = items.flatMap((item) =>
-            item.kind === "relation_phrase" && item.accepted
-                ? [
-                      {
-                          item,
-                          payload: item.payload as Extract<
-                              ReviewCandidate,
-                              { kind: "relation_phrase" }
-                          >["payload"],
-                          choice: item.choice,
-                      },
-                  ]
-                : [],
-        );
+        const phrases = items.flatMap((item) => {
+            if (item.kind !== "relation_phrase" || !item.accepted) return [];
+            const proposed = item.payload as Extract<
+                ReviewCandidate,
+                { kind: "relation_phrase" }
+            >["payload"];
+            // The relation needs none of its sides; only its first fact
+            // does, and is left out when a side was not added.
+            const payload = onRecords(proposed) ?? proposed;
+            return [{ item, payload, choice: item.choice }];
+        });
         // Suggestions first, then new types: every finish takes the
         // proposal rows before the vocabulary's version row, so two never
         // wait on each other the wrong way round.
@@ -917,6 +1240,11 @@ function finishInTx(
                         userId: run.scopeUserId,
                         recordingId: run.recordingId,
                         fingerprintHmac: item.fingerprintHmac,
+                        // A new record the reviewer rejected is not
+                        // proposed again on any recording; one merely left
+                        // unticked, only not on this one.
+                        scopeWide:
+                            item.kind === "new_record" && item.rejectedOutright,
                     })),
                 )
                 .onConflictDoNothing();

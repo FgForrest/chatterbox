@@ -22,11 +22,14 @@ export interface PickedRecord {
  */
 export function RecordPicker({
     types,
+    kind,
     exclude,
     typeLabels = {},
     onPick,
 }: {
     types?: readonly string[];
+    /** Only people, or only things. */
+    kind?: "person" | "entity";
     exclude?: string;
     typeLabels?: Record<string, string>;
     onPick: (record: PickedRecord) => void;
@@ -88,7 +91,9 @@ export function RecordPicker({
 
     const offered = (records ?? []).filter(
         (record) =>
-            record.id !== exclude && (!types || types.includes(record.typeKey)),
+            record.id !== exclude &&
+            (!kind || record.kind === kind) &&
+            (!types || types.includes(record.typeKey)),
     );
 
     return (

@@ -1828,6 +1828,7 @@ export const learnReviewItems = pgTable(
                 | "known_fact"
                 | "fact"
                 | "relation_phrase"
+                | "new_record"
             >()
             .notNull(),
         fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
@@ -1840,7 +1841,8 @@ export const learnReviewItems = pgTable(
         >(),
         // What they chose with it, encrypted: another person for a speaker,
         // "create as my relation" (with its name and shape) or "suggest to
-        // the Organization" for a phrase.
+        // the Organization" for a phrase, another name or type for a new
+        // record, or the record the Almanac has that it is.
         choice: jsonb("choice"),
         version: integer("version").notNull().default(0),
         dependsOnLabel: varchar("depends_on_label", { length: 64 }),
@@ -1856,14 +1858,18 @@ export const learnReviewItems = pgTable(
         userIdx: index("learn_review_items_user_id_idx").on(table.userId),
         kindCheck: check(
             "learn_review_items_kind_check",
-            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase')`,
+            sql`${table.kind} in ('speaker', 'correction', 'known_fact', 'fact', 'relation_phrase', 'new_record')`,
         ),
     }),
 );
 
 // What a person said no to on a recording, so the next run there does not
 // propose it again, Re-learn included. A keyed HMAC of the item's
-// fingerprint, nothing readable.
+// fingerprint, nothing readable. A new record they rejected outright is
+// not proposed on any recording of the scope (`scopeWide`); the recording
+// is where they rejected it, so forgetting that recording's rejections
+// (or deleting it, or withdrawing it from the Organization) forgets it
+// too.
 export const learnDismissals = pgTable(
     "learn_dismissals",
     {
@@ -1878,6 +1884,7 @@ export const learnDismissals = pgTable(
             .notNull()
             .references(() => recordings.id, { onDelete: "cascade" }),
         fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        scopeWide: boolean("scope_wide").notNull().default(false),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
@@ -1889,6 +1896,9 @@ export const learnDismissals = pgTable(
         recordingIdx: index("learn_dismissals_recording_id_idx").on(
             table.recordingId,
         ),
+        scopeWideIdx: index("learn_dismissals_scope_wide_idx")
+            .on(table.userId)
+            .where(sql`${table.scopeWide}`),
     }),
 );
 

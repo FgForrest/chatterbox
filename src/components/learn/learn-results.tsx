@@ -62,6 +62,8 @@ export function useSkipReason(): (code: string | undefined) => string {
                 return i18n("it exists already");
             case "changed":
                 return i18n("it changed since Learn ran");
+            case "record_not_added":
+                return i18n("a person or thing it needs was not added");
             default:
                 return i18n("it no longer fits");
         }
@@ -122,6 +124,7 @@ export function LearnResults({
     const failure = useLearnFailure();
 
     const sections = [
+        { kind: "new_record", title: i18n("New in the Almanac") },
         { kind: "speaker", title: i18n("Speakers") },
         { kind: "correction", title: i18n("Corrections") },
         { kind: "known_fact", title: i18n("Known facts mentioned again") },

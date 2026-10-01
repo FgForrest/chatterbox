@@ -865,4 +865,315 @@ describe("LearnReview", () => {
             ).toBeTruthy();
         });
     });
+
+    describe("new records", () => {
+        const item = (overrides: Record<string, unknown>) => ({
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            outcome: null,
+            ...overrides,
+        });
+        const records = [
+            item({
+                id: "i-veltrix",
+                kind: "new_record",
+                payload: {
+                    ref: "n1",
+                    kind: "entity",
+                    typeKey: "organization",
+                    name: "Veltrix",
+                    evidenceMs: [0],
+                    reason: "the client",
+                },
+            }),
+            item({
+                id: "i-petra",
+                kind: "new_record",
+                payload: {
+                    ref: "n2",
+                    kind: "person",
+                    typeKey: null,
+                    name: "Petra Kolářová",
+                    evidenceMs: [5_000],
+                    reason: "introduces herself",
+                    speakerLabel: "speaker_1",
+                },
+            }),
+            item({
+                id: "i-speaker",
+                kind: "speaker",
+                payload: {
+                    label: "speaker_1",
+                    personId: null,
+                    newRef: "n2",
+                    evidenceMs: [5_000],
+                    reason: "introduces herself",
+                },
+            }),
+            item({
+                id: "i-works",
+                kind: "fact",
+                payload: {
+                    subject: { newRef: "n2" },
+                    relationKey: "works_for",
+                    object: { newRef: "n1" },
+                    startMs: 5_000,
+                    endMs: 9_000,
+                    speakerLabel: null,
+                },
+            }),
+        ];
+        const entityTypes = [
+            { key: "organization", label: "Organization" },
+            { key: "product", label: "Product or system" },
+        ];
+
+        it("lists them first, and holds what refers to one until it is ticked", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: records,
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    { version: 1 },
+                "PATCH /api/recordings/rec-1/review/items/i-petra?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (4)" }),
+            );
+            const headings = screen
+                .getAllByRole("heading", { level: 3 })
+                .map((heading) => heading.textContent);
+            expect(headings[0]).toBe("New in the Almanac");
+            const fact = screen.getByRole("checkbox", {
+                name: "Petra Kolářová — works_for — Veltrix",
+            }) as HTMLInputElement;
+            const speaker = screen.getByRole("checkbox", {
+                name: "Accept speaker_1 as Petra Kolářová",
+            }) as HTMLInputElement;
+            expect(fact.disabled).toBe(true);
+            expect(speaker.disabled).toBe(true);
+            expect(
+                screen.getByText(
+                    "waits for Petra Kolářová, Veltrix to be added",
+                ),
+            ).toBeTruthy();
+
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Veltrix to the Almanac",
+                }),
+            );
+            await waitFor(() =>
+                expect(
+                    screen.getByText("waits for Petra Kolářová to be added"),
+                ).toBeTruthy(),
+            );
+            expect(fact.disabled).toBe(true);
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Add Petra Kolářová to the Almanac",
+                }),
+            );
+            await waitFor(() => expect(fact.disabled).toBe(false));
+            expect(speaker.disabled).toBe(false);
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/items/i-petra?source=riffado",
+                expect.objectContaining({ method: "PATCH" }),
+            );
+        });
+
+        it("keeps a name and a type the reviewer corrects at once, one save after the other, ticking the record", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            const name = screen.getByRole("textbox", { name: "Name" });
+            fireEvent.change(name, { target: { value: "Veltrix a.s." } });
+            // The type changed at once, before the name's save came back.
+            fireEvent.blur(name);
+            fireEvent.change(
+                screen.getByRole("combobox", { name: "Kind of thing" }),
+                { target: { value: "product" } },
+            );
+            await waitFor(() =>
+                expect(
+                    fetch.mock.calls.filter(
+                        ([, init]) => init?.method === "PATCH",
+                    ),
+                ).toHaveLength(2),
+            );
+            const bodies = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)));
+            expect(bodies).toEqual([
+                {
+                    decision: "accepted",
+                    version: 0,
+                    choice: { name: "Veltrix a.s.", typeKey: "organization" },
+                },
+                {
+                    decision: "accepted",
+                    version: 1,
+                    choice: { name: "Veltrix a.s.", typeKey: "product" },
+                },
+            ]);
+        });
+
+        it("rejects one outright, for every recording, and takes that back", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    entityTypes,
+                    items: [records[0]],
+                },
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    inTurn({ version: 1 }, { version: 2 }),
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            const never = screen.getByRole("button", {
+                name: "Never propose it",
+            });
+            expect(never.getAttribute("aria-pressed")).toBe("false");
+            fireEvent.click(never);
+            await waitFor(() =>
+                expect(never.getAttribute("aria-pressed")).toBe("true"),
+            );
+            fireEvent.click(never);
+            await waitFor(() =>
+                expect(never.getAttribute("aria-pressed")).toBe("false"),
+            );
+            const decisions = fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([, init]) => JSON.parse(String(init?.body)).decision);
+            expect(decisions).toEqual(["rejected", null]);
+        });
+
+        it("offers the known record a name is close to, in one click", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": inTurn({
+                    ...READY,
+                    entityTypes,
+                    items: [
+                        {
+                            ...records[0],
+                            payload: {
+                                ...(
+                                    records[0] as unknown as { payload: object }
+                                ).payload,
+                                maybe: { entityId: "e-tavesi" },
+                            },
+                        },
+                    ],
+                }),
+                "PATCH /api/recordings/rec-1/review/items/i-veltrix?source=riffado":
+                    { version: 1 },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", { name: "Review (1)" }),
+            );
+            expect(
+                screen.getByText("Maybe it is Tavesi, misheard?"),
+            ).toBeTruthy();
+            fireEvent.click(
+                screen.getByRole("button", { name: "Yes, it is Tavesi" }),
+            );
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/review/items/i-veltrix?source=riffado",
+                    expect.objectContaining({
+                        body: JSON.stringify({
+                            decision: "accepted",
+                            version: 0,
+                            choice: { entityId: "e-tavesi" },
+                        }),
+                    }),
+                ),
+            );
+        });
+
+        it("shows what the finished review did with them", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": {
+                    ...READY,
+                    run: { id: "run-1", status: "finished" },
+                    entityTypes,
+                    items: [
+                        {
+                            ...records[0],
+                            decision: "rejected",
+                            outcome: "rejected",
+                        },
+                        {
+                            ...records[3],
+                            decision: "accepted",
+                            outcome: "record_not_added",
+                        },
+                    ],
+                },
+            });
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                />,
+            );
+            fireEvent.click(
+                await screen.findByRole("button", {
+                    name: "Learned: nothing applied",
+                }),
+            );
+            expect(screen.getByText("New in the Almanac")).toBeTruthy();
+            expect(screen.getByText(/Veltrix \(Organization\)/)).toBeTruthy();
+            expect(
+                screen.getByText(
+                    "not applied: a person or thing it needs was not added",
+                ),
+            ).toBeTruthy();
+        });
+    });
 });
