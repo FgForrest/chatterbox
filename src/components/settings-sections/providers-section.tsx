@@ -6,6 +6,7 @@ import {
     FileText,
     GraduationCap,
     ListChecks,
+    ListTree,
     type LucideIcon,
     Pencil,
     Plus,
@@ -19,20 +20,7 @@ import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
 import { AiCostRates } from "@/components/settings/ai-cost-rates";
 import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
-import { SettingsCard } from "@/components/settings/settings-card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    isEnhancementOnlyProvider,
-    isTranscriptionOnlyProvider,
-} from "@/lib/ai/provider-presets";
 
 interface Provider {
     id: string;
@@ -41,6 +29,7 @@ interface Provider {
     defaultModel: string | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
+    isDefaultTopics?: boolean;
     /** Present only where this instance has Learn. */
     isDefaultLearn?: boolean;
     createdAt: Date;
@@ -49,27 +38,7 @@ interface Provider {
     available?: boolean;
 }
 
-type Role = "transcription" | "summaries" | "learn";
-
 const EMPTY_PROVIDERS: Provider[] = [];
-
-/**
- * The Learn picker's "no provider of its own" choice. Radix Select needs a
- * non-empty value for every item, so the fallback gets a sentinel that no
- * credential id (a nanoid) can collide with.
- */
-const LEARN_FOLLOWS_SUMMARIES = "__same-as-summaries__";
-
-/**
- * Where each role is set on the server. Transcription and summaries have
- * no "unset" here: clearing one is an explicit act in the edit dialog,
- * not something a dropdown should make easy.
- */
-const ROLE_ENDPOINTS: Record<Role, string> = {
-    transcription: "/api/settings/ai/providers/default-transcription",
-    summaries: "/api/settings/ai/providers/default-enhancement",
-    learn: "/api/settings/ai/providers/default-learn",
-};
 
 /**
  * One line that tells two rows of the same provider apart: duplicates of
@@ -89,13 +58,8 @@ interface ProvidersSectionProps {
 /**
  * AI Providers settings section.
  *
- * Two parts: which provider does each job (transcription, summaries and,
- * where the instance has it, Learn), then the configured providers with
- * duplicate/edit/delete. Each job belongs to one provider at a time, so it
- * is chosen once, from a dropdown, rather than by a button on every row.
- * Local state seeded from `initialProviders` and updated in place by the
- * dialogs. Prompt templates live with the features that use them: title
- * templates in Transcription, summary templates in Summary.
+ * Configured providers with duplicate, edit, and delete actions. Each AI
+ * feature selects its provider in its own settings section.
  *
  * Note: `initialProviders` is the server-rendered seed only. The local
  * `providers` state diverges from it after add/edit/delete actions; we do
@@ -133,7 +97,6 @@ export function ProvidersSection({
     );
     const [editMode, setEditMode] = useState<"edit" | "duplicate">("edit");
     const [deletingId, setDeletingId] = useState<string | null>(null);
-    const [savingRole, setSavingRole] = useState<Role | null>(null);
 
     const refreshProviders = async () => {
         try {
@@ -158,54 +121,6 @@ export function ProvidersSection({
         setEditMode("duplicate");
         setEditingProvider(provider);
         setIsEditProviderOpen(true);
-    };
-
-    /**
-     * Give a role to a provider. For Learn, `null` hands it back to the
-     * summaries provider, which is what Learn uses when none is marked.
-     */
-    const handleAssignRole = (role: Role, providerId: string | null) => {
-        const chosen = providers.find((p) => p.id === providerId);
-        void (async () => {
-            setSavingRole(role);
-            try {
-                const res = await fetch(
-                    ROLE_ENDPOINTS[role],
-                    providerId === null
-                        ? { method: "DELETE" }
-                        : {
-                              method: "PUT",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ providerId }),
-                          },
-                );
-                if (!res.ok) {
-                    const b = (await res.json().catch(() => ({}))) as {
-                        error?: string;
-                    };
-                    throw new Error(b.error ?? `HTTP ${res.status}`);
-                }
-                const name = chosen ? providerLabel(chosen) : "";
-                toast.success(
-                    role === "transcription"
-                        ? i18n("Transcription now uses {name}", { name })
-                        : role === "summaries"
-                          ? i18n("Summaries now use {name}", { name })
-                          : providerId === null
-                            ? i18n("Learn uses the summaries provider again")
-                            : i18n("Learn now uses {name}", { name }),
-                );
-                await refreshProviders();
-            } catch (e) {
-                toast.error(
-                    e instanceof Error
-                        ? e.message
-                        : i18n("Failed to update default"),
-                );
-            } finally {
-                setSavingRole(null);
-            }
-        })();
     };
 
     const handleDelete = (id: string) => {
@@ -247,7 +162,7 @@ export function ProvidersSection({
                 <SettingsSectionHeader
                     title={i18n("AI Providers")}
                     description={i18n(
-                        "Connect transcription and summary providers. Anything OpenAI-compatible works.",
+                        "Connect providers for transcription, topics, learning, and summaries.",
                     )}
                     icon={Bot}
                     action={
@@ -259,14 +174,6 @@ export function ProvidersSection({
                         </Button>
                     }
                 />
-
-                {providers.length > 0 && (
-                    <RoleAssignments
-                        providers={providers}
-                        savingRole={savingRole}
-                        onAssign={handleAssignRole}
-                    />
-                )}
 
                 <ProvidersList
                     providers={providers}
@@ -308,173 +215,6 @@ export function ProvidersSection({
                     refreshProviders();
                 }}
             />
-        </>
-    );
-}
-
-/**
- * Which provider does each job. Every role belongs to one provider at a
- * time, so it is one dropdown per role, listing only the providers that
- * can do that job.
- */
-function RoleAssignments({
-    providers,
-    savingRole,
-    onAssign,
-}: {
-    providers: Provider[];
-    savingRole: Role | null;
-    onAssign: (role: Role, providerId: string | null) => void;
-}) {
-    const i18n = useExtracted();
-
-    const transcribers = providers.filter(
-        (p) => p.managed === true || !isEnhancementOnlyProvider(p.provider),
-    );
-    const summarizers = providers.filter(
-        (p) => p.managed !== true && !isTranscriptionOnlyProvider(p.provider),
-    );
-    // `isDefaultLearn` is absent on every row where this instance has no
-    // Learn, which is how the list says "don't offer the choice".
-    const hasLearn = providers.some((p) => p.isDefaultLearn !== undefined);
-    const learnProvider = providers.find((p) => p.isDefaultLearn === true);
-    const summariesProvider = providers.find((p) => p.isDefaultEnhancement);
-
-    return (
-        <SettingsCard
-            title={i18n("Used for")}
-            description={i18n(
-                "Each job runs on one provider. Only providers that can do the job are listed.",
-            )}
-        >
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
-                <RolePicker
-                    id="role-transcription"
-                    icon={FileText}
-                    label={i18n("Transcription")}
-                    options={transcribers}
-                    value={
-                        providers.find((p) => p.isDefaultTranscription)?.id ??
-                        ""
-                    }
-                    disabled={savingRole !== null}
-                    onChange={(id) => onAssign("transcription", id)}
-                />
-                <RolePicker
-                    id="role-summaries"
-                    icon={ListChecks}
-                    label={i18n("Summaries")}
-                    options={summarizers}
-                    value={summariesProvider?.id ?? ""}
-                    disabled={savingRole !== null}
-                    onChange={(id) => onAssign("summaries", id)}
-                />
-                {hasLearn && (
-                    <RolePicker
-                        id="role-learn"
-                        icon={GraduationCap}
-                        label={i18n("Learn")}
-                        options={summarizers}
-                        value={learnProvider?.id ?? LEARN_FOLLOWS_SUMMARIES}
-                        disabled={savingRole !== null}
-                        onChange={(id) =>
-                            onAssign(
-                                "learn",
-                                id === LEARN_FOLLOWS_SUMMARIES ? null : id,
-                            )
-                        }
-                        fallback={{
-                            value: LEARN_FOLLOWS_SUMMARIES,
-                            label: summariesProvider
-                                ? i18n("Same as summaries ({name})", {
-                                      name: providerLabel(summariesProvider),
-                                  })
-                                : i18n("Same as summaries"),
-                        }}
-                        hint={i18n(
-                            "Pick a provider only when Learn should use a different model than summaries, a stronger one for example.",
-                        )}
-                    />
-                )}
-            </div>
-        </SettingsCard>
-    );
-}
-
-function RolePicker({
-    id,
-    icon: Icon,
-    label,
-    options,
-    value,
-    disabled,
-    onChange,
-    fallback,
-    hint,
-}: {
-    id: string;
-    icon: LucideIcon;
-    label: string;
-    options: Provider[];
-    value: string;
-    disabled: boolean;
-    onChange: (id: string) => void;
-    /** An extra first item that means "no provider of its own". */
-    fallback?: { value: string; label: string };
-    hint?: string;
-}) {
-    const i18n = useExtracted();
-    const empty = options.length === 0 && !fallback;
-    return (
-        <>
-            {/* Height of the select, so a hint below it can't pull the label off its line. */}
-            <Label htmlFor={id} className="gap-2 sm:h-9">
-                <Icon
-                    className="size-4 text-muted-foreground"
-                    aria-hidden="true"
-                />
-                {label}
-            </Label>
-            <div className="min-w-0 space-y-1">
-                <Select
-                    value={value}
-                    onValueChange={(next) => {
-                        if (next !== value) onChange(next);
-                    }}
-                    disabled={disabled || empty}
-                >
-                    <SelectTrigger id={id} className="w-full">
-                        <SelectValue
-                            placeholder={
-                                empty
-                                    ? i18n("No provider can do this yet")
-                                    : i18n("Not chosen")
-                            }
-                        />
-                    </SelectTrigger>
-                    <SelectContent>
-                        {fallback && (
-                            <SelectItem value={fallback.value}>
-                                {fallback.label}
-                            </SelectItem>
-                        )}
-                        {options.map((p) => (
-                            <SelectItem
-                                key={p.id}
-                                value={p.id}
-                                disabled={p.available === false}
-                            >
-                                {providerLabel(p)}
-                                {p.available === false &&
-                                    ` (${i18n("resubscribe to use")})`}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-                {hint && (
-                    <p className="text-xs text-muted-foreground">{hint}</p>
-                )}
-            </div>
         </>
     );
 }
@@ -548,6 +288,9 @@ function ProvidersList({
                                 label={i18n("Learn")}
                             />
                         )}
+                        {provider.isDefaultTopics && (
+                            <RoleChip icon={ListTree} label={i18n("Topics")} />
+                        )}
                     </>
                 );
 
@@ -617,7 +360,8 @@ function ProvidersList({
                             )}
                             {(provider.isDefaultTranscription ||
                                 provider.isDefaultEnhancement ||
-                                provider.isDefaultLearn) && (
+                                provider.isDefaultLearn ||
+                                provider.isDefaultTopics) && (
                                 <div className="flex flex-wrap gap-1.5">
                                     {roles}
                                 </div>

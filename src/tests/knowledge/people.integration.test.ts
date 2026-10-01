@@ -24,7 +24,6 @@ import {
 } from "vitest";
 import {
     people,
-    recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,

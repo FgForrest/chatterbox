@@ -41,6 +41,18 @@ export function pickLearnCredential<
     );
 }
 
+/** Pick the selected Topics provider, otherwise the summary provider. */
+export function pickTopicsCredential<
+    T extends EnhancementCandidate & { id: string },
+>(credentials: readonly T[], providerId: string | null): T | undefined {
+    const selected = credentials.find(
+        (candidate) =>
+            candidate.id === providerId &&
+            !isTranscriptionOnlyProvider(candidate.provider),
+    );
+    return selected ?? pickEnhancementCredential(credentials);
+}
+
 /**
  * The chat model to run enhancement with.
  *

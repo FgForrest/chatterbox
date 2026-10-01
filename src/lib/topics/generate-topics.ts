@@ -21,10 +21,11 @@ import {
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import {
     enhancementChatModel,
-    pickEnhancementCredential,
+    pickTopicsCredential,
 } from "@/lib/ai/enhancement-provider";
 import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
+import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
@@ -185,7 +186,18 @@ export async function generateTopicsForTranscript(
         .select()
         .from(apiCredentials)
         .where(eq(apiCredentials.userId, ctx.actorUserId));
-    const credentials = pickEnhancementCredential(configured);
+    const [providerSettings] =
+        ctx.actorUserId === ctx.settingsUserId
+            ? [settings]
+            : await db
+                  .select({ defaultProviders: userSettings.defaultProviders })
+                  .from(userSettings)
+                  .where(eq(userSettings.userId, ctx.actorUserId))
+                  .limit(1);
+    const credentials = pickTopicsCredential(
+        configured,
+        topicsProviderId(providerSettings?.defaultProviders),
+    );
     if (!credentials) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
