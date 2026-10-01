@@ -63,20 +63,25 @@ export function parseImportList(text: string): {
         }
         for (const item of items) {
             const open = item.indexOf("(");
-            const name = (open >= 0 ? item.slice(0, open) : item)
-                .trim()
-                .replace(/\s+/g, " ");
-            const close = item.lastIndexOf(")");
-            // Nothing may follow the nicknames: "Name (nick) more" is a
-            // line to fix, not a nickname "nick) more".
-            if (open >= 0 && close >= 0 && item.slice(close + 1).trim()) {
+            const close = item.indexOf(")");
+            // Nicknames are one closed group at the end: "Name (nick",
+            // "Name) (nick)" or "Name (nick) more" is a line to fix, not
+            // a name or nickname with a stray bracket in it.
+            if (
+                (open >= 0 || close >= 0) &&
+                (open < 0 ||
+                    close < open ||
+                    item.indexOf("(", open + 1) >= 0 ||
+                    item.indexOf(")", close + 1) >= 0 ||
+                    item.slice(close + 1).trim())
+            ) {
                 problems.push({ line, text: item });
                 continue;
             }
-            const inner =
-                open >= 0
-                    ? item.slice(open + 1, close > open ? close : undefined)
-                    : "";
+            const name = (open >= 0 ? item.slice(0, open) : item)
+                .trim()
+                .replace(/\s+/g, " ");
+            const inner = open >= 0 ? item.slice(open + 1, close) : "";
             const nicknames = inner
                 .split(/[,;]/)
                 .map((nickname) => nickname.trim().replace(/\s+/g, " "))

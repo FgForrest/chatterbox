@@ -111,12 +111,13 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const affected = await accountsNamingEntities([id]);
     await mergeEntities(userId, mergeIntoId, id);
     await replanExports(affected);
-    // The target may have been merged away meanwhile: report where the
-    // thing actually went.
-    const winner = target.mergedIntoId
-        ? await getEntity(userId, target.mergedIntoId)
-        : target;
-    return NextResponse.json({ entity: winner ?? target });
+    // The target may have been merged away, even after it was read above:
+    // read it again and report where the thing actually went.
+    const after = (await getEntity(userId, mergeIntoId)) ?? target;
+    const winner = after.mergedIntoId
+        ? await getEntity(userId, after.mergedIntoId)
+        : after;
+    return NextResponse.json({ entity: winner ?? after });
 });
 
 /**

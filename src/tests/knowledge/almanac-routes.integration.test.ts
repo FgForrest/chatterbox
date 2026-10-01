@@ -31,6 +31,15 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
+// Runs once right after the route reads the thing it names, to merge that
+// thing away before the route's own merge.
+const afterRead = vi.hoisted(() => ({
+    current: null as null | {
+        id: string;
+        run: () => Promise<void>;
+    },
+}));
+
 const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
@@ -74,6 +83,24 @@ vi.mock("@/lib/posthog-server", () => ({
 vi.mock("@/lib/folder-exports/jobs", () => ({
     enqueueExportPlansForUser: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/knowledge/entities", async (importOriginal) => {
+    const actual =
+        await importOriginal<typeof import("@/lib/knowledge/entities")>();
+    return {
+        ...actual,
+        getEntity: async (
+            ...args: Parameters<typeof actual.getEntity>
+        ): ReturnType<typeof actual.getEntity> => {
+            const found = await actual.getEntity(...args);
+            const hook = afterRead.current;
+            if (hook && hook.id === args[1]) {
+                afterRead.current = null;
+                await hook.run();
+            }
+            return found;
+        },
+    };
+});
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
@@ -116,7 +143,11 @@ import {
     aliasTextsVisibleTo,
     listAliases,
 } from "@/lib/knowledge/aliases";
-import { createEntity, getEntity } from "@/lib/knowledge/entities";
+import {
+    createEntity,
+    getEntity,
+    mergeEntities,
+} from "@/lib/knowledge/entities";
 import { confirmManualFact, listFacts } from "@/lib/knowledge/facts";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { createPerson, listPeople } from "@/lib/knowledge/people";
@@ -304,6 +335,30 @@ describeWithDatabase("editing the Almanac (PostgreSQL)", () => {
                 ).status,
             ).toBe(200);
             expect(await getEntity(OWNER, dupe.id)).toBeNull();
+        });
+
+        it("reports the winner when the target is merged away after it was read", async () => {
+            const [target, winner, loser] = await Promise.all(
+                ["Target", "Winner", "Loser"].map((name) =>
+                    createEntity(OWNER, { typeKey: "project", name }),
+                ),
+            );
+            afterRead.current = {
+                id: target.id,
+                run: () => mergeEntities(OWNER, winner.id, target.id),
+            };
+            const merged = await call(
+                mergeEntityRoute,
+                OWNER,
+                "POST",
+                { mergeIntoId: target.id },
+                { id: loser.id },
+            );
+            expect(afterRead.current).toBeNull();
+            expect(merged.body.entity).toMatchObject({ id: winner.id });
+            expect((await getEntity(OWNER, loser.id))?.mergedIntoId).toBe(
+                winner.id,
+            );
         });
 
         it("keeps a type change from breaking a fact, and names the fact", async () => {
