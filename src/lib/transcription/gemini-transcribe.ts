@@ -11,6 +11,8 @@ export interface GeminiTranscribeArgs {
 export interface GeminiTranscribeResult {
     text: string;
     detectedLanguage: string | null;
+    inputTokens?: number;
+    outputTokens?: number;
 }
 
 // Maps Node.js/HTTP content-type strings to Gemini-accepted MIME types.
@@ -102,8 +104,18 @@ export async function geminiTranscribe({
         );
     }
 
+    const usage = response.response.usageMetadata as
+        | (typeof response.response.usageMetadata & {
+              thoughtsTokenCount?: number;
+          })
+        | undefined;
     return {
         text: text.trim(),
         detectedLanguage: language ?? null,
+        inputTokens: usage?.promptTokenCount,
+        outputTokens: usage
+            ? (usage.candidatesTokenCount ?? 0) +
+              (usage.thoughtsTokenCount ?? 0)
+            : undefined,
     };
 }

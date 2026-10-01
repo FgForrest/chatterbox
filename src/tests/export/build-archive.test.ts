@@ -35,6 +35,14 @@ vi.mock("@/db/schema", () => ({
     recordings: "recordings",
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",
+    aiUsageEvents: {
+        __table: "aiUsageEvents",
+        payerUserId: "aiUsageEvents.payerUserId",
+    },
+    aiCostRates: {
+        __table: "aiCostRates",
+        userId: "aiCostRates.userId",
+    },
     // The knowledge-base reads project individual columns, so these
     // need a shape rather than a placeholder string.
     people: {
@@ -191,10 +199,19 @@ vi.mock("@/lib/encryption/fields", () => ({
 
 type Row = Record<string, unknown>;
 
-function mockSelectSequence(results: Row[][]) {
+function mockSelectSequence(
+    results: Row[][],
+    extras: { usage?: Row[]; rates?: Row[] } = {},
+) {
     let call = 0;
     dbMock.select.mockImplementation(() => ({
-        from: () => {
+        from: (table: { __table?: string }) => {
+            if (table?.__table === "aiUsageEvents") {
+                return { where: () => Promise.resolve(extras.usage ?? []) };
+            }
+            if (table?.__table === "aiCostRates") {
+                return { where: () => Promise.resolve(extras.rates ?? []) };
+            }
             // The folder assignment read joins its folder; the join itself
             // adds nothing a canned result needs to reproduce.
             const query = {
@@ -313,6 +330,77 @@ describe("buildAndUploadExportArchive", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         storage = new FakeStorage();
+    });
+
+    it("exports the payer's usage and rate snapshots", async () => {
+        const date = new Date("2026-01-01T00:00:00Z");
+        mockSelectSequence(
+            [
+                [
+                    {
+                        id: "rec-1",
+                        userId: "user-1",
+                        filename: "enc-recording",
+                        startTime: date,
+                        endTime: date,
+                        duration: 1000,
+                        filesize: 0,
+                        deviceSn: "SN1",
+                        storagePath: "audio/missing.mp3",
+                    },
+                ],
+                [],
+                [],
+            ],
+            {
+                usage: [
+                    {
+                        id: "usage-1",
+                        recordingId: "rec-1",
+                        payerUserId: "user-1",
+                        operation: "transcription",
+                        costUsd: "0.006000000",
+                        createdAt: date,
+                    },
+                ],
+                rates: [
+                    {
+                        id: "rate-1",
+                        userId: "user-1",
+                        provider: "Custom",
+                        model: "model-1",
+                        audioUsdPerHour: "1.000000",
+                        createdAt: date,
+                        updatedAt: date,
+                    },
+                ],
+            },
+        );
+
+        await buildAndUploadExportArchive({
+            userId: "user-1",
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/usage.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const usage = [...entries.entries()].find(([name]) =>
+            name.endsWith("/ai-usage.json"),
+        );
+        expect(JSON.parse(usage?.[1].buffer.toString("utf-8") ?? "[]")).toEqual(
+            [
+                expect.objectContaining({
+                    id: "usage-1",
+                    costUsd: "0.006000000",
+                    createdAt: date.toISOString(),
+                }),
+            ],
+        );
+        const rates = JSON.parse(
+            entries.get("ai/cost-rates.json")?.buffer.toString("utf-8") ?? "[]",
+        );
+        expect(rates).toEqual([expect.objectContaining({ id: "rate-1" })]);
     });
 
     it("carries the knowledge base so a restore keeps who was speaking", async () => {

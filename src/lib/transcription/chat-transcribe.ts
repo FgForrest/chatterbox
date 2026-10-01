@@ -14,6 +14,9 @@ export interface ChatTranscribeArgs {
 export interface ChatTranscribeResult {
     text: string;
     detectedLanguage: string | null;
+    inputTokens?: number;
+    outputTokens?: number;
+    reportedCostUsd?: number;
 }
 
 function contentTypeToAudioFormat(contentType: string): "mp3" | "wav" {
@@ -121,5 +124,12 @@ export async function chatTranscribe({
     return {
         text: text.trim(),
         detectedLanguage: language ?? null,
+        inputTokens: response.usage?.prompt_tokens,
+        outputTokens: response.usage?.completion_tokens,
+        reportedCostUsd: (
+            response.usage as
+                | (typeof response.usage & { cost?: number })
+                | undefined
+        )?.cost,
     };
 }

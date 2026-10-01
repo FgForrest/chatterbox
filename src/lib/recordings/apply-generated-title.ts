@@ -26,7 +26,11 @@ export async function applyGeneratedTitle(input: {
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
-    const generatedTitle = await generateTitleFromTranscription(userId, text);
+    const generatedTitle = await generateTitleFromTranscription(
+        userId,
+        recordingId,
+        text,
+    );
 
     // Not stored when a person has set a title, and then nothing below runs.
     const retitled = generatedTitle

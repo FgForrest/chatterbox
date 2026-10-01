@@ -26,6 +26,7 @@ import {
 import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { topicsProviderId } from "@/lib/ai/topics-provider";
+import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -258,6 +259,18 @@ export async function generateTopicsForTranscript(
                         temperature: 0.3,
                         maxTokens: 2000,
                     }),
+                );
+                await recordChatCompletionUsage(
+                    {
+                        recordingId,
+                        ownerUserId: ctx.ownerUserId,
+                        payerUserId: ctx.actorUserId,
+                        operation: "topics",
+                        provider: credentials.provider,
+                        model,
+                        baseUrl: credentials.baseUrl,
+                    },
+                    response,
                 );
                 return response.choices[0]?.message?.content?.trim() || "";
             },

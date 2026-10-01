@@ -11,9 +11,11 @@ import {
 } from "./prompt-presets";
 import { resolveTemplate } from "./prompt-templates";
 import { getAiOutputLanguageDirective } from "./summary-presets";
+import { recordChatCompletionUsage } from "./usage-cost";
 
 export async function generateTitleFromTranscription(
     userId: string,
+    recordingId: string,
     transcriptionText: string,
 ): Promise<string | null> {
     try {
@@ -126,6 +128,18 @@ export async function generateTitleFromTranscription(
                 temperature: 0.7,
                 maxTokens: 50, // Titles should be short
             }),
+        );
+        await recordChatCompletionUsage(
+            {
+                recordingId,
+                ownerUserId: userId,
+                payerUserId: userId,
+                operation: "title",
+                provider: credentials.provider,
+                model,
+                baseUrl: credentials.baseUrl,
+            },
+            response,
         );
 
         const title = response.choices[0]?.message?.content?.trim() || null;
