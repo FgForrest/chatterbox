@@ -37,9 +37,11 @@ describe("agent-bridge", () => {
             expect(resolveBackend("claude-haiku-4-5-20251001")).toBe("claude");
         });
 
-        it("routes codex and gpt-5 ids to the Codex CLI", () => {
+        it("routes registered Codex models and existing generic ids", () => {
             expect(resolveBackend("codex")).toBe("codex");
             expect(resolveBackend("gpt-5-codex")).toBe("codex");
+            expect(resolveBackend("gpt-6-sol")).toBe("codex");
+            expect(resolveBackend("gpt-6-unlisted")).toBeNull();
         });
 
         it("refuses ids carrying whitespace or control characters", () => {
@@ -538,6 +540,7 @@ describe("agent-bridge", () => {
                     usage: {
                         input_tokens: 1_000_000,
                         cached_input_tokens: 800_000,
+                        cache_write_input_tokens: 0,
                         output_tokens: 100_000,
                     },
                 }),
@@ -550,7 +553,25 @@ describe("agent-bridge", () => {
             });
         });
 
-        it("keeps unknown models and missing usage unpriced", () => {
+        it("prices cache writes separately from uncached input", () => {
+            const stdout = JSON.stringify({
+                type: "turn.completed",
+                usage: {
+                    input_tokens: 1_000_000,
+                    cached_input_tokens: 800_000,
+                    cache_write_input_tokens: 100_000,
+                    output_tokens: 100_000,
+                },
+            });
+            expect(parseCodexUsage(stdout, "gpt-6-sol")).toEqual({
+                prompt_tokens: 1_000_000,
+                completion_tokens: 100_000,
+                total_tokens: 1_100_000,
+                cost: 1.61,
+            });
+        });
+
+        it("keeps unknown models and incomplete usage unpriced", () => {
             const stdout = JSON.stringify({
                 type: "turn.completed",
                 usage: {
@@ -560,6 +581,11 @@ describe("agent-bridge", () => {
                 },
             });
             expect(parseCodexUsage(stdout, "codex")).toEqual({
+                prompt_tokens: 10,
+                completion_tokens: 5,
+                total_tokens: 15,
+            });
+            expect(parseCodexUsage(stdout, "gpt-6-sol")).toEqual({
                 prompt_tokens: 10,
                 completion_tokens: 5,
                 total_tokens: 15,

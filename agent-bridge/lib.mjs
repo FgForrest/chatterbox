@@ -27,6 +27,14 @@ export function splitArgs(value) {
  * caller forge log lines (CodeQL: js/log-injection) or pad argv.
  */
 const MODEL_ID_PATTERN = /^[A-Za-z0-9._:+/-]{1,128}$/;
+const CODEX_MODELS = {
+    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, cacheWriteInput: 0.25, output: 1.2 },
+    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 12 },
+    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWriteInput: 5, output: 20 },
+    "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWriteInput: 0.125, output: 0.5 },
+    "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWriteInput: 2.5, output: 10 },
+    "gpt-6-astra": { input: 10, cachedInput: 1, cacheWriteInput: 12.5, output: 50 },
+};
 
 /**
  * Strip anything that could break out of a single log line.
@@ -70,7 +78,8 @@ export function resolveBackend(model) {
     const id = model.trim();
     if (!MODEL_ID_PATTERN.test(id)) return null;
     if (id.startsWith("claude")) return "claude";
-    if (id.startsWith("codex") || id.startsWith("gpt-5")) return "codex";
+    if (Object.hasOwn(CODEX_MODELS, id) || id.startsWith("codex") || id.startsWith("gpt-5"))
+        return "codex";
     return null;
 }
 
@@ -609,15 +618,6 @@ export function parseClaudeEnvelope(
     return { content, usage };
 }
 
-const CODEX_API_RATES = {
-    "gpt-5.6-luna": [0.2, 0.02, 1.2],
-    "gpt-5.6-terra": [2, 0.2, 12],
-    "gpt-5.6-sol": [4, 0.4, 20],
-    "gpt-6-luna": [0.1, 0.01, 0.5],
-    "gpt-6-sol": [2, 0.2, 10],
-    "gpt-6-astra": [10, 1, 50],
-};
-
 /** Read the completed turn's usage and estimate its API-equivalent cost. */
 export function parseCodexUsage(stdout, model) {
     let counts = null;
@@ -635,12 +635,19 @@ export function parseCodexUsage(stdout, model) {
     const output = nonnegativeNumber(counts?.output_tokens);
     if (input === null || output === null) return null;
     const cached = nonnegativeNumber(counts?.cached_input_tokens);
-    const rates = Object.hasOwn(CODEX_API_RATES, model)
-        ? CODEX_API_RATES[model]
+    const cacheWrite = nonnegativeNumber(counts?.cache_write_input_tokens);
+    const rates = Object.hasOwn(CODEX_MODELS, model)
+        ? CODEX_MODELS[model]
         : null;
     const cost =
-        rates && cached !== null && cached <= input
-            ? ((input - cached) * rates[0] + cached * rates[1] + output * rates[2]) /
+        rates &&
+        cached !== null &&
+        cacheWrite !== null &&
+        cached + cacheWrite <= input
+            ? ((input - cached - cacheWrite) * rates.input +
+                  cached * rates.cachedInput +
+                  cacheWrite * rates.cacheWriteInput +
+                  output * rates.output) /
               1_000_000
             : null;
     return {
