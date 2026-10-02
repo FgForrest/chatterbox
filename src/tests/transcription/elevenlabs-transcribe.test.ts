@@ -8,6 +8,7 @@ vi.mock("@/lib/env", () => ({
 
 import {
     ElevenLabsTranscribeError,
+    elevenLabsTakesKeyterms,
     elevenLabsTranscribe,
     parseElevenLabsModel,
     resolveElevenLabsUrl,
@@ -125,6 +126,41 @@ describe("elevenlabs-transcribe", () => {
         expect(form.get("language_code")).toBe("cs");
         expect(form.get("diarize")).toBeNull();
         expect((form.get("file") as File).name).toBe("meeting.mp3");
+    });
+
+    it("sends each keyterm as its own field to Scribe v2", async () => {
+        vi.mocked(globalThis.fetch).mockResolvedValue(
+            jsonResponse({ text: "hello", language_code: "cs" }),
+        );
+
+        await elevenLabsTranscribe({
+            apiKey: "sk_test",
+            model: "scribe_v2+diarize",
+            file: audioFile(),
+            keyterms: ["Zefira", "Blue Harbor"],
+        });
+
+        expect(lastRequest().form.getAll("keyterms")).toEqual([
+            "Zefira",
+            "Blue Harbor",
+        ]);
+    });
+
+    it("leaves keyterms out for models that do not take them", async () => {
+        vi.mocked(globalThis.fetch).mockResolvedValue(
+            jsonResponse({ text: "hello", language_code: "cs" }),
+        );
+
+        await elevenLabsTranscribe({
+            apiKey: "sk_test",
+            model: "scribe_v1",
+            file: audioFile(),
+            keyterms: ["Zefira"],
+        });
+
+        expect(lastRequest().form.getAll("keyterms")).toEqual([]);
+        expect(elevenLabsTakesKeyterms("scribe_v2_medical")).toBe(true);
+        expect(elevenLabsTakesKeyterms("scribe_v1+diarize")).toBe(false);
     });
 
     it("omits language_code when no default language is configured", async () => {

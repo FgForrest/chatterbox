@@ -77,7 +77,12 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/transcription/almanac-terms", () => ({
+    almanacTermsFor: vi.fn().mockResolvedValue([]),
+}));
+
 import { db } from "@/db";
+import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
 interface CredentialRow {
@@ -309,5 +314,28 @@ describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI S
         expect(all.find((r) => r.url.includes("/transcript"))?.url).toBe(
             "https://eu2.asr.api.speechmatics.com/v2/jobs/job-xyz/transcript?format=json-v2",
         );
+    });
+
+    it("sends the Almanac's names as the custom dictionary", async () => {
+        vi.mocked(almanacTermsFor).mockResolvedValueOnce([
+            { text: "Zefira", soundsLike: ["Zefyra"] },
+            { text: "Blue Harbor", soundsLike: [] },
+        ]);
+        mockDbForCredential({
+            provider: "Speechmatics",
+            baseUrl: null,
+            defaultModel: "enhanced",
+        });
+
+        await transcribeRecording("user-sm", "rec-sm");
+
+        const submit = requests().find((r) => r.method === "POST");
+        const config = JSON.parse(
+            (submit?.init.body as FormData).get("config") as string,
+        );
+        expect(config.transcription_config.additional_vocab).toEqual([
+            { content: "Zefira", sounds_like: ["Zefyra"] },
+            { content: "Blue Harbor" },
+        ]);
     });
 });
