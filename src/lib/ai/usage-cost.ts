@@ -25,6 +25,8 @@ interface UsageValues {
     outputTokens?: number | null;
     audioSeconds?: number | null;
     reportedCostUsd?: number | null;
+    /** Keyterms sent with an ElevenLabs transcription, priced as an add-on. */
+    keytermCount?: number;
 }
 
 export interface AiCustomRate {
@@ -34,6 +36,12 @@ export interface AiCustomRate {
 }
 
 const PRICE_SOURCE = "catalog_2026_10_01";
+
+// ElevenLabs keyterm prompting: an hourly add-on, and past this many terms
+// a request bills at least `KEYTERM_MIN_BILLABLE_SECONDS`.
+const ELEVENLABS_KEYTERMS_USD_PER_HOUR = 0.05;
+const KEYTERM_MIN_BILLING_THRESHOLD = 100;
+const KEYTERM_MIN_BILLABLE_SECONDS = 20;
 
 function usesPublishedEndpoint(context: AiUsageContext): boolean {
     if (!context.baseUrl) return context.provider !== "Groq";
@@ -119,16 +127,27 @@ export function estimateAiUsage(
         }
     }
     if (cost === null && audioSeconds !== null) {
-        const rate =
-            customRate?.audioUsdPerHour ??
-            (usesPublishedEndpoint(context)
+        const keyterms =
+            context.provider === "ElevenLabs"
+                ? Math.max(0, usage.keytermCount ?? 0)
+                : 0;
+        const published =
+            customRate?.audioUsdPerHour == null &&
+            usesPublishedEndpoint(context)
                 ? audioHourlyRate(context.provider, context.model)
-                : null);
+                : null;
+        let rate = customRate?.audioUsdPerHour ?? published;
+        let minimumSeconds = 0;
+        if (context.provider === "Groq") {
+            minimumSeconds = 10;
+        } else if (published !== null && keyterms > 0) {
+            rate = published + ELEVENLABS_KEYTERMS_USD_PER_HOUR;
+            if (keyterms > KEYTERM_MIN_BILLING_THRESHOLD) {
+                minimumSeconds = KEYTERM_MIN_BILLABLE_SECONDS;
+            }
+        }
         if (rate !== null) {
-            const billableSeconds =
-                context.provider === "Groq"
-                    ? Math.max(10, audioSeconds)
-                    : audioSeconds;
+            const billableSeconds = Math.max(minimumSeconds, audioSeconds);
             cost = (billableSeconds * rate) / 3600;
             source =
                 customRate?.audioUsdPerHour != null ? "user" : PRICE_SOURCE;

@@ -116,6 +116,8 @@ vi.mock("@/lib/storage/factory", () => ({
     }),
 }));
 vi.mock("@/lib/transcription/elevenlabs-transcribe", () => ({
+    // No Almanac names: these runs are about what a share freezes.
+    elevenLabsTakesKeyterms: () => false,
     elevenLabsTranscribe: vi.fn(async () => {
         provider.calls += 1;
         const run = provider.during;

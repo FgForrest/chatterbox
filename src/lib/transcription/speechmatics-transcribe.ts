@@ -55,6 +55,8 @@ export interface SpeechmaticsTranscribeArgs {
     file: File;
     language?: string;
     baseUrl?: string | null;
+    /** Words and phrases to expect, as the custom dictionary. */
+    vocabulary?: readonly SpeechmaticsVocabularyEntry[];
     /** Overridden in tests so the poll loop doesn't actually sleep. */
     pollIntervalMs?: number;
 }
@@ -74,6 +76,12 @@ export class SpeechmaticsTranscribeError extends Error {
         super(message);
         this.name = "SpeechmaticsTranscribeError";
     }
+}
+
+/** One custom dictionary entry: how it is written, and how it may sound. */
+export interface SpeechmaticsVocabularyEntry {
+    text: string;
+    soundsLike: readonly string[];
 }
 
 /** A Speechmatics model name plus the request flags Riffado encodes with it. */
@@ -151,13 +159,15 @@ export function buildSpeechmaticsConfig({
     modelId,
     diarize,
     language,
+    vocabulary = [],
 }: {
     modelId: string;
     diarize: boolean;
     language?: string;
+    vocabulary?: readonly SpeechmaticsVocabularyEntry[];
 }): string {
     const isMelia = modelId.toLowerCase().startsWith("melia");
-    const transcriptionConfig: Record<string, string> = {
+    const transcriptionConfig: Record<string, unknown> = {
         language: isMelia ? MELIA_LANGUAGE : language || AUTO_LANGUAGE,
     };
     if (modelId) {
@@ -165,6 +175,13 @@ export function buildSpeechmaticsConfig({
     }
     if (diarize) {
         transcriptionConfig.diarization = "speaker";
+    }
+    if (vocabulary.length > 0) {
+        transcriptionConfig.additional_vocab = vocabulary.map((entry) =>
+            entry.soundsLike.length > 0
+                ? { content: entry.text, sounds_like: [...entry.soundsLike] }
+                : { content: entry.text },
+        );
     }
     return JSON.stringify({
         type: "transcription",
@@ -186,6 +203,7 @@ export async function speechmaticsTranscribe({
     file,
     language,
     baseUrl,
+    vocabulary,
     pollIntervalMs = POLL_INTERVAL_MS,
 }: SpeechmaticsTranscribeArgs): Promise<SpeechmaticsTranscribeResult> {
     const { modelId, diarize } = parseSpeechmaticsModel(model);
@@ -197,7 +215,7 @@ export async function speechmaticsTranscribe({
     form.append("data_file", file, file.name);
     form.append(
         "config",
-        buildSpeechmaticsConfig({ modelId, diarize, language }),
+        buildSpeechmaticsConfig({ modelId, diarize, language, vocabulary }),
     );
 
     const created = await fetch(`${base}/jobs`, {

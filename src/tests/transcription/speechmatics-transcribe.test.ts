@@ -233,6 +233,38 @@ describe("speechmatics-transcribe", () => {
                 diarization: "speaker",
             });
         });
+
+        it("adds the vocabulary as additional_vocab, sounds_like only when known", () => {
+            const config = JSON.parse(
+                buildSpeechmaticsConfig({
+                    modelId: "enhanced",
+                    diarize: false,
+                    language: "cs",
+                    vocabulary: [
+                        { text: "Zefira", soundsLike: ["Zefyra", "Zephira"] },
+                        { text: "Orion", soundsLike: [] },
+                    ],
+                }),
+            );
+            expect(config.transcription_config.additional_vocab).toEqual([
+                { content: "Zefira", sounds_like: ["Zefyra", "Zephira"] },
+                { content: "Orion" },
+            ]);
+        });
+
+        it("omits additional_vocab when there is no vocabulary", () => {
+            const config = JSON.parse(
+                buildSpeechmaticsConfig({
+                    modelId: "enhanced",
+                    diarize: false,
+                    language: "cs",
+                    vocabulary: [],
+                }),
+            );
+            expect(config.transcription_config).not.toHaveProperty(
+                "additional_vocab",
+            );
+        });
     });
 
     it("submits, polls to done, and downloads the json-v2 transcript", async () => {

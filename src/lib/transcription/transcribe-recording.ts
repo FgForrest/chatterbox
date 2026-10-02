@@ -51,10 +51,17 @@ import {
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
+import {
+    type AlmanacTerm,
+    almanacTermsFor,
+} from "@/lib/transcription/almanac-terms";
 import { buildAudioFile } from "@/lib/transcription/audio-file";
 import { chatTranscribe } from "@/lib/transcription/chat-transcribe";
 import { maybeCompressForWhisper } from "@/lib/transcription/compress-audio";
-import { elevenLabsTranscribe } from "@/lib/transcription/elevenlabs-transcribe";
+import {
+    elevenLabsTakesKeyterms,
+    elevenLabsTranscribe,
+} from "@/lib/transcription/elevenlabs-transcribe";
 import {
     buildTranscriptionParams,
     getResponseFormat,
@@ -580,6 +587,24 @@ async function transcribeRecordingInner(
             };
         };
 
+        // The Almanac's names, for the providers that can be told what to
+        // expect. A failure to read them costs accuracy, not the run.
+        const almanacTerms = async (): Promise<AlmanacTerm[]> => {
+            try {
+                return await almanacTermsFor({
+                    ownerUserId: ctx.ownerUserId,
+                    shared: orgView,
+                    language: defaultLanguage ?? null,
+                });
+            } catch (error) {
+                console.error(
+                    "[transcription] Almanac terms unavailable:",
+                    error,
+                );
+                return [];
+            }
+        };
+
         let transcriptionText: string;
         let detectedLanguage: string | null;
         let persistProvider: string;
@@ -668,12 +693,16 @@ async function transcribeRecordingInner(
             } else if (transcriptionStyle === "elevenlabs") {
                 // Scribe accepts multi-gigabyte uploads, so the Whisper
                 // 25 MiB re-encode is deliberately skipped here.
+                const keyterms = elevenLabsTakesKeyterms(model)
+                    ? (await almanacTerms()).map((term) => term.text)
+                    : [];
                 const result = await elevenLabsTranscribe({
                     apiKey,
                     model,
                     file: audioFile,
                     language: defaultLanguage,
                     baseUrl: credentials.baseUrl,
+                    keyterms,
                 });
                 await recordAiUsage(
                     {
@@ -685,7 +714,10 @@ async function transcribeRecordingInner(
                         model,
                         baseUrl: credentials.baseUrl,
                     },
-                    { audioSeconds: recording.duration / 1000 },
+                    {
+                        audioSeconds: recording.duration / 1000,
+                        keytermCount: keyterms.length,
+                    },
                 );
                 transcriptionText = result.text;
                 detectedLanguage = result.detectedLanguage;
@@ -699,6 +731,7 @@ async function transcribeRecordingInner(
                     file: audioFile,
                     language: defaultLanguage,
                     baseUrl: credentials.baseUrl,
+                    vocabulary: await almanacTerms(),
                 });
                 await recordAiUsage(
                     {

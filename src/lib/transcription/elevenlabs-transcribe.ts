@@ -14,6 +14,8 @@ export interface ElevenLabsTranscribeArgs {
     file: File;
     language?: string;
     baseUrl?: string | null;
+    /** Words and phrases to bias towards; sent only to models taking them. */
+    keyterms?: readonly string[];
 }
 
 export interface ElevenLabsTranscribeResult {
@@ -70,6 +72,11 @@ export function parseElevenLabsModel(model: string): ParsedElevenLabsModel {
     return { modelId: trimmed, diarize: false };
 }
 
+/** Whether a Scribe model takes `keyterms` (Scribe v2 and its variants). */
+export function elevenLabsTakesKeyterms(model: string): boolean {
+    return parseElevenLabsModel(model).modelId.startsWith("scribe_v2");
+}
+
 /**
  * Resolve the speech-to-text endpoint. An empty base URL targets the
  * global API; a residency host (`https://api.eu.residency.elevenlabs.io`)
@@ -96,6 +103,7 @@ export async function elevenLabsTranscribe({
     file,
     language,
     baseUrl,
+    keyterms = [],
 }: ElevenLabsTranscribeArgs): Promise<ElevenLabsTranscribeResult> {
     const { modelId, diarize } = parseElevenLabsModel(model);
 
@@ -107,6 +115,11 @@ export async function elevenLabsTranscribe({
     }
     if (diarize) {
         form.append("diarize", "true");
+    }
+    if (elevenLabsTakesKeyterms(modelId)) {
+        for (const term of keyterms) {
+            form.append("keyterms", term);
+        }
     }
 
     const response = await fetch(resolveElevenLabsUrl(baseUrl), {

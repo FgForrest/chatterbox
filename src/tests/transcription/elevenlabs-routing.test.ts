@@ -77,7 +77,12 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/transcription/almanac-terms", () => ({
+    almanacTermsFor: vi.fn().mockResolvedValue([]),
+}));
+
 import { db } from "@/db";
+import { almanacTermsFor } from "@/lib/transcription/almanac-terms";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
 
 interface CredentialRow {
@@ -258,5 +263,70 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         const form = init.body as FormData;
         expect(form.get("model_id")).toBe("scribe_v2");
         expect(form.get("diarize")).toBe("true");
+    });
+
+    it("sends the Almanac's names as keyterms to Scribe v2", async () => {
+        vi.mocked(almanacTermsFor).mockResolvedValueOnce([
+            { text: "Zefira", soundsLike: ["Zefyra"] },
+            { text: "Blue Harbor", soundsLike: [] },
+        ]);
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2+diarize",
+        });
+
+        await transcribeRecording("user-el", "rec-el");
+
+        expect(almanacTermsFor).toHaveBeenCalledWith({
+            ownerUserId: "user-el",
+            shared: false,
+            language: "cs",
+        });
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([
+            "Zefira",
+            "Blue Harbor",
+        ]);
+    });
+
+    it("does not read the Almanac for Scribe v1, which takes no keyterms", async () => {
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v1",
+        });
+
+        await transcribeRecording("user-el", "rec-el");
+
+        expect(almanacTermsFor).not.toHaveBeenCalled();
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([]);
+    });
+
+    it("transcribes without keyterms when the Almanac cannot be read", async () => {
+        vi.mocked(almanacTermsFor).mockRejectedValueOnce(new Error("down"));
+        const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+        mockDbForCredential({
+            provider: "ElevenLabs",
+            baseUrl: null,
+            defaultModel: "scribe_v2",
+        });
+
+        const result = await transcribeRecording("user-el", "rec-el");
+
+        expect(result.success).toBe(true);
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).getAll("keyterms")).toEqual([]);
+        logged.mockRestore();
     });
 });

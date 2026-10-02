@@ -97,6 +97,11 @@ oversized recordings under OpenAI's 25 MiB request limit is skipped for
 Scribe, which accepts multi-gigabyte uploads, so long meetings reach the
 model at full quality.
 
+Scribe v2 and v2 Medical are told which names to expect: up to 500
+people and things from the [Almanac](./almanac), sent as keyterms. See
+[Names from the Almanac](./almanac#names-from-the-almanac). ElevenLabs
+charges keyterms as an add-on to the hourly price.
+
 ElevenLabs is transcription only. It has no `chat/completions` endpoint,
 so keep a separate provider as your summarization default.
 
@@ -113,6 +118,9 @@ and friends. With one of those selected, transcripts come back as
 Speechmatics' own `S1` labels are rewritten to `speaker_1` on the way in so
 they read the same as every other provider's; a name that came from speaker
 identification is kept as-is.
+
+The same names from the Almanac go to Speechmatics as its custom
+dictionary, each with the forms it was misheard as before.
 
 Your **Default transcription language** is passed through as the language
 code. If you haven't set one, Riffado asks for `auto` and lets
@@ -142,7 +150,10 @@ endpoint, so keep a separate provider as your summarization default.
 ## What gets sent to the provider
 
 Plaintext audio (for transcription) and plaintext transcript text
-(for summarization). The trust boundary is the provider you picked.
+(for summarization). ElevenLabs Scribe v2 and Speechmatics also get up to
+500 names from your Almanac with the audio (see
+[Names from the Almanac](./almanac#names-from-the-almanac)). The trust
+boundary is the provider you picked.
 Riffado's at-rest encryption protects the database, not the network
 hop to your AI provider — see
 [Encryption at rest](../reference/encryption-at-rest) for the explicit

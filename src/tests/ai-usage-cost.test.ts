@@ -37,6 +37,23 @@ describe("AI usage estimates", () => {
         expect(result.cost).toBeCloseTo(0.04 * (10 / 3600));
     });
 
+    it("adds ElevenLabs' keyterm surcharge and its 20-second minimum", () => {
+        const hour = estimateAiUsage(context("ElevenLabs", "scribe_v2"), {
+            audioSeconds: 3600,
+            keytermCount: 40,
+        });
+        expect(hour.cost).toBeCloseTo(0.27);
+        const short = estimateAiUsage(context("ElevenLabs", "scribe_v2"), {
+            audioSeconds: 5,
+            keytermCount: 101,
+        });
+        expect(short.cost).toBeCloseTo(0.27 * (20 / 3600));
+        const plain = estimateAiUsage(context("ElevenLabs", "scribe_v2"), {
+            audioSeconds: 5,
+        });
+        expect(plain.cost).toBeCloseTo(0.22 * (5 / 3600));
+    });
+
     it("prefers a provider-reported price and leaves unknown rates unpriced", () => {
         expect(
             estimateAiUsage(context("OpenRouter", "some-model"), {
