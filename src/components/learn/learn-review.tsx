@@ -336,7 +336,7 @@ export function LearnReview({
     };
 
     /** Work on the items done outside the review: Finish waits for it. */
-    const track = useCallback(<T,>(work: Promise<T>): Promise<T> => {
+    const track = useCallback(function track<T>(work: Promise<T>): Promise<T> {
         setSaving((count) => count + 1);
         drafts.current.add(work);
         return work.finally(() => {
