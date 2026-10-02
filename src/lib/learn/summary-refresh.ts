@@ -71,8 +71,30 @@ async function refresh(input: {
     recordingId: string;
     view: RecordingView;
 }): Promise<void> {
-    if (input.view !== "private") return;
-    if (!(await isSummaryStale(input.ownerUserId, input.recordingId))) return;
+    const due = await summaryRefreshDue(input);
+    if (!due) return;
+    await enqueueSummaryJob({
+        userId: input.ownerUserId,
+        recordingId: input.recordingId,
+        presetId: due.presetId,
+        trigger: "auto",
+    });
+}
+
+/**
+ * Whether the summary is to be made again now: on the private view, stale,
+ * with auto-summarize on and within the hourly cap (spent when it is).
+ * Null when not; otherwise the preset the automatic summary uses.
+ */
+export async function summaryRefreshDue(input: {
+    ownerUserId: string;
+    recordingId: string;
+    view: RecordingView;
+}): Promise<{ presetId?: string } | null> {
+    if (input.view !== "private") return null;
+    if (!(await isSummaryStale(input.ownerUserId, input.recordingId))) {
+        return null;
+    }
     const [settings] = await db
         .select({
             autoSummarize: userSettings.autoSummarize,
@@ -81,7 +103,7 @@ async function refresh(input: {
         .from(userSettings)
         .where(eq(userSettings.userId, input.ownerUserId))
         .limit(1);
-    if (!settings?.autoSummarize) return;
+    if (!settings?.autoSummarize) return null;
     const allowed = await consumeRateLimitBucket(
         `auto-summary:user:${input.ownerUserId}`,
         {
@@ -90,11 +112,6 @@ async function refresh(input: {
         },
     );
     // Over the cap: the summary says it may be stale instead.
-    if (!allowed.allowed) return;
-    await enqueueSummaryJob({
-        userId: input.ownerUserId,
-        recordingId: input.recordingId,
-        presetId: settings.preset ?? undefined,
-        trigger: "auto",
-    });
+    if (!allowed.allowed) return null;
+    return settings.preset ? { presetId: settings.preset } : {};
 }

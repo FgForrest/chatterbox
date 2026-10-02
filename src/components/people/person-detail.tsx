@@ -55,6 +55,11 @@ export interface PersonDetailProps {
     otherNames?: OtherName[];
     /** What the viewer may add and change among their facts and names. */
     editing?: FactEditing;
+    /**
+     * The viewer's account email: the person carrying it is the viewer,
+     * whom Learn names as the one who made their recordings.
+     */
+    accountEmail?: string;
 }
 
 export function PersonDetail({
@@ -64,11 +69,16 @@ export function PersonDetail({
     facts,
     otherNames = [],
     editing,
+    accountEmail,
 }: PersonDetailProps) {
     const i18n = useExtracted();
     const locale = useLocale();
     const router = useRouter();
     const [confirmingDelete, setConfirmingDelete] = useState(false);
+    const isMe =
+        Boolean(accountEmail) &&
+        person.primaryEmail?.trim().toLowerCase() ===
+            accountEmail?.trim().toLowerCase();
 
     // One recording can hold two transcripts -- the user's own and a Plaud
     // import -- and the same person can be attributed in both, so the overlay
@@ -108,8 +118,18 @@ export function PersonDetail({
                     {initials(person.displayName)}
                 </span>
                 <div className="min-w-0 flex-1">
-                    <h1 className="truncate text-2xl font-semibold">
-                        {person.displayName}
+                    <h1 className="flex min-w-0 items-center gap-2 text-2xl font-semibold">
+                        <span className="truncate">{person.displayName}</span>
+                        {isMe && (
+                            <span
+                                className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                                title={i18n(
+                                    "Learn names you as the one who made your recordings.",
+                                )}
+                            >
+                                {i18n("You")}
+                            </span>
+                        )}
                     </h1>
                     {person.primaryEmail && (
                         <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -127,7 +147,10 @@ export function PersonDetail({
                 </div>
                 {canManage && !confirmingDelete && (
                     <div className="flex flex-wrap justify-end gap-2">
-                        <PersonActions person={person} />
+                        <PersonActions
+                            person={person}
+                            accountEmail={isMe ? undefined : accountEmail}
+                        />
                     </div>
                 )}
                 {!canManage ? null : confirmingDelete ? (

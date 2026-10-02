@@ -22,6 +22,9 @@ vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/learn/hold", () => ({
     isHeldForLearn: vi.fn().mockResolvedValue(false),
 }));
+vi.mock("@/lib/learn/summary-refresh", () => ({
+    summaryRefreshDue: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/summary/generate-summary", () => ({
     generateSummaryForRecording: vi.fn(),
 }));
@@ -42,6 +45,8 @@ vi.mock("@/lib/env", () => ({ env: { AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20 } }));
 
 import { AppError, ErrorCode } from "@/lib/errors";
 import { JobDeferredError } from "@/lib/jobs/retryable";
+import { isHeldForLearn } from "@/lib/learn/hold";
+import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
@@ -151,6 +156,85 @@ describe("summaryJobHandler", () => {
                 trigger: "auto",
             }),
         );
+    });
+
+    it("makes it again when a review changed what it read while it ran", async () => {
+        // The review's own refresh found no summary yet, and the hold's
+        // release found this job running: nothing else would.
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+        (summaryRefreshDue as Mock).mockResolvedValueOnce({
+            presetId: "meeting-notes",
+        });
+
+        await summaryJobHandler.run(
+            context({ payload: { recordingId: "rec-1", trigger: "manual" } }),
+        );
+
+        expect(summaryRefreshDue).toHaveBeenCalledWith({
+            ownerUserId: "user-1",
+            recordingId: "rec-1",
+            view: "private",
+        });
+        expect(generateSummaryForRecording).toHaveBeenCalledTimes(2);
+        expect(
+            (generateSummaryForRecording as Mock).mock.calls[1]?.[2],
+        ).toMatchObject({ presetId: "meeting-notes" });
+        // Announced once, for the summary that stays.
+        expect(emitEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the preset it was asked for when it makes it again", async () => {
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+        (summaryRefreshDue as Mock).mockResolvedValueOnce({});
+
+        await summaryJobHandler.run(
+            context({
+                payload: {
+                    recordingId: "rec-1",
+                    presetId: "custom",
+                    trigger: "manual",
+                },
+            }),
+        );
+
+        expect(
+            (generateSummaryForRecording as Mock).mock.calls[1]?.[2],
+        ).toMatchObject({ presetId: "custom" });
+    });
+
+    it("makes it once while nothing changed what it read", async () => {
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+
+        await summaryJobHandler.run(context());
+
+        expect(generateSummaryForRecording).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a summary under an open hold to the hold's release", async () => {
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+        (isHeldForLearn as Mock).mockResolvedValueOnce(true);
+
+        await summaryJobHandler.run(context());
+
+        expect(summaryRefreshDue).not.toHaveBeenCalled();
+        expect(generateSummaryForRecording).toHaveBeenCalledTimes(1);
+    });
+
+    it("never makes the Organization's summary again by itself", async () => {
+        (generateSummaryForRecording as Mock).mockResolvedValue(generated);
+
+        await summaryJobHandler.run(
+            context({
+                payload: {
+                    recordingId: "rec-1",
+                    trigger: "manual",
+                    view: "org",
+                },
+            }),
+        );
+
+        expect(summaryRefreshDue).not.toHaveBeenCalled();
+        expect(generateSummaryForRecording).toHaveBeenCalledTimes(1);
     });
 
     it("puts off a summary the hourly cap put off while the cap is still full", async () => {

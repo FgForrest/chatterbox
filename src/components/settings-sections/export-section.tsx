@@ -461,6 +461,7 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                                     <Button asChild size="sm">
                                         <a
                                             href={`/api/backup/${backupJob.id}/download`}
+                                            download
                                         >
                                             <Download className="size-4 mr-2" />{" "}
                                             {i18n("Download")}

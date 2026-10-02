@@ -23,11 +23,46 @@ export interface LearnCorrectionMark {
     ticked: boolean;
 }
 
+/**
+ * Whom a speaker guess names, as the speakers route takes it: someone
+ * known, or someone new the review proposes to add (`recordItemId`, its
+ * new record, which then links to whoever the name made).
+ */
+export type SpeakerGuessAnswer =
+    | { personId: string }
+    | { displayName: string; recordItemId?: string };
+
+export interface LearnSpeakerMark {
+    itemId: string;
+    /** The transcript's label, as a speaker key (`speaker_0`). */
+    label: string;
+    name: string;
+    ticked: boolean;
+    /** Unticked by the reviewer, not merely left as it came. */
+    declined: boolean;
+    answer: SpeakerGuessAnswer;
+    evidenceMs: number[];
+    /** Only the first name was heard. */
+    onlyFirstName: boolean;
+    /** Named as the person who made the recording, on their role. */
+    recorder: boolean;
+}
+
 export interface LearnMarks {
     /** Proposed names, by speaker key. */
-    speakers: Record<string, { itemId: string; name: string; ticked: boolean }>;
+    speakers: Record<string, LearnSpeakerMark>;
     corrections: LearnCorrectionMark[];
-    decide: (itemId: string, decision: "accepted" | "rejected") => void;
+    /** Keep a draft decision, with a choice where the kind takes one. */
+    decide: (
+        itemId: string,
+        decision: "accepted" | "rejected",
+        choice?: Record<string, unknown> | null,
+    ) => Promise<void>;
+    /**
+     * Hold the review's Finish until `work` settles: something done on its
+     * items outside the review (naming a speaker, then ticking it).
+     */
+    track: <T>(work: Promise<T>) => Promise<T>;
 }
 
 /** The part of the review answer the marks are made from. */
@@ -49,11 +84,16 @@ export interface LearnMarksSource {
 export function learnMarksFrom(
     state: LearnMarksSource | null,
     decide: LearnMarks["decide"],
+    track: LearnMarks["track"] = (work) => work,
 ): LearnMarks | null {
     if (state?.run?.status !== "ready") return null;
     // A person or thing the review proposes to add, by its ref: the name
     // the reviewer left it, or the record they said it is.
     const recordNames = new Map<string, string | undefined>();
+    const recordItems = new Map<
+        string,
+        { id: string; personId: string | null }
+    >();
     for (const item of state.items) {
         if (item.kind !== "new_record") continue;
         const payload = item.payload as { ref: string; name: string };
@@ -64,6 +104,11 @@ export function learnMarksFrom(
                 : typeof choice?.entityId === "string"
                   ? choice.entityId
                   : null;
+        recordItems.set(payload.ref, {
+            id: item.id,
+            personId:
+                typeof choice?.personId === "string" ? choice.personId : null,
+        });
         recordNames.set(
             payload.ref,
             linked
@@ -84,6 +129,9 @@ export function learnMarksFrom(
                 label: string;
                 personId: string | null;
                 newRef?: string;
+                evidenceMs?: number[];
+                onlyFirstName?: boolean;
+                recorder?: boolean;
             };
             // As the reviewer chose (someone known, or someone new), else
             // as Learn proposed; answered unknown, nobody is shown.
@@ -100,10 +148,33 @@ export function learnMarksFrom(
                           ? recordNames.get(payload.newRef)
                           : undefined;
             if (!name) continue;
-            speakers[speakerKey(payload.label)] = {
+            const record = payload.newRef
+                ? recordItems.get(payload.newRef)
+                : undefined;
+            const answer: SpeakerGuessAnswer =
+                typeof choice?.personId === "string"
+                    ? { personId: choice.personId }
+                    : typeof choice?.displayName === "string"
+                      ? { displayName: choice.displayName }
+                      : payload.personId
+                        ? { personId: payload.personId }
+                        : record?.personId
+                          ? { personId: record.personId }
+                          : {
+                                displayName: name,
+                                ...(record ? { recordItemId: record.id } : {}),
+                            };
+            const label = speakerKey(payload.label);
+            speakers[label] = {
                 itemId: item.id,
+                label,
                 name,
                 ticked,
+                declined: item.decision === "rejected",
+                answer,
+                evidenceMs: payload.evidenceMs ?? [],
+                onlyFirstName: payload.onlyFirstName === true,
+                recorder: payload.recorder === true,
             };
         } else if (item.kind === "correction") {
             const payload = item.payload as {
@@ -141,7 +212,7 @@ export function learnMarksFrom(
             }
         }
     }
-    return { speakers, corrections, decide };
+    return { speakers, corrections, decide, track };
 }
 
 /**

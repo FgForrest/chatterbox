@@ -7,12 +7,16 @@
  */
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
+    renderHook,
     screen,
     waitFor,
 } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
+import { IntlProvider } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -59,6 +63,9 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
+import { defaultLocale } from "@/lib/i18n/config";
+import { messagesForLocale } from "@/lib/i18n/messages";
 import type { Recording } from "@/types/recording";
 
 const RECORDING: Recording = {
@@ -355,5 +362,49 @@ describe("transcript topics", () => {
             ).toHaveProperty("disabled", false),
         );
         expect(screen.queryByRole("button", { name: /Topics \(/ })).toBeNull();
+    });
+
+    it("shows the saved topics when a re-check finds nothing running", async () => {
+        const redone = [{ title: "Kontrola", fromMs: 0, toMs: 300_000 }];
+        fetchMock.mockImplementation(
+            async (_url: string, init?: RequestInit) =>
+                init?.method === "POST"
+                    ? json({ topics: TOPICS })
+                    : json({ topics: redone, jobId: null }),
+        );
+        const hook = renderHook(
+            ({ revision }) =>
+                useTranscriptTopics(
+                    "rec-1",
+                    "plaud",
+                    null,
+                    true,
+                    undefined,
+                    revision,
+                ),
+            {
+                initialProps: { revision: 0 },
+                wrapper: ({ children }: PropsWithChildren) => (
+                    <IntlProvider
+                        locale={defaultLocale}
+                        messages={messagesForLocale(defaultLocale)}
+                    >
+                        {children}
+                    </IntlProvider>
+                ),
+            },
+        );
+        // The check on mount has answered before the click.
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+        });
+        await act(async () => {
+            await hook.result.current.detect();
+        });
+        expect(hook.result.current.topics).toEqual(TOPICS);
+
+        hook.rerender({ revision: 1 });
+
+        await waitFor(() => expect(hook.result.current.topics).toEqual(redone));
     });
 });
