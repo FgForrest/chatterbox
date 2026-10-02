@@ -287,6 +287,7 @@ describeWithDatabase("transcript corrections (PostgreSQL)", () => {
                 targetEntityId: null,
                 replacement: "Novotný",
                 preTicked: false,
+                passId: null,
             },
         ]);
         const [row] = await db()

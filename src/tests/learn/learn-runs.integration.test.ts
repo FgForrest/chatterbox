@@ -2103,9 +2103,13 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     actionItems: [],
                 });
                 await generateSummaryForRecording(OWNER, REC);
-                await db()
-                    .insert(userSettings)
-                    .values({ userId: OWNER, autoSummarize: true });
+                // No correction pass: it would refresh the summary itself,
+                // once it ends.
+                await db().insert(userSettings).values({
+                    userId: OWNER,
+                    autoSummarize: true,
+                    correctAfterLearn: false,
+                });
                 // Unticked after all, and finished: nothing applied.
                 await route(patchItemRoute, OWNER, `review/items/${id}`, {
                     method: "PATCH",

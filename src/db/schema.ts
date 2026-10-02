@@ -1417,12 +1417,14 @@ export const transcriptCorrections = pgTable(
         // `domainLookupHash("correction-heard", heard)`.
         heardHmac: varchar("heard_hmac", { length: 64 }).notNull(),
         // `correct` replaces what was heard; `link` keeps it as spoken
-        // (a nickname, slang) and points at who or what it means.
+        // (a nickname, slang) and points at who or what it means; `fix` is
+        // the correction pass's: what was heard put right, of a record or
+        // of any misheard words, never teaching how a name is heard.
         kind: varchar("kind", { length: 8 })
-            .$type<"correct" | "link">()
+            .$type<"correct" | "link" | "fix">()
             .notNull(),
-        // A person or an entity (CHECK). Erasing either deletes the
-        // corrections targeting them.
+        // A person or an entity (CHECK); none on a `fix` of plain words.
+        // Erasing either deletes the corrections targeting them.
         targetPersonId: text("target_person_id").references(() => people.id, {
             onDelete: "cascade",
         }),
@@ -1435,6 +1437,11 @@ export const transcriptCorrections = pgTable(
         replacement: text("replacement"),
         // Accepted by default in a review not yet finished.
         preTicked: boolean("pre_ticked").notNull().default(false),
+        // The correction pass that made a `fix`.
+        passId: text("pass_id").references(
+            (): AnyPgColumn => transcriptCorrectionPasses.id,
+            { onDelete: "set null" },
+        ),
         createdByUserId: text("created_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
@@ -1445,6 +1452,7 @@ export const transcriptCorrections = pgTable(
         transcriptIdx: index("transcript_corrections_transcription_id_idx").on(
             table.transcriptionId,
         ),
+        passIdx: index("transcript_corrections_pass_id_idx").on(table.passId),
         userIdIdx: index("transcript_corrections_user_id_idx").on(table.userId),
         targetPersonIdx: index(
             "transcript_corrections_target_person_id_idx",
@@ -1454,15 +1462,15 @@ export const transcriptCorrections = pgTable(
         ).on(table.targetEntityId),
         oneTarget: check(
             "transcript_corrections_one_target_check",
-            sql`num_nonnulls(${table.targetPersonId}, ${table.targetEntityId}) = 1`,
+            sql`num_nonnulls(${table.targetPersonId}, ${table.targetEntityId}) = 1 or (${table.kind} = 'fix' and ${table.targetPersonId} is null and ${table.targetEntityId} is null)`,
         ),
         replacementForCorrect: check(
             "transcript_corrections_replacement_check",
-            sql`(${table.kind} = 'correct') = (${table.replacement} is not null)`,
+            sql`(${table.kind} in ('correct', 'fix')) = (${table.replacement} is not null)`,
         ),
         kindCheck: check(
             "transcript_corrections_kind_check",
-            sql`${table.kind} in ('correct', 'link')`,
+            sql`${table.kind} in ('correct', 'link', 'fix')`,
         ),
         spanCheck: check(
             "transcript_corrections_span_check",
@@ -1801,6 +1809,95 @@ export const learnRuns = pgTable(
         ),
         viewCheck: check(
             "learn_runs_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+    }),
+);
+
+// A correction pass: after a Learn run finished, the Learn model reads the
+// whole transcript again with the Almanac and puts misheard words right
+// (`transcript_corrections` of kind `fix`). Its token for Riffado's tools
+// names this row, valid while it runs.
+export const transcriptCorrectionPasses = pgTable(
+    "transcript_correction_passes",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The transcript's owner.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // Whose corrections it writes: the owner's, or the Organization's.
+        scopeUserId: text("scope_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        transcriptionId: text("transcription_id")
+            .notNull()
+            .references(() => transcriptions.id, { onDelete: "cascade" }),
+        transcriptRevision: integer("transcript_revision").notNull(),
+        // The Learn run whose end started it.
+        learnRunId: text("learn_run_id").references(() => learnRuns.id, {
+            onDelete: "set null",
+        }),
+        view: varchar("view", { length: 16 })
+            .$type<"private" | "org">()
+            .notNull(),
+        // Who pays: the owner, or the organization account.
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        status: varchar("status", { length: 16 })
+            .$type<
+                | "queued"
+                | "running"
+                | "finished"
+                | "failed"
+                | "superseded"
+                | "cancelled"
+            >()
+            .notNull()
+            .default("queued"),
+        path: varchar("path", { length: 16 }).$type<"bridge" | "fallback">(),
+        provider: varchar("provider", { length: 100 }),
+        model: varchar("model", { length: 100 }),
+        jobId: text("job_id"),
+        // Counts only (fixes written, drops per reason, tool calls).
+        stats: jsonb("stats").$type<Record<string, number>>(),
+        errorCode: varchar("error_code", { length: 64 }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        startedAt: timestamp("started_at"),
+        finishedAt: timestamp("finished_at"),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        recordingIdx: index("transcript_correction_passes_recording_id_idx").on(
+            table.recordingId,
+        ),
+        transcriptionIdx: index(
+            "transcript_correction_passes_transcription_id_idx",
+        ).on(table.transcriptionId),
+        userIdx: index("transcript_correction_passes_user_id_idx").on(
+            table.userId,
+        ),
+        scopeIdx: index("transcript_correction_passes_scope_user_id_idx").on(
+            table.scopeUserId,
+        ),
+        actorIdx: index("transcript_correction_passes_actor_user_id_idx").on(
+            table.actorUserId,
+        ),
+        learnRunIdx: index("transcript_correction_passes_learn_run_id_idx").on(
+            table.learnRunId,
+        ),
+        statusCheck: check(
+            "transcript_correction_passes_status_check",
+            sql`${table.status} in ('queued', 'running', 'finished', 'failed', 'superseded', 'cancelled')`,
+        ),
+        viewCheck: check(
+            "transcript_correction_passes_view_check",
             sql`${table.view} in ('private', 'org')`,
         ),
     }),
@@ -2252,6 +2349,9 @@ export const userSettings = pgTable("user_settings", {
     // Automatic Learn after a transcript with timings (offered wherever
     // Learn runs); the title, summary and topics wait for its review.
     autoLearn: boolean("auto_learn").notNull().default(false),
+    // After a Learn run finished, the Learn model reads the whole transcript
+    // again with the Almanac and corrects misheard words.
+    correctAfterLearn: boolean("correct_after_learn").notNull().default(true),
     topicPrompt: jsonb("topic_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // AI output language (applies to summaries, AI-generated titles and topics).
     // null or "auto" => match transcript language (default behavior).

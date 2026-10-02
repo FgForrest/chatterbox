@@ -17,7 +17,13 @@ import {
     it,
     vi,
 } from "vitest";
-import { learnRuns, recordings, transcriptions, users } from "@/db/schema";
+import {
+    learnRuns,
+    recordings,
+    transcriptCorrectionPasses,
+    transcriptions,
+    users,
+} from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -76,7 +82,10 @@ import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { MCP_MAX_BODY_BYTES, MCP_TOOL_BUDGET } from "@/lib/learn/mcp";
-import { issueLearnRunToken } from "@/lib/learn/run-token";
+import {
+    issueCorrectionPassToken,
+    issueLearnRunToken,
+} from "@/lib/learn/run-token";
 import { ensureOrgAccount } from "@/lib/org/account";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -319,5 +328,55 @@ describeWithDatabase("the Learn MCP endpoint (PostgreSQL)", () => {
         await expect(refused.json()).resolves.toMatchObject({
             result: { isError: true },
         });
+    });
+
+    it("opens to a running correction pass's token, counting its own lookups", async () => {
+        const [transcript] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(eq(transcriptions.recordingId, REC));
+        const [pass] = await db()
+            .insert(transcriptCorrectionPasses)
+            .values({
+                userId: ALICE,
+                scopeUserId: ALICE,
+                recordingId: REC,
+                transcriptionId: transcript?.id ?? "",
+                transcriptRevision: 0,
+                view: "private",
+                actorUserId: ALICE,
+                status: "running",
+            })
+            .returning({ id: transcriptCorrectionPasses.id });
+        const passToken = issueCorrectionPassToken(pass?.id ?? "");
+        const lookup = {
+            jsonrpc: "2.0",
+            id: 7,
+            method: "tools/call",
+            params: { name: "get_entity", arguments: { id: orion } },
+        };
+        const answered = await mcp(lookup, passToken);
+        expect(answered.status).toBe(200);
+        await expect(payloadOf(answered)).resolves.toMatchObject({
+            name: "Orion",
+        });
+        const [counted] = await db()
+            .select({ stats: transcriptCorrectionPasses.stats })
+            .from(transcriptCorrectionPasses)
+            .where(eq(transcriptCorrectionPasses.id, pass?.id ?? ""));
+        expect(counted?.stats).toEqual({ tool_calls: 1 });
+        // A pass's token is not a run's, nor the other way round.
+        expect(
+            (await mcp(lookup, issueLearnRunToken(pass?.id ?? ""))).status,
+        ).toBe(401);
+        expect(
+            (await mcp(lookup, issueCorrectionPassToken(runId))).status,
+        ).toBe(401);
+
+        await db()
+            .update(transcriptCorrectionPasses)
+            .set({ status: "finished" })
+            .where(eq(transcriptCorrectionPasses.id, pass?.id ?? ""));
+        expect((await mcp(lookup, passToken)).status).toBe(401);
     });
 });

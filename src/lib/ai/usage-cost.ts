@@ -8,6 +8,7 @@ export type AiOperation =
     | "summary"
     | "topics"
     | "learn"
+    | "correction"
     | "title";
 
 export interface AiUsageContext {

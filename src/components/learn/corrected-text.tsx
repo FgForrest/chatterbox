@@ -6,7 +6,8 @@ import type { RenderedSegment } from "@/lib/learn/render";
 
 /**
  * A turn's text as people read it: replacements applied (what was heard on
- * hover), a link kept as spoken (what it means on hover). Whoever may
+ * hover; the correction pass's in their own colour), a link kept as spoken
+ * (what it means on hover). Whoever may
  * change the recording undoes a correction in two steps: the words, then
  * "Undo".
  */
@@ -29,14 +30,18 @@ export function CorrectedText({
                 <Fragment key={index}>{segment.text}</Fragment>
             );
         }
-        const title =
-            correction.kind === "link"
-                ? correction.meaning
-                : i18n("Heard as {heard}", { heard: correction.heard });
-        const style =
-            correction.kind === "link"
-                ? "underline decoration-sky-500/70 decoration-dotted underline-offset-4"
-                : "underline decoration-emerald-500/70 decoration-dotted underline-offset-4";
+        let title = i18n("Heard as {heard}", { heard: correction.heard });
+        let colour = "decoration-emerald-500/70";
+        if (correction.kind === "link") {
+            title = correction.meaning;
+            colour = "decoration-sky-500/70";
+        } else if (correction.kind === "fix") {
+            title = i18n("Corrected automatically. Heard as {heard}", {
+                heard: correction.heard,
+            });
+            colour = "decoration-amber-500/70";
+        }
+        const style = `underline ${colour} decoration-dotted underline-offset-4`;
         if (!onUndo || !correction.id) {
             return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: stable order

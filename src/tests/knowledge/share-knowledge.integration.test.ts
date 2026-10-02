@@ -948,6 +948,36 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         ).toHaveLength(1);
     });
 
+    it("shares the correction pass's fixes, with no record to name or one that stays private", async () => {
+        const fix = (heard: string, target: { entityId: string } | null) =>
+            db()
+                .insert(transcriptCorrections)
+                .values({
+                    userId: OWNER,
+                    transcriptionId: transcriptId,
+                    transcriptRevision: 0,
+                    ...at(heard),
+                    heard: encryptText(heard),
+                    heardHmac: "h",
+                    kind: "fix",
+                    targetPersonId: null,
+                    targetEntityId: target?.entityId ?? null,
+                    replacement: encryptText(`${heard}!`),
+                })
+                .returning({ id: transcriptCorrections.id })
+                .then((rows) => rows[0]?.id ?? "");
+        const plain = await fix("zítra", null);
+        const named = await fix("Orion", { entityId: orion });
+        await share();
+        expect(await scopeOf(plain)).toBe(orgUserId);
+        expect(await scopeOf(named)).toBe(orgUserId);
+        const [shared] = await db()
+            .select({ entityId: transcriptCorrections.targetEntityId })
+            .from(transcriptCorrections)
+            .where(eq(transcriptCorrections.id, named));
+        expect(shared?.entityId).not.toBeNull();
+    });
+
     it("exports, for the owner, the Organization's corrections on their shared recording and whom they name", async () => {
         await correct("Novák", { personId: jan }, OWNER, "Novotný");
         await share();

@@ -13,10 +13,8 @@
  */
 
 import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
-import { OpenAI } from "openai";
 import { db } from "@/db";
 import {
-    apiCredentials,
     knowledgeAliases,
     knowledgeScopeGenerations,
     knowledgeVocabularyVersion,
@@ -29,17 +27,10 @@ import {
     transcriptSpeakers,
     users,
 } from "@/db/schema";
-import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
-import {
-    enhancementChatModel,
-    pickLearnCredential,
-} from "@/lib/ai/enhancement-provider";
-import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { retryWithBackoff } from "@/lib/jobs/backoff";
+import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { listCorrections } from "@/lib/knowledge/corrections";
@@ -51,6 +42,8 @@ import { findPersonByEmail } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
+import { learnChatClients } from "@/lib/learn/chat-clients";
+import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { isFinalLearnError } from "@/lib/learn/errors";
 import {
     LEARN_JOB_KIND,
@@ -60,9 +53,8 @@ import {
 } from "@/lib/learn/learn-job";
 import type { LearnObject } from "@/lib/learn/output";
 import { chooseLearnPath } from "@/lib/learn/provider";
-import { type LearnBridgeChat, runBridgePass } from "@/lib/learn/run-bridge";
+import { runBridgePass } from "@/lib/learn/run-bridge";
 import {
-    type LearnChat,
     type LearnEntityTypeChoice,
     type LearnRelationChoice,
     runFallbackPass,
@@ -90,9 +82,6 @@ const FINGERPRINT_DOMAIN = "learn-fingerprint";
  * adjudicated knowing nothing.
  */
 const TOOL_BUDGET = 480;
-const CALL_RETRY_ATTEMPTS = 3;
-/** A Learn call through the bridge, tools and all; the job allows 20 min. */
-const BRIDGE_CALL_TIMEOUT_MS = 18 * 60 * 1000;
 /**
  * How often a run validates again when what it validated against changed
  * before the items were written; the last time, it writes without
@@ -144,133 +133,16 @@ async function setStatus(
         .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")));
 }
 
-/**
- * The actor's chat provider, as the Learn pass talks to it: the one marked
- * for Learn, else the enhancement default.
- */
-async function chatFor(
-    run: RunRow,
-    signal: AbortSignal,
-): Promise<{
-    chat: LearnChat;
-    bridge: LearnBridgeChat;
-    provider: string;
-    baseUrl: string | null;
-    model: string;
-}> {
-    const actorUserId = run.actorUserId ?? "";
-    const configured = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, actorUserId));
-    const credentials = pickLearnCredential(configured);
-    if (!credentials) {
-        throw new AppError(
-            ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
-            "No AI provider configured",
-            400,
-        );
-    }
-    const openai = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
-        baseURL: credentials.baseUrl || undefined,
+/** The actor's chat provider, as the Learn pass talks to it. */
+function chatFor(run: RunRow, signal: AbortSignal) {
+    return learnChatClients({
+        actorUserId: run.actorUserId ?? "",
+        recordingId: run.recordingId,
+        ownerUserId: run.userId,
+        operation: "learn",
+        schemaName: "learn_output",
+        signal,
     });
-    const model = enhancementChatModel(credentials);
-    const bridgeClient = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
-        baseURL: credentials.baseUrl || undefined,
-        maxRetries: 0,
-        timeout: BRIDGE_CALL_TIMEOUT_MS,
-    });
-    return {
-        provider: credentials.provider,
-        baseUrl: credentials.baseUrl,
-        model,
-        // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
-        // the answer's JSON Schema, and this run's token for Riffado's
-        // tools. Unknown fields travel in the body as they are.
-        // One attempt: a CLI session with tools spends the run's lookups,
-        // and a second one would answer knowing nothing. The job's own
-        // retry starts over with a fresh run budget instead. Long enough
-        // for a CLI that looks things up (the bridge's BRIDGE_TIMEOUT_MS
-        // bounds it on the other side).
-        bridge: {
-            complete: async ({ system, user, schema, mcp, maxTokens }) => {
-                signal.throwIfAborted();
-                const response = await bridgeClient.chat.completions.create(
-                    {
-                        ...buildChatCompletionParams({
-                            model,
-                            messages: [
-                                { role: "system", content: system },
-                                { role: "user", content: user },
-                            ],
-                            temperature: 0.1,
-                            maxTokens,
-                        }),
-                        response_format: {
-                            type: "json_schema",
-                            json_schema: { name: "learn_output", schema },
-                        },
-                        ...(mcp ? { riffado_mcp: mcp } : {}),
-                    } as Parameters<
-                        typeof openai.chat.completions.create
-                    >[0] & { stream?: false },
-                    { signal },
-                );
-                await recordChatCompletionUsage(
-                    {
-                        recordingId: run.recordingId,
-                        ownerUserId: run.userId,
-                        payerUserId: actorUserId,
-                        operation: "learn",
-                        provider: credentials.provider,
-                        model,
-                        baseUrl: credentials.baseUrl,
-                    },
-                    response,
-                );
-                return response.choices[0]?.message?.content?.trim() || "";
-            },
-        },
-        chat: {
-            complete: (messages, maxTokens) =>
-                retryWithBackoff({
-                    attempts: CALL_RETRY_ATTEMPTS,
-                    baseMs: 1_500,
-                    maxMs: 15_000,
-                    jitter: 0.5,
-                    isRetryable: isRetryableError,
-                    run: async () => {
-                        signal.throwIfAborted();
-                        const response = await openai.chat.completions.create(
-                            buildChatCompletionParams({
-                                model,
-                                messages,
-                                temperature: 0.1,
-                                maxTokens,
-                            }),
-                            { signal },
-                        );
-                        await recordChatCompletionUsage(
-                            {
-                                recordingId: run.recordingId,
-                                ownerUserId: run.userId,
-                                payerUserId: actorUserId,
-                                operation: "learn",
-                                provider: credentials.provider,
-                                model,
-                                baseUrl: credentials.baseUrl,
-                            },
-                            response,
-                        );
-                        return (
-                            response.choices[0]?.message?.content?.trim() || ""
-                        );
-                    },
-                }),
-        },
-    };
 }
 
 /**
@@ -278,8 +150,8 @@ async function chatFor(
  * writer rule, and the view the run was started in. `orgUserId` is
  * resolved by the caller, outside any transaction (`sharingOrgUserId`).
  */
-async function mayStillRun(
-    run: RunRow,
+export async function mayStillRun(
+    run: Pick<RunRow, "actorUserId" | "recordingId" | "userId" | "view">,
     orgUserId: string | null,
     executor?: Parameters<typeof contentWriterRefusal>[0],
 ): Promise<boolean> {
@@ -929,9 +801,14 @@ async function runLearnJob({
                         ? ("ready" as const)
                         : ("finished" as const);
                 await finish(status);
-                return { status, items: items.length };
+                // Nothing to review: the transcript is read again now.
+                const correcting =
+                    status === "finished" &&
+                    (await queueCorrectionPassInTx(tx, run));
+                return { status, items: items.length, correcting };
             });
             if (outcome.status === "stale") continue;
+            if ("correcting" in outcome && outcome.correcting) nudge();
             return { status: outcome.status, items: outcome.items };
         }
     } catch (caught) {

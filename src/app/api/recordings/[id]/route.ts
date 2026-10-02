@@ -401,6 +401,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                         "learn.run",
                         "title.generate",
                         "learn.release",
+                        "learn.correct",
                     ]),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
