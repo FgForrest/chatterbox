@@ -10,7 +10,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { learnRuns } from "@/db/schema";
+import { learnRuns, transcriptCorrectionPasses } from "@/db/schema";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import {
@@ -29,6 +29,8 @@ const PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpRun {
     id: string;
+    /** A Learn run's, or a correction pass's: where its lookups count. */
+    kind?: "learn" | "correction";
     userId: string;
     view: "private" | "org";
     /** Its transcript's language, which names are matched in. */
@@ -82,7 +84,9 @@ export function readMcpBody(
 }
 
 /** Spend one lookup of the run's, atomically; false when none is left. */
-async function spendLookup(runId: string): Promise<boolean> {
+async function spendLookup(run: McpRun): Promise<boolean> {
+    if (run.kind === "correction") return spendPassLookup(run.id);
+    const runId = run.id;
     const spent = await db
         .update(learnRuns)
         .set({
@@ -97,6 +101,26 @@ async function spendLookup(runId: string): Promise<boolean> {
             ),
         )
         .returning({ id: learnRuns.id });
+    return spent.length > 0;
+}
+
+/** `spendLookup` for a correction pass, on its own row. */
+async function spendPassLookup(passId: string): Promise<boolean> {
+    const passes = transcriptCorrectionPasses;
+    const spent = await db
+        .update(passes)
+        .set({
+            stats: sql`coalesce(${passes.stats}, '{}'::jsonb) || jsonb_build_object('tool_calls', coalesce((${passes.stats}->>'tool_calls')::int, 0) + 1)`,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(passes.id, passId),
+                eq(passes.status, "running"),
+                sql`coalesce((${passes.stats}->>'tool_calls')::int, 0) < ${MCP_TOOL_BUDGET}`,
+            ),
+        )
+        .returning({ id: passes.id });
     return spent.length > 0;
 }
 
@@ -168,7 +192,7 @@ export async function handleLearnMcp(
             const needed = name === "find_entities" ? "text" : "id";
             const value = stringArg(args, needed);
             if (!value) return fail(-32602, `Missing or invalid "${needed}"`);
-            if (!(await spendLookup(run.id))) {
+            if (!(await spendLookup(run))) {
                 return answer(
                     text({ error: "This run has used all its lookups" }, true),
                 );

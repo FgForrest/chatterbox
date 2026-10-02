@@ -302,7 +302,7 @@ export function turnPieces(
             const { correction } = item;
             pieces.push({
                 text:
-                    correction.kind === "correct" &&
+                    correction.kind !== "link" &&
                     correction.replacement !== null
                         ? correction.replacement
                         : correction.heard,

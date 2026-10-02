@@ -112,6 +112,7 @@ export function TranscriptionSection({
     const titlePresetCopy = useTitlePresetCopy();
     const [autoDetectTopics, setAutoDetectTopics] = useState(false);
     const [autoLearn, setAutoLearn] = useState(false);
+    const [correctAfterLearn, setCorrectAfterLearn] = useState(true);
     const [autoLearnOffered, setAutoLearnOffered] = useState(false);
     // Starting state for the topic <TemplateList>, as for titles.
     const [topicTemplates, setTopicTemplates] = useState(() =>
@@ -144,6 +145,7 @@ export function TranscriptionSection({
                     );
                     setAutoDetectTopics(data.autoDetectTopics ?? false);
                     setAutoLearn(data.autoLearn ?? false);
+                    setCorrectAfterLearn(data.correctAfterLearn ?? true);
                     setAutoLearnOffered(data.autoLearnOffered === true);
                     setTopicTemplates(
                         normalizeTopicPromptConfig(data.topicPrompt),
@@ -201,6 +203,24 @@ export function TranscriptionSection({
             }
         } catch {
             setAutoDetectTopics(previous);
+            toast.error(i18n("Failed to save settings. Changes reverted."));
+        }
+    };
+
+    const handleCorrectAfterLearnChange = async (checked: boolean) => {
+        const previous = correctAfterLearn;
+        setCorrectAfterLearn(checked);
+        try {
+            const response = await fetch("/api/settings/user", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ correctAfterLearn: checked }),
+            });
+            if (!response.ok) {
+                throw new Error("Failed to save settings");
+            }
+        } catch {
+            setCorrectAfterLearn(previous);
             toast.error(i18n("Failed to save settings. Changes reverted."));
         }
     };
@@ -399,6 +419,29 @@ export function TranscriptionSection({
                                 checked={autoLearn}
                                 onCheckedChange={(checked) =>
                                     void handleAutoLearnChange(checked)
+                                }
+                                disabled={isSavingSettings}
+                            />
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <div className="space-y-0.5 flex-1">
+                                <Label
+                                    htmlFor="correct-after-learn"
+                                    className="text-base"
+                                >
+                                    {i18n("Correct the transcript after Learn")}
+                                </Label>
+                                <p className="text-sm text-muted-foreground">
+                                    {i18n(
+                                        "When a Learn review is finished, or Learn found nothing to review, the Learn model reads the whole transcript again with the Almanac and corrects misheard words. Each correction is underlined and can be undone.",
+                                    )}
+                                </p>
+                            </div>
+                            <Switch
+                                id="correct-after-learn"
+                                checked={correctAfterLearn}
+                                onCheckedChange={(checked) =>
+                                    void handleCorrectAfterLearnChange(checked)
                                 }
                                 disabled={isSavingSettings}
                             />

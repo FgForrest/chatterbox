@@ -253,11 +253,12 @@ export async function eraseLocalArtifact(
                     "learn.run",
                     "title.generate",
                     "learn.release",
+                    "learn.correct",
                 ],
                 now,
             );
-            // A Learn run on the Organization view reads the same
-            // transcript, whoever started it.
+            // A Learn run or correction pass on the Organization view
+            // reads the same transcript, whoever started it.
             await tx
                 .update(asyncJobs)
                 .set({
@@ -276,7 +277,7 @@ export async function eraseLocalArtifact(
                             asyncJobs.subjectId,
                             recordingJobSubject(recordingId, "org"),
                         ),
-                        eq(asyncJobs.kind, "learn.run"),
+                        inArray(asyncJobs.kind, ["learn.run", "learn.correct"]),
                         inArray(asyncJobs.status, ["pending", "processing"]),
                     ),
                 );

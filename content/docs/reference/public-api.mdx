@@ -212,7 +212,9 @@ transcript without stored turns (it then has no corrections either); a
 turn's `speaker` is the provider's label, never a name. A `correct`
 correction replaces the words with `replacement`; a `link` keeps them as
 spoken (a nickname, slang) and `meaning` names who or what they refer
-to.
+to. A `fix` replaces the words with `replacement` too: the automatic
+correction pass made it, and `meaning` is the record it names or else the
+replacement.
 
 Returns `404 NOT_FOUND` if the recording exists but no transcription
 has been produced for it yet. Listen for `transcription.completed`

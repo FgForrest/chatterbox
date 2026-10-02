@@ -89,7 +89,10 @@ async function transcriptShared(
 /** Long enough for any name or term, short enough to keep it one. */
 const MAX_REPLACEMENT_LENGTH = 200;
 
-export type CorrectionKind = "correct" | "link";
+export type CorrectionKind = "correct" | "link" | "fix";
+
+/** What a person accepts; `fix` is the correction pass's alone. */
+export type AcceptedCorrectionKind = Exclude<CorrectionKind, "fix">;
 
 export interface Correction {
     id: string;
@@ -99,12 +102,14 @@ export interface Correction {
     charEnd: number;
     heard: string;
     kind: CorrectionKind;
-    /** One of the two is set. */
+    /** One of the two is set, except on a `fix` of plain words. */
     targetPersonId: string | null;
     targetEntityId: string | null;
     /** Null on a link, which shows the target's current name. */
     replacement: string | null;
     preTicked: boolean;
+    /** The correction pass that made it (a `fix`). */
+    passId: string | null;
 }
 
 interface Writer {
@@ -119,7 +124,7 @@ interface Writer {
 
 export interface AcceptCorrectionArgs extends TranscriptVersion, Writer {
     anchor: CorrectionAnchor;
-    kind: CorrectionKind;
+    kind: AcceptedCorrectionKind;
     target: KnowledgeTarget;
     /** Required for `correct`, ignored for `link`. */
     replacement?: string | null;
@@ -136,7 +141,7 @@ function invalid(message: string, field: string): AppError {
 }
 
 function cleanReplacement(
-    kind: CorrectionKind,
+    kind: AcceptedCorrectionKind,
     replacement: string | null | undefined,
     heard: string,
 ): string | null {
@@ -320,6 +325,7 @@ export async function listCorrections(
             targetEntityId: transcriptCorrections.targetEntityId,
             replacement: transcriptCorrections.replacement,
             preTicked: transcriptCorrections.preTicked,
+            passId: transcriptCorrections.passId,
         })
         .from(transcriptCorrections)
         .innerJoin(
@@ -382,6 +388,7 @@ export async function listLibraryCorrections(
             targetEntityId: transcriptCorrections.targetEntityId,
             replacement: transcriptCorrections.replacement,
             preTicked: transcriptCorrections.preTicked,
+            passId: transcriptCorrections.passId,
         })
         .from(transcriptCorrections)
         .innerJoin(

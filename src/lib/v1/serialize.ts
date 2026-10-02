@@ -52,8 +52,11 @@ export type V1Correction = {
     char_start: number;
     char_end: number;
     heard: string;
-    /** `correct` replaces what was heard; `link` keeps it and says what it means. */
-    kind: "correct" | "link";
+    /**
+     * `correct` replaces what was heard; `link` keeps it and says what it
+     * means; `fix` is a replacement the automatic correction pass made.
+     */
+    kind: "correct" | "link" | "fix";
     replacement: string | null;
     /** The name of whom or what it refers to. */
     meaning: string;

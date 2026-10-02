@@ -134,10 +134,12 @@ export type LearnObject = z.infer<typeof object>;
  * strict schema does not take (the parse above still tolerates its lack).
  */
 export function learnOutputJsonSchema(): Record<string, unknown> {
-    return withoutDefaults(z.toJSONSchema(learnOutputSchema)) as Record<
-        string,
-        unknown
-    >;
+    return strictJsonSchema(learnOutputSchema);
+}
+
+/** A schema as the bridge's CLIs enforce it: no `default` anywhere. */
+export function strictJsonSchema(schema: z.ZodType): Record<string, unknown> {
+    return withoutDefaults(z.toJSONSchema(schema)) as Record<string, unknown>;
 }
 
 function withoutDefaults(value: unknown): unknown {
@@ -176,9 +178,19 @@ export type ParsedLearnOutput =
  * wrong, for a repair request (path 2) or the run's record.
  */
 export function parseLearnOutput(raw: string): ParsedLearnOutput {
+    return parseJsonAnswer(learnOutputSchema, raw);
+}
+
+/**
+ * A reply as `schema` reads it, or why not, as `parseLearnOutput` says it.
+ */
+export function parseJsonAnswer<T>(
+    schema: z.ZodType<T>,
+    raw: string,
+): { ok: true; output: T } | { ok: false; error: string } {
     const value = jsonIn(raw);
     if (value === undefined) return { ok: false, error: "not JSON" };
-    const parsed = learnOutputSchema.safeParse(value);
+    const parsed = schema.safeParse(value);
     if (parsed.success) return { ok: true, output: parsed.data };
     return {
         ok: false,

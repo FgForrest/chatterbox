@@ -39,6 +39,7 @@ import {
     encryptJsonField,
 } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { nudge } from "@/lib/jobs/nudge";
 import {
     addAliasInTx,
     type KnowledgeTarget,
@@ -72,6 +73,7 @@ import {
     vocabularyVisibleTo,
 } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
+import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns } from "@/lib/learn/learn-job";
 import {
     type RecordTarget,
@@ -671,6 +673,8 @@ export interface FinishedReview {
     dismissed: number;
     /** Ticked items not applied: a code, and the server's words (logs). */
     skipped: { itemId: string; code: SkipCode; reason: string }[];
+    /** A correction pass was queued to read the transcript again. */
+    correcting: boolean;
 }
 
 /**
@@ -706,7 +710,9 @@ export async function finishReview(
         versions,
         readScopes,
     );
-    // The last review done releases what automatic Learn held back.
+    if (finished.correcting) nudge();
+    // The last review done releases what automatic Learn held back, unless
+    // the correction pass it queued is still to run (that releases it).
     await releaseAutoLearnHold(access.recordingId);
     return finished;
 }
@@ -744,6 +750,7 @@ function finishInTx(
                 applied: 0,
                 dismissed: 0,
                 skipped: [],
+                correcting: false,
             };
         }
         const rows = await tx
@@ -1358,11 +1365,13 @@ function finishInTx(
         // Once, after every type the finish made (`createOwnTypeInTx`).
         if (typesCreated) await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
+        const correcting = await queueCorrectionPassInTx(tx, run);
         return {
             status: "finished",
             applied,
             dismissed: rejected.length,
             skipped,
+            correcting,
         };
     });
 }
