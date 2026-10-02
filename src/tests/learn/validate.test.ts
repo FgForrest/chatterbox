@@ -275,6 +275,78 @@ describe("validateLearnOutput", () => {
             expect(dropped).toMatchObject({ ambiguousFirstName: 1 });
         });
 
+        it("names the person who made the recording on their role, without hearing their name", () => {
+            const { items } = validateLearnOutput(
+                output({
+                    speakers: [
+                        {
+                            label: "speaker_1",
+                            personId: "p-jan",
+                            evidence: ["00:41"],
+                            reason: "leads the meeting",
+                        },
+                    ],
+                }),
+                frame({ recorderPersonId: "p-jan" }),
+            );
+            expect(items).toEqual([
+                expect.objectContaining({
+                    kind: "speaker",
+                    preTicked: false,
+                    payload: expect.objectContaining({
+                        label: "speaker_1",
+                        personId: "p-jan",
+                        recorder: true,
+                    }),
+                }),
+            ]);
+            expect(
+                items[0]?.kind === "speaker" && items[0].payload.onlyFirstName,
+            ).toBeFalsy();
+        });
+
+        it("names the recorder on their role for one label only, and not once a label is theirs", () => {
+            const turns: TranscriptTurn[] = [
+                ...TURNS,
+                {
+                    speaker: "speaker_2",
+                    startMs: 60_000,
+                    endMs: 70_000,
+                    text: "Tak začneme.",
+                },
+            ];
+            const asRecorder = (label: string, evidence: string) => ({
+                label,
+                personId: "p-jan",
+                evidence: [evidence],
+                reason: "leads",
+            });
+            const twice = validateLearnOutput(
+                output({
+                    speakers: [
+                        asRecorder("speaker_1", "00:19"),
+                        asRecorder("speaker_2", "01:01"),
+                    ],
+                }),
+                frame({ turns, recorderPersonId: "p-jan" }),
+            );
+            expect(twice.items).toEqual([]);
+            expect(twice.dropped).toMatchObject({ conflicting: 2 });
+
+            const answered = validateLearnOutput(
+                output({ speakers: [asRecorder("speaker_2", "01:01")] }),
+                frame({
+                    turns,
+                    recorderPersonId: "p-jan",
+                    answeredLabels: new Map([
+                        ["speaker_0", "p-alice"],
+                        ["speaker_1", "p-jan"],
+                    ]),
+                }),
+            );
+            expect(answered.items).toEqual([]);
+        });
+
         it("joins a label's suggestions: a name beats not-identified, and names that disagree give nothing", () => {
             const { items, dropped } = validateLearnOutput(
                 output({
@@ -448,6 +520,60 @@ describe("validateLearnOutput", () => {
                     }),
                 }),
             ]);
+        });
+
+        it("takes every other place a thing's words stand alone, exactly as heard", () => {
+            const turns: TranscriptTurn[] = [
+                ...TURNS,
+                {
+                    speaker: "speaker_1",
+                    startMs: 60_000,
+                    endMs: 70_000,
+                    text: "Tavesy znovu, ne Tavesyho ani tavesy.",
+                },
+            ];
+            const { items } = validateLearnOutput(
+                output({ corrections: [correctTavesi(1)] }),
+                frame({ turns }),
+            );
+            expect(items).toHaveLength(1);
+            const anchors =
+                items[0]?.kind === "correction" ? items[0].payload.anchors : [];
+            // Turn 0 and the first word of turn 3 too, in order; neither an
+            // inflected form nor another case.
+            expect(anchors).toEqual([
+                { turnIndex: 0, charStart: 33, charEnd: 39 },
+                expect.objectContaining({ turnIndex: 1 }),
+                { turnIndex: 3, charStart: 0, charEnd: 6 },
+            ]);
+        });
+
+        it("takes no other place for a person, who may be a namesake", () => {
+            const turns: TranscriptTurn[] = [
+                ...TURNS,
+                {
+                    speaker: "speaker_1",
+                    startMs: 60_000,
+                    endMs: 70_000,
+                    text: "Díky Honzo.",
+                },
+            ];
+            const { items } = validateLearnOutput(
+                output({
+                    corrections: [
+                        {
+                            ...at(2, "Honzo"),
+                            kind: "link",
+                            target: { personId: "p-jan" },
+                            replacement: null,
+                        },
+                    ],
+                }),
+                frame({ turns }),
+            );
+            expect(
+                items[0]?.kind === "correction" && items[0].payload.anchors,
+            ).toHaveLength(1);
         });
 
         it("pre-ticks a correction of a non-person a person confirmed before, heard alike by the same provider in the same language", () => {

@@ -717,6 +717,15 @@ export function useTranscriptionSummary({
         return () => clearInterval(timer);
     }, [isSummarizing]);
 
+    /**
+     * Read the summary again, keeping what is shown until the answer
+     * replaces it: a job queued since (automatic Learn's release) is
+     * attached to, and a summary written since is shown.
+     */
+    const recheckSummary = useCallback(() => {
+        setSummaryFetchKey((k) => k + 1);
+    }, []);
+
     const refetchSummary = useCallback(() => {
         const id = recordingIdRef.current;
         const source = summarySourceRef.current;
@@ -741,5 +750,6 @@ export function useTranscriptionSummary({
         handleSummarize,
         handleDeleteSummary,
         refetchSummary,
+        recheckSummary,
     };
 }

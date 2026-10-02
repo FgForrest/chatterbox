@@ -27,6 +27,7 @@ import {
     transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
+    users,
 } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import {
@@ -46,6 +47,7 @@ import { nodeKey } from "@/lib/knowledge/fact-rules";
 import { objectKeyOf } from "@/lib/knowledge/facts";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
+import { findPersonByEmail } from "@/lib/knowledge/people";
 import { readableScopes } from "@/lib/knowledge/scope";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
@@ -437,6 +439,25 @@ async function heardFormsWritingName(
     return found;
 }
 
+/**
+ * The person who made the recording: the record in the run's scopes that
+ * carries the recording owner's account email. Null without one.
+ */
+async function recorderOf(
+    run: RunRow,
+    people: ReadonlyMap<string, { name: string }>,
+): Promise<{ personId: string; name: string } | null> {
+    const [owner] = await db
+        .select({ email: users.email })
+        .from(users)
+        .where(eq(users.id, run.userId))
+        .limit(1);
+    if (!owner?.email) return null;
+    const person = await findPersonByEmail(run.userId, owner.email);
+    const known = person ? people.get(person.id) : undefined;
+    return person && known ? { personId: person.id, name: known.name } : null;
+}
+
 /** Everything the validation needs to know of the run's scopes, frozen now. */
 async function frameFor(
     run: RunRow,
@@ -546,6 +567,7 @@ async function frameFor(
             { factId: fact.id, object: fact.object },
         );
     }
+    const recorder = await recorderOf(run, people);
     return {
         revision: run.transcriptRevision,
         currentRevision: transcript.revision,
@@ -571,6 +593,7 @@ async function frameFor(
                     row.markedUnknown ? null : row.personId,
                 ]),
         ),
+        recorderPersonId: recorder?.personId ?? null,
         confirmedHeardAs,
         knownFacts,
         foreignFacts,
@@ -738,6 +761,17 @@ async function runLearnJob({
         const unnamedLabels = labels.filter(
             (label) => !frameBefore.answeredLabels.has(label),
         );
+        // Who made the recording, unless a label already names them.
+        const recorderId = frameBefore.recorderPersonId;
+        const recorderName = recorderId
+            ? frameBefore.people.get(recorderId)?.name
+            : undefined;
+        const recorder =
+            recorderId &&
+            recorderName &&
+            ![...frameBefore.answeredLabels.values()].includes(recorderId)
+                ? { personId: recorderId, name: recorderName }
+                : null;
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"
@@ -749,6 +783,7 @@ async function runLearnJob({
                       relations,
                       entityTypes,
                       unnamedLabels,
+                      recorder,
                       signal,
                   })
                 : await runFallbackPass({
@@ -762,6 +797,7 @@ async function runLearnJob({
                       relations,
                       entityTypes,
                       unnamedLabels,
+                      recorder,
                       signal,
                   });
         reportProgress({ phase: "checking" });

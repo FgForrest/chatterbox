@@ -85,8 +85,14 @@ describe("Learn marks", () => {
         expect(marks?.speakers).toEqual({
             speaker_1: {
                 itemId: "i-speaker",
+                label: "speaker_1",
                 name: "Jan Novotný",
                 ticked: false,
+                declined: false,
+                answer: { personId: "p-jan" },
+                evidenceMs: [5_000],
+                onlyFirstName: false,
+                recorder: false,
             },
         });
         expect(
@@ -119,11 +125,12 @@ describe("Learn marks", () => {
             vi.fn(),
         );
         expect(marks?.speakers).toEqual({
-            speaker_1: {
+            speaker_1: expect.objectContaining({
                 itemId: "i-speaker",
                 name: "Jan Novotný",
                 ticked: false,
-            },
+                declined: true,
+            }),
         });
         expect(marks?.corrections).toEqual([
             expect.objectContaining({
@@ -169,8 +176,56 @@ describe("Learn marks", () => {
             vi.fn(),
         );
         expect(marks?.speakers).toEqual({
-            speaker_1: { itemId: "i-speaker", name: "Petr", ticked: true },
-            speaker_2: { itemId: "i-new", name: "Jana Nová", ticked: true },
+            speaker_1: expect.objectContaining({
+                itemId: "i-speaker",
+                name: "Petr",
+                ticked: true,
+                answer: { personId: "p-petr" },
+            }),
+            speaker_2: expect.objectContaining({
+                itemId: "i-new",
+                name: "Jana Nová",
+                ticked: true,
+                answer: { displayName: "Jana Nová" },
+            }),
+        });
+    });
+
+    it("name someone the review adds by the name it adds them under, with its record", () => {
+        const marks = learnMarksFrom(
+            {
+                ...STATE,
+                items: [
+                    item({
+                        id: "i-record",
+                        kind: "new_record",
+                        choice: { name: "Ondřej Novák", typeKey: null },
+                        payload: {
+                            ref: "n1",
+                            kind: "person",
+                            typeKey: null,
+                            name: "Ondra Novák",
+                        },
+                    }),
+                    item({
+                        id: "i-speaker",
+                        kind: "speaker",
+                        payload: {
+                            label: "speaker_3",
+                            personId: null,
+                            newRef: "n1",
+                            evidenceMs: [1_000],
+                            onlyFirstName: true,
+                        },
+                    }),
+                ],
+            },
+            vi.fn(),
+        );
+        expect(marks?.speakers.speaker_3).toMatchObject({
+            name: "Ondřej Novák",
+            answer: { displayName: "Ondřej Novák", recordItemId: "i-record" },
+            onlyFirstName: true,
         });
     });
 

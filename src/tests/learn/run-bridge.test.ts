@@ -68,6 +68,22 @@ describe("runBridgePass", () => {
         expect(result).toMatchObject({ calls: 1, repairs: 0, output: empty });
     });
 
+    it("says who made the recording, and how they may be named", async () => {
+        const { chat, requests } = fakeChat([JSON.stringify(empty)]);
+
+        await runBridgePass({
+            ...input(chat),
+            recorder: { personId: "p-jan", name: "Jan Novák" },
+        });
+
+        expect(requests[0]?.user).toContain(
+            '"recorder":{"personId":"p-jan","name":"Jan Novák"}',
+        );
+        expect(requests[0]?.system).toContain(
+            "the person who made the recording",
+        );
+    });
+
     it("anchors corrections where their words stand, whatever offsets the model gave", async () => {
         const { chat } = fakeChat([
             JSON.stringify({

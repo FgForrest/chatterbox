@@ -101,6 +101,7 @@ import {
     releaseAutoLearnHold,
     sweepAutoLearnHolds,
 } from "@/lib/learn/auto-learn";
+import { recordingFollowUps } from "@/lib/learn/follow-ups";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
@@ -319,6 +320,39 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
         await runRelease();
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
+    it("tells the page what waits and which of its jobs are still to finish", async () => {
+        await hold();
+        const ready = await run("ready");
+        expect(await recordingFollowUps(OWNER, REC)).toEqual({
+            held: true,
+            pending: [],
+        });
+
+        await setStatus(ready, "finished");
+        await releaseAutoLearnHold(REC);
+        expect(await recordingFollowUps(OWNER, REC)).toEqual({
+            held: false,
+            pending: ["learn.release"],
+        });
+
+        await runRelease();
+        expect(await recordingFollowUps(OWNER, REC)).toEqual({
+            held: false,
+            pending: ["summary", "title.generate", "topics"],
+        });
+
+        await db()
+            .update(asyncJobs)
+            .set({ status: "completed" })
+            .where(eq(asyncJobs.kind, "title.generate"));
+        expect((await recordingFollowUps(OWNER, REC))?.pending).toEqual([
+            "summary",
+            "topics",
+        ]);
+        // Someone else's recording is not found, whatever it waits for.
+        expect(await recordingFollowUps("someone-else", REC)).toBeNull();
     });
 
     it("releases when the run failed", async () => {

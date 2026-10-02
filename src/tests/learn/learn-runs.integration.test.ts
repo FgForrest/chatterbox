@@ -193,6 +193,7 @@ import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { acceptCorrection } from "@/lib/knowledge/corrections";
 import { createEntity, deleteEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { createPerson } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import {
     bumpVocabularyVersionInTx,
@@ -802,6 +803,69 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 decryptJsonField<{ anchors: unknown[] }>(item?.payload)
                     ?.anchors,
             ).toEqual([{ turnIndex: 0, charStart: 19, charEnd: 25 }]);
+        });
+
+        it("tells the model who made the recording, and names them on their role", async () => {
+            // Their own record, carrying the account's email.
+            const me = await createPerson({
+                userId: OWNER,
+                displayName: "Jan Novák",
+                primaryEmail: "O@example.test",
+            });
+            await db()
+                .update(transcriptions)
+                .set({
+                    turns: encryptJsonField([
+                        {
+                            speaker: "speaker_0",
+                            startMs: 0,
+                            endMs: 5_000,
+                            text: "Dobrý den, máme tu Tavesy.",
+                        },
+                        {
+                            speaker: "speaker_1",
+                            startMs: 5_000,
+                            endMs: 9_000,
+                            text: "Tak začneme.",
+                        },
+                    ]),
+                })
+                .where(eq(transcriptions.id, transcriptId));
+            const { runId } = (await (await learn(OWNER)).json()) as {
+                runId: string;
+            };
+            reply({ mentions: [] });
+            reply({
+                speakers: [
+                    {
+                        label: "speaker_1",
+                        personId: me.id,
+                        evidence: ["00:05"],
+                        reason: "Opens the meeting.",
+                    },
+                ],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            });
+
+            await expect(runJob(runId)).resolves.toMatchObject({
+                status: "ready",
+                items: 1,
+            });
+            const answer = createCompletion.mock.calls.at(-1)?.[0] as {
+                messages: { role: string; content: string }[];
+            };
+            expect(answer.messages[0]?.content).toContain("recorder");
+            expect(answer.messages[1]?.content).toContain(
+                JSON.stringify({ personId: me.id, name: "Jan Novák" }),
+            );
+            const [item] = await db().select().from(learnReviewItems);
+            expect(decryptJsonField(item?.payload)).toMatchObject({
+                label: "speaker_1",
+                personId: me.id,
+                recorder: true,
+            });
         });
 
         it("proposes a new thing it heard, and not one rejected on another recording", async () => {

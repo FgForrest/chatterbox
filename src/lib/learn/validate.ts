@@ -22,7 +22,13 @@
  *   answered: a label's suggestions (one per window) join, a name beats
  *   "nobody known", and names that disagree give nothing; a name heard
  *   only as a first name (no surname or nickname of theirs near the
- *   evidence) is marked so, for the reviewer;
+ *   evidence) is marked so, for the reviewer; the person who made the
+ *   recording (`recorderPersonId`) may be named for one label without
+ *   their name being heard, on the role the transcript gives them, and is
+ *   marked so;
+ * - a correction of a thing takes every other place its words stand
+ *   alone, exactly as heard: a thing misheard once is misheard alike
+ *   wherever it is said (never a person's, who may be a namesake);
  * - a fact whose speaker a person already answered otherwise
  *   goes; at most `MAX_NEW_FACTS` new facts, and bounded corrections and
  *   phrases;
@@ -76,6 +82,8 @@ import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 export const MAX_NEW_FACTS = 10;
 export const MAX_CORRECTION_ITEMS = 50;
+/** Places one correction of a thing takes, the ones the model gave first. */
+export const MAX_CORRECTION_ANCHORS = 50;
 export const MAX_PHRASE_ITEMS = 20;
 
 export interface VisibleRelation {
@@ -115,6 +123,11 @@ export interface LearnRunFrame {
     relations: ReadonlyMap<string, VisibleRelation>;
     /** Labels a person already answered: the person named, or null for unknown. */
     answeredLabels: ReadonlyMap<string, string | null>;
+    /**
+     * The person who made the recording (whose record carries the account's
+     * email), when the run's scopes have them.
+     */
+    recorderPersonId?: string | null;
     /** `heardAsKey` of every heard-as form a person confirmed. */
     confirmedHeardAs: ReadonlySet<string>;
     /** Current facts in the run's own scope: `factKey` -> fact id. */
@@ -192,6 +205,8 @@ export type ReviewCandidate =
               reason: string;
               /** Heard by a first name alone: no surname or nickname near it. */
               onlyFirstName?: true;
+              /** The person who made the recording, named on their role. */
+              recorder?: true;
           };
       }
     | {
@@ -475,7 +490,12 @@ export function validateLearnOutput(
             : newRef
               ? personOf({ newRef })
               : undefined;
+        // Whoever made the recording is rarely called by name in it: no
+        // name to have heard.
+        const recorder =
+            personId !== null && personId === frame.recorderPersonId;
         const onlyFirstName =
+            !recorder &&
             person !== undefined &&
             !fullNameNear(person, frame.turns, evidenceMs);
         // A first name alone that two people known here share names
@@ -500,8 +520,24 @@ export function validateLearnOutput(
                 evidenceMs,
                 reason,
                 ...(onlyFirstName ? { onlyFirstName: true as const } : {}),
+                ...(recorder ? { recorder: true as const } : {}),
             },
         });
+    }
+    // The recorder named on their role is one voice: on two labels (or
+    // with a label answered as them already) the role tells nobody which.
+    const recorderId = frame.recorderPersonId ?? null;
+    const recorderNamed =
+        recorderId !== null &&
+        [...frame.answeredLabels.values()].includes(recorderId);
+    const asRecorder = items.filter(
+        (item) => item.kind === "speaker" && item.payload.recorder,
+    );
+    if (asRecorder.length > 1 || (asRecorder.length > 0 && recorderNamed)) {
+        for (const item of asRecorder) {
+            items.splice(items.indexOf(item), 1);
+            drop("conflicting");
+        }
     }
 
     // Corrections: exact anchors, in scope, grouped per target and words.
@@ -569,6 +605,23 @@ export function validateLearnOutput(
         };
         groups.set(group, item);
         items.push(item);
+    }
+
+    // A thing's words, wherever else they stand alone exactly as heard.
+    for (const item of groups.values()) {
+        if (personOf(item.payload.target)) continue;
+        const anchors = item.payload.anchors;
+        for (const position of occurrences(item.payload.heard, frame.turns)) {
+            if (anchors.length >= MAX_CORRECTION_ANCHORS) break;
+            if (taken.some((other) => anchorsOverlap(other, position))) {
+                continue;
+            }
+            taken.push(position);
+            anchors.push(position);
+        }
+        anchors.sort(
+            (a, b) => a.turnIndex - b.turnIndex || a.charStart - b.charStart,
+        );
     }
 
     function validCorrection(
@@ -928,6 +981,35 @@ const NAME_RADIUS = 3;
  * (`moreThanFirstName`: Czech inflection, no titles or initials, a one-word
  * name counts as a first name).
  */
+/** Where `heard` stands in the turns as whole words, exactly as written. */
+export function occurrences(
+    heard: string,
+    turns: readonly TranscriptTurn[],
+): AnchorPosition[] {
+    const found: AnchorPosition[] = [];
+    if (!heard.trim()) return found;
+    const wordChar = /[\p{L}\p{N}]/u;
+    turns.forEach((turn, turnIndex) => {
+        let from = 0;
+        for (;;) {
+            const charStart = turn.text.indexOf(heard, from);
+            if (charStart < 0) break;
+            const charEnd = charStart + heard.length;
+            from = charStart + 1;
+            const before = turn.text.slice(0, charStart).at(-1) ?? "";
+            const after = turn.text.slice(charEnd)[0] ?? "";
+            if (wordChar.test(before) || wordChar.test(after)) continue;
+            if (
+                !anchorMatches({ turnIndex, charStart, charEnd, heard }, turns)
+            ) {
+                continue;
+            }
+            found.push({ turnIndex, charStart, charEnd });
+        }
+    });
+    return found;
+}
+
 export function fullNameNear(
     person: { name: string; aliases?: readonly string[] },
     turns: readonly TranscriptTurn[],

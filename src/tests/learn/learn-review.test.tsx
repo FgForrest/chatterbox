@@ -957,7 +957,7 @@ describe("LearnReview", () => {
             const headings = screen
                 .getAllByRole("heading", { level: 3 })
                 .map((heading) => heading.textContent);
-            expect(headings[0]).toBe("New in the Almanac");
+            expect(headings[0]).toMatch(/^New in the Almanac/);
             const fact = screen.getByRole("checkbox", {
                 name: "Petra Kolářová — works_for — Veltrix",
             }) as HTMLInputElement;

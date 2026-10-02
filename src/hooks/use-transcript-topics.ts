@@ -29,7 +29,9 @@ function isTopicSource(source: string | undefined): source is TopicSource {
  * When `enabled`, a topics job already running for the transcript -- queued
  * automatically, or by a click before the page was reloaded -- is picked up
  * on mount and followed as if this page had started it. Without that the
- * button looks idle while the job runs, and a click only joins it.
+ * button looks idle while the job runs, and a click only joins it. A new
+ * `probeRevision` checks again: a job queued since, by something the page
+ * did not start (automatic Learn's release).
  */
 export function useTranscriptTopics(
     recordingId: string,
@@ -37,6 +39,7 @@ export function useTranscriptTopics(
     stored: TranscriptTopic[] | null | undefined,
     enabled: boolean,
     view?: RecordingView,
+    probeRevision = 0,
 ) {
     const i18n = useExtracted();
     // `i18n` is a new function every render. The callbacks the mount check
@@ -143,6 +146,7 @@ export function useTranscriptTopics(
         [showStored],
     );
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: probeRevision is an intentional re-check trigger
     useEffect(() => {
         if (!enabled || !isTopicSource(source)) return;
         const topicSource = source;
@@ -177,7 +181,16 @@ export function useTranscriptTopics(
             probe.abort();
             following?.abort();
         };
-    }, [recordingId, source, enabled, view, restart, release, settle]);
+    }, [
+        recordingId,
+        source,
+        enabled,
+        view,
+        restart,
+        release,
+        settle,
+        probeRevision,
+    ]);
 
     const detect = useCallback(async () => {
         if (!isTopicSource(source)) return;

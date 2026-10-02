@@ -19,6 +19,7 @@ import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-m
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
+import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
 import { Markdown } from "@/components/markdown";
 import {
     confirmedAttributions,
@@ -35,6 +36,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import { useSummaryPresetCopy } from "@/hooks/use-preset-copy";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import {
@@ -280,6 +282,9 @@ export function TranscriptionPanel({
     // Organization view (the server decides whether Learn is available).
     const canLearn =
         canDetectTopics && !isUntimed(activeTranscript?.turns ?? []);
+    // Bumped when what automatic Learn held back is queued or made, so the
+    // topics and the summary look for it again.
+    const [followUpRevision, setFollowUpRevision] = useState(0);
     const {
         topics,
         detecting: detectingTopics,
@@ -290,6 +295,7 @@ export function TranscriptionPanel({
         activeTranscript?.topics,
         canDetectTopics,
         view,
+        followUpRevision,
     );
     const transcriptSectionRef = useRef<HTMLElement>(null);
     const speakerCursorRef = useRef<{
@@ -308,10 +314,8 @@ export function TranscriptionPanel({
     // Reviews finished here: a review names speakers without a new
     // revision, so the speaker tags mount afresh to read them again.
     const [reviewsFinished, setReviewsFinished] = useState(0);
-    const handleReviewFinished = useCallback(() => {
-        setReviewsFinished((count) => count + 1);
-        onTranscriptStale?.();
-    }, [onTranscriptStale]);
+    // Speakers named from Learn's guesses, read again the same way.
+    const [guessesAccepted, setGuessesAccepted] = useState(0);
 
     // The transcript's corrections, read edited by default. Only a Plaud or
     // Riffado transcript with stored turns has any; a mix has none.
@@ -534,12 +538,31 @@ export function TranscriptionPanel({
         setSummaryPreset,
         summaryPromptOptions,
         handleSummarize,
+        recheckSummary,
     } = useTranscriptionSummary({
         recordingId: recording?.id,
         summarySource,
         transcriptionText: summaryTranscript?.text,
         view,
     });
+
+    // The title, summary and topics automatic Learn held back are made by
+    // jobs a finished review queues: followed here, since nothing the page
+    // started makes them.
+    const { held: heldForReview, follow: followReleased } = useLearnFollowUps({
+        recordingId: recording.id,
+        enabled: canLearn && !orgView,
+        onChange: () => {
+            setFollowUpRevision((count) => count + 1);
+            recheckSummary();
+            onTranscriptStale?.();
+        },
+    });
+    const handleReviewFinished = useCallback(() => {
+        setReviewsFinished((count) => count + 1);
+        followReleased();
+        onTranscriptStale?.();
+    }, [followReleased, onTranscriptStale]);
 
     // Null for a single-pass summary, so the badge simply does not
     // render. Derived rather than stored on the client: the shape comes
@@ -621,6 +644,26 @@ export function TranscriptionPanel({
 
     return (
         <div className="space-y-4">
+            {learnMarks &&
+                canLearn &&
+                activeTranscript &&
+                activeTranscript.source !== "mixed" && (
+                    <SpeakerGuesses
+                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                        recordingId={recording.id}
+                        source={activeTranscript.source}
+                        view={view}
+                        shownVersion={activeTranscript.version}
+                        marks={learnMarks}
+                        confirmedLabels={
+                            new Set(Object.keys(speakerAttributions))
+                        }
+                        onAccepted={() =>
+                            setGuessesAccepted((count) => count + 1)
+                        }
+                        onSeek={onSeekToTurn}
+                    />
+                )}
             {/* Transcription Card */}
             <Card>
                 <CardHeader>
@@ -726,7 +769,7 @@ export function TranscriptionPanel({
                             // another transcript to name: mount afresh, so
                             // nothing of the last one's state, or its late
                             // answers, reaches this one.
-                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}`}
+                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}:${reviewsFinished}:${guessesAccepted}`}
                             recordingId={recording.id}
                             source={activeTranscript.source}
                             speakers={speakerTags}
@@ -778,6 +821,7 @@ export function TranscriptionPanel({
                                 <TranscriptTopicsMenu
                                     topics={topics}
                                     canDetect={canDetectTopics}
+                                    waitingForReview={heldForReview}
                                     detecting={detectingTopics}
                                     onDetect={() => void detectTopics()}
                                     onSelect={handleSelectTopic}
@@ -1221,13 +1265,17 @@ export function TranscriptionPanel({
                                         ? i18n(
                                               "No Plaud summary has been imported. It will appear after Plaud sync when available.",
                                           )
-                                        : summaryTranscript
+                                        : summaryTranscript && heldForReview
                                           ? i18n(
-                                                'No custom summary yet. Click "Summarize" to generate one.',
+                                                'The summary waits for your Learn review, so it reads the corrected transcript. Finish the review, or click "Summarize" to make it now.',
                                             )
-                                          : i18n(
-                                                "A custom transcript is required before generating a custom summary.",
-                                            )}
+                                          : summaryTranscript
+                                            ? i18n(
+                                                  'No custom summary yet. Click "Summarize" to generate one.',
+                                              )
+                                            : i18n(
+                                                  "A custom transcript is required before generating a custom summary.",
+                                              )}
                                 </p>
                             </div>
                         )}

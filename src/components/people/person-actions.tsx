@@ -1,6 +1,6 @@
 "use client";
 
-import { Merge, Pencil } from "lucide-react";
+import { Merge, Pencil, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
@@ -31,6 +31,11 @@ interface PersonActionsProps {
         primaryEmail: string | null;
         scope?: "personal" | "org";
     };
+    /**
+     * The viewer's account email, offered as "This is me" when the person
+     * is not the viewer yet.
+     */
+    accountEmail?: string;
 }
 
 /**
@@ -40,7 +45,7 @@ interface PersonActionsProps {
  * Organization person the organization account, whose edits reach every
  * recording that names them.
  */
-export function PersonActions({ person }: PersonActionsProps) {
+export function PersonActions({ person, accountEmail }: PersonActionsProps) {
     const i18n = useExtracted();
     const router = useRouter();
     const [renaming, setRenaming] = useState(false);
@@ -79,16 +84,16 @@ export function PersonActions({ person }: PersonActionsProps) {
         };
     }, [merging, person.id, person.scope]);
 
-    async function rename() {
+    async function rename(
+        primaryEmail: string | null = email.trim() || null,
+        displayName = name,
+    ) {
         setSaving(true);
         try {
             const response = await fetch(`/api/people/${person.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    displayName: name,
-                    primaryEmail: email.trim() || null,
-                }),
+                body: JSON.stringify({ displayName, primaryEmail }),
             });
             if (!response.ok) {
                 toast.error(
@@ -134,6 +139,22 @@ export function PersonActions({ person }: PersonActionsProps) {
 
     return (
         <>
+            {accountEmail && (
+                <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    disabled={saving}
+                    title={i18n(
+                        "Give this person your account email, so Learn names you as the one who made your recordings.",
+                    )}
+                    onClick={() =>
+                        void rename(accountEmail, person.displayName)
+                    }
+                >
+                    <UserCheck className="mr-2 size-4" /> {i18n("This is me")}
+                </Button>
+            )}
             <Button
                 size="sm"
                 variant="outline"

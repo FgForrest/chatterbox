@@ -92,6 +92,7 @@ export default async function PersonPage({ params }: Params) {
                 // Private people are their owner's to erase; the
                 // Organization's are the organization account's.
                 canManage={person.scope === "personal" || userId === orgUserId}
+                accountEmail={session.user.email}
                 facts={facts}
                 otherNames={otherNames.map((name) => ({
                     id: name.id,

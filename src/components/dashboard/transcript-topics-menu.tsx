@@ -22,6 +22,8 @@ interface TranscriptTopicsMenuProps {
     topics: TranscriptTopic[] | null;
     /** The transcript has timings and belongs to the viewer. */
     canDetect: boolean;
+    /** Automatic Learn holds them back until its review is finished. */
+    waitingForReview?: boolean;
     detecting: boolean;
     onDetect: () => void;
     onSelect: (index: number) => void;
@@ -37,6 +39,7 @@ interface TranscriptTopicsMenuProps {
 export function TranscriptTopicsMenu({
     topics,
     canDetect,
+    waitingForReview = false,
     detecting,
     onDetect,
     onSelect,
@@ -65,6 +68,14 @@ export function TranscriptTopicsMenu({
 
     if (!topics?.length) {
         if (!canDetect) return null;
+        if (waitingForReview && !detecting) {
+            return (
+                <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Tag className="size-4" />
+                    {i18n("Topics follow the Learn review")}
+                </span>
+            );
+        }
         return (
             <Button
                 type="button"

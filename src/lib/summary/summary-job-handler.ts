@@ -21,6 +21,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
+import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
 import { emitEvent } from "@/lib/webhooks/emit";
@@ -86,17 +87,28 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     410,
                 );
             }
-            const result = await generateSummaryForRecording(
-                userId,
-                payload.recordingId,
-                {
-                    presetId: payload.presetId,
+            const generate = (presetId: string | undefined) =>
+                generateSummaryForRecording(userId, payload.recordingId, {
+                    presetId,
                     trigger: payload.trigger,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
                     jobId,
-                },
-            );
+                });
+            let result = await generate(payload.presetId);
+            // Corrections that changed while it ran (a review finished
+            // meanwhile) found no summary to refresh, and the hold's release
+            // found this job running: made again, once, from the reading as
+            // it is now. A hold still open makes it at its release instead.
+            if (!orgView && !(await isHeldForLearn(payload.recordingId))) {
+                const due = await summaryRefreshDue({
+                    ownerUserId: result.ownerUserId,
+                    recordingId: payload.recordingId,
+                    view: "private",
+                });
+                if (due)
+                    result = await generate(payload.presetId ?? due.presetId);
+            }
 
             // Emitted here rather than in the transcription pipeline, so the
             // event still means "the summary is written and readable" now
