@@ -975,12 +975,6 @@ function sharesFirstName(
 /** Turns either side of an evidence turn searched for the rest of a name. */
 const NAME_RADIUS = 3;
 
-/**
- * Whether more than a first name backs a speaker: the person's surname or
- * a nickname of theirs, said within `NAME_RADIUS` turns of the evidence
- * (`moreThanFirstName`: Czech inflection, no titles or initials, a one-word
- * name counts as a first name).
- */
 /** Where `heard` stands in the turns as whole words, exactly as written. */
 export function occurrences(
     heard: string,
@@ -988,7 +982,7 @@ export function occurrences(
 ): AnchorPosition[] {
     const found: AnchorPosition[] = [];
     if (!heard.trim()) return found;
-    const wordChar = /[\p{L}\p{N}]/u;
+    const wordChar = /[\p{L}\p{M}\p{N}]/u;
     turns.forEach((turn, turnIndex) => {
         let from = 0;
         for (;;) {
@@ -1010,6 +1004,12 @@ export function occurrences(
     return found;
 }
 
+/**
+ * Whether more than a first name backs a speaker: the person's surname or
+ * a nickname of theirs, said within `NAME_RADIUS` turns of the evidence
+ * (`moreThanFirstName`: Czech inflection, no titles or initials, a one-word
+ * name counts as a first name).
+ */
 export function fullNameNear(
     person: { name: string; aliases?: readonly string[] },
     turns: readonly TranscriptTurn[],

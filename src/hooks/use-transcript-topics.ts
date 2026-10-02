@@ -161,11 +161,23 @@ export function useTranscriptTopics(
                 { signal: probe.signal },
             );
             if (!response.ok || probe.signal.aborted) return;
-            const { jobId } = (await response.json()) as {
+            const { jobId, topics: saved } = (await response.json()) as {
                 jobId?: string | null;
+                topics?: TranscriptTopic[] | null;
             };
             // A click that came first owns the job already.
-            if (!jobId || probe.signal.aborted || abortRef.current) return;
+            if (probe.signal.aborted || abortRef.current) return;
+            if (!jobId) {
+                // Nothing running: what is saved now replaces topics an
+                // earlier detection here left on screen.
+                const replacement = Array.isArray(saved) ? saved : undefined;
+                setDetected((current) =>
+                    current[topicSource] === undefined
+                        ? current
+                        : { ...current, [topicSource]: replacement },
+                );
+                return;
+            }
             following = restart(topicSource);
             try {
                 await settle(topicSource, jobId, following.signal);

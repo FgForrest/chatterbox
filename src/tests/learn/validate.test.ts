@@ -6,6 +6,7 @@ import {
     heardAsKey,
     type LearnRunFrame,
     MAX_NEW_FACTS,
+    occurrences,
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -1221,5 +1222,23 @@ describe("validateLearnOutput", () => {
             );
             expect(many.items[0]?.payload).not.toHaveProperty("replaces");
         });
+    });
+});
+
+describe("occurrences", () => {
+    const turnOf = (text: string): TranscriptTurn[] => [
+        { speaker: "speaker_0", startMs: 0, endMs: 1000, text },
+    ];
+
+    it("finds the words standing alone", () => {
+        expect(occurrences("Tavesy", turnOf("Tavesy a Tavesy."))).toEqual([
+            { turnIndex: 0, charStart: 0, charEnd: 6 },
+            { turnIndex: 0, charStart: 9, charEnd: 15 },
+        ]);
+    });
+
+    it("treats combining marks as part of a word", () => {
+        expect(occurrences("Tavesy", turnOf("Tavesy\u0301 dnes"))).toEqual([]);
+        expect(occurrences("Tavesy", turnOf("e\u0301Tavesy dnes"))).toEqual([]);
     });
 });

@@ -46,6 +46,7 @@ function marksOf(...guesses: LearnSpeakerMark[]): LearnMarks {
         speakers: Object.fromEntries(guesses.map((one) => [one.label, one])),
         corrections: [],
         decide: vi.fn().mockResolvedValue(undefined),
+        track: vi.fn((work) => work),
     };
 }
 
@@ -67,7 +68,7 @@ function renderGuesses(
             source="riffado"
             shownVersion={VERSION}
             marks={marks}
-            confirmedLabels={new Set(confirmed)}
+            answeredLabels={new Set(confirmed)}
             onAccepted={onAccepted}
         />,
     );
@@ -106,6 +107,8 @@ describe("SpeakerGuesses", () => {
             ...VERSION,
         });
         expect(marks.decide).toHaveBeenCalledWith("item-speaker_0", "accepted");
+        // The review's Finish waits for the whole acceptance.
+        expect(marks.track).toHaveBeenCalledTimes(1);
         // Named: the guess is gone.
         expect(screen.queryByText("Speaker guesses")).toBeNull();
     });

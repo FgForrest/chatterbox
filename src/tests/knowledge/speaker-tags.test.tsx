@@ -69,6 +69,7 @@ function SpeakerTagsHarness({
     onSeek,
     shownVersion,
     onStale,
+    onUnknownLabelsChange,
     readOnly,
     speakers = [{ speaker: "speaker_0", label: "Speaker 0" }],
 }: {
@@ -76,6 +77,7 @@ function SpeakerTagsHarness({
     onSeek?: (ms: number) => void;
     shownVersion?: { transcriptionId: string; revision: number };
     onStale?: () => void;
+    onUnknownLabelsChange?: (labels: ReadonlySet<string>) => void;
     readOnly?: boolean;
     speakers?: { speaker: string; label: string }[];
 }) {
@@ -98,6 +100,7 @@ function SpeakerTagsHarness({
             onSeek={onSeek}
             shownVersion={shownVersion}
             onStale={onStale}
+            onUnknownLabelsChange={onUnknownLabelsChange}
             readOnly={readOnly}
         />
     );
@@ -200,9 +203,11 @@ describe("SpeakerTags", () => {
                 },
             ],
         });
+        const onUnknownLabelsChange = vi.fn();
         render(
             <SpeakerTagsHarness
                 onAttributionsChange={vi.fn()}
+                onUnknownLabelsChange={onUnknownLabelsChange}
                 readOnly
                 speakers={[
                     { speaker: "speaker_0", label: "Speaker 0" },
@@ -215,6 +220,9 @@ describe("SpeakerTags", () => {
         const personLink = await screen.findByRole("link", { name: "Jan" });
         expect(personLink.getAttribute("href")).toBe("/almanac/person-1");
         expect(await screen.findByText("Speaker 1: unknown")).toBeDefined();
+        expect(onUnknownLabelsChange).toHaveBeenLastCalledWith(
+            new Set(["speaker_1"]),
+        );
         expect(screen.getByText("Speaker 2")).toBeDefined();
         expect(screen.getByText("Managed by the Organization")).toBeDefined();
         expect(screen.queryAllByRole("button")).toEqual([]);

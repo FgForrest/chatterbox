@@ -229,6 +229,23 @@ describe("Learn marks", () => {
         });
     });
 
+    it("give a speaker mark its label as a speaker key", () => {
+        const marks = learnMarksFrom(
+            {
+                ...STATE,
+                items: [
+                    item({
+                        id: "i-padded",
+                        kind: "speaker",
+                        payload: { label: " speaker_4 ", personId: "p-jan" },
+                    }),
+                ],
+            },
+            vi.fn(),
+        );
+        expect(marks?.speakers.speaker_4?.label).toBe("speaker_4");
+    });
+
     it("split a turn's text at the marks that still quote it, in order", () => {
         const mark = (charStart: number, charEnd: number, heard: string) => ({
             itemId: `${charStart}`,

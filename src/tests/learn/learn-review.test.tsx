@@ -239,6 +239,118 @@ describe("LearnReview", () => {
         expect(onMarks).toHaveBeenLastCalledWith(null);
     });
 
+    it("holds Finish while the transcript names a speaker for it", async () => {
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": READY,
+            "POST /api/recordings/rec-1/review/finish?source=riffado": {
+                status: "finished",
+                applied: 1,
+                dismissed: 0,
+                skipped: [],
+            },
+        });
+        const onMarks = vi.fn();
+        render(
+            <LearnReview
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                onMarks={onMarks}
+            />,
+        );
+        await waitFor(() =>
+            expect(onMarks).toHaveBeenLastCalledWith(expect.anything()),
+        );
+        let release: (value: boolean) => void = () => {};
+        const naming = new Promise<boolean>((resolve) => {
+            release = resolve;
+        });
+        void onMarks.mock.lastCall?.[0].track(naming);
+        fireEvent.click(
+            await screen.findByRole("button", { name: /Review \(2\)/ }),
+        );
+        const finish = screen.getByRole("button", { name: "Finish review" });
+        await waitFor(() => expect(finish).toHaveProperty("disabled", true));
+        fireEvent.click(finish);
+        expect(fetch).not.toHaveBeenCalledWith(
+            "/api/recordings/rec-1/review/finish?source=riffado",
+            expect.anything(),
+        );
+
+        release(true);
+        await waitFor(() => expect(finish).toHaveProperty("disabled", false));
+        fireEvent.click(finish);
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/rec-1/review/finish?source=riffado",
+                expect.objectContaining({ method: "POST" }),
+            ),
+        );
+    });
+
+    it("reads the review again when the transcript links a record it does not name yet", async () => {
+        const record = {
+            id: "i-record",
+            kind: "new_record",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                ref: "n1",
+                kind: "person",
+                typeKey: null,
+                name: "Eva",
+                evidenceMs: [],
+            },
+        };
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": inTurn(
+                { ...READY, items: [record] },
+                {
+                    ...READY,
+                    names: { ...READY.names, "p-eva": "Eva Malá" },
+                    items: [
+                        {
+                            ...record,
+                            decision: "accepted",
+                            choice: { personId: "p-eva" },
+                            version: 1,
+                        },
+                    ],
+                },
+            ),
+            "PATCH /api/recordings/rec-1/review/items/i-record?source=riffado":
+                { version: 1 },
+        });
+        const onMarks = vi.fn();
+        render(
+            <LearnReview
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                onMarks={onMarks}
+            />,
+        );
+        await waitFor(() =>
+            expect(onMarks).toHaveBeenLastCalledWith(expect.anything()),
+        );
+        await onMarks.mock.lastCall?.[0].decide("i-record", "accepted", {
+            personId: "p-eva",
+        });
+        const reads = fetch.mock.calls.filter(
+            ([url, init]) =>
+                url === "/api/recordings/rec-1/review?source=riffado" &&
+                (init?.method ?? "GET") === "GET",
+        );
+        expect(reads).toHaveLength(2);
+        fireEvent.click(
+            await screen.findByRole("button", { name: /Review \(1\)/ }),
+        );
+        expect(await screen.findByText(/Eva Malá/)).toBeTruthy();
+    });
+
     it("keeps a fact waiting on its speaker until that speaker is ticked, and says what it replaces", async () => {
         const item = (overrides: Record<string, unknown>) => ({
             preTicked: false,

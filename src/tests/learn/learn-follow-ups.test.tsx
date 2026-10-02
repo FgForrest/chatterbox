@@ -38,7 +38,7 @@ describe("useLearnFollowUps", () => {
         vi.unstubAllGlobals();
     });
 
-    it("says the recording waits for its review, and does not poll while it does", async () => {
+    it("says the recording waits for its review, and checks it only now and then", async () => {
         const fetchMock = answering({ held: true, pending: [] });
         vi.stubGlobal("fetch", fetchMock);
         const onChange = vi.fn();
@@ -53,9 +53,13 @@ describe("useLearnFollowUps", () => {
 
         await waitFor(() => expect(hook.result.current.held).toBe(true));
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(30_000);
+            await vi.advanceTimersByTimeAsync(29_000);
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/follow-ups",
             expect.anything(),
@@ -119,7 +123,55 @@ describe("useLearnFollowUps", () => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
-    it("stops waiting for a release another open run keeps back", async () => {
+    it("reads back a hold released elsewhere, even with its jobs already done", async () => {
+        const fetchMock = answering(
+            { held: true, pending: [] },
+            { held: false, pending: [] },
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        const onChange = vi.fn();
+        const hook = renderHook(() =>
+            useLearnFollowUps({
+                recordingId: "rec-1",
+                enabled: true,
+                onChange,
+            }),
+        );
+        await waitFor(() => expect(hook.result.current.held).toBe(true));
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(31_000);
+        });
+
+        expect(hook.result.current.held).toBe(false);
+        expect(onChange).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(5 * 60_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("asks nothing more of a recording that is not the viewer's", async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(new Response("{}", { status: 404 }));
+        vi.stubGlobal("fetch", fetchMock);
+        renderHook(() =>
+            useLearnFollowUps({
+                recordingId: "rec-1",
+                enabled: true,
+                onChange: vi.fn(),
+            }),
+        );
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(5 * 60_000);
+        });
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits for a release another open run keeps back quickly, then now and then", async () => {
         const fetchMock = answering({ held: true, pending: [] });
         vi.stubGlobal("fetch", fetchMock);
         const hook = renderHook(() =>
@@ -136,8 +188,10 @@ describe("useLearnFollowUps", () => {
             await vi.advanceTimersByTimeAsync(5 * 60_000);
         });
 
-        // One on opening, then a bounded wait for the release.
-        expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(8);
+        // One on opening, six quick ones for the release, then one each
+        // half minute.
+        expect(fetchMock.mock.calls.length).toBeGreaterThan(7);
+        expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1 + 6 + 10);
     });
 
     it("follows jobs already queued when the page opens", async () => {

@@ -7,8 +7,13 @@ const POLL_MS = 2_500;
 /** Past the slowest summary; what is still running then finishes unseen. */
 const POLL_LIMIT_MS = 15 * 60 * 1000;
 /**
- * Checks a finished review waits for its release to queue anything: the
- * hold outlives it while another run on the recording is still open.
+ * How often a hold with nothing queued is checked: it can be released
+ * without this page (a run that found nothing, another tab, its expiry).
+ */
+const HELD_POLL_MS = 30_000;
+/**
+ * Checks a finished review waits at the quick pace for its release to
+ * queue anything, before the hold is only checked now and then.
  */
 const RELEASE_WAIT_CHECKS = 6;
 
@@ -19,11 +24,12 @@ interface FollowUps {
 
 /**
  * What automatic Learn held back on the owner's private view: whether the
- * title, summary and topics still wait for the review (`held`), and, once
- * `follow()` is called (the review was finished) or the page opens with
- * any of them queued, the jobs that make them, polled until none is left.
- * `onChange` runs whenever that set of jobs changes, so the page can pick
- * up jobs just queued and read back what one just made.
+ * title, summary and topics still wait for the review (`held`), and the
+ * jobs that make them, polled until none is left. A hold is checked now
+ * and then, and quickly once `follow()` is called (the review was
+ * finished). `onChange` runs whenever that set of jobs changes or the hold
+ * is released, so the page can pick up jobs just queued and read back what
+ * one just made.
  */
 export function useLearnFollowUps({
     recordingId,
@@ -47,9 +53,11 @@ export function useLearnFollowUps({
         // A follow started by a finished review, rather than the page opening.
         const afterReview = following > 0;
         const controller = new AbortController();
-        const startedAt = Date.now();
+        // When the jobs now followed were first seen, for the poll limit.
+        let activeSince: number | null = null;
         // After a review, the first answer is news too: what it queued.
         let previous: string | null = afterReview ? "\u0000" : null;
+        let wasHeld = false;
         let idleChecks = 0;
         let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -60,6 +68,8 @@ export function useLearnFollowUps({
                     `/api/recordings/${recordingId}/follow-ups`,
                     { signal: controller.signal },
                 );
+                // Not the owner's, or gone: there is nothing to follow.
+                if (response.status >= 400 && response.status < 500) return;
                 if (response.ok) {
                     const body = (await response.json()) as Partial<FollowUps>;
                     if (
@@ -73,22 +83,32 @@ export function useLearnFollowUps({
                 // A blip: the next check tries again.
             }
             if (controller.signal.aborted) return;
+            // A failed check is tried again, but not at the quick pace.
+            let delay = state ? POLL_MS : HELD_POLL_MS;
             if (state) {
                 setHeld(state.held);
                 const current = state.pending.join(",");
-                if (previous !== null && current !== previous) {
+                const released = wasHeld && !state.held;
+                if (previous !== null && (current !== previous || released)) {
                     onChangeRef.current();
                 }
                 previous = current;
-                // Nothing queued, and either nothing waits or it waits for
-                // a review not finished yet: nothing to follow.
-                if (state.pending.length === 0) {
-                    if (!state.held || !afterReview) return;
-                    if (++idleChecks >= RELEASE_WAIT_CHECKS) return;
+                wasHeld = state.held;
+                if (state.pending.length > 0) {
+                    activeSince ??= Date.now();
+                    if (Date.now() - activeSince > POLL_LIMIT_MS) return;
+                } else {
+                    activeSince = null;
+                    // Nothing queued and nothing waits: nothing to follow.
+                    if (!state.held) return;
+                    // Waiting for a release: quickly just after a review,
+                    // then now and then.
+                    if (!afterReview || ++idleChecks >= RELEASE_WAIT_CHECKS) {
+                        delay = HELD_POLL_MS;
+                    }
                 }
             }
-            if (Date.now() - startedAt > POLL_LIMIT_MS) return;
-            timer = setTimeout(check, POLL_MS);
+            timer = setTimeout(check, delay);
         };
         void check();
         return () => {

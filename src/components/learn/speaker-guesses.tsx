@@ -18,7 +18,7 @@ import { formatSpeakerLabel } from "@/lib/transcription/diarization";
  * transcript: each accepted at once (named now, and ticked in the review),
  * or all of them together; "not them" unticks it in the review. What the
  * review adds for a new person links to whoever the name made, so finishing
- * the review adds nobody twice.
+ * the review adds nobody twice; Finish waits for an acceptance under way.
  */
 export function SpeakerGuesses({
     recordingId,
@@ -26,7 +26,7 @@ export function SpeakerGuesses({
     view,
     shownVersion,
     marks,
-    confirmedLabels,
+    answeredLabels,
     onAccepted,
     onSeek,
 }: {
@@ -36,8 +36,8 @@ export function SpeakerGuesses({
     /** The transcript on screen; a speaker change names it. */
     shownVersion?: { transcriptionId: string; revision: number };
     marks: LearnMarks;
-    /** Labels already named: their guesses are no longer shown. */
-    confirmedLabels: ReadonlySet<string>;
+    /** Labels already answered (named, or nobody known): no guess for them. */
+    answeredLabels: ReadonlySet<string>;
     /** Speakers were named here: the speaker strip reads them again. */
     onAccepted: () => void;
     onSeek?: (ms: number) => void;
@@ -51,7 +51,7 @@ export function SpeakerGuesses({
     const shown = Object.values(marks.speakers)
         .filter(
             (guess) =>
-                !confirmedLabels.has(guess.label) && !accepted.has(guess.label),
+                !answeredLabels.has(guess.label) && !accepted.has(guess.label),
         )
         .sort((a, b) =>
             a.label.localeCompare(b.label, undefined, { numeric: true }),
@@ -112,7 +112,7 @@ export function SpeakerGuesses({
     const acceptOne = async (guess: LearnSpeakerMark) => {
         setBusy(guess.label);
         try {
-            if (await accept(guess)) onAccepted();
+            if (await marks.track(accept(guess))) onAccepted();
         } finally {
             setBusy(null);
         }
@@ -123,7 +123,7 @@ export function SpeakerGuesses({
         let named = 0;
         try {
             for (const guess of guesses) {
-                if (await accept(guess)) named++;
+                if (await marks.track(accept(guess))) named++;
             }
         } finally {
             setBusy(null);

@@ -433,6 +433,18 @@ export function TranscriptionPanel({
         Record<string, SpeakerAttributions>
     >({});
     const speakerAttributions = attributionsByKey[attributionKey] ?? {};
+    // Labels answered "nobody known", which no guess names either.
+    const [unknownByKey, setUnknownByKey] = useState<
+        Record<string, ReadonlySet<string>>
+    >({});
+    const answeredLabels = useMemo(
+        () =>
+            new Set([
+                ...Object.keys(speakerAttributions),
+                ...(unknownByKey[attributionKey] ?? []),
+            ]),
+        [speakerAttributions, unknownByKey, attributionKey],
+    );
     const handlePlaySpeaker = (speaker: string): boolean => {
         const turns = activeTranscript?.turns;
         if (!turns?.length || !onPlayFromTurn) return false;
@@ -462,6 +474,15 @@ export function TranscriptionPanel({
             setAttributionsByKey((current) => ({
                 ...current,
                 [attributionKey]: values,
+            }));
+        },
+        [attributionKey],
+    );
+    const handleUnknownLabelsChange = useCallback(
+        (labels: ReadonlySet<string>) => {
+            setUnknownByKey((current) => ({
+                ...current,
+                [attributionKey]: labels,
             }));
         },
         [attributionKey],
@@ -655,9 +676,7 @@ export function TranscriptionPanel({
                         view={view}
                         shownVersion={activeTranscript.version}
                         marks={learnMarks}
-                        confirmedLabels={
-                            new Set(Object.keys(speakerAttributions))
-                        }
+                        answeredLabels={answeredLabels}
                         onAccepted={() =>
                             setGuessesAccepted((count) => count + 1)
                         }
@@ -784,6 +803,7 @@ export function TranscriptionPanel({
                             }
                             shownVersion={activeTranscript.version}
                             onStale={onTranscriptStale}
+                            onUnknownLabelsChange={handleUnknownLabelsChange}
                             readOnly={readOnly}
                         />
                     )}

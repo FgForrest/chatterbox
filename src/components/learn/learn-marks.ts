@@ -34,7 +34,7 @@ export type SpeakerGuessAnswer =
 
 export interface LearnSpeakerMark {
     itemId: string;
-    /** The transcript's label, as stored (`speaker_0`). */
+    /** The transcript's label, as a speaker key (`speaker_0`). */
     label: string;
     name: string;
     ticked: boolean;
@@ -58,6 +58,11 @@ export interface LearnMarks {
         decision: "accepted" | "rejected",
         choice?: Record<string, unknown> | null,
     ) => Promise<void>;
+    /**
+     * Hold the review's Finish until `work` settles: something done on its
+     * items outside the review (naming a speaker, then ticking it).
+     */
+    track: <T>(work: Promise<T>) => Promise<T>;
 }
 
 /** The part of the review answer the marks are made from. */
@@ -79,6 +84,7 @@ export interface LearnMarksSource {
 export function learnMarksFrom(
     state: LearnMarksSource | null,
     decide: LearnMarks["decide"],
+    track: LearnMarks["track"] = (work) => work,
 ): LearnMarks | null {
     if (state?.run?.status !== "ready") return null;
     // A person or thing the review proposes to add, by its ref: the name
@@ -158,9 +164,10 @@ export function learnMarksFrom(
                                 displayName: name,
                                 ...(record ? { recordItemId: record.id } : {}),
                             };
-            speakers[speakerKey(payload.label)] = {
+            const label = speakerKey(payload.label);
+            speakers[label] = {
                 itemId: item.id,
-                label: payload.label,
+                label,
                 name,
                 ticked,
                 declined: item.decision === "rejected",
@@ -205,7 +212,7 @@ export function learnMarksFrom(
             }
         }
     }
-    return { speakers, corrections, decide };
+    return { speakers, corrections, decide, track };
 }
 
 /**

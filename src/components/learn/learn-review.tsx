@@ -335,22 +335,40 @@ export function LearnReview({
         );
     };
 
+    /** Work on the items done outside the review: Finish waits for it. */
+    const track = useCallback(<T,>(work: Promise<T>): Promise<T> => {
+        setSaving((count) => count + 1);
+        drafts.current.add(work);
+        return work.finally(() => {
+            drafts.current.delete(work);
+            setSaving((count) => count - 1);
+        });
+    }, []);
+
     // The latest `decide`, for marks made from an earlier render.
     const decideRef = useRef(decide);
     decideRef.current = decide;
     useEffect(() => {
         onMarks?.(
-            learnMarksFrom(state, async (itemId, decision, choice) => {
-                const item = state?.items.find((other) => other.id === itemId);
-                if (!item) return;
-                await decideRef.current(
-                    item,
-                    decision,
-                    choice === undefined ? item.choice : choice,
-                );
-            }),
+            learnMarksFrom(
+                state,
+                async (itemId, decision, choice) => {
+                    const item = state?.items.find(
+                        (other) => other.id === itemId,
+                    );
+                    if (!item) return;
+                    const kept = choice === undefined ? item.choice : choice;
+                    await decideRef.current(item, decision, kept);
+                    // Linked to a record made meanwhile: the review names it.
+                    const linked = linkedRecordId(kept);
+                    if (linked && !(linked in (state?.names ?? {}))) {
+                        await load();
+                    }
+                },
+                track,
+            ),
         );
-    }, [state, onMarks]);
+    }, [state, onMarks, load, track]);
     useEffect(() => () => onMarks?.(null), [onMarks]);
 
     const finish = async () => {
