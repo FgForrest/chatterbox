@@ -139,4 +139,72 @@ describe("speaker playback navigation", () => {
         );
         expect(Element.prototype.scrollTo).toHaveBeenCalled();
     });
+
+    it("plays only the speaker's turn from a review's speaker", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: string) =>
+                Response.json(
+                    url.includes("/review")
+                        ? {
+                              run: { id: "run-1", status: "ready" },
+                              available: true,
+                              names: { "person-1": "Jan" },
+                              types: {},
+                              relations: {},
+                              items: [
+                                  {
+                                      id: "i-speaker",
+                                      kind: "speaker",
+                                      preTicked: false,
+                                      decision: null,
+                                      choice: null,
+                                      version: 0,
+                                      dependsOnLabel: null,
+                                      payload: {
+                                          label: "speaker_1",
+                                          personId: "person-1",
+                                          evidenceMs: [],
+                                          reason: "",
+                                      },
+                                  },
+                              ],
+                          }
+                        : url.includes("/speakers")
+                          ? {
+                                transcriptionId: "tx-1",
+                                revision: 1,
+                                speakers: [],
+                            }
+                          : { topics: null },
+                ),
+            ),
+        );
+        const onPlayFromTurn = vi.fn();
+        render(
+            <TranscriptionPanel
+                recording={recording}
+                transcripts={[
+                    {
+                        source: "riffado",
+                        text: turns
+                            .map((turn) => `${turn.speaker}: ${turn.text}`)
+                            .join("\n"),
+                        turns,
+                        version: { transcriptionId: "tx-1", revision: 1 },
+                    },
+                ]}
+                isTranscribing={false}
+                onTranscribe={vi.fn()}
+                onPlayFromTurn={onPlayFromTurn}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (1)" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Play a turn of Speaker 1" }),
+        );
+        expect(onPlayFromTurn).toHaveBeenLastCalledWith(3000, 4000);
+    });
 });

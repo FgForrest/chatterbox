@@ -10,6 +10,7 @@ import {
     turnPieces,
 } from "@/components/learn/learn-marks";
 import { MarkedText } from "@/components/learn/marked-text";
+import { speakerAccent } from "@/components/people/speaker-accents";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import {
@@ -28,19 +29,6 @@ import {
     speakerOrder,
 } from "@/lib/transcription/diarization";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
-
-/**
- * Per-speaker accents. Cycles when a recording has more speakers than
- * colours, which is rare and still readable: adjacent turns keep their labels.
- */
-const SPEAKER_STYLES = [
-    { dot: "bg-primary", text: "text-primary" },
-    { dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
-    { dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
-    { dot: "bg-violet-500", text: "text-violet-600 dark:text-violet-400" },
-    { dot: "bg-rose-500", text: "text-rose-600 dark:text-rose-400" },
-    { dot: "bg-sky-500", text: "text-sky-600 dark:text-sky-400" },
-];
 
 export interface TranscriptViewProps {
     text: string;
@@ -192,6 +180,9 @@ export function TranscriptView({
     }
 
     const order = speakerOrder(turns);
+    // From the first topic on, turns sit inside their topic, under its title.
+    const firstTopicTurn =
+        topicsByTurn.size > 0 ? Math.min(...topicsByTurn.keys()) : null;
     // The accept button goes on a speaker's first turn only.
     const firstTurnOf = new Map<string, number>();
     turns.forEach((turn, index) => {
@@ -203,10 +194,7 @@ export function TranscriptView({
         <div className="space-y-4">
             {turns.map((turn, index) => {
                 const position = order.indexOf(turn.speaker);
-                const style =
-                    SPEAKER_STYLES[
-                        (position === -1 ? 0 : position) % SPEAKER_STYLES.length
-                    ];
+                const style = speakerAccent(position);
                 const key = speakerKey(turn.speaker);
                 const confirmedName = speakerAttributions[key]?.name;
                 const proposed =
@@ -235,12 +223,12 @@ export function TranscriptView({
                                 <div
                                     key={`topic-${topicIndex}-${topic.fromMs}`}
                                     data-topic-index={topicIndex}
-                                    className={`flex scroll-mt-2 items-baseline gap-2 rounded-md border-t border-border/60 px-1 pt-3 transition-colors duration-700 ${topicIndex === 0 && index === 0 ? "border-t-0 pt-0" : ""} ${highlightedTopic === topicIndex ? "bg-primary/10" : ""}`}
+                                    className={`flex scroll-mt-2 items-baseline gap-2 rounded-md border-t border-border/60 px-1 pt-4 transition-colors duration-700 ${topicIndex === 0 && index === 0 ? "border-t-0 pt-0" : ""} ${highlightedTopic === topicIndex ? "bg-primary/10" : ""}`}
                                 >
-                                    <span className="text-sm font-semibold tabular-nums text-primary">
+                                    <span className="w-7 shrink-0 text-base font-semibold tabular-nums text-primary">
                                         {topicIndex + 1}.
                                     </span>
-                                    <h4 className="min-w-0 flex-1 text-sm font-semibold">
+                                    <h4 className="min-w-0 flex-1 text-base font-semibold leading-snug">
                                         {topic.title}
                                     </h4>
                                     {onSeekToTurn ? (
@@ -267,7 +255,7 @@ export function TranscriptView({
                         })}
                         <div
                             data-turn-index={index}
-                            className={`space-y-1 rounded-md transition-colors duration-700 ${highlightedTurn === index || highlightedTurnIndex === index ? "bg-primary/10" : ""}`}
+                            className={`space-y-1 rounded-md transition-colors duration-700 ${firstTopicTurn !== null && index >= firstTopicTurn ? "ml-10" : ""} ${highlightedTurn === index || highlightedTurnIndex === index ? "bg-primary/10" : ""}`}
                         >
                             {!turn.label && canSeek && (
                                 <button

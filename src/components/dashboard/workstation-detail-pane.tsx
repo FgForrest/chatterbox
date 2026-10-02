@@ -238,9 +238,12 @@ export function WorkstationDetailPane({
                             onPlayFromTurn={
                                 currentRecording.audioReaped
                                     ? undefined
-                                    : (startMs) =>
+                                    : (startMs, endMs) =>
                                           playerRef.current?.playFrom(
                                               startMs / 1000,
+                                              endMs === undefined
+                                                  ? undefined
+                                                  : endMs / 1000,
                                           )
                             }
                             getPlaybackMs={() =>

@@ -351,7 +351,7 @@ describe("LearnReview", () => {
         expect(await screen.findByText(/Eva Malá/)).toBeTruthy();
     });
 
-    it("keeps a fact waiting on its speaker until that speaker is ticked, and says what it replaces", async () => {
+    it("keeps a fact waiting on its speaker until that speaker is ticked, then names them in it", async () => {
         const item = (overrides: Record<string, unknown>) => ({
             preTicked: false,
             decision: null,
@@ -406,15 +406,173 @@ describe("LearnReview", () => {
             await screen.findByRole("button", { name: "Review (2)" }),
         );
         const fact = screen.getByRole("checkbox", {
-            name: /speaker_1 — works_for — Tavesi/,
+            name: "Speaker 1 — works_for — Tavesi",
         }) as HTMLInputElement;
         expect(fact.disabled).toBe(true);
         expect(screen.getByText("replaces Acme")).toBeTruthy();
+        expect(screen.getByText("needs Speaker 1 named")).toBeTruthy();
         fireEvent.click(
             screen.getByRole("checkbox", { name: "Accept speaker_1 as Jan" }),
         );
         await waitFor(() => expect(fact.disabled).toBe(false));
+        expect(fact.getAttribute("aria-label")).toBe(
+            "Jan — works_for — Tavesi",
+        );
+        expect(screen.queryByText("needs Speaker 1 named")).toBeNull();
         expect(fetch).toHaveBeenCalled();
+    });
+
+    it("ticks and unticks a whole section from its heading, leaving what waits alone", async () => {
+        const fact = (id: string, dependsOnLabel: string | null) => ({
+            id,
+            kind: "fact",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel,
+            payload: {
+                subject: dependsOnLabel
+                    ? { speakerLabel: dependsOnLabel }
+                    : { personId: "p-jan" },
+                relationKey: "leads",
+                object: { entityId: "e-orion" },
+                startMs: 5_000,
+                endMs: 9_000,
+                speakerLabel: dependsOnLabel,
+            },
+        });
+        const speaker = {
+            id: "i-speaker",
+            kind: "speaker",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                label: "speaker_1",
+                personId: "p-jan",
+                evidenceMs: [],
+                reason: "",
+            },
+        };
+        const fetch = respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [speaker, fact("i-a", null), fact("i-b", "speaker_1")],
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-a?source=riffado": {
+                version: 1,
+            },
+            "PATCH /api/recordings/rec-1/review/items/i-b?source=riffado": {
+                version: 1,
+            },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (3)" }),
+        );
+        const patched = () =>
+            fetch.mock.calls
+                .filter(([, init]) => init?.method === "PATCH")
+                .map(([url, init]) => [
+                    url.split("/items/")[1]?.split("?")[0],
+                    JSON.parse(String(init?.body)).decision,
+                ]);
+        // The fact waiting on its speaker is not ticked with the rest.
+        fireEvent.click(
+            screen.getByRole("checkbox", { name: "Tick all: New facts" }),
+        );
+        await waitFor(() => expect(patched()).toEqual([["i-a", "accepted"]]));
+        const all = (await screen.findByRole("checkbox", {
+            name: "Untick all: New facts",
+        })) as HTMLInputElement;
+        expect(all.checked).toBe(true);
+
+        fireEvent.click(all);
+        await waitFor(() =>
+            expect(patched()).toEqual([
+                ["i-a", "accepted"],
+                ["i-a", "rejected"],
+            ]),
+        );
+        expect(
+            (
+                screen.getByRole("checkbox", {
+                    name: "Tick all: New facts",
+                }) as HTMLInputElement
+            ).checked,
+        ).toBe(false);
+    });
+
+    it("shows a section half ticked when only some of it is", async () => {
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [
+                    READY.items[0],
+                    { ...READY.items[0], id: "i-other", preTicked: false },
+                ],
+            },
+        });
+        render(
+            <LearnReview recordingId="rec-1" source="riffado" turns={TURNS} />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        );
+        const all = screen.getByRole("checkbox", {
+            name: "Tick all: Corrections",
+        }) as HTMLInputElement;
+        expect(all.indeterminate).toBe(true);
+        expect(all.checked).toBe(false);
+    });
+
+    it("plays a speaker from its chip, where it has turns", async () => {
+        const speaker = (label: string) => ({
+            id: `i-${label}`,
+            kind: "speaker",
+            preTicked: false,
+            decision: null,
+            choice: null,
+            version: 0,
+            dependsOnLabel: null,
+            payload: {
+                label,
+                personId: "p-jan",
+                evidenceMs: [],
+                reason: "",
+            },
+        });
+        respond({
+            "GET /api/recordings/rec-1/review?source=riffado": {
+                ...READY,
+                items: [speaker("speaker_1"), speaker("speaker_7")],
+            },
+        });
+        const onPlaySpeaker = vi.fn(() => true);
+        render(
+            <LearnReview
+                recordingId="rec-1"
+                source="riffado"
+                turns={TURNS}
+                onPlaySpeaker={onPlaySpeaker}
+            />,
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Review (2)" }),
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Play a turn of Speaker 1" }),
+        );
+        expect(onPlaySpeaker).toHaveBeenCalledWith("speaker_1");
+        // Nobody to hear: no turn of that speaker in the transcript.
+        expect(
+            screen.queryByRole("button", { name: "Play a turn of Speaker 7" }),
+        ).toBeNull();
     });
 
     it("answers a speaker nobody was proposed for: unknown, or someone else", async () => {
@@ -675,7 +833,7 @@ describe("LearnReview", () => {
         expect(
             (
                 screen.getByRole("checkbox", {
-                    name: /speaker_1 — leads — Orion/,
+                    name: "Jan Nový — leads — Orion",
                 }) as HTMLInputElement
             ).disabled,
         ).toBe(false);
@@ -1044,7 +1202,7 @@ describe("LearnReview", () => {
             { key: "product", label: "Product or system" },
         ];
 
-        it("lists them first, and holds what refers to one until it is ticked", async () => {
+        it("lists them after the speakers, and holds what refers to one until it is ticked", async () => {
             const fetch = respond({
                 "GET /api/recordings/rec-1/review?source=riffado": {
                     ...READY,
@@ -1069,7 +1227,8 @@ describe("LearnReview", () => {
             const headings = screen
                 .getAllByRole("heading", { level: 3 })
                 .map((heading) => heading.textContent);
-            expect(headings[0]).toMatch(/^New in the Almanac/);
+            expect(headings[0]).toMatch(/^Speakers/);
+            expect(headings[1]).toMatch(/^New in the Almanac/);
             const fact = screen.getByRole("checkbox", {
                 name: "Petra Kolářová — works_for — Veltrix",
             }) as HTMLInputElement;

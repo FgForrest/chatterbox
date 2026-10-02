@@ -111,8 +111,8 @@ interface TranscriptionPanelProps {
     onTranscriptStale?: () => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
-    /** Seek and start playback for speaker navigation. */
-    onPlayFromTurn?: (startMs: number) => void;
+    /** Seek and start playback for speaker navigation, up to `endMs` if given. */
+    onPlayFromTurn?: (startMs: number, endMs?: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
     /**
@@ -445,7 +445,8 @@ export function TranscriptionPanel({
             ]),
         [speakerAttributions, unknownByKey, attributionKey],
     );
-    const handlePlaySpeaker = (speaker: string): boolean => {
+    /** Play a speaker's next turn; `once`: only that turn. */
+    const handlePlaySpeaker = (speaker: string, once = false): boolean => {
         const turns = activeTranscript?.turns;
         if (!turns?.length || !onPlayFromTurn) return false;
         const matching = turns.flatMap((turn, index) =>
@@ -464,7 +465,12 @@ export function TranscriptionPanel({
                 : 0;
         const index = matching[nextPosition];
         speakerCursorRef.current = { transcript, speaker, index };
-        onPlayFromTurn(turns[index].startMs);
+        const { startMs, endMs } = turns[index];
+        if (once && Number.isFinite(endMs) && endMs > startMs) {
+            onPlayFromTurn(startMs, endMs);
+        } else {
+            onPlayFromTurn(startMs);
+        }
         setTranscriptExpanded(true);
         setSpeakerJump({ index });
         return true;
@@ -875,6 +881,15 @@ export function TranscriptionPanel({
                                         }
                                         turns={activeTranscript.turns ?? []}
                                         onSeek={onSeekToTurn}
+                                        onPlaySpeaker={
+                                            onPlayFromTurn
+                                                ? (label) =>
+                                                      handlePlaySpeaker(
+                                                          label,
+                                                          true,
+                                                      )
+                                                : undefined
+                                        }
                                         onFinished={handleReviewFinished}
                                         onMarks={setLearnMarks}
                                     />

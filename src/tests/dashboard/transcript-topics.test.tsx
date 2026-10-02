@@ -231,6 +231,27 @@ describe("transcript topics", () => {
         ]);
     });
 
+    it("sets the turns of a topic in under its heading, and no others", () => {
+        fetchMock.mockImplementation(async () => json({ speakers: [] }));
+        const { unmount } = renderPanel({
+            ...PLAUD,
+            topics: TOPICS.slice(1),
+        });
+        const indented = () =>
+            [0, 1, 2].map((index) =>
+                document
+                    .querySelector(`[data-turn-index="${index}"]`)
+                    ?.className.split(" ")
+                    .includes("ml-10"),
+            );
+        // The topic starts in the second turn; the first is in none.
+        expect(indented()).toEqual([false, true, true]);
+        unmount();
+
+        renderPanel(PLAUD);
+        expect(indented()).toEqual([false, false, false]);
+    });
+
     it("marks the topic being played", async () => {
         renderPanel(
             { ...PLAUD, topics: TOPICS },
