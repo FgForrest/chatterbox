@@ -1,7 +1,7 @@
 "use client";
 
 import type * as React from "react";
-import { useImperativeHandle } from "react";
+import { useEffect, useImperativeHandle, useRef } from "react";
 import { RecordingPlayerControls } from "@/components/dashboard/recording-player-controls";
 import { RecordingWaveformStatus } from "@/components/dashboard/recording-player-header";
 import { DownloadAudioButton } from "@/components/recordings/download-audio-button";
@@ -28,7 +28,8 @@ interface RecordingPlayerProps {
 
 export interface RecordingPlayerHandle {
     seekTo: (seconds: number) => void;
-    playFrom: (seconds: number) => void;
+    /** Play from a moment; with `untilSeconds`, pause once it is reached. */
+    playFrom: (seconds: number, untilSeconds?: number) => void;
     /** Playback position in seconds, read from the audio element. */
     getCurrentTime: () => number;
 }
@@ -71,12 +72,24 @@ export function RecordingPlayer({
         initialAutoPlayNext,
     });
 
+    // Where playback started with an end pauses; any pause forgets it.
+    const stopAt = useRef<number | null>(null);
+    useEffect(() => {
+        if (!isPlaying) {
+            stopAt.current = null;
+        } else if (stopAt.current !== null && currentTime >= stopAt.current) {
+            stopAt.current = null;
+            togglePlayPause();
+        }
+    }, [isPlaying, currentTime, togglePlayPause]);
+
     useImperativeHandle(
         ref,
         () => ({
             seekTo: seekToTime,
-            playFrom: (seconds) => {
+            playFrom: (seconds, untilSeconds) => {
                 seekToTime(seconds);
+                stopAt.current = untilSeconds ?? null;
                 if (!isPlaying) togglePlayPause();
             },
             getCurrentTime: () => audioRef.current?.currentTime ?? 0,

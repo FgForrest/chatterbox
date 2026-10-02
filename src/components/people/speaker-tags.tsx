@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
 import { parseApiError, toastApiError } from "@/lib/api-errors";
 import {
@@ -12,15 +13,6 @@ import {
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
 import { type RecordingView, withRecordingView } from "@/lib/sharing/view";
-
-const SPEAKER_ACCENTS = [
-    "bg-primary",
-    "bg-emerald-500",
-    "bg-amber-500",
-    "bg-violet-500",
-    "bg-rose-500",
-    "bg-sky-500",
-] as const;
 
 export interface TranscriptSpeakerTag {
     speaker: string;
@@ -329,8 +321,7 @@ export function SpeakerTags({
             >
                 {speakers.map((speaker, index) => {
                     const attribution = attributions[speaker.speaker];
-                    const accent =
-                        SPEAKER_ACCENTS[index % SPEAKER_ACCENTS.length];
+                    const accent = speakerAccent(index).dot;
                     const dot = (
                         <span className={`size-1.5 rounded-full ${accent}`} />
                     );
@@ -389,7 +380,7 @@ export function SpeakerTags({
             {speakers.map((speaker, index) => {
                 const attribution = attributions[speaker.speaker];
                 const saving = savingLabel === speaker.speaker;
-                const accent = SPEAKER_ACCENTS[index % SPEAKER_ACCENTS.length];
+                const accent = speakerAccent(index).dot;
 
                 if (!attribution && unknownLabels.has(speaker.speaker)) {
                     return (
