@@ -22,10 +22,14 @@ interface FollowUps {
     pending: string[];
 }
 
+/** The correction pass's job kind (`correction-pass-queue.ts`). */
+const CORRECTION_JOB_KIND = "learn.correct";
+
 /**
  * What automatic Learn held back on the owner's private view: whether the
- * title, summary and topics still wait for the review (`held`), and the
- * jobs that make them, polled until none is left. A hold is checked now
+ * title, summary and topics still wait for the review (`held`), whether
+ * the correction pass is reading the transcript again (`correcting`), and
+ * the jobs that make them, polled until none is left. A hold is checked now
  * and then, and quickly once `follow()` is called (the review was
  * finished). `onChange` runs whenever that set of jobs changes or the hold
  * is released, so the page can pick up jobs just queued and read back what
@@ -39,8 +43,9 @@ export function useLearnFollowUps({
     recordingId: string;
     enabled: boolean;
     onChange: () => void;
-}): { held: boolean; follow: () => void } {
+}): { held: boolean; correcting: boolean; follow: () => void } {
     const [held, setHeld] = useState(false);
+    const [correcting, setCorrecting] = useState(false);
     const [following, setFollowing] = useState(0);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
@@ -48,6 +53,7 @@ export function useLearnFollowUps({
     useEffect(() => {
         if (!enabled) {
             setHeld(false);
+            setCorrecting(false);
             return;
         }
         // A follow started by a finished review, rather than the page opening.
@@ -87,6 +93,7 @@ export function useLearnFollowUps({
             let delay = state ? POLL_MS : HELD_POLL_MS;
             if (state) {
                 setHeld(state.held);
+                setCorrecting(state.pending.includes(CORRECTION_JOB_KIND));
                 const current = state.pending.join(",");
                 const released = wasHeld && !state.held;
                 if (previous !== null && (current !== previous || released)) {
@@ -118,5 +125,5 @@ export function useLearnFollowUps({
     }, [recordingId, enabled, following]);
 
     const follow = useCallback(() => setFollowing((count) => count + 1), []);
-    return { held, follow };
+    return { held, correcting, follow };
 }

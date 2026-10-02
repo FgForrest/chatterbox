@@ -570,11 +570,17 @@ export function TranscriptionPanel({
     // The title, summary and topics automatic Learn held back are made by
     // jobs a finished review queues: followed here, since nothing the page
     // started makes them.
-    const { held: heldForReview, follow: followReleased } = useLearnFollowUps({
+    const {
+        held: heldForReview,
+        correcting,
+        follow: followReleased,
+    } = useLearnFollowUps({
         recordingId: recording.id,
         enabled: canLearn && !orgView,
         onChange: () => {
             setFollowUpRevision((count) => count + 1);
+            // The correction pass may have corrected it meanwhile.
+            setCorrectionsRead((count) => count + 1);
             recheckSummary();
             onTranscriptStale?.();
         },
@@ -665,6 +671,14 @@ export function TranscriptionPanel({
 
     return (
         <div className="space-y-4">
+            {correcting && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    {i18n(
+                        "Learn is reading the transcript again with the Almanac to correct misheard words.",
+                    )}
+                </p>
+            )}
             {learnMarks &&
                 canLearn &&
                 activeTranscript &&

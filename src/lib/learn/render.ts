@@ -3,7 +3,8 @@
  * an overlay anchored to a turn and character offsets; the stored turns
  * never change, and these apply the overlay when something reads them.
  *
- * - For people: a replacement is applied; a link (a nickname, slang) is
+ * - For people: a replacement (a correction's, or the correction pass's
+ *   fix) is applied; a link (a nickname, slang) is
  *   kept as spoken and carries what it means, for the view to show on
  *   hover.
  * - For the model: a replacement is applied; a link is written with its
@@ -29,7 +30,7 @@ export interface OverlayCorrection {
     charEnd: number;
     /** The words at the offsets when the correction was made. */
     heard: string;
-    kind: "correct" | "link";
+    kind: "correct" | "link" | "fix";
     /** What replaces the words; null on a link. */
     replacement: string | null;
     /** What the words mean: the target's current name. */
@@ -41,7 +42,7 @@ export interface RenderedSegment {
     /** Set on the words a correction changed or explained. */
     correction?: {
         id?: string;
-        kind: "correct" | "link";
+        kind: "correct" | "link" | "fix";
         heard: string;
         meaning: string;
     };
@@ -133,7 +134,7 @@ export function renderTurnsForPeople(
     corrections: readonly OverlayCorrection[],
 ): RenderedTurn[] {
     return render(turns, corrections, (correction) =>
-        correction.kind === "correct" && correction.replacement !== null
+        correction.kind !== "link" && correction.replacement !== null
             ? correction.replacement
             : correction.heard,
     );
@@ -173,7 +174,7 @@ export function flattenTurns(turns: readonly TranscriptTurn[]): string {
 
 /** How the model's rendering shows a correction's words. */
 function llmShown(correction: OverlayCorrection): string {
-    return correction.kind === "correct" && correction.replacement !== null
+    return correction.kind !== "link" && correction.replacement !== null
         ? correction.replacement
         : `${correction.heard} [= ${correction.meaning}]`;
 }

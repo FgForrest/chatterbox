@@ -167,6 +167,7 @@ export async function publishKnowledgeInTx(
     const corrections = await tx
         .select({
             id: transcriptCorrections.id,
+            kind: transcriptCorrections.kind,
             targetPersonId: transcriptCorrections.targetPersonId,
             targetEntityId: transcriptCorrections.targetEntityId,
         })
@@ -237,19 +238,31 @@ export async function publishKnowledgeInTx(
     }
 
     for (const correction of corrections) {
-        const target = await sharedTargetInTx(
-            tx,
-            node(correction.targetPersonId, correction.targetEntityId),
-            orgUserId,
-        );
-        if (!target) {
+        const named =
+            correction.targetPersonId !== null ||
+            correction.targetEntityId !== null;
+        const target = named
+            ? await sharedTargetInTx(
+                  tx,
+                  node(correction.targetPersonId, correction.targetEntityId),
+                  orgUserId,
+              )
+            : null;
+        // A correction pass's fix is the words put right: it is shared
+        // with its record where that can be, else on its own.
+        if (!target && correction.kind !== "fix") {
             result.privateCorrections++;
             continue;
         }
-        const columns =
-            "personId" in target
-                ? { targetPersonId: target.personId, targetEntityId: null }
-                : { targetPersonId: null, targetEntityId: target.entityId };
+        let columns: {
+            targetPersonId: string | null;
+            targetEntityId: string | null;
+        } = { targetPersonId: null, targetEntityId: null };
+        if (target && "personId" in target) {
+            columns = { targetPersonId: target.personId, targetEntityId: null };
+        } else if (target) {
+            columns = { targetPersonId: null, targetEntityId: target.entityId };
+        }
         await tx
             .update(transcriptCorrections)
             .set({ userId: orgUserId, ...columns, updatedAt: new Date() })

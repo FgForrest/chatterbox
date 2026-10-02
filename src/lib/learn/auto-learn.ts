@@ -8,7 +8,8 @@
  * - no Learn run on the recording's private view is open (`learnRunOpen`:
  *   ready for review, or queued or running with its job alive): the review
  *   finished, the run found nothing, failed, died, or was cancelled or
- *   superseded with no successor; or
+ *   superseded with no successor; and no correction pass the run's end
+ *   queued is still to run (it releases the hold when it ends); or
  * - `summaryDueAt` passed (72 h): nobody reviewed, and the rest goes on
  *   without them.
  * A new Riffado transcript clears the hold in the transaction that writes
@@ -24,11 +25,22 @@
  * Learn off, nothing here runs: the title follows the transcription.
  */
 
-import { and, eq, isNotNull, isNull, lte, notExists, or } from "drizzle-orm";
+import {
+    and,
+    eq,
+    inArray,
+    isNotNull,
+    isNull,
+    lte,
+    ne,
+    notExists,
+    or,
+} from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJobInTx, getActiveJob } from "@/db/queries/async-jobs";
 import {
     aiEnhancements,
+    asyncJobs,
     learnRuns,
     recordings,
     userSettings,
@@ -41,6 +53,7 @@ import {
     type JobResult,
 } from "@/lib/jobs/types";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
+import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
@@ -132,18 +145,45 @@ export async function holdForAutoLearn(input: {
 }
 
 /**
- * Release a recording's hold when no run on its private view is open
- * (`expired`: when its time is up, whatever is open). Exactly once: the
- * hold is cleared by the statement that checks it, and the release job is
- * queued in the same transaction. Returns whether it released. Never
- * throws.
+ * A correction pass on the recording's private view still to run: a job
+ * queued or running, other than `exceptJobId` (the pass that asks).
+ */
+function correctionPending(
+    recordingId: string | typeof recordings.id,
+    exceptJobId?: string,
+) {
+    return db
+        .select({ id: asyncJobs.id })
+        .from(asyncJobs)
+        .where(
+            and(
+                eq(asyncJobs.kind, LEARN_CORRECT_JOB_KIND),
+                eq(asyncJobs.subjectId, recordingId),
+                inArray(asyncJobs.status, ["pending", "processing"]),
+                exceptJobId ? ne(asyncJobs.id, exceptJobId) : undefined,
+            ),
+        );
+}
+
+/**
+ * Release a recording's hold when no run on its private view is open and
+ * no correction pass is still to run (`expired`: when its time is up,
+ * whatever is open). Exactly once: the hold is cleared by the statement
+ * that checks it, and the release job is queued in the same transaction.
+ * Returns whether it released. Never throws.
  */
 export async function releaseAutoLearnHold(
     recordingId: string,
     {
         expired = false,
         now = new Date(),
-    }: { expired?: boolean; now?: Date } = {},
+        exceptJobId,
+    }: {
+        expired?: boolean;
+        now?: Date;
+        /** The correction pass releasing it, still running as it asks. */
+        exceptJobId?: string;
+    } = {},
 ): Promise<boolean> {
     try {
         if (!expired) await settleDeadLearnRuns(recordingId);
@@ -168,7 +208,15 @@ export async function releaseAutoLearnHold(
                         // A renewed hold is not the one whose time was up.
                         expired
                             ? lte(recordings.summaryDueAt, now)
-                            : notExists(open),
+                            : and(
+                                  notExists(open),
+                                  notExists(
+                                      correctionPending(
+                                          recordingId,
+                                          exceptJobId,
+                                      ),
+                                  ),
+                              ),
                     ),
                 )
                 .returning({ userId: recordings.userId });
@@ -312,7 +360,13 @@ export async function sweepAutoLearnHolds(
         .where(
             and(
                 isNotNull(recordings.summaryDueAt),
-                or(lte(recordings.summaryDueAt, now), notExists(open)),
+                or(
+                    lte(recordings.summaryDueAt, now),
+                    and(
+                        notExists(open),
+                        notExists(correctionPending(recordings.id)),
+                    ),
+                ),
             ),
         )
         .orderBy(recordings.summaryDueAt)

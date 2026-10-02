@@ -44,8 +44,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         source: requestedReviewSource(request),
     });
     // What it applied, and what it left out that a waiting review had
-    // ticked, may change what a summary read.
-    if (finished.status === "finished") {
+    // ticked, may change what a summary read; a correction pass queued
+    // refreshes it when it ends instead.
+    if (finished.status === "finished" && !finished.correcting) {
         await refreshSummaryAfterCorrections({
             ownerUserId: access.ownerUserId,
             recordingId: id,
