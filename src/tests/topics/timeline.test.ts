@@ -10,6 +10,7 @@ import {
     buildTimeMarks,
     containingTurnIndex,
     formatClock,
+    paragraphsOf,
     parseClock,
     renderTimedTranscript,
     splitIntoWindows,
@@ -190,5 +191,59 @@ describe("activeTopicIndex", () => {
         expect(activeTopicIndex(topics, 0)).toBe(-1);
         expect(activeTopicIndex(topics, 5_000)).toBe(0);
         expect(activeTopicIndex(topics, 39_000)).toBe(1);
+    });
+});
+
+describe("paragraphsOf", () => {
+    // Twenty sentences of 21 characters with their space, 20 s each.
+    const sentence = (i: number) =>
+        `s${String(i).padStart(2, "0")} lorem ipsum dol. `;
+    const lecture = turn(
+        "speaker_1",
+        0,
+        400,
+        Array.from({ length: 20 }, (_, i) => sentence(i)).join(""),
+    );
+
+    it("keeps short turns whole, each topic heading the turn it starts in", () => {
+        const { paragraphs, topicParagraphs } = paragraphsOf(
+            [
+                turn("speaker_0", 0, 10, "Ahoj. Jak se máš?"),
+                turn("speaker_1", 10, 20, "Dobře."),
+            ],
+            [12_000],
+        );
+        expect(paragraphs).toEqual([
+            { turnIndex: 0, charStart: 0, startMs: 0 },
+            { turnIndex: 1, charStart: 0, startMs: 10_000 },
+        ]);
+        expect(topicParagraphs).toEqual([1]);
+    });
+
+    it("cuts a long turn at sentence ends about every half a minute", () => {
+        const { paragraphs } = paragraphsOf([lecture]);
+        expect(paragraphs.map((paragraph) => paragraph.charStart)).toEqual(
+            [0, 2, 4, 6, 8, 10, 12, 14, 16, 18].map((i) => i * 21),
+        );
+        expect(paragraphs[1].startMs).toBe(40_000);
+    });
+
+    it("starts a paragraph where a topic starts inside a long turn", () => {
+        // A second off the sentence it was anchored to, as a correction
+        // made since might leave it.
+        const { paragraphs, topicParagraphs } = paragraphsOf(
+            [lecture],
+            [0, 141_000],
+        );
+        const heading = paragraphs[topicParagraphs[1]];
+        expect(heading).toEqual({
+            turnIndex: 0,
+            charStart: 7 * 21,
+            startMs: 140_000,
+        });
+        expect(topicParagraphs[0]).toBe(0);
+        expect(paragraphs.map((paragraph) => paragraph.charStart)).toContain(
+            9 * 21,
+        );
     });
 });

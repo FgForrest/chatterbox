@@ -241,6 +241,94 @@ export function splitIntoWindows(
     return windows;
 }
 
+/** A stretch of one turn shown as a paragraph of its own. */
+export interface TranscriptParagraph {
+    turnIndex: number;
+    /** UTF-16 offset into the turn's text where the paragraph starts. */
+    charStart: number;
+    /** Milliseconds from the start of the audio; interpolated inside a turn. */
+    startMs: number;
+}
+
+/** A paragraph inside a long turn ends at the first sentence end past this. */
+const PARAGRAPH_MS = 30_000;
+
+/**
+ * Turns cut into paragraphs for reading, and the paragraph each topic heads.
+ *
+ * A lecture is one speaker's single turn, minutes long: shown whole it is
+ * one block of text, and every topic heading would sit above it. A long
+ * turn is therefore cut at sentence ends, every half a minute or so and
+ * wherever a topic starts. Topic starts inside a long turn are the inner
+ * marks of `buildTimeMarks`, so each is snapped back to the sentence nearest
+ * its place in the text; corrections made since can shift it by a few
+ * characters, never by a sentence. Short turns stay whole.
+ */
+export function paragraphsOf(
+    turns: readonly TranscriptTurn[],
+    topicStartsMs: readonly number[] = [],
+): { paragraphs: TranscriptParagraph[]; topicParagraphs: number[] } {
+    const paragraphs: TranscriptParagraph[] = [];
+    const topicParagraphs: number[] = [];
+
+    turns.forEach((turn, turnIndex) => {
+        const duration = turn.endMs - turn.startMs;
+        const first = paragraphs.length;
+        paragraphs.push({ turnIndex, charStart: 0, startMs: turn.startMs });
+        const headed = topicStartsMs.flatMap((ms, topicIndex) =>
+            containingTurnIndex(turns, ms) === turnIndex
+                ? [{ ms, topicIndex }]
+                : [],
+        );
+        if (duration <= LONG_TURN_MS || !turn.text.trim()) {
+            for (const { topicIndex } of headed) {
+                topicParagraphs[topicIndex] = first;
+            }
+            return;
+        }
+
+        const length = turn.text.length;
+        const sentences = sentencesOf(turn.text).map(({ at }) => ({
+            at,
+            ms: turn.startMs + Math.round((at / length) * duration),
+        }));
+        const topicAt = new Map<number, number[]>();
+        for (const { ms, topicIndex } of headed) {
+            const at = ((ms - turn.startMs) / duration) * length;
+            let nearest = 0;
+            sentences.forEach((sentence, index) => {
+                if (
+                    Math.abs(sentence.at - at) <
+                    Math.abs(sentences[nearest].at - at)
+                ) {
+                    nearest = index;
+                }
+            });
+            topicAt.set(nearest, [...(topicAt.get(nearest) ?? []), topicIndex]);
+        }
+
+        sentences.forEach((sentence, index) => {
+            const current = paragraphs.at(-1) as TranscriptParagraph;
+            if (
+                index > 0 &&
+                (topicAt.has(index) ||
+                    sentence.ms - current.startMs >= PARAGRAPH_MS)
+            ) {
+                paragraphs.push({
+                    turnIndex,
+                    charStart: sentence.at,
+                    startMs: sentence.ms,
+                });
+            }
+            for (const topicIndex of topicAt.get(index) ?? []) {
+                topicParagraphs[topicIndex] = paragraphs.length - 1;
+            }
+        });
+    });
+
+    return { paragraphs, topicParagraphs };
+}
+
 /** Index of the turn a moment falls in: the last one starting at or before it. */
 export function containingTurnIndex(
     turns: readonly Pick<TranscriptTurn, "startMs">[],
