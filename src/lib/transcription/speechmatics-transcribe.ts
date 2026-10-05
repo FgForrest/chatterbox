@@ -137,6 +137,19 @@ export function parseSpeechmaticsModel(model: string): ParsedSpeechmaticsModel {
 }
 
 /**
+ * Whether a model takes `additional_vocab`. Melia does not support the
+ * custom dictionary, and its job schema rejects the whole job if the
+ * field is present.
+ */
+export function speechmaticsTakesVocabulary(model: string): boolean {
+    return !isMeliaModel(parseSpeechmaticsModel(model).modelId);
+}
+
+function isMeliaModel(modelId: string): boolean {
+    return modelId.toLowerCase().startsWith("melia");
+}
+
+/**
  * Resolve the Jobs API root. An empty base URL targets the auto-routing
  * host; a regional host (`https://eu2.asr.api.speechmatics.com`) is
  * accepted with or without a trailing `/v2`.
@@ -153,7 +166,8 @@ export function resolveSpeechmaticsBase(baseUrl?: string | null): string {
  * `language` is mandatory on Speechmatics' side, so a user who never set
  * a default transcription language gets `auto` (batch-only language
  * identification) rather than a silent failure. Melia is the exception:
- * it detects languages itself and only accepts `multi`.
+ * it detects languages itself and only accepts `multi`, and it gets no
+ * vocabulary (see `speechmaticsTakesVocabulary`).
  */
 export function buildSpeechmaticsConfig({
     modelId,
@@ -166,7 +180,7 @@ export function buildSpeechmaticsConfig({
     language?: string;
     vocabulary?: readonly SpeechmaticsVocabularyEntry[];
 }): string {
-    const isMelia = modelId.toLowerCase().startsWith("melia");
+    const isMelia = isMeliaModel(modelId);
     const transcriptionConfig: Record<string, unknown> = {
         language: isMelia ? MELIA_LANGUAGE : language || AUTO_LANGUAGE,
     };
@@ -176,7 +190,7 @@ export function buildSpeechmaticsConfig({
     if (diarize) {
         transcriptionConfig.diarization = "speaker";
     }
-    if (vocabulary.length > 0) {
+    if (vocabulary.length > 0 && !isMelia) {
         transcriptionConfig.additional_vocab = vocabulary.map((entry) =>
             entry.soundsLike.length > 0
                 ? { content: entry.text, sounds_like: [...entry.soundsLike] }

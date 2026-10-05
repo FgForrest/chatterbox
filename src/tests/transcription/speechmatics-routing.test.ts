@@ -338,4 +338,24 @@ describe("Speechmatics credentials route to the Batch jobs API, not the OpenAI S
             { content: "Blue Harbor" },
         ]);
     });
+
+    it("does not look up the Almanac for Melia, which has no custom dictionary", async () => {
+        mockDbForCredential({
+            provider: "Speechmatics",
+            baseUrl: null,
+            defaultModel: "melia-1+diarize",
+        });
+
+        const result = await transcribeRecording("user-sm", "rec-sm");
+
+        expect(result.success).toBe(true);
+        expect(almanacTermsFor).not.toHaveBeenCalled();
+        const submit = requests().find((r) => r.method === "POST");
+        const config = JSON.parse(
+            (submit?.init.body as FormData).get("config") as string,
+        );
+        expect(config.transcription_config).not.toHaveProperty(
+            "additional_vocab",
+        );
+    });
 });
