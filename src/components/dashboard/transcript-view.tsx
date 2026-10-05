@@ -7,19 +7,18 @@ import { CorrectedText } from "@/components/learn/corrected-text";
 import {
     type LearnCorrectionMark,
     type LearnMarks,
+    type TurnPiece,
     turnPieces,
 } from "@/components/learn/learn-marks";
 import { MarkedText } from "@/components/learn/marked-text";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
+import type { OverlayCorrection } from "@/lib/learn/render";
 import {
-    type OverlayCorrection,
-    renderTurnsForPeople,
-} from "@/lib/learn/render";
-import {
-    containingTurnIndex,
     formatClock,
+    paragraphsOf,
+    type TranscriptParagraph,
     type TranscriptTopic,
 } from "@/lib/topics/timeline";
 import {
@@ -95,6 +94,53 @@ function formatTimestamp(milliseconds: number): string {
 }
 
 /**
+ * A turn's pieces cut where its paragraphs start. A cut inside corrected or
+ * marked words moves to their end.
+ */
+function piecesByParagraph(
+    pieces: readonly TurnPiece[],
+    cuts: readonly number[],
+): TurnPiece[][] {
+    const out: TurnPiece[][] = [[]];
+    const push = (piece: TurnPiece) => {
+        const paragraph = out[out.length - 1];
+        if (paragraph.length === 0 && !piece.correction && !piece.mark) {
+            const text = piece.text.trimStart();
+            if (text) paragraph.push({ text });
+            return;
+        }
+        paragraph.push(piece);
+    };
+    let at = 0;
+    let next = 0;
+    for (const piece of pieces) {
+        const end =
+            at +
+            (piece.correction
+                ? piece.correction.heard.length
+                : piece.text.length);
+        if (piece.correction || piece.mark) {
+            for (; next < cuts.length && cuts[next] <= at; next++) out.push([]);
+            push(piece);
+        } else {
+            let from = at;
+            for (; next < cuts.length && cuts[next] < end; next++) {
+                const cut = Math.max(cuts[next], from);
+                if (cut > from) {
+                    push({ text: piece.text.slice(from - at, cut - at) });
+                }
+                out.push([]);
+                from = cut;
+            }
+            if (from < end) push({ text: piece.text.slice(from - at) });
+        }
+        at = end;
+    }
+    for (; next < cuts.length; next++) out.push([]);
+    return out;
+}
+
+/**
  * A transcript, rendered as a dialog when it has speaker turns to show and as
  * plain text otherwise.
  *
@@ -103,6 +149,10 @@ function formatTimestamp(milliseconds: number): string {
  * happens to contain a line like "Note: ..." is never examined.
  * `parseSpeakerTurns` then asks whether labels actually arrived, because a
  * diarizing model can still answer with one unlabelled block.
+ *
+ * Long stored turns are read in paragraphs, each topic heading the one it
+ * starts in. With a single speaker, as in a lecture, the speaker is not
+ * named on every paragraph: each starts with its time instead.
  */
 export function TranscriptView({
     text,
@@ -118,14 +168,6 @@ export function TranscriptView({
     corrections = null,
 }: TranscriptViewProps) {
     const i18n = useExtracted();
-    // Corrections are anchored to stored turns too.
-    const corrected = useMemo(
-        () =>
-            corrections?.list.length && storedTurns?.length
-                ? renderTurnsForPeople(storedTurns, corrections.list)
-                : null,
-        [corrections, storedTurns],
-    );
     // Marks are anchored to stored turns; a transcript without them has none.
     const marksByTurn = useMemo(() => {
         const byTurn = new Map<number, LearnCorrectionMark[]>();
@@ -150,25 +192,65 @@ export function TranscriptView({
         if (!mayBeDiarized({ source, model })) return null;
         return parseSpeakerTurns(text);
     }, [text, source, model, storedTurns]);
-    // Topic indices by the turn they start in. Only stored turns carry the
-    // timings topics are anchored to, so a transcript without them shows none.
-    const topicsByTurn = useMemo(() => {
-        const byTurn = new Map<number, number[]>();
-        if (!topics?.length || !storedTurns?.length) return byTurn;
-        topics.forEach((topic, topicIndex) => {
-            const turnIndex = containingTurnIndex(storedTurns, topic.fromMs);
-            byTurn.set(turnIndex, [
-                ...(byTurn.get(turnIndex) ?? []),
-                topicIndex,
-            ]);
+    // Only stored turns carry the timings that paragraphs and topics need.
+    const { paragraphs, topicParagraphs } = useMemo<{
+        paragraphs: TranscriptParagraph[];
+        topicParagraphs: number[];
+    }>(() => {
+        if (storedTurns?.length) {
+            return paragraphsOf(
+                storedTurns,
+                (topics ?? []).map((topic) => topic.fromMs),
+            );
+        }
+        return {
+            paragraphs: (turns ?? []).map((turn, turnIndex) => ({
+                turnIndex,
+                charStart: 0,
+                startMs: turn.startMs ?? Number.NaN,
+            })),
+            topicParagraphs: [],
+        };
+    }, [storedTurns, topics, turns]);
+    // Each paragraph's text: corrections applied and review marks in place,
+    // both anchored to the stored turn it is cut from.
+    const pieces = useMemo(() => {
+        const out: TurnPiece[][] = [];
+        if (!turns) return out;
+        const list = storedTurns?.length ? (corrections?.list ?? []) : [];
+        const cutsByTurn = new Map<number, number[]>();
+        for (const paragraph of paragraphs) {
+            if (paragraph.charStart === 0) continue;
+            const cuts = cutsByTurn.get(paragraph.turnIndex);
+            if (cuts) cuts.push(paragraph.charStart);
+            else cutsByTurn.set(paragraph.turnIndex, [paragraph.charStart]);
+        }
+        turns.forEach((turn, turnIndex) => {
+            const cuts = cutsByTurn.get(turnIndex) ?? [];
+            out.push(
+                ...piecesByParagraph(
+                    turnPieces(
+                        turn.text,
+                        turnIndex,
+                        list,
+                        marksByTurn.get(turnIndex) ?? [],
+                    ),
+                    cuts,
+                ),
+            );
         });
-        return byTurn;
-    }, [topics, storedTurns]);
-    const highlightedTurn =
-        highlightedTopic !== null &&
-        topics?.[highlightedTopic] &&
-        storedTurns?.length
-            ? containingTurnIndex(storedTurns, topics[highlightedTopic].fromMs)
+        return out;
+    }, [turns, storedTurns, corrections, marksByTurn, paragraphs]);
+    const topicsByParagraph = new Map<number, number[]>();
+    topicParagraphs.forEach((paragraphIndex, topicIndex) => {
+        topicsByParagraph.set(paragraphIndex, [
+            ...(topicsByParagraph.get(paragraphIndex) ?? []),
+            topicIndex,
+        ]);
+    });
+    const highlightedParagraph =
+        highlightedTopic !== null && topics?.[highlightedTopic]
+            ? (topicParagraphs[highlightedTopic] ?? null)
             : null;
 
     if (!turns) {
@@ -180,9 +262,18 @@ export function TranscriptView({
     }
 
     const order = speakerOrder(turns);
-    // From the first topic on, turns sit inside their topic, under its title.
-    const firstTopicTurn =
-        topicsByTurn.size > 0 ? Math.min(...topicsByTurn.keys()) : null;
+    // A lone speaker is named only while a review proposes a name for them.
+    const loneKey = order.length === 1 ? speakerKey(order[0]) : null;
+    const showSpeakers =
+        loneKey === null ||
+        (speakerAttributions[loneKey]?.name === undefined &&
+            Boolean(storedTurns?.length) &&
+            learnMarks?.speakers[loneKey] !== undefined);
+    // From the first topic on, paragraphs sit inside their topic, under its title.
+    const firstTopicParagraph =
+        topicsByParagraph.size > 0
+            ? Math.min(...topicsByParagraph.keys())
+            : null;
     // The accept button goes on a speaker's first turn only.
     const firstTurnOf = new Map<string, number>();
     turns.forEach((turn, index) => {
@@ -192,7 +283,12 @@ export function TranscriptView({
 
     return (
         <div className="space-y-4">
-            {turns.map((turn, index) => {
+            {paragraphs.map((paragraph, index) => {
+                const turnIndex = paragraph.turnIndex;
+                const turn = turns[turnIndex];
+                const opensTurn =
+                    paragraphs[index - 1]?.turnIndex !== turnIndex;
+                const named = showSpeakers && turn.label !== "";
                 const position = order.indexOf(turn.speaker);
                 const style = speakerAccent(position);
                 const key = speakerKey(turn.speaker);
@@ -207,13 +303,12 @@ export function TranscriptView({
                 const nameStyle = proposed ? "italic" : "";
                 const canSeek =
                     onSeekToTurn !== undefined &&
-                    turn.startMs !== undefined &&
-                    Number.isFinite(turn.startMs);
+                    Number.isFinite(paragraph.startMs);
                 return (
                     <Fragment
-                        key={`${turn.speaker}-${index}-${turn.text.slice(0, 24)}`}
+                        key={`${turn.speaker}-${turnIndex}-${paragraph.charStart}`}
                     >
-                        {topicsByTurn.get(index)?.map((topicIndex) => {
+                        {topicsByParagraph.get(index)?.map((topicIndex) => {
                             const topic = (topics as TranscriptTopic[])[
                                 topicIndex
                             ];
@@ -254,26 +349,26 @@ export function TranscriptView({
                             );
                         })}
                         <div
-                            data-turn-index={index}
-                            className={`space-y-1 rounded-md transition-colors duration-700 ${firstTopicTurn !== null && index >= firstTopicTurn ? "ml-10" : ""} ${highlightedTurn === index || highlightedTurnIndex === index ? "bg-primary/10" : ""}`}
+                            data-turn-index={opensTurn ? turnIndex : undefined}
+                            className={`space-y-1 rounded-md transition-colors duration-700 ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
                         >
-                            {!turn.label && canSeek && (
+                            {!named && canSeek && (
                                 <button
                                     type="button"
                                     className="rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                     onClick={() =>
-                                        onSeekToTurn(turn.startMs ?? 0)
+                                        onSeekToTurn(paragraph.startMs)
                                     }
                                     aria-label={i18n("Seek audio to {time}", {
                                         time: formatTimestamp(
-                                            turn.startMs ?? 0,
+                                            paragraph.startMs,
                                         ),
                                     })}
                                 >
-                                    {formatTimestamp(turn.startMs ?? 0)}
+                                    {formatTimestamp(paragraph.startMs)}
                                 </button>
                             )}
-                            {turn.label && (
+                            {named && opensTurn && (
                                 <div className="relative flex items-center gap-2">
                                     <span
                                         className={`size-1.5 rounded-full shrink-0 ${style.dot}`}
@@ -352,62 +447,43 @@ export function TranscriptView({
                                 </div>
                             )}
                             <p
-                                className={`text-sm whitespace-pre-wrap leading-relaxed ${turn.label ? "pl-3.5" : ""}`}
+                                className={`text-sm whitespace-pre-wrap leading-relaxed ${named ? "pl-3.5" : ""}`}
                             >
-                                {marksByTurn.has(index) && learnMarks ? (
-                                    turnPieces(
-                                        turn.text,
-                                        index,
-                                        corrections?.list ?? [],
-                                        marksByTurn.get(index) ?? [],
-                                    ).map((piece, pieceIndex) =>
-                                        piece.mark ? (
-                                            <MarkedText
-                                                // Pieces are fixed by the text, its corrections and marks.
-                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                key={pieceIndex}
-                                                text={piece.text}
-                                                marks={[
-                                                    {
-                                                        ...piece.mark,
-                                                        charStart: 0,
-                                                        charEnd:
-                                                            piece.text.length,
-                                                    },
-                                                ]}
-                                                decide={learnMarks.decide}
-                                            />
-                                        ) : piece.correction ? (
-                                            <CorrectedText
-                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                key={pieceIndex}
-                                                segments={[piece]}
-                                                onUndo={
-                                                    corrections?.canUndo
-                                                        ? corrections.onUndo
-                                                        : undefined
-                                                }
-                                            />
-                                        ) : (
-                                            <Fragment
-                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                                key={pieceIndex}
-                                            >
-                                                {piece.text}
-                                            </Fragment>
-                                        ),
-                                    )
-                                ) : corrected?.[index] ? (
-                                    <CorrectedText
-                                        segments={corrected[index].segments}
-                                        onUndo={
-                                            corrections?.canUndo
-                                                ? corrections.onUndo
-                                                : undefined
-                                        }
-                                    />
-                                ) : (
-                                    turn.text
+                                {pieces[index]?.map((piece, pieceIndex) =>
+                                    piece.mark && learnMarks ? (
+                                        <MarkedText
+                                            // Pieces are fixed by the text, its corrections and marks.
+                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                            key={pieceIndex}
+                                            text={piece.text}
+                                            marks={[
+                                                {
+                                                    ...piece.mark,
+                                                    charStart: 0,
+                                                    charEnd: piece.text.length,
+                                                },
+                                            ]}
+                                            decide={learnMarks.decide}
+                                        />
+                                    ) : piece.correction ? (
+                                        <CorrectedText
+                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                            key={pieceIndex}
+                                            segments={[piece]}
+                                            onUndo={
+                                                corrections?.canUndo
+                                                    ? corrections.onUndo
+                                                    : undefined
+                                            }
+                                        />
+                                    ) : (
+                                        <Fragment
+                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                            key={pieceIndex}
+                                        >
+                                            {piece.text}
+                                        </Fragment>
+                                    ),
                                 )}
                             </p>
                         </div>

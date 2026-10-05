@@ -6,9 +6,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
 
+// Two speakers: a lone speaker is not named at all.
 const TURNS = [
     { speaker: "speaker_0", startMs: 0, endMs: 2000, text: "Ahoj." },
+    { speaker: "speaker_1", startMs: 2000, endMs: 4000, text: "Nazdar." },
 ];
+const TEXT = "speaker_0: Ahoj.\nspeaker_1: Nazdar.";
 
 describe("TranscriptView speaker names", () => {
     afterEach(cleanup);
@@ -16,7 +19,7 @@ describe("TranscriptView speaker names", () => {
     it("projects a confirmed name over the raw speaker label", () => {
         render(
             <TranscriptView
-                text="speaker_0: Ahoj."
+                text={TEXT}
                 source="riffado"
                 model="gpt-4o-transcribe-diarize"
                 storedTurns={TURNS}
@@ -34,7 +37,7 @@ describe("TranscriptView speaker names", () => {
     it("returns to the raw label when the overlay is removed", () => {
         const view = render(
             <TranscriptView
-                text="speaker_0: Ahoj."
+                text={TEXT}
                 source="riffado"
                 model="gpt-4o-transcribe-diarize"
                 storedTurns={TURNS}
@@ -46,7 +49,7 @@ describe("TranscriptView speaker names", () => {
 
         view.rerender(
             <TranscriptView
-                text="speaker_0: Ahoj."
+                text={TEXT}
                 source="riffado"
                 model="gpt-4o-transcribe-diarize"
                 storedTurns={TURNS}
@@ -62,17 +65,10 @@ describe("TranscriptView speaker names", () => {
         const onSeekToTurn = vi.fn();
         render(
             <TranscriptView
-                text="speaker_0: Ahoj."
+                text={TEXT}
                 source="riffado"
                 model="gpt-4o-transcribe-diarize"
-                storedTurns={[
-                    {
-                        speaker: "speaker_0",
-                        startMs: 1250,
-                        endMs: 2000,
-                        text: "Ahoj.",
-                    },
-                ]}
+                storedTurns={[{ ...TURNS[0], startMs: 1250 }, TURNS[1]]}
                 onSeekToTurn={onSeekToTurn}
             />,
         );
@@ -89,7 +85,7 @@ describe("TranscriptView speaker names", () => {
     it("does not offer seeking for legacy turns without timestamps", () => {
         render(
             <TranscriptView
-                text="speaker_0: Ahoj."
+                text={TEXT}
                 source="plaud"
                 onSeekToTurn={vi.fn()}
             />,
