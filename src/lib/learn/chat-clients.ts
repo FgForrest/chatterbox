@@ -84,6 +84,7 @@ export async function learnChatClients(input: {
         provider: credentials.provider,
         model,
         baseUrl: credentials.baseUrl,
+        credentialId: credentials.id,
     };
     return {
         provider: credentials.provider,

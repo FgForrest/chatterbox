@@ -413,6 +413,7 @@ export async function generateSummaryForRecording(
                         provider: credentials.provider,
                         model,
                         baseUrl: credentials.baseUrl,
+                        credentialId: credentials.id,
                     },
                     response,
                 );

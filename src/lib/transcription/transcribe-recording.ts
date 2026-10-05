@@ -682,6 +682,7 @@ async function transcribeRecordingInner(
                         provider: credentials.provider,
                         model,
                         baseUrl: credentials.baseUrl,
+                        credentialId: credentials.id,
                     },
                     {
                         inputTokens: result.inputTokens,
@@ -713,6 +714,7 @@ async function transcribeRecordingInner(
                         provider: credentials.provider,
                         model,
                         baseUrl: credentials.baseUrl,
+                        credentialId: credentials.id,
                     },
                     {
                         audioSeconds: recording.duration / 1000,
@@ -742,6 +744,7 @@ async function transcribeRecordingInner(
                         provider: credentials.provider,
                         model,
                         baseUrl: credentials.baseUrl,
+                        credentialId: credentials.id,
                     },
                     { audioSeconds: recording.duration / 1000 },
                 );
@@ -772,6 +775,7 @@ async function transcribeRecordingInner(
                             provider: credentials.provider,
                             model,
                             baseUrl: credentials.baseUrl,
+                            credentialId: credentials.id,
                         },
                         {
                             inputTokens: result.inputTokens,
@@ -836,6 +840,7 @@ async function transcribeRecordingInner(
                             provider: credentials.provider,
                             model,
                             baseUrl: credentials.baseUrl,
+                            credentialId: credentials.id,
                         },
                         {
                             inputTokens: measured?.input_tokens,

@@ -2092,39 +2092,6 @@ export const aiUsageEvents = pgTable(
     }),
 );
 
-export const aiCostRates = pgTable(
-    "ai_cost_rates",
-    {
-        id: text("id")
-            .primaryKey()
-            .$defaultFn(() => nanoid()),
-        userId: text("user_id")
-            .notNull()
-            .references(() => users.id, { onDelete: "cascade" }),
-        provider: varchar("provider", { length: 100 }).notNull(),
-        model: varchar("model", { length: 100 }).notNull(),
-        inputUsdPerMillion: numeric("input_usd_per_million", {
-            precision: 16,
-            scale: 6,
-        }),
-        outputUsdPerMillion: numeric("output_usd_per_million", {
-            precision: 16,
-            scale: 6,
-        }),
-        audioUsdPerHour: numeric("audio_usd_per_hour", {
-            precision: 16,
-            scale: 6,
-        }),
-        createdAt: timestamp("created_at").notNull().defaultNow(),
-        updatedAt: timestamp("updated_at").notNull().defaultNow(),
-    },
-    (table) => ({
-        userProviderModelUnique: unique(
-            "ai_cost_rates_user_provider_model_unique",
-        ).on(table.userId, table.provider, table.model),
-    }),
-);
-
 // API Credentials (encrypted)
 export const apiCredentials = pgTable(
     "api_credentials",
@@ -2153,6 +2120,21 @@ export const apiCredentials = pgTable(
         // enhancement default (a stronger model for learning, say). None
         // marked: Learn uses the enhancement default.
         isDefaultLearn: boolean("is_default_learn").notNull().default(false),
+        // The user's price for this card's model, overriding Riffado's
+        // published catalog. Both token rates or neither; null throughout
+        // leaves the catalog price, or an unknown cost.
+        inputUsdPerMillion: numeric("input_usd_per_million", {
+            precision: 16,
+            scale: 6,
+        }),
+        outputUsdPerMillion: numeric("output_usd_per_million", {
+            precision: 16,
+            scale: 6,
+        }),
+        audioUsdPerHour: numeric("audio_usd_per_hour", {
+            precision: 16,
+            scale: 6,
+        }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },

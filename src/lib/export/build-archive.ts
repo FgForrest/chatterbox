@@ -3,9 +3,9 @@ import { ZipArchive } from "archiver";
 import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    aiCostRates,
     aiEnhancements,
     aiUsageEvents,
+    apiCredentials,
     knowledgeAliases,
     knowledgeEntities,
     knowledgeEntityNotes,
@@ -281,7 +281,7 @@ export async function buildAndUploadExportArchive(input: {
         entities?: { entities: number; aliases: number; notes: number };
         facts?: { facts: number; evidence: number };
         learn?: { runs: number; items: number };
-        aiCostRates?: { count: number; path: string };
+        aiProviderRates?: { count: number; path: string };
     } = {
         version: "2.0",
         createdAt: new Date().toISOString(),
@@ -680,27 +680,34 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
-    const costRates = await db
-        .select()
-        .from(aiCostRates)
-        .where(eq(aiCostRates.userId, userId));
-    if (costRates.length > 0) {
-        const path = "ai/cost-rates.json";
-        archive.append(
-            Buffer.from(
-                JSON.stringify(
-                    costRates.map((rate) => ({
-                        ...rate,
-                        createdAt: rate.createdAt.toISOString(),
-                        updatedAt: rate.updatedAt.toISOString(),
-                    })),
-                    null,
-                    2,
+    // Prices the user set on their provider cards. The cards themselves
+    // stay behind (their keys are secrets), so each rate names the card
+    // by what a restore would re-add: provider, model, endpoint.
+    const priced = await db
+        .select({
+            provider: apiCredentials.provider,
+            model: apiCredentials.defaultModel,
+            baseUrl: apiCredentials.baseUrl,
+            inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
+            outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
+            audioUsdPerHour: apiCredentials.audioUsdPerHour,
+        })
+        .from(apiCredentials)
+        .where(
+            and(
+                eq(apiCredentials.userId, userId),
+                or(
+                    isNotNull(apiCredentials.inputUsdPerMillion),
+                    isNotNull(apiCredentials.audioUsdPerHour),
                 ),
             ),
-            { name: path },
         );
-        manifest.aiCostRates = { count: costRates.length, path };
+    if (priced.length > 0) {
+        const path = "ai/provider-rates.json";
+        archive.append(Buffer.from(JSON.stringify(priced, null, 2)), {
+            name: path,
+        });
+        manifest.aiProviderRates = { count: priced.length, path };
     }
 
     archive.append(Buffer.from(JSON.stringify(manifest, null, 2)), {
