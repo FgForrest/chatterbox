@@ -12,6 +12,7 @@ export interface DriveNode {
 
 /** Where a Drive export remembers the ids of the items it created. */
 export interface DriveNodeStore {
+    list(): Promise<DriveNode[]>;
     get(logicalPath: string): Promise<DriveNode | null>;
     put(node: DriveNode): Promise<void>;
     /** Forgets `logicalPath` and everything beneath it. */
@@ -48,6 +49,17 @@ export class DbDriveNodeStore implements DriveNodeStore {
                 underPrefix(logicalPath),
             ),
         );
+    }
+
+    async list(): Promise<DriveNode[]> {
+        return db
+            .select({
+                logicalPath: driveExportNodes.logicalPath,
+                driveFileId: driveExportNodes.driveFileId,
+                kind: driveExportNodes.kind,
+            })
+            .from(driveExportNodes)
+            .where(this.scope());
     }
 
     async get(logicalPath: string): Promise<DriveNode | null> {

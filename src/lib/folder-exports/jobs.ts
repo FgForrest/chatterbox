@@ -71,14 +71,25 @@ async function queue(
     return result;
 }
 
-export function enqueueExportPlan(userId: string, exportId: string) {
-    return queue({
-        userId,
-        kind: EXPORT_PLAN_JOB_KIND,
-        subjectId: exportId,
-        payload: { exportId },
-        maxAttempts: 3,
-    });
+/**
+ * Plans an export again. A plan already running read the library before
+ * this change, so one more is queued behind it rather than folded into it.
+ */
+export async function enqueueExportPlan(
+    userId: string,
+    exportId: string,
+): Promise<EnqueueJobResult> {
+    const plan = (subjectId: string) =>
+        queue({
+            userId,
+            kind: EXPORT_PLAN_JOB_KIND,
+            subjectId,
+            payload: { exportId },
+            maxAttempts: 3,
+        });
+    const result = await plan(exportId);
+    if (result.created || result.job.status !== "processing") return result;
+    return plan(`${exportId}:again`);
 }
 
 export async function enqueueExportPlansForUser(userId: string): Promise<void> {

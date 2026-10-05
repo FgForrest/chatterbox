@@ -554,11 +554,48 @@ export const filesystemExportSettings = pgTable(
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
         targetPath: text("target_path").notNull(),
+        // When the files earlier versions wrote were taken into
+        // `filesystem_export_nodes`; null until the first plan does it.
+        nodesAdoptedAt: timestamp("nodes_adopted_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
         userIdIdx: index("filesystem_export_settings_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// Files and directories a filesystem export created, by logical path: the
+// only entries under the export root it ever moves or deletes.
+export const filesystemExportNodes = pgTable(
+    "filesystem_export_nodes",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        exportConfigurationId: text("export_configuration_id")
+            .notNull()
+            .references(() => folderExportConfigurations.id, {
+                onDelete: "cascade",
+            }),
+        logicalPath: text("logical_path").notNull(),
+        kind: varchar("kind", { length: 16 })
+            .$type<"directory" | "file">()
+            .notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pathUnique: unique("filesystem_export_nodes_path_unique").on(
+            table.exportConfigurationId,
+            table.logicalPath,
+        ),
+        userIdIdx: index("filesystem_export_nodes_user_id_idx").on(
             table.userId,
         ),
     }),

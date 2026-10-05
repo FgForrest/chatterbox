@@ -145,13 +145,81 @@ describe("Google Drive export provider", () => {
         ).toBe(true);
     });
 
-    it("refuses to rename over a folder that is still there", async () => {
+    it("leaves a folder in place rather than rename it over another", async () => {
         const p = provider();
         await p.reconcileDirectory(null, `${ROOT}/One`);
         await p.reconcileDirectory(null, `${ROOT}/Two`);
         await expect(
             provider().reconcileDirectory(`${ROOT}/One`, `${ROOT}/Two`),
-        ).rejects.toThrow(/over an existing directory/);
+        ).resolves.toEqual({ contentPreserved: false });
+        expect(drive.tree(ROOT)).toEqual(["One/", "Two/"]);
+    });
+
+    it("moves its own file into another folder, keeping its id", async () => {
+        const p = provider();
+        await p.materialize(
+            `${ROOT}/Old/audio.mp3`,
+            Buffer.from("abc"),
+            file(),
+        );
+        await p.materialize(
+            `${ROOT}/Taken/audio.mp3`,
+            Buffer.from("x"),
+            file(),
+        );
+        const id = drive.idAt(ROOT, "Old/audio.mp3");
+        await expect(
+            p.moveFile(`${ROOT}/Old/audio.mp3`, `${ROOT}/Taken/audio.mp3`),
+        ).resolves.toBe(false);
+        await expect(
+            p.moveFile(`${ROOT}/Old/audio.mp3`, `${ROOT}/Team/New/audio.mp3`),
+        ).resolves.toBe(true);
+        expect(drive.idAt(ROOT, "Team/New/audio.mp3")).toBe(id);
+        expect(drive.tree(ROOT)).toEqual([
+            "Old/",
+            "Taken/",
+            "Taken/audio.mp3",
+            "Team/",
+            "Team/New/",
+            "Team/New/audio.mp3",
+        ]);
+        expect(nodes.nodes.has(`${ROOT}/Old/audio.mp3`)).toBe(false);
+        await expect(
+            p.moveFile("otherroot/audio.mp3", `${ROOT}/x/audio.mp3`),
+        ).resolves.toBe(false);
+    });
+
+    it("treats paths of a previously picked folder as not there", async () => {
+        const p = provider();
+        await expect(
+            p.exists("otherroot/Team/audio.mp3", {
+                size: 3,
+                version: "v1",
+                format: "file",
+            }),
+        ).resolves.toBe(false);
+        await expect(p.removeEmptyDirectory("otherroot/Team")).resolves.toBe(
+            false,
+        );
+    });
+
+    it("trashes its own file only as a duplicate", async () => {
+        const p = provider();
+        await p.materialize(
+            `${ROOT}/Old/audio.mp3`,
+            Buffer.from("abc"),
+            file(),
+        );
+        const id = drive.idAt(ROOT, "Old/audio.mp3") ?? "";
+        await expect(
+            p.removeFile(`${ROOT}/Old/audio.mp3`, { duplicate: false }),
+        ).resolves.toBe(false);
+        expect(drive.isTrashed(id)).toBe(false);
+        await expect(
+            p.removeFile(`${ROOT}/Old/audio.mp3`, { duplicate: true }),
+        ).resolves.toBe(true);
+        expect(drive.isTrashed(id)).toBe(true);
+        expect(nodes.nodes.has(`${ROOT}/Old/audio.mp3`)).toBe(false);
     });
 
     it("creates the new folder when the previous one is gone", async () => {

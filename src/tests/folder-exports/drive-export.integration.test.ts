@@ -22,6 +22,7 @@ import {
     aiEnhancements,
     driveExportNodes,
     folderExportMaterializations,
+    folderExportPlacements,
     googleDriveExportSettings,
     recordings,
     transcriptions,
@@ -352,6 +353,105 @@ describeWithDatabase("Google Drive folder export (PostgreSQL)", () => {
         // The documents carry the title, so they are rewritten; the audio
         // moved with its folder and is not uploaded again.
         expect(drive.calls.filter((call) => call === "upload")).toHaveLength(2);
+    });
+
+    it("moves a recording's folder when it is filed deeper, uploading nothing", async () => {
+        const configuration = await createExport("markdown");
+        await planFolderExport(OWNER, configuration.id);
+        await materializeAll();
+        const folderId = drive.idAt(ROOT, "Weekly sync");
+        const audioId = drive.idAt(ROOT, "Weekly sync/audio.mp3");
+        const sub = await createFolder({
+            userId: OWNER,
+            parentId: teamFolderId,
+            name: "Sub",
+        });
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: RECORDING,
+            folderId: sub.id,
+        });
+        drive.calls.length = 0;
+        await planFolderExport(OWNER, configuration.id);
+        await materializeAll();
+
+        expect(drive.tree(ROOT)).toEqual([
+            "Sub/",
+            "Sub/Weekly sync/",
+            "Sub/Weekly sync/audio.mp3",
+            "Sub/Weekly sync/riffado.summary.md",
+            "Sub/Weekly sync/riffado.transcript [doc]",
+        ]);
+        expect(drive.idAt(ROOT, "Sub/Weekly sync")).toBe(folderId);
+        expect(drive.idAt(ROOT, "Sub/Weekly sync/audio.mp3")).toBe(audioId);
+        expect(drive.calls.filter((call) => call === "upload")).toHaveLength(0);
+    });
+
+    it("trashes a copy an earlier version left behind, as a duplicate", async () => {
+        const configuration = await createExport("markdown");
+        await planFolderExport(OWNER, configuration.id);
+        await materializeAll();
+        const oldAudioId = drive.idAt(ROOT, "Weekly sync/audio.mp3") ?? "";
+        const sub = await createFolder({
+            userId: OWNER,
+            parentId: teamFolderId,
+            name: "Sub",
+        });
+        // What earlier versions did on filing: a second copy under the
+        // folder, the first one kept.
+        const teamStates = await db()
+            .select()
+            .from(folderExportMaterializations);
+        await db().update(folderExportPlacements).set({ expected: false });
+        await db()
+            .update(folderExportMaterializations)
+            .set({ expected: false });
+        await db()
+            .insert(folderExportPlacements)
+            .values({
+                userId: OWNER,
+                exportConfigurationId: configuration.id,
+                recordingId: RECORDING,
+                placementFolderId: sub.id,
+                targetPath: ROOT,
+                directoryName: "Weekly sync",
+                logicalPath: `${ROOT}/Sub/Weekly sync`,
+            });
+        await db()
+            .insert(folderExportMaterializations)
+            .values(
+                teamStates.map(({ id: _id, ...state }) => ({
+                    ...state,
+                    placementFolderId: sub.id,
+                    logicalPath: state.logicalPath.replace(
+                        `${ROOT}/`,
+                        `${ROOT}/Sub/`,
+                    ),
+                    status: "pending" as const,
+                    exportedAt: null,
+                })),
+            );
+        await materializeAll();
+        expect(drive.tree(ROOT)).toContain("Weekly sync/audio.mp3");
+        expect(drive.tree(ROOT)).toContain("Sub/Weekly sync/audio.mp3");
+
+        await addRecordingToFolder({
+            userId: OWNER,
+            recordingId: RECORDING,
+            folderId: sub.id,
+        });
+        await planFolderExport(OWNER, configuration.id);
+        await materializeAll();
+
+        expect(drive.tree(ROOT)).toEqual([
+            "Sub/",
+            "Sub/Weekly sync/",
+            "Sub/Weekly sync/audio.mp3",
+            "Sub/Weekly sync/riffado.summary.md",
+            "Sub/Weekly sync/riffado.transcript [doc]",
+        ]);
+        expect(drive.isTrashed(oldAudioId)).toBe(true);
+        expect(drive.items.has(oldAudioId)).toBe(true);
     });
 
     it("trashes the folder of a recording that left before anything was written", async () => {

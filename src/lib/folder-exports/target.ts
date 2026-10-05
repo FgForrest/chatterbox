@@ -30,6 +30,8 @@ export interface ExportTarget {
     exportTranscript: boolean;
     exportSummary: boolean;
     googleDrive: GoogleDriveTarget | null;
+    /** Filesystem: when entries written before ownership tracking were adopted. */
+    nodesAdoptedAt: Date | null;
     lastError: string | null;
     lastErrorAt: Date | null;
 }
@@ -47,6 +49,7 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
             lastError: folderExportConfigurations.lastError,
             lastErrorAt: folderExportConfigurations.lastErrorAt,
             filesystemPath: filesystemExportSettings.targetPath,
+            nodesAdoptedAt: filesystemExportSettings.nodesAdoptedAt,
             drive: {
                 accountSubject: googleDriveExportSettings.accountSubject,
                 rootFolderId: googleDriveExportSettings.rootFolderId,
@@ -91,6 +94,7 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
                           provider: "filesystem",
                           targetPath: row.filesystemPath,
                           googleDrive: null,
+                          nodesAdoptedAt: row.nodesAdoptedAt,
                       },
                   ]
                 : [];
@@ -102,6 +106,7 @@ async function selectTargets(where: SQL | undefined): Promise<ExportTarget[]> {
                       provider: "google-drive",
                       targetPath: row.drive.rootFolderId,
                       googleDrive: row.drive,
+                      nodesAdoptedAt: null,
                   },
               ]
             : [];

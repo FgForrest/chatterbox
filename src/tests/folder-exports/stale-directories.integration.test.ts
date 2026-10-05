@@ -343,7 +343,7 @@ describeWithDatabase("Export directories after a rename (PostgreSQL)", () => {
         expect(treeUnder(root())).toEqual(["org/"]);
     });
 
-    it("keeps a directory that still holds files", async () => {
+    it("removes its own files but keeps a directory holding someone's", async () => {
         await planFolderExport(orgUserId, exportId);
         await materializeAll();
         mkdirSync(path.join(root(), "org/Old title/notes"));
@@ -356,10 +356,8 @@ describeWithDatabase("Export directories after a rename (PostgreSQL)", () => {
         expect(treeUnder(root())).toEqual([
             "org/",
             "org/Old title/",
-            "org/Old title/audio.mp3",
             "org/Old title/notes/",
             "org/Old title/notes/mine.md",
-            "org/Old title/riffado.transcript.md",
         ]);
     });
 });

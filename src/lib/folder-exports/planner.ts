@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    filesystemExportSettings,
     folderExportDirectories,
     folderExportMaterializations,
     folderExportPlacements,
@@ -33,8 +34,13 @@ import {
 } from "./naming";
 import { createExportProvider } from "./provider-factory";
 import { clearExportFailure, recordExportFailure } from "./status";
-import { loadExportTarget } from "./target";
-import type { ExportArtifactType, ExportFormat, ExportProvider } from "./types";
+import { type ExportTarget, loadExportTarget } from "./target";
+import type {
+    ExportArtifactType,
+    ExportFormat,
+    ExportProvider,
+    OwnedEntryKind,
+} from "./types";
 
 interface PlannedArtifact {
     artifactType: ExportArtifactType;
@@ -43,6 +49,8 @@ interface PlannedArtifact {
     version: string;
     filename: string;
     size: number;
+    /** Audio Riffado no longer holds: only an exported copy can stay. */
+    reaped: boolean;
 }
 
 interface PathMove {
@@ -50,12 +58,52 @@ interface PathMove {
     current: string;
 }
 
+interface ExistingState {
+    id: string;
+    recordingId: string;
+    placementFolderId: string;
+    artifactType: ExportArtifactType;
+    artifactId: string;
+    format: ExportFormat;
+    artifactVersion: string;
+    logicalPath: string;
+    expectedSize: number;
+    status: "pending" | "in_progress" | "exported" | "failed";
+    exportedAt: Date | null;
+}
+
+interface PlannedState {
+    id: string;
+    status: ExistingState["status"];
+    key: string;
+    logicalPath: string;
+    version: string;
+    size: number;
+    reaped: boolean;
+}
+
+const BATCH = 500;
+
 function digest(value: string | Buffer): string {
     return createHash("sha256").update(value).digest("hex");
 }
 
 function placementKey(recordingId: string, folderId: string): string {
     return `${recordingId}\0${folderId}`;
+}
+
+function artifactKey(state: {
+    recordingId: string;
+    artifactType: ExportArtifactType;
+    artifactId: string;
+    format: ExportFormat;
+}): string {
+    return [
+        state.recordingId,
+        state.artifactType,
+        state.artifactId,
+        state.format,
+    ].join("\0");
 }
 
 function relocatedPath(value: string, moves: PathMove[]): string {
@@ -77,6 +125,11 @@ function allocationPriority(
     if (existingName === preferredName) return 0;
     if (existingName) return 1;
     return 2;
+}
+
+function pathPrefixes(logicalPath: string): string[] {
+    const parts = logicalPath.split("/");
+    return parts.map((_, index) => parts.slice(0, index + 1).join("/"));
 }
 
 function legacyProjectionPaths(
@@ -127,15 +180,25 @@ function legacyProjectionPaths(
     return { directories, placements };
 }
 
+/**
+ * Projects the export's folder subtree onto its target: one directory per
+ * folder, one per placement of a recording, and the files of each.
+ *
+ * Whatever the export wrote earlier and no longer places is moved where it
+ * belongs now or deleted; entries it did not create are never touched.
+ * With `verify`, entries someone removed from the target are forgotten
+ * first, so they are written again.
+ */
 export async function planFolderExport(
     userId: string,
     exportId: string,
+    options: { verify?: boolean } = {},
 ): Promise<number> {
     let queued: number;
     try {
         // Exclusive: it moves directories and every stored path under them.
         queued = await withExportLock(exportId, "exclusive", () =>
-            planLocked(userId, exportId),
+            planLocked(userId, exportId, options.verify ?? false),
         );
     } catch (error) {
         await recordExportFailure(userId, exportId, error).catch(() => {});
@@ -145,7 +208,11 @@ export async function planFolderExport(
     return queued;
 }
 
-async function planLocked(userId: string, exportId: string): Promise<number> {
+async function planLocked(
+    userId: string,
+    exportId: string,
+    verify: boolean,
+): Promise<number> {
     const configuration = await loadExportTarget(userId, exportId);
     if (!configuration) return 0;
 
@@ -219,7 +286,14 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                 recordingId: folderExportMaterializations.recordingId,
                 placementFolderId:
                     folderExportMaterializations.placementFolderId,
+                artifactType: folderExportMaterializations.artifactType,
+                artifactId: folderExportMaterializations.artifactId,
+                format: folderExportMaterializations.format,
+                artifactVersion: folderExportMaterializations.artifactVersion,
                 logicalPath: folderExportMaterializations.logicalPath,
+                expectedSize: folderExportMaterializations.expectedSize,
+                status: folderExportMaterializations.status,
+                exportedAt: folderExportMaterializations.exportedAt,
             })
             .from(folderExportMaterializations)
             .where(
@@ -251,6 +325,19 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
             ),
     ]);
     const provider = await createExportProvider(configuration);
+    if (
+        configuration.provider === "filesystem" &&
+        !configuration.nodesAdoptedAt
+    ) {
+        await adoptLegacyEntries(
+            userId,
+            configuration,
+            provider,
+            existingStates,
+            [...existingDirectories, ...existingPlacements],
+        );
+    }
+    if (verify) await provider.forgetMissing();
     await provider.reconcileDirectory(null, configuration.targetPath);
     await Promise.all([
         db
@@ -291,7 +378,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
     const folderPathById = new Map<string, string>([
         [configuration.folderId, configuration.targetPath],
     ]);
-    const folderMoves: PathMove[] = [];
+    const moves: PathMove[] = [];
     const childrenByParent = new Map<string, RecordingFolder[]>();
     for (const folder of organization.folders) {
         if (
@@ -327,17 +414,25 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                 );
             return priority || left.id.localeCompare(right.id);
         });
-        const occupied = new Set(
-            children.flatMap((folder) => {
+        const foreign =
+            children.length > 0
+                ? await provider.foreignNames(parentPath)
+                : new Set<string>();
+        const occupied = new Set([
+            ...foreign,
+            ...children.flatMap((folder) => {
                 const existing = directoryByFolder.get(folder.id);
                 return existing?.targetPath === configuration.targetPath
                     ? [existing.directoryName]
                     : [];
             }),
-        );
+        ]);
         for (const folder of children) {
             const existing = directoryByFolder.get(folder.id);
-            if (existing?.targetPath === configuration.targetPath) {
+            if (
+                existing?.targetPath === configuration.targetPath &&
+                !foreign.has(existing.directoryName)
+            ) {
                 occupied.delete(existing.directoryName);
             }
             const directoryName = allocateDirectoryName(
@@ -354,7 +449,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                   ? null
                   : (legacy.directories.get(folder.id) ?? null);
             const previousPath = storedPrevious
-                ? relocatedPath(storedPrevious, folderMoves)
+                ? relocatedPath(storedPrevious, moves)
                 : null;
             const reconciliation = await provider.reconcileDirectory(
                 previousPath,
@@ -366,10 +461,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                 previousPath &&
                 previousPath !== logicalPath
             ) {
-                folderMoves.push({
-                    previous: previousPath,
-                    current: logicalPath,
-                });
+                moves.push({ previous: previousPath, current: logicalPath });
             }
             await db
                 .insert(folderExportDirectories)
@@ -400,12 +492,24 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
         }
     }
 
+    const exportedAudio = new Map<string, ExistingState>();
+    for (const state of existingStates) {
+        if (
+            state.artifactType === "audio" &&
+            state.status === "exported" &&
+            !exportedAudio.has(state.recordingId)
+        ) {
+            exportedAudio.set(state.recordingId, state);
+        }
+    }
+
     const plannedPlacements: Array<{
         recording: (typeof recordingRows)[number];
         placementFolderId: string;
         artifacts: PlannedArtifact[];
         preferredName: string;
     }> = [];
+    const placementFoldersByRecording = new Map<string, Set<string>>();
     for (const recording of recordingRows) {
         const placements = exportPlacementFolderIds(
             organization.folders,
@@ -414,8 +518,12 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
             configuration.folderId,
         ).filter((folderId) => configSubtree.has(folderId));
         if (placements.length === 0) continue;
+        placementFoldersByRecording.set(recording.id, new Set(placements));
 
         const artifacts: PlannedArtifact[] = [];
+        const filename = `audio${audioExtension(
+            recording.storageFilename ?? recording.storagePath,
+        )}`;
         if (configuration.exportAudio && !recording.audioReapedAt) {
             artifacts.push({
                 artifactType: "audio",
@@ -429,11 +537,23 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                         recording.filesize,
                     ].join(":"),
                 ),
-                filename: `audio${audioExtension(
-                    recording.storageFilename ?? recording.storagePath,
-                )}`,
+                filename,
                 size: recording.filesize,
+                reaped: false,
             });
+        } else if (configuration.exportAudio) {
+            const kept = exportedAudio.get(recording.id);
+            if (kept) {
+                artifacts.push({
+                    artifactType: "audio",
+                    artifactId: recording.id,
+                    format: "file",
+                    version: kept.artifactVersion,
+                    filename: path.posix.basename(kept.logicalPath),
+                    size: kept.expectedSize,
+                    reaped: true,
+                });
+            }
         }
         if (configuration.exportTranscript) {
             for (const transcript of transcriptRows.filter(
@@ -459,6 +579,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                         version: digest(content),
                         filename: file.filename,
                         size: content.byteLength,
+                        reaped: false,
                     });
                 }
             }
@@ -487,6 +608,7 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                         version: digest(content),
                         filename: file.filename,
                         size: content.byteLength,
+                        reaped: false,
                     });
                 }
             }
@@ -500,6 +622,36 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                     decryptText(recording.filename),
                 ),
             });
+        }
+    }
+
+    // A placement the recording left, matched with one it gained: the
+    // recording moved between folders, so its directory moves with it.
+    const movedFrom = new Map<string, (typeof existingPlacements)[number]>();
+    for (const [recordingId, folderIds] of placementFoldersByRecording) {
+        const left = existingPlacements
+            .filter(
+                (placement) =>
+                    placement.recordingId === recordingId &&
+                    placement.targetPath === configuration.targetPath &&
+                    !folderIds.has(placement.placementFolderId),
+            )
+            .sort(
+                (a, b) =>
+                    Number(b.expected) - Number(a.expected) ||
+                    b.updatedAt.getTime() - a.updatedAt.getTime() ||
+                    a.id.localeCompare(b.id),
+            );
+        const gained = [...folderIds]
+            .filter(
+                (folderId) =>
+                    !placementByKey.has(placementKey(recordingId, folderId)),
+            )
+            .sort();
+        for (const folderId of gained) {
+            const from = left.shift();
+            if (!from) break;
+            movedFrom.set(placementKey(recordingId, folderId), from);
         }
     }
 
@@ -526,20 +678,27 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
         return priority || left.recording.id.localeCompare(right.recording.id);
     });
 
-    let queued = 0;
     const occupiedByFolder = new Map<string, Set<string>>();
+    const foreignByFolder = new Map<string, Set<string>>();
+    for (const placement of plannedPlacements) {
+        const parentPath = folderPathById.get(placement.placementFolderId);
+        if (!parentPath || foreignByFolder.has(placement.placementFolderId)) {
+            continue;
+        }
+        const foreign = await provider.foreignNames(parentPath);
+        foreignByFolder.set(placement.placementFolderId, foreign);
+        occupiedByFolder.set(placement.placementFolderId, new Set(foreign));
+    }
     for (const placement of plannedPlacements) {
         const existing = placementByKey.get(
             placementKey(placement.recording.id, placement.placementFolderId),
         );
         if (existing?.targetPath !== configuration.targetPath) continue;
-        const occupied =
-            occupiedByFolder.get(placement.placementFolderId) ??
-            new Set<string>();
-        occupied.add(existing.directoryName);
-        occupiedByFolder.set(placement.placementFolderId, occupied);
+        occupiedByFolder
+            .get(placement.placementFolderId)
+            ?.add(existing.directoryName);
     }
-    const expectedStateIds = new Set<string>();
+    const plannedStates: PlannedState[] = [];
     const plannedPlacementPaths = new Set<string>();
     for (const placement of plannedPlacements) {
         const parentPath = folderPathById.get(placement.placementFolderId);
@@ -547,14 +706,18 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
         const occupied =
             occupiedByFolder.get(placement.placementFolderId) ??
             new Set<string>();
-        occupiedByFolder.set(placement.placementFolderId, occupied);
+        const foreign =
+            foreignByFolder.get(placement.placementFolderId) ??
+            new Set<string>();
         const key = placementKey(
             placement.recording.id,
             placement.placementFolderId,
         );
         const existing = placementByKey.get(key);
         const sameTarget = existing?.targetPath === configuration.targetPath;
-        if (sameTarget) occupied.delete(existing.directoryName);
+        if (sameTarget && !foreign.has(existing.directoryName)) {
+            occupied.delete(existing.directoryName);
+        }
         const directoryName = allocateDirectoryName(
             placement.preferredName,
             occupied,
@@ -566,14 +729,26 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
             ? existing.logicalPath
             : existing
               ? null
-              : (legacy.placements.get(key) ?? null);
+              : (movedFrom.get(key)?.logicalPath ??
+                legacy.placements.get(key) ??
+                null);
         const previousPath = storedPrevious
-            ? relocatedPath(storedPrevious, folderMoves)
+            ? relocatedPath(storedPrevious, moves)
             : null;
         const reconciliation = await provider.reconcileDirectory(
             previousPath,
             logicalDirectoryPath,
         );
+        if (
+            reconciliation.contentPreserved &&
+            previousPath &&
+            previousPath !== logicalDirectoryPath
+        ) {
+            moves.push({
+                previous: previousPath,
+                current: logicalDirectoryPath,
+            });
+        }
         const contentPreserved =
             (sameTarget || legacy.placements.has(key)) &&
             reconciliation.contentPreserved;
@@ -646,24 +821,256 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                     id: folderExportMaterializations.id,
                     status: folderExportMaterializations.status,
                 });
-            if (
-                state &&
-                (state.status === "pending" || state.status === "failed")
-            ) {
-                await enqueueExportMaterialization(userId, state.id);
-                queued += 1;
-            }
-            if (state) expectedStateIds.add(state.id);
+            if (!state) continue;
+            plannedStates.push({
+                id: state.id,
+                status: state.status,
+                key: artifactKey({
+                    recordingId: placement.recording.id,
+                    ...artifact,
+                }),
+                logicalPath,
+                version: artifact.version,
+                size: artifact.size,
+                reaped: artifact.reaped,
+            });
         }
     }
 
-    const staleIds = existingStates
-        .map((state) => state.id)
-        .filter((id) => !expectedStateIds.has(id));
-    for (let offset = 0; offset < staleIds.length; offset += 500) {
+    const plannedIds = new Set(plannedStates.map((state) => state.id));
+    const plannedFilePaths = new Set(
+        plannedStates.map((state) => state.logicalPath),
+    );
+    const plannedKeys = new Set(plannedStates.map((state) => state.key));
+    const consumed = new Set<string>();
+    const statesByKey = new Map<string, ExistingState[]>();
+    for (const state of existingStates) {
+        const key = artifactKey(state);
+        const list = statesByKey.get(key) ?? [];
+        list.push(state);
+        statesByKey.set(key, list);
+    }
+
+    let queued = 0;
+    const unproducible: string[] = [];
+    for (const planned of plannedStates) {
+        if (planned.status !== "pending" && planned.status !== "failed") {
+            continue;
+        }
+        const inPlace = await reuseWrittenCopy(
+            provider,
+            planned,
+            (statesByKey.get(planned.key) ?? []).filter(
+                (state) =>
+                    !consumed.has(state.id) &&
+                    (state.id === planned.id || !plannedIds.has(state.id)),
+            ),
+            moves,
+            consumed,
+        );
+        if (inPlace) {
+            await db
+                .update(folderExportMaterializations)
+                .set({
+                    status: "exported",
+                    lastError: null,
+                    exportedAt: new Date(),
+                    updatedAt: new Date(),
+                })
+                .where(
+                    and(
+                        eq(folderExportMaterializations.id, planned.id),
+                        eq(folderExportMaterializations.userId, userId),
+                    ),
+                );
+        } else if (planned.reaped) {
+            unproducible.push(planned.id);
+        } else {
+            await enqueueExportMaterialization(userId, planned.id);
+            queued += 1;
+        }
+    }
+
+    const staleStates = existingStates.filter(
+        (state) => !plannedIds.has(state.id),
+    );
+    for (const state of staleStates) {
+        if (consumed.has(state.id)) continue;
+        const current = relocatedPath(state.logicalPath, moves);
+        if (plannedFilePaths.has(current)) continue;
+        await provider
+            .removeFile(current, {
+                duplicate: plannedKeys.has(artifactKey(state)),
+            })
+            .catch((error) => {
+                console.error(
+                    `[folder-export] could not remove ${current}:`,
+                    error,
+                );
+            });
+    }
+    await deleteStates(userId, exportId, [
+        ...staleStates.map((state) => state.id),
+        ...unproducible,
+    ]);
+
+    const plannedDirectories = new Set([
+        ...pathPrefixes(configuration.targetPath),
+        ...folderPathById.values(),
+        ...plannedPlacementPaths,
+    ]);
+    await removeUnplannedEntries(
+        provider,
+        await provider.ownedEntries(),
+        plannedFilePaths,
+        plannedDirectories,
+    );
+    await Promise.all([
+        db
+            .delete(folderExportDirectories)
+            .where(
+                and(
+                    eq(folderExportDirectories.userId, userId),
+                    eq(folderExportDirectories.exportConfigurationId, exportId),
+                    eq(folderExportDirectories.expected, false),
+                ),
+            ),
+        db
+            .delete(folderExportPlacements)
+            .where(
+                and(
+                    eq(folderExportPlacements.userId, userId),
+                    eq(folderExportPlacements.exportConfigurationId, exportId),
+                    eq(folderExportPlacements.expected, false),
+                ),
+            ),
+    ]);
+    return queued;
+}
+
+/**
+ * Takes the entries the export wrote before it tracked what it creates:
+ * files it recorded as written and the directories of its folders and
+ * placements, stale ones included, so the plan can clean them up.
+ */
+async function adoptLegacyEntries(
+    userId: string,
+    configuration: ExportTarget,
+    provider: ExportProvider,
+    states: ExistingState[],
+    directories: Array<{ logicalPath: string }>,
+): Promise<void> {
+    const entries = new Map<string, OwnedEntryKind>();
+    for (const directory of directories) {
+        entries.set(directory.logicalPath, "directory");
+    }
+    for (const state of states) {
+        if (state.exportedAt) entries.set(state.logicalPath, "file");
+    }
+    await provider.adopt(entries);
+    await db
+        .update(filesystemExportSettings)
+        .set({ nodesAdoptedAt: new Date(), updatedAt: new Date() })
+        .where(
+            and(
+                eq(
+                    filesystemExportSettings.exportConfigurationId,
+                    configuration.id,
+                ),
+                eq(filesystemExportSettings.userId, userId),
+            ),
+        );
+}
+
+/**
+ * Puts a copy the export already wrote of the planned artifact at its
+ * planned path, moving it there when it is elsewhere. True when that copy
+ * is the planned version, so nothing has to be written.
+ */
+async function reuseWrittenCopy(
+    provider: ExportProvider,
+    planned: PlannedState,
+    candidates: ExistingState[],
+    moves: PathMove[],
+    consumed: Set<string>,
+): Promise<boolean> {
+    const located = candidates
+        .filter((state) => state.status === "exported" && state.exportedAt)
+        .map((state) => ({
+            state,
+            current: relocatedPath(state.logicalPath, moves),
+            sameVersion:
+                state.artifactVersion === planned.version &&
+                state.expectedSize === planned.size,
+        }))
+        .sort(
+            (left, right) =>
+                Number(right.current === planned.logicalPath) -
+                    Number(left.current === planned.logicalPath) ||
+                Number(right.sameVersion) - Number(left.sameVersion),
+        );
+    for (const { state, current, sameVersion } of located) {
+        const written = await provider.exists(current, {
+            size: state.expectedSize,
+            version: state.artifactVersion,
+            format: state.format,
+        });
+        if (!written) continue;
+        if (current !== planned.logicalPath) {
+            if (!(await provider.moveFile(current, planned.logicalPath))) {
+                continue;
+            }
+        }
+        if (state.id !== planned.id) consumed.add(state.id);
+        return sameVersion;
+    }
+    return false;
+}
+
+/**
+ * Removes what the export created and no longer places: files first, then
+ * directories deepest first, each only while empty, so anything someone
+ * put there keeps its directory.
+ */
+async function removeUnplannedEntries(
+    provider: ExportProvider,
+    owned: ReadonlyMap<string, OwnedEntryKind>,
+    plannedFiles: ReadonlySet<string>,
+    plannedDirectories: ReadonlySet<string>,
+): Promise<void> {
+    const report = (entry: string) => (error: unknown) => {
+        console.error(`[folder-export] could not remove ${entry}:`, error);
+    };
+    for (const [entry, kind] of owned) {
+        if (kind !== "file" || plannedFiles.has(entry)) continue;
+        await provider
+            .removeFile(entry, { duplicate: false })
+            .catch(report(entry));
+    }
+    const directories = [...owned]
+        .filter(
+            ([entry, kind]) =>
+                kind === "directory" && !plannedDirectories.has(entry),
+        )
+        .map(([entry]) => entry)
+        .sort(
+            (left, right) =>
+                right.split("/").length - left.split("/").length ||
+                left.localeCompare(right),
+        );
+    for (const directory of directories) {
+        await provider.removeEmptyDirectory(directory).catch(report(directory));
+    }
+}
+
+async function deleteStates(
+    userId: string,
+    exportId: string,
+    ids: string[],
+): Promise<void> {
+    for (let offset = 0; offset < ids.length; offset += BATCH) {
         await db
-            .update(folderExportMaterializations)
-            .set({ expected: false, updatedAt: new Date() })
+            .delete(folderExportMaterializations)
             .where(
                 and(
                     eq(folderExportMaterializations.userId, userId),
@@ -673,53 +1080,9 @@ async function planLocked(userId: string, exportId: string): Promise<number> {
                     ),
                     inArray(
                         folderExportMaterializations.id,
-                        staleIds.slice(offset, offset + 500),
+                        ids.slice(offset, offset + BATCH),
                     ),
                 ),
             );
-    }
-
-    await pruneUnplacedDirectories(
-        provider,
-        [
-            ...existingPlacements.filter(
-                (placement) =>
-                    placement.targetPath === configuration.targetPath,
-            ),
-            ...existingDirectories.filter(
-                (directory) =>
-                    directory.targetPath === configuration.targetPath,
-            ),
-        ].map((row) => relocatedPath(row.logicalPath, folderMoves)),
-        new Set([...folderPathById.values(), ...plannedPlacementPaths]),
-    );
-    return queued;
-}
-
-/**
- * Removes the directories of placements and folders this plan no longer
- * has, deepest first so a folder emptied by its last recording goes too.
- * Only empty ones: the export never deletes files, so a directory still
- * holding any is left as it is.
- */
-async function pruneUnplacedDirectories(
-    provider: ExportProvider,
-    previousPaths: string[],
-    plannedPaths: ReadonlySet<string>,
-): Promise<void> {
-    const candidates = [...new Set(previousPaths)]
-        .filter((candidate) => !plannedPaths.has(candidate))
-        .sort(
-            (left, right) =>
-                right.split("/").length - left.split("/").length ||
-                left.localeCompare(right),
-        );
-    for (const candidate of candidates) {
-        await provider.removeEmptyDirectory(candidate).catch((error) => {
-            console.error(
-                `[folder-export] could not remove ${candidate}:`,
-                error,
-            );
-        });
     }
 }
