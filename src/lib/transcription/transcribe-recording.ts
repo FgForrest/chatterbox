@@ -70,7 +70,10 @@ import {
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
 import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 import { upsertTranscription } from "@/lib/transcription/persist";
-import { speechmaticsTranscribe } from "@/lib/transcription/speechmatics-transcribe";
+import {
+    speechmaticsTakesVocabulary,
+    speechmaticsTranscribe,
+} from "@/lib/transcription/speechmatics-transcribe";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { emitEvent } from "@/lib/webhooks/emit";
 
@@ -731,7 +734,9 @@ async function transcribeRecordingInner(
                     file: audioFile,
                     language: defaultLanguage,
                     baseUrl: credentials.baseUrl,
-                    vocabulary: await almanacTerms(),
+                    vocabulary: speechmaticsTakesVocabulary(model)
+                        ? await almanacTerms()
+                        : [],
                 });
                 await recordAiUsage(
                     {

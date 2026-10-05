@@ -11,6 +11,7 @@ import {
     parseSpeechmaticsModel,
     resolveSpeechmaticsBase,
     SpeechmaticsTranscribeError,
+    speechmaticsTakesVocabulary,
     speechmaticsTranscribe,
 } from "@/lib/transcription/speechmatics-transcribe";
 import { expectTextAndTurnsAgree } from "./turns-parity";
@@ -165,6 +166,15 @@ describe("speechmatics-transcribe", () => {
         });
     });
 
+    describe("speechmaticsTakesVocabulary", () => {
+        it("is false for Melia and true for the classic models", () => {
+            expect(speechmaticsTakesVocabulary("enhanced")).toBe(true);
+            expect(speechmaticsTakesVocabulary("standard+diarize")).toBe(true);
+            expect(speechmaticsTakesVocabulary("melia-1")).toBe(false);
+            expect(speechmaticsTakesVocabulary("melia-1+diarize")).toBe(false);
+        });
+    });
+
     describe("resolveSpeechmaticsBase", () => {
         it("defaults to the auto-routing host and accepts regional ones", () => {
             expect(resolveSpeechmaticsBase(null)).toBe(
@@ -250,6 +260,21 @@ describe("speechmatics-transcribe", () => {
                 { content: "Zefira", sounds_like: ["Zefyra", "Zephira"] },
                 { content: "Orion" },
             ]);
+        });
+
+        it("omits additional_vocab for Melia, whose job schema rejects it", () => {
+            const config = JSON.parse(
+                buildSpeechmaticsConfig({
+                    modelId: "melia-1",
+                    diarize: false,
+                    language: "cs",
+                    vocabulary: [{ text: "Zefira", soundsLike: ["Zefyra"] }],
+                }),
+            );
+            expect(config.transcription_config).toEqual({
+                model: "melia-1",
+                language: "multi",
+            });
         });
 
         it("omits additional_vocab when there is no vocabulary", () => {
