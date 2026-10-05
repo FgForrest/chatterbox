@@ -39,9 +39,11 @@ vi.mock("@/db/schema", () => ({
         __table: "aiUsageEvents",
         payerUserId: "aiUsageEvents.payerUserId",
     },
-    aiCostRates: {
-        __table: "aiCostRates",
-        userId: "aiCostRates.userId",
+    apiCredentials: {
+        __table: "apiCredentials",
+        userId: "apiCredentials.userId",
+        inputUsdPerMillion: "apiCredentials.inputUsdPerMillion",
+        audioUsdPerHour: "apiCredentials.audioUsdPerHour",
     },
     // The knowledge-base reads project individual columns, so these
     // need a shape rather than a placeholder string.
@@ -209,7 +211,7 @@ function mockSelectSequence(
             if (table?.__table === "aiUsageEvents") {
                 return { where: () => Promise.resolve(extras.usage ?? []) };
             }
-            if (table?.__table === "aiCostRates") {
+            if (table?.__table === "apiCredentials") {
                 return { where: () => Promise.resolve(extras.rates ?? []) };
             }
             // The folder assignment read joins its folder; the join itself
@@ -365,13 +367,12 @@ describe("buildAndUploadExportArchive", () => {
                 ],
                 rates: [
                     {
-                        id: "rate-1",
-                        userId: "user-1",
                         provider: "Custom",
                         model: "model-1",
+                        baseUrl: "https://stt.example.com/v1",
+                        inputUsdPerMillion: null,
+                        outputUsdPerMillion: null,
                         audioUsdPerHour: "1.000000",
-                        createdAt: date,
-                        updatedAt: date,
                     },
                 ],
             },
@@ -398,9 +399,16 @@ describe("buildAndUploadExportArchive", () => {
             ],
         );
         const rates = JSON.parse(
-            entries.get("ai/cost-rates.json")?.buffer.toString("utf-8") ?? "[]",
+            entries.get("ai/provider-rates.json")?.buffer.toString("utf-8") ??
+                "[]",
         );
-        expect(rates).toEqual([expect.objectContaining({ id: "rate-1" })]);
+        expect(rates).toEqual([
+            expect.objectContaining({
+                provider: "Custom",
+                model: "model-1",
+                audioUsdPerHour: "1.000000",
+            }),
+        ]);
     });
 
     it("carries the knowledge base so a restore keeps who was speaking", async () => {

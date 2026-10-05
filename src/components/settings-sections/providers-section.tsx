@@ -17,10 +17,11 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
-import { AiCostRates } from "@/components/settings/ai-cost-rates";
 import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
+import { ProviderPriceLine } from "@/components/settings/provider-pricing-fields";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
+import type { AiRate } from "@/lib/ai/published-rates";
 
 interface Provider {
     id: string;
@@ -32,6 +33,7 @@ interface Provider {
     isDefaultTopics?: boolean;
     /** Present only where this instance has Learn. */
     isDefaultLearn?: boolean;
+    rate?: AiRate | null;
     createdAt: Date;
     managed?: boolean;
     includedSeconds?: number;
@@ -182,9 +184,6 @@ export function ProvidersSection({
                     onEdit={handleEdit}
                     onDuplicate={handleDuplicate}
                     onDelete={handleDelete}
-                />
-                <AiCostRates
-                    providers={providers.map((item) => item.provider)}
                 />
             </div>
 
@@ -358,6 +357,12 @@ function ProvidersList({
                                     {provider.baseUrl}
                                 </p>
                             )}
+                            <ProviderPriceLine
+                                provider={provider.provider}
+                                model={provider.defaultModel}
+                                baseUrl={provider.baseUrl}
+                                rate={provider.rate}
+                            />
                             {(provider.isDefaultTranscription ||
                                 provider.isDefaultEnhancement ||
                                 provider.isDefaultLearn ||

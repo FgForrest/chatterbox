@@ -6,6 +6,13 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Panel } from "@/components/panel";
+import {
+    EMPTY_PRICING,
+    type PricingDraft,
+    ProviderPricingFields,
+    pricingDraft,
+    pricingPayload,
+} from "@/components/settings/provider-pricing-fields";
 import { TranscriptionModelPicker } from "@/components/settings/transcription-model-picker";
 import {
     Dialog,
@@ -27,6 +34,7 @@ import {
     getVisiblePresets,
     isLocalPreset,
 } from "@/lib/ai/provider-presets";
+import type { AiRate } from "@/lib/ai/published-rates";
 
 interface Provider {
     id: string;
@@ -35,6 +43,7 @@ interface Provider {
     defaultModel: string | null;
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
+    rate?: AiRate | null;
 }
 
 interface EditProviderDialogProps {
@@ -85,6 +94,7 @@ export function EditProviderDialog({
     const [defaultModel, setDefaultModel] = useState("");
     const [isDefaultTranscription, setIsDefaultTranscription] = useState(false);
     const [isDefaultEnhancement, setIsDefaultEnhancement] = useState(false);
+    const [pricing, setPricing] = useState<PricingDraft>(EMPTY_PRICING);
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
@@ -98,6 +108,9 @@ export function EditProviderDialog({
             setIsDefaultEnhancement(
                 duplicating ? false : provider.isDefaultEnhancement,
             );
+            setPricing(
+                duplicating ? EMPTY_PRICING : pricingDraft(provider.rate),
+            );
             setApiKey("");
         } else if (!open) {
             setProviderName("");
@@ -106,6 +119,7 @@ export function EditProviderDialog({
             setDefaultModel("");
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
+            setPricing(EMPTY_PRICING);
         }
     }, [open, provider, duplicating]);
 
@@ -122,15 +136,22 @@ export function EditProviderDialog({
             return;
         }
 
+        const rate = pricingPayload(providerName, pricing);
+        if (!rate) {
+            toast.error(i18n("Enter both token prices, or neither."));
+            return;
+        }
+
         setIsLoading(true);
         try {
-            const updateData: {
+            const updateData: AiRate & {
                 baseUrl: string | null;
                 defaultModel: string | null;
                 isDefaultTranscription: boolean;
                 isDefaultEnhancement: boolean;
                 apiKey?: string;
             } = {
+                ...rate,
                 baseUrl: baseUrl || null,
                 defaultModel: defaultModel || null,
                 isDefaultTranscription: enhancementOnly
@@ -187,6 +208,7 @@ export function EditProviderDialog({
             setDefaultModel("");
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
+            setPricing(EMPTY_PRICING);
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -206,7 +228,7 @@ export function EditProviderDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange} key={provider.id}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>
                         {duplicating
@@ -404,6 +426,15 @@ export function EditProviderDialog({
                             </p>
                         )}
                     </Panel>
+
+                    <ProviderPricingFields
+                        provider={providerName}
+                        model={defaultModel}
+                        baseUrl={baseUrl}
+                        value={pricing}
+                        onChange={setPricing}
+                        disabled={isLoading}
+                    />
 
                     <div className="flex gap-2">
                         <MetalButton

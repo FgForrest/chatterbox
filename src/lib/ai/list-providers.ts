@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
+import { type AiRate, hasRate, storedRate } from "@/lib/ai/published-rates";
 import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import {
@@ -21,6 +22,8 @@ export interface ProviderListItem {
      * so the list offers the choice only where it means something.
      */
     isDefaultLearn?: boolean;
+    /** The price the user set on this card; null leaves the catalog's. */
+    rate?: AiRate | null;
     createdAt: Date;
     /** Present and true only for the instance-managed included provider. */
     managed?: boolean;
@@ -62,6 +65,9 @@ export async function listUserProviders(
             defaultModel: apiCredentials.defaultModel,
             isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
             isDefaultLearn: apiCredentials.isDefaultLearn,
+            inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
+            outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
+            audioUsdPerHour: apiCredentials.audioUsdPerHour,
             createdAt: apiCredentials.createdAt,
         })
         .from(apiCredentials)
@@ -75,12 +81,26 @@ export async function listUserProviders(
 
     const learn = isLearnDeploymentAvailable();
     const credentials: ProviderListItem[] = rows.map(
-        ({ isDefaultLearn, ...row }) => ({
-            ...row,
-            isDefaultTranscription: row.id === pointer,
-            isDefaultTopics: row.id === topicsPointer,
-            ...(learn ? { isDefaultLearn } : {}),
-        }),
+        ({
+            isDefaultLearn,
+            inputUsdPerMillion,
+            outputUsdPerMillion,
+            audioUsdPerHour,
+            ...row
+        }) => {
+            const rate = storedRate({
+                inputUsdPerMillion,
+                outputUsdPerMillion,
+                audioUsdPerHour,
+            });
+            return {
+                ...row,
+                rate: hasRate(rate) ? rate : null,
+                isDefaultTranscription: row.id === pointer,
+                isDefaultTopics: row.id === topicsPointer,
+                ...(learn ? { isDefaultLearn } : {}),
+            };
+        },
     );
 
     const managed = await getManagedTranscriptionProvider(

@@ -5,6 +5,12 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { Panel } from "@/components/panel";
+import {
+    EMPTY_PRICING,
+    type PricingDraft,
+    ProviderPricingFields,
+    pricingPayload,
+} from "@/components/settings/provider-pricing-fields";
 import { TranscriptionModelPicker } from "@/components/settings/transcription-model-picker";
 import {
     Dialog,
@@ -49,6 +55,7 @@ export function AddProviderDialog({
     const [defaultModel, setDefaultModel] = useState("");
     const [isDefaultTranscription, setIsDefaultTranscription] = useState(false);
     const [isDefaultEnhancement, setIsDefaultEnhancement] = useState(false);
+    const [pricing, setPricing] = useState<PricingDraft>(EMPTY_PRICING);
     const [isLoading, setIsLoading] = useState(false);
 
     const resetForm = () => {
@@ -58,6 +65,7 @@ export function AddProviderDialog({
         setDefaultModel("");
         setIsDefaultTranscription(false);
         setIsDefaultEnhancement(false);
+        setPricing(EMPTY_PRICING);
     };
 
     // Closing without saving -- Cancel, Esc, a click outside -- used to
@@ -91,12 +99,19 @@ export function AddProviderDialog({
             return;
         }
 
+        const rate = pricingPayload(provider, pricing);
+        if (!rate) {
+            toast.error(i18n("Enter both token prices, or neither."));
+            return;
+        }
+
         setIsLoading(true);
         try {
             const response = await fetch("/api/settings/ai/providers", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
+                    ...rate,
                     provider,
                     apiKey,
                     baseUrl: baseUrl || null,
@@ -135,7 +150,7 @@ export function AddProviderDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleOpenChange}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>{i18n("Add AI Provider")}</DialogTitle>
                 </DialogHeader>
@@ -276,6 +291,15 @@ export function AddProviderDialog({
                             </p>
                         )}
                     </Panel>
+
+                    <ProviderPricingFields
+                        provider={provider}
+                        model={defaultModel}
+                        baseUrl={baseUrl}
+                        value={pricing}
+                        onChange={setPricing}
+                        disabled={isLoading}
+                    />
 
                     <div className="flex gap-2">
                         <MetalButton

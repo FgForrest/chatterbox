@@ -7,6 +7,7 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import { parseProviderRates } from "@/lib/ai/provider-rate-input";
 import { setDefaultTranscriptionProvider } from "@/lib/ai/set-default-transcription";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSession } from "@/lib/auth-server";
@@ -28,6 +29,7 @@ export const GET = apiHandler(async (request: Request) => {
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
 
+    const body = await request.json();
     const {
         provider,
         apiKey,
@@ -36,7 +38,8 @@ export const POST = apiHandler(async (request: Request) => {
         isDefaultTranscription,
         isDefaultEnhancement,
         copyKeyFrom,
-    } = await request.json();
+    } = body;
+    const rates = parseProviderRates(body);
 
     if (!provider || (!apiKey && !copyKeyFrom)) {
         throw new AppError(
@@ -155,6 +158,7 @@ export const POST = apiHandler(async (request: Request) => {
                 defaultModel: defaultModel || null,
                 isDefaultTranscription: isDefaultTranscription || false,
                 isDefaultEnhancement: isDefaultEnhancement || false,
+                ...rates,
             })
             .returning({
                 id: apiCredentials.id,

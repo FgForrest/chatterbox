@@ -1,7 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import type { ChatCompletion } from "openai/resources/chat/completions";
 import { db } from "@/db";
-import { aiCostRates, aiUsageEvents } from "@/db/schema";
+import { aiUsageEvents, apiCredentials } from "@/db/schema";
+import {
+    type AiRate,
+    PRICE_SOURCE,
+    publishedRate,
+    storedRate,
+} from "@/lib/ai/published-rates";
 
 export type AiOperation =
     | "transcription"
@@ -19,6 +25,8 @@ export interface AiUsageContext {
     provider: string;
     model: string;
     baseUrl?: string | null;
+    /** The provider card the call went through; its own rate wins. */
+    credentialId?: string | null;
 }
 
 interface UsageValues {
@@ -30,57 +38,11 @@ interface UsageValues {
     keytermCount?: number;
 }
 
-export interface AiCustomRate {
-    inputUsdPerMillion: number | null;
-    outputUsdPerMillion: number | null;
-    audioUsdPerHour: number | null;
-}
-
-const PRICE_SOURCE = "catalog_2026_10_01";
-
 // ElevenLabs keyterm prompting: an hourly add-on, and past this many terms
 // a request bills at least `KEYTERM_MIN_BILLABLE_SECONDS`.
 const ELEVENLABS_KEYTERMS_USD_PER_HOUR = 0.05;
 const KEYTERM_MIN_BILLING_THRESHOLD = 100;
 const KEYTERM_MIN_BILLABLE_SECONDS = 20;
-
-function usesPublishedEndpoint(context: AiUsageContext): boolean {
-    if (!context.baseUrl) return context.provider !== "Groq";
-    try {
-        const url = new URL(context.baseUrl);
-        if (url.protocol !== "https:") return false;
-        if (context.provider === "OpenAI")
-            return url.hostname === "api.openai.com";
-        if (context.provider === "Groq") return url.hostname === "api.groq.com";
-        if (context.provider === "ElevenLabs")
-            return url.hostname === "api.elevenlabs.io";
-    } catch {
-        return false;
-    }
-    return false;
-}
-
-function tokenRates(provider: string, model: string): [number, number] | null {
-    if (provider === "OpenAI") {
-        if (model.startsWith("gpt-4o-mini-transcribe")) return [1.25, 5];
-        if (model.startsWith("gpt-4o-transcribe")) return [2.5, 10];
-        if (model === "gpt-4o-mini" || model.startsWith("gpt-4o-mini-")) {
-            return [0.15, 0.6];
-        }
-        if (model === "gpt-4o" || model.startsWith("gpt-4o-20")) {
-            return [2.5, 10];
-        }
-    }
-    return null;
-}
-
-function audioHourlyRate(provider: string, model: string): number | null {
-    if (provider === "OpenAI" && model === "whisper-1") return 0.36;
-    if (provider === "Groq" && model === "whisper-large-v3-turbo") return 0.04;
-    if (provider === "Groq" && model === "whisper-large-v3") return 0.111;
-    if (provider === "ElevenLabs" && model.startsWith("scribe_")) return 0.22;
-    return null;
-}
 
 function positiveFinite(value: number | null | undefined): number | null {
     return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -92,7 +54,7 @@ function positiveFinite(value: number | null | undefined): number | null {
 export function estimateAiUsage(
     context: AiUsageContext,
     usage: UsageValues,
-    customRate?: AiCustomRate | null,
+    customRate?: AiRate | null,
 ): {
     inputTokens: number | null;
     outputTokens: number | null;
@@ -106,6 +68,11 @@ export function estimateAiUsage(
     const reportedCost = positiveFinite(usage.reportedCostUsd);
     let cost: number | null = reportedCost;
     let source: string | null = reportedCost === null ? null : "provider";
+    const catalog = publishedRate(
+        context.provider,
+        context.model,
+        context.baseUrl,
+    );
 
     if (cost === null && inputTokens !== null && outputTokens !== null) {
         const manualRates: [number, number] | null =
@@ -116,10 +83,11 @@ export function estimateAiUsage(
                       customRate.outputUsdPerMillion,
                   ]
                 : null;
-        const rates =
+        const rates: [number, number] | null =
             manualRates ??
-            (usesPublishedEndpoint(context)
-                ? tokenRates(context.provider, context.model)
+            (catalog?.inputUsdPerMillion != null &&
+            catalog.outputUsdPerMillion != null
+                ? [catalog.inputUsdPerMillion, catalog.outputUsdPerMillion]
                 : null);
         if (rates) {
             cost =
@@ -133,9 +101,8 @@ export function estimateAiUsage(
                 ? Math.max(0, usage.keytermCount ?? 0)
                 : 0;
         const published =
-            customRate?.audioUsdPerHour == null &&
-            usesPublishedEndpoint(context)
-                ? audioHourlyRate(context.provider, context.model)
+            customRate?.audioUsdPerHour == null
+                ? (catalog?.audioUsdPerHour ?? null)
                 : null;
         let rate = customRate?.audioUsdPerHour ?? published;
         let minimumSeconds = 0;
@@ -158,45 +125,42 @@ export function estimateAiUsage(
     return { inputTokens, outputTokens, audioSeconds, cost, source };
 }
 
+/**
+ * The rate set on the provider card the call went through. It prices that
+ * card's own model only: a call that fell back to another model (a
+ * Whisper card writing a title through `gpt-4o-mini`) is not what the
+ * user priced.
+ */
+async function cardRate(context: AiUsageContext): Promise<AiRate | null> {
+    if (!context.credentialId) return null;
+    const [card] = await db
+        .select({
+            defaultModel: apiCredentials.defaultModel,
+            inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
+            outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
+            audioUsdPerHour: apiCredentials.audioUsdPerHour,
+        })
+        .from(apiCredentials)
+        .where(
+            and(
+                eq(apiCredentials.id, context.credentialId),
+                eq(apiCredentials.userId, context.payerUserId),
+            ),
+        )
+        .limit(1);
+    if (!card) return null;
+    if (card.defaultModel && card.defaultModel !== context.model) return null;
+    return storedRate(card);
+}
+
 /** Store measured provider usage and a rate snapshot for one completed call. */
 export async function recordAiUsage(
     context: AiUsageContext,
     usage: UsageValues,
 ): Promise<void> {
     try {
-        const [configured] = await db
-            .select({
-                inputUsdPerMillion: aiCostRates.inputUsdPerMillion,
-                outputUsdPerMillion: aiCostRates.outputUsdPerMillion,
-                audioUsdPerHour: aiCostRates.audioUsdPerHour,
-            })
-            .from(aiCostRates)
-            .where(
-                and(
-                    eq(aiCostRates.userId, context.payerUserId),
-                    eq(aiCostRates.provider, context.provider),
-                    eq(aiCostRates.model, context.model),
-                ),
-            )
-            .limit(1);
-        const customRate: AiCustomRate | null = configured
-            ? {
-                  inputUsdPerMillion:
-                      configured.inputUsdPerMillion === null
-                          ? null
-                          : Number(configured.inputUsdPerMillion),
-                  outputUsdPerMillion:
-                      configured.outputUsdPerMillion === null
-                          ? null
-                          : Number(configured.outputUsdPerMillion),
-                  audioUsdPerHour:
-                      configured.audioUsdPerHour === null
-                          ? null
-                          : Number(configured.audioUsdPerHour),
-              }
-            : null;
         const { inputTokens, outputTokens, audioSeconds, cost, source } =
-            estimateAiUsage(context, usage, customRate);
+            estimateAiUsage(context, usage, await cardRate(context));
         await db.insert(aiUsageEvents).values({
             recordingId: context.recordingId,
             userId: context.ownerUserId,

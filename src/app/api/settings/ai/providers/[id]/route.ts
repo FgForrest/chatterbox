@@ -6,6 +6,7 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import { parseProviderRates } from "@/lib/ai/provider-rate-input";
 import { setDefaultTranscriptionProvider } from "@/lib/ai/set-default-transcription";
 import { validateAiBaseUrl } from "@/lib/ai/validate-base-url";
 import { requireApiSession } from "@/lib/auth-server";
@@ -20,13 +21,15 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
 
     const { id } = await (context as IdContext).params;
+    const body = await request.json();
     const {
         apiKey,
         baseUrl,
         defaultModel,
         isDefaultTranscription,
         isDefaultEnhancement,
-    } = await request.json();
+    } = body;
+    const rates = parseProviderRates(body);
 
     // Verify ownership
     const [existing] = await db
@@ -108,18 +111,12 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         }
 
         // Build update object
-        const updateData: {
-            baseUrl: string | null;
-            defaultModel: string | null;
-            isDefaultTranscription: boolean;
-            isDefaultEnhancement: boolean;
-            updatedAt: Date;
-            apiKey?: string;
-        } = {
+        const updateData: Partial<typeof apiCredentials.$inferInsert> = {
             baseUrl: baseUrl || null,
             defaultModel: defaultModel || null,
             isDefaultTranscription: isDefaultTranscription || false,
             isDefaultEnhancement: isDefaultEnhancement || false,
+            ...rates,
             updatedAt: new Date(),
         };
 
