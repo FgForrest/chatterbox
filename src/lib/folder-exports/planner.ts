@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    filesystemExportNodes,
     filesystemExportSettings,
     folderExportDirectories,
     folderExportMaterializations,
@@ -80,6 +81,13 @@ interface PlannedState {
     version: string;
     size: number;
     reaped: boolean;
+}
+
+/** A row left out of the plan whose file stays at `current`. */
+interface KeptState {
+    current: string;
+    /** Restore it as written: a verified copy of reaped audio. */
+    exported: boolean;
 }
 
 const BATCH = 500;
@@ -414,12 +422,14 @@ async function planLocked(
                 );
             return priority || left.id.localeCompare(right.id);
         });
-        const foreign =
+        const taken =
             children.length > 0
-                ? await provider.foreignNames(parentPath)
-                : new Set<string>();
+                ? await provider.takenNames(parentPath)
+                : { names: new Set<string>(), foreign: new Set<string>() };
+        // A folder may take over a directory the export is vacating: the
+        // recordings placed in it then avoid every name already there.
         const occupied = new Set([
-            ...foreign,
+            ...taken.foreign,
             ...children.flatMap((folder) => {
                 const existing = directoryByFolder.get(folder.id);
                 return existing?.targetPath === configuration.targetPath
@@ -431,7 +441,7 @@ async function planLocked(
             const existing = directoryByFolder.get(folder.id);
             if (
                 existing?.targetPath === configuration.targetPath &&
-                !foreign.has(existing.directoryName)
+                !taken.foreign.has(existing.directoryName)
             ) {
                 occupied.delete(existing.directoryName);
             }
@@ -678,6 +688,8 @@ async function planLocked(
         return priority || left.recording.id.localeCompare(right.recording.id);
     });
 
+    // Every name in a directory is taken, the export's own included: a
+    // directory the plan is about to vacate still holds what it wrote.
     const occupiedByFolder = new Map<string, Set<string>>();
     const foreignByFolder = new Map<string, Set<string>>();
     for (const placement of plannedPlacements) {
@@ -685,9 +697,9 @@ async function planLocked(
         if (!parentPath || foreignByFolder.has(placement.placementFolderId)) {
             continue;
         }
-        const foreign = await provider.foreignNames(parentPath);
-        foreignByFolder.set(placement.placementFolderId, foreign);
-        occupiedByFolder.set(placement.placementFolderId, new Set(foreign));
+        const taken = await provider.takenNames(parentPath);
+        foreignByFolder.set(placement.placementFolderId, taken.foreign);
+        occupiedByFolder.set(placement.placementFolderId, new Set(taken.names));
     }
     for (const placement of plannedPlacements) {
         const existing = placementByKey.get(
@@ -853,21 +865,26 @@ async function planLocked(
 
     let queued = 0;
     const unproducible: string[] = [];
+    const placedKeys = new Set<string>();
+    const keptStates = new Map<string, KeptState>();
     for (const planned of plannedStates) {
         if (planned.status !== "pending" && planned.status !== "failed") {
+            if (planned.status === "exported") placedKeys.add(planned.key);
             continue;
         }
+        const candidates = (statesByKey.get(planned.key) ?? []).filter(
+            (state) =>
+                !consumed.has(state.id) &&
+                (state.id === planned.id || !plannedIds.has(state.id)),
+        );
         const inPlace = await reuseWrittenCopy(
             provider,
             planned,
-            (statesByKey.get(planned.key) ?? []).filter(
-                (state) =>
-                    !consumed.has(state.id) &&
-                    (state.id === planned.id || !plannedIds.has(state.id)),
-            ),
+            candidates,
             moves,
             consumed,
         );
+        if (inPlace) placedKeys.add(planned.key);
         if (inPlace) {
             await db
                 .update(folderExportMaterializations)
@@ -884,7 +901,22 @@ async function planLocked(
                     ),
                 );
         } else if (planned.reaped) {
-            unproducible.push(planned.id);
+            // Riffado no longer holds this audio: a copy that could not be
+            // moved stays where it is, the only one left.
+            for (const state of candidates) {
+                const current = relocatedPath(state.logicalPath, moves);
+                if (
+                    state.status === "exported" &&
+                    (await provider.exists(current, {
+                        size: state.expectedSize,
+                        version: state.artifactVersion,
+                        format: state.format,
+                    }))
+                ) {
+                    keptStates.set(state.id, { current, exported: true });
+                }
+            }
+            if (!keptStates.has(planned.id)) unproducible.push(planned.id);
         } else {
             await enqueueExportMaterialization(userId, planned.id);
             queued += 1;
@@ -895,22 +927,29 @@ async function planLocked(
         (state) => !plannedIds.has(state.id),
     );
     for (const state of staleStates) {
-        if (consumed.has(state.id)) continue;
+        if (consumed.has(state.id) || keptStates.has(state.id)) continue;
         const current = relocatedPath(state.logicalPath, moves);
         if (plannedFilePaths.has(current)) continue;
-        await provider
-            .removeFile(current, {
-                duplicate: plannedKeys.has(artifactKey(state)),
-            })
+        const key = artifactKey(state);
+        const removed = await provider
+            .removeFile(current, { duplicate: placedKeys.has(key) })
             .catch((error) => {
                 console.error(
                     `[folder-export] could not remove ${current}:`,
                     error,
                 );
+                return false;
             });
+        // Its counterpart is not written yet: decide on the next plan.
+        if (!removed && plannedKeys.has(key) && !placedKeys.has(key)) {
+            keptStates.set(state.id, { current, exported: false });
+        }
     }
+    await keepStates(userId, exportId, keptStates);
     await deleteStates(userId, exportId, [
-        ...staleStates.map((state) => state.id),
+        ...staleStates
+            .map((state) => state.id)
+            .filter((id) => !keptStates.has(id)),
         ...unproducible,
     ]);
 
@@ -922,7 +961,10 @@ async function planLocked(
     await removeUnplannedEntries(
         provider,
         await provider.ownedEntries(),
-        plannedFilePaths,
+        new Set([
+            ...plannedFilePaths,
+            ...[...keptStates.values()].map((kept) => kept.current),
+        ]),
         plannedDirectories,
     );
     await Promise.all([
@@ -966,6 +1008,27 @@ async function adoptLegacyEntries(
     }
     for (const state of states) {
         if (state.exportedAt) entries.set(state.logicalPath, "file");
+    }
+    // Another export of the same tree may have taken them first.
+    const paths = [...entries.keys()];
+    for (let offset = 0; offset < paths.length; offset += BATCH) {
+        const claimed = await db
+            .select({ logicalPath: filesystemExportNodes.logicalPath })
+            .from(filesystemExportNodes)
+            .where(
+                and(
+                    eq(filesystemExportNodes.userId, userId),
+                    ne(
+                        filesystemExportNodes.exportConfigurationId,
+                        configuration.id,
+                    ),
+                    inArray(
+                        filesystemExportNodes.logicalPath,
+                        paths.slice(offset, offset + BATCH),
+                    ),
+                ),
+            );
+        for (const row of claimed) entries.delete(row.logicalPath);
     }
     await provider.adopt(entries);
     await db
@@ -1060,6 +1123,37 @@ async function removeUnplannedEntries(
         );
     for (const directory of directories) {
         await provider.removeEmptyDirectory(directory).catch(report(directory));
+    }
+}
+
+/**
+ * Leaves rows whose file stays where it is out of the plan, at the path
+ * the file is at now, for the next plan to place.
+ */
+async function keepStates(
+    userId: string,
+    exportId: string,
+    kept: ReadonlyMap<string, KeptState>,
+): Promise<void> {
+    for (const [id, { current, exported }] of kept) {
+        await db
+            .update(folderExportMaterializations)
+            .set({
+                logicalPath: current,
+                ...(exported ? { status: "exported" as const } : {}),
+                expected: false,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(folderExportMaterializations.id, id),
+                    eq(folderExportMaterializations.userId, userId),
+                    eq(
+                        folderExportMaterializations.exportConfigurationId,
+                        exportId,
+                    ),
+                ),
+            );
     }
 }
 

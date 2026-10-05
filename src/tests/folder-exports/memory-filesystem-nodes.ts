@@ -19,21 +19,17 @@ export class MemoryFilesystemNodeStore implements FilesystemNodeStore {
         this.nodes.set(logicalPath, kind);
     }
 
+    async putAll(
+        entries: ReadonlyMap<string, FilesystemNodeKind>,
+    ): Promise<void> {
+        for (const [key, kind] of entries) this.nodes.set(key, kind);
+    }
+
     async removeSubtree(logicalPath: string): Promise<void> {
         for (const key of [...this.nodes.keys()]) {
             if (key === logicalPath || key.startsWith(`${logicalPath}/`)) {
                 this.nodes.delete(key);
             }
-        }
-    }
-
-    async movePrefix(previous: string, current: string): Promise<void> {
-        const moved = [...this.nodes].filter(
-            ([key]) => key === previous || key.startsWith(`${previous}/`),
-        );
-        for (const [key] of moved) this.nodes.delete(key);
-        for (const [key, kind] of moved) {
-            this.nodes.set(`${current}${key.slice(previous.length)}`, kind);
         }
     }
 

@@ -23,6 +23,11 @@ export interface MaterializeOptions {
 
 export type OwnedEntryKind = "directory" | "file";
 
+export interface TakenNames {
+    names: Set<string>;
+    foreign: Set<string>;
+}
+
 /**
  * A target the export writes into. It tracks every file and directory it
  * creates and never moves, overwrites or deletes anything else.
@@ -30,8 +35,11 @@ export type OwnedEntryKind = "directory" | "file";
 export interface ExportProvider {
     /** Whether the export's own file at the path matches `expected`. */
     exists(relativePath: string, expected: ExpectedArtifact): Promise<boolean>;
-    /** Names in a directory taken by entries the export did not create. */
-    foreignNames(relativePath: string): Promise<Set<string>>;
+    /**
+     * Names taken in a directory: all of them, and those of entries the
+     * export did not create.
+     */
+    takenNames(relativePath: string): Promise<TakenNames>;
     /**
      * Makes sure the directory at `currentPath` exists, moving the one at
      * `previousPath` there as a whole when that is safe. `contentPreserved`

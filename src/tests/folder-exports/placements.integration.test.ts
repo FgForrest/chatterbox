@@ -15,6 +15,7 @@ import {
     mkdirSync,
     mkdtempSync,
     readdirSync,
+    readFileSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
@@ -103,9 +104,15 @@ vi.mock("@/lib/posthog-server", () => ({
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn(async () => ({
-        downloadStream: vi.fn(async () => {
+        downloadStream: vi.fn(async (storagePath: string) => {
             downloads.count += 1;
-            return Readable.from(Buffer.from("audio bytes!"));
+            return Readable.from(
+                Buffer.from(
+                    storagePath.endsWith("rec-beta.mp3")
+                        ? "beta bytes!!"
+                        : "audio bytes!",
+                ),
+            );
         }),
     })),
 }));
@@ -586,6 +593,91 @@ describeWithDatabase("Filesystem export placements (PostgreSQL)", () => {
             "rec/Weekly sync/riffado.transcript.md",
         ]);
         expect(downloads.count).toBe(3);
+    });
+
+    it("never gives a recording the directory another one is leaving", async () => {
+        await db()
+            .insert(recordings)
+            .values({
+                id: "rec-beta",
+                userId: OWNER,
+                deviceSn: "SN-1",
+                plaudFileId: "plaud-rec-beta",
+                filename: encryptText("Beta"),
+                duration: 60_000,
+                startTime: new Date("2026-09-02T10:00:00Z"),
+                endTime: new Date("2026-09-02T10:01:00Z"),
+                filesize: 12,
+                fileMd5: "1".repeat(32),
+                storageType: "local",
+                storagePath: `${OWNER}/rec-beta.mp3`,
+                storageFilename: "rec-beta.mp3",
+                plaudVersion: "1",
+            });
+        await exportNow();
+        // Beta's audio now lives only in the export.
+        await db()
+            .update(recordings)
+            .set({ audioReapedAt: new Date() })
+            .where(eq(recordings.id, "rec-beta"));
+        await db()
+            .update(recordings)
+            .set({ deletedAt: new Date() })
+            .where(eq(recordings.id, RECORDING));
+        await db()
+            .update(recordings)
+            .set({ filename: encryptText("Weekly sync") })
+            .where(eq(recordings.id, "rec-beta"));
+
+        await exportNow();
+        expect(tree()).toEqual([
+            "rec/",
+            "rec/Weekly sync (2)/",
+            "rec/Weekly sync (2)/audio.mp3",
+        ]);
+        await exportNow();
+        expect(tree()).toEqual([
+            "rec/",
+            "rec/Weekly sync/",
+            "rec/Weekly sync/audio.mp3",
+        ]);
+        expect(
+            readFileSync(
+                path.join(root(), "rec/Weekly sync/audio.mp3"),
+                "utf8",
+            ),
+        ).toBe("beta bytes!!");
+        expect(downloads.count).toBe(2);
+    });
+
+    it("does not adopt what another of the user's exports already owns", async () => {
+        await exportNow();
+        const other = await createFolderExport(OWNER, await folder("Work"), {
+            targetPath: "rec2",
+            exportAudio: true,
+            exportTranscript: false,
+            exportSummary: false,
+        });
+        await db().delete(filesystemExportNodes);
+        await db()
+            .update(filesystemExportSettings)
+            .set({ nodesAdoptedAt: null });
+        await db().insert(filesystemExportNodes).values({
+            userId: OWNER,
+            exportConfigurationId: other.id,
+            logicalPath: "rec/Weekly sync/audio.mp3",
+            kind: "file",
+        });
+        await plan();
+        const own = await db()
+            .select({ logicalPath: filesystemExportNodes.logicalPath })
+            .from(filesystemExportNodes)
+            .where(eq(filesystemExportNodes.exportConfigurationId, exportId));
+        expect(own.map((row) => row.logicalPath).sort()).toEqual([
+            "rec/Weekly sync",
+            "rec/Weekly sync/riffado.transcript.md",
+            "rec/Work",
+        ]);
     });
 
     it("queues one more plan behind a running one", async () => {

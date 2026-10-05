@@ -1,5 +1,6 @@
 import { createReadStream } from "node:fs";
 import {
+    chmod,
     mkdir,
     mkdtemp,
     readdir,
@@ -357,16 +358,46 @@ describe("filesystem export provider", () => {
         ).rejects.toThrow(/regular directory/);
     });
 
-    it("names only what it did not create as foreign", async () => {
+    it("names everything in a directory as taken, what it did not create as foreign", async () => {
         const p = provider();
         await p.reconcileDirectory(null, "team/Ours");
         await mkdir(path.join(root, "team/Theirs"));
         await writeFile(path.join(root, "team/notes.txt"), "mine");
-        await expect(p.foreignNames("team")).resolves.toEqual(
-            new Set(["Theirs", "notes.txt"]),
-        );
-        await expect(p.foreignNames("missing")).resolves.toEqual(new Set());
+        await expect(p.takenNames("team")).resolves.toEqual({
+            names: new Set(["Ours", "Theirs", "notes.txt"]),
+            foreign: new Set(["Theirs", "notes.txt"]),
+        });
+        await expect(p.takenNames("missing")).resolves.toEqual({
+            names: new Set(),
+            foreign: new Set(),
+        });
     });
+
+    it.skipIf(process.getuid?.() === 0)(
+        "keeps its records on the old directory when the rename fails",
+        async () => {
+            const p = provider();
+            await p.materialize("a/Old/audio.mp3", Buffer.from("abc"));
+            await p.reconcileDirectory(null, "b");
+            await chmod(path.join(root, "b"), 0o555);
+            try {
+                await expect(
+                    p.reconcileDirectory("a/Old", "b/New"),
+                ).rejects.toThrow();
+            } finally {
+                await chmod(path.join(root, "b"), 0o755);
+            }
+            expect(nodes.entries()).toEqual([
+                "directory:a",
+                "directory:a/Old",
+                "directory:b",
+                "file:a/Old/audio.mp3",
+            ]);
+            await expect(
+                provider().exists("a/Old/audio.mp3", file(3)),
+            ).resolves.toBe(true);
+        },
+    );
 
     it("forgets what someone removed and adopts what earlier versions wrote", async () => {
         const p = provider();

@@ -10,10 +10,9 @@ export interface FilesystemNodeStore {
     list(): Promise<Map<string, FilesystemNodeKind>>;
     get(logicalPath: string): Promise<FilesystemNodeKind | null>;
     put(logicalPath: string, kind: FilesystemNodeKind): Promise<void>;
+    putAll(entries: ReadonlyMap<string, FilesystemNodeKind>): Promise<void>;
     /** Forgets `logicalPath` and everything beneath it. */
     removeSubtree(logicalPath: string): Promise<void>;
-    /** Re-roots `previous` and everything beneath it at `current`. */
-    movePrefix(previous: string, current: string): Promise<void>;
 }
 
 function underPrefix(logicalPath: string) {
@@ -87,17 +86,33 @@ export class DbFilesystemNodeStore implements FilesystemNodeStore {
             });
     }
 
-    async removeSubtree(logicalPath: string): Promise<void> {
-        await db.delete(filesystemExportNodes).where(this.subtree(logicalPath));
+    async putAll(
+        entries: ReadonlyMap<string, FilesystemNodeKind>,
+    ): Promise<void> {
+        const rows = [...entries].map(([logicalPath, kind]) => ({
+            userId: this.userId,
+            exportConfigurationId: this.exportId,
+            logicalPath,
+            kind,
+        }));
+        for (let offset = 0; offset < rows.length; offset += 500) {
+            await db
+                .insert(filesystemExportNodes)
+                .values(rows.slice(offset, offset + 500))
+                .onConflictDoUpdate({
+                    target: [
+                        filesystemExportNodes.exportConfigurationId,
+                        filesystemExportNodes.logicalPath,
+                    ],
+                    set: {
+                        kind: sql`excluded.kind`,
+                        updatedAt: new Date(),
+                    },
+                });
+        }
     }
 
-    async movePrefix(previous: string, current: string): Promise<void> {
-        await db
-            .update(filesystemExportNodes)
-            .set({
-                logicalPath: sql`${current}::text || substr(${filesystemExportNodes.logicalPath}, char_length(${previous}::text) + 1)`,
-                updatedAt: new Date(),
-            })
-            .where(this.subtree(previous));
+    async removeSubtree(logicalPath: string): Promise<void> {
+        await db.delete(filesystemExportNodes).where(this.subtree(logicalPath));
     }
 }

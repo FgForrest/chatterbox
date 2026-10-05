@@ -14,6 +14,7 @@ import type {
     ExportProvider,
     MaterializeOptions,
     OwnedEntryKind,
+    TakenNames,
 } from "./types";
 
 /** Drive description of every folder an export creates. */
@@ -302,8 +303,22 @@ export class DriveExportProvider implements ExportProvider {
         return { contentPreserved: !ensured.created };
     }
 
-    async foreignNames(): Promise<Set<string>> {
-        return new Set();
+    async takenNames(relativePath: string): Promise<TakenNames> {
+        await this.loadSnapshot();
+        const prefix = `${relativePath}/`;
+        const names = new Set<string>();
+        for (const node of await this.nodes.list()) {
+            const name = node.logicalPath.slice(prefix.length);
+            if (
+                node.logicalPath.startsWith(prefix) &&
+                !name.includes("/") &&
+                (await this.live(node.driveFileId))
+            ) {
+                names.add(name);
+            }
+        }
+        // Under `drive.file` the export sees only what it created.
+        return { names, foreign: new Set() };
     }
 
     async moveFile(from: string, to: string): Promise<boolean> {
@@ -345,7 +360,7 @@ export class DriveExportProvider implements ExportProvider {
         relativePath: string,
         options: { duplicate: boolean },
     ): Promise<boolean> {
-        if (!options.duplicate) return false;
+        if (!options.duplicate || !this.inRoot(relativePath)) return false;
         const node = await this.nodes.get(relativePath);
         if (!node || node.kind === "folder") return false;
         const item = await this.live(node.driveFileId);

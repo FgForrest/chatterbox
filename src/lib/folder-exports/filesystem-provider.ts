@@ -15,7 +15,12 @@ import type {
     FilesystemNodeKind,
     FilesystemNodeStore,
 } from "./filesystem-nodes";
-import type { ExpectedArtifact, ExportProvider, OwnedEntryKind } from "./types";
+import type {
+    ExpectedArtifact,
+    ExportProvider,
+    OwnedEntryKind,
+    TakenNames,
+} from "./types";
 
 export const MAX_EXPORT_PATH_LENGTH = 1024;
 
@@ -152,23 +157,18 @@ export class FilesystemExportProvider implements ExportProvider {
         }
     }
 
-    private async moveClaims(previous: string, current: string): Promise<void> {
-        await this.nodes.removeSubtree(current);
-        await this.nodes.movePrefix(previous, current);
-        if (!this.snapshot) return;
-        const moved: Array<[string, FilesystemNodeKind]> = [];
-        for (const key of [...this.snapshot.keys()]) {
-            if (key === current || key.startsWith(`${current}/`)) {
-                this.snapshot.delete(key);
-            }
-        }
-        for (const [key, kind] of [...this.snapshot]) {
+    /** Claims everything under `previous` again under `current`. */
+    private async claimMoved(previous: string, current: string): Promise<void> {
+        const owned = await this.loadSnapshot();
+        const moved = new Map<string, FilesystemNodeKind>();
+        for (const [key, kind] of owned) {
             if (key === previous || key.startsWith(`${previous}/`)) {
-                this.snapshot.delete(key);
-                moved.push([`${current}${key.slice(previous.length)}`, kind]);
+                moved.set(`${current}${key.slice(previous.length)}`, kind);
             }
         }
-        for (const [key, kind] of moved) this.snapshot.set(key, kind);
+        await this.release(current);
+        await this.nodes.putAll(moved);
+        for (const [key, kind] of moved) owned.set(key, kind);
     }
 
     /**
@@ -281,16 +281,21 @@ export class FilesystemExportProvider implements ExportProvider {
         }
     }
 
-    async foreignNames(relativePath: string): Promise<Set<string>> {
+    async takenNames(relativePath: string): Promise<TakenNames> {
         const owned = await this.loadSnapshot();
         const resolved = await this.resolve(relativePath, false);
         if (!resolved || !(await isKind(resolved.target, "directory"))) {
-            return new Set();
+            return { names: new Set(), foreign: new Set() };
         }
-        const names = await readdir(resolved.target);
-        return new Set(
-            names.filter((name) => !owned.has(`${relativePath}/${name}`)),
-        );
+        const names = new Set(await readdir(resolved.target));
+        return {
+            names,
+            foreign: new Set(
+                [...names].filter(
+                    (name) => !owned.has(`${relativePath}/${name}`),
+                ),
+            ),
+        };
     }
 
     async reconcileDirectory(
@@ -311,8 +316,14 @@ export class FilesystemExportProvider implements ExportProvider {
                 (await this.owned(previousPath)) === "directory" &&
                 (await this.onlyOwnedUnder(previous.target, previousPath))
             ) {
-                await this.moveClaims(previousPath, currentPath);
-                await rename(previous.target, current.target);
+                await this.claimMoved(previousPath, currentPath);
+                try {
+                    await rename(previous.target, current.target);
+                } catch (error) {
+                    await this.release(currentPath);
+                    throw error;
+                }
+                await this.release(previousPath);
                 return { contentPreserved: true };
             }
         }
@@ -428,6 +439,7 @@ export class FilesystemExportProvider implements ExportProvider {
             throw new Error("Export path escapes the configured root");
         }
         const { root, target } = resolved;
+        let replacing = false;
         try {
             const current = await lstat(target);
             if (current.isSymbolicLink() || !current.isFile()) {
@@ -436,6 +448,7 @@ export class FilesystemExportProvider implements ExportProvider {
             if ((await this.owned(relativePath)) !== "file") {
                 throw new ExportPathTakenError(relativePath);
             }
+            replacing = true;
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
@@ -451,7 +464,10 @@ export class FilesystemExportProvider implements ExportProvider {
                 constants.O_WRONLY |
                 constants.O_NOFOLLOW,
             0o600,
-        );
+        ).catch(async (error: unknown) => {
+            await this.release(temporaryPath);
+            throw error;
+        });
         try {
             if (Buffer.isBuffer(content)) {
                 await handle.writeFile(content);
@@ -478,6 +494,9 @@ export class FilesystemExportProvider implements ExportProvider {
             await handle.close().catch(() => {});
             await unlink(temporary).catch(() => {});
             await this.release(temporaryPath);
+            if (!replacing && !(await entryExists(target))) {
+                await this.release(relativePath);
+            }
             throw error;
         }
         await this.release(temporaryPath);
