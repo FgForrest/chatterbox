@@ -25,6 +25,10 @@ ORG_ACCOUNT_NAME=Acme             # optional, defaults to "Organization"
 The email must not belong to an existing user; Riffado refuses to turn a
 person's account into the organization account and logs why.
 
+With [single sign-on](./sso), `ORG_ACCOUNT_PASSWORD` is optional: nobody
+signs in as the organization account, which keeps owning the Organization
+tree.
+
 Removing the two variables makes the Organization **read-only**: what was
 shared stays visible, nothing is deleted, and nothing new can be changed
 except that owners can still withdraw their recordings. `SELF_HOST_MODE=local`

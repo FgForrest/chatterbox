@@ -26,11 +26,11 @@ on production secrets.
 
 | Variable                            | Default                            | Effect                                                                                                              |
 | ----------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `DISABLE_REGISTRATION`              | `false`                            | When `true`, sign-up is rejected server-side and the `/register` page is disabled. Existing users keep working.     |
+| `DISABLE_REGISTRATION`              | `false`                            | When `true`, sign-up is rejected server-side and the `/register` page is disabled. Existing users keep working. With [single sign-on](./sso), only existing accounts can sign in. |
 | `DISABLE_UPDATE_CHECK`              | `false`                            | When `true`, the footer never calls `api.github.com` to check for new release tags.                                 |
 | `SELF_HOST_MODE`                    | `shared`                           | `shared` allows the Organization scope; `local` keeps every account strictly private.                               |
 | `ORG_ACCOUNT_EMAIL`                 | unset                              | With `ORG_ACCOUNT_PASSWORD`, enables the Organization scope: a shared folder tree, and one organization account that curates it. Must not be an existing user's email. |
-| `ORG_ACCOUNT_PASSWORD`              | unset                              | Password of the organization account (12+ characters). Re-applied on every start.                                   |
+| `ORG_ACCOUNT_PASSWORD`              | unset                              | Password of the organization account (12+ characters). Re-applied on every start. Optional with single sign-on, where the account has no interactive login. |
 | `ORG_ACCOUNT_NAME`                  | `Organization`                     | Display name of the organization account.                                                                           |
 | `RIFFADO_VERSION`                 | `latest`                           | Read by Docker Compose, not the app. Sets which image tag Compose pulls.                                            |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | When `true`, webhook URLs must be HTTPS and resolve to public IPs. Useful when your instance is exposed to others.  |
@@ -80,6 +80,22 @@ See [Google Drive export](./google-drive) for the Google Cloud setup.
 | `GOOGLE_PICKER_API_KEY`       | —       | Browser API key for the Google Picker. Restrict it to the Picker API and your `APP_URL`.    |
 | `GOOGLE_CLOUD_PROJECT_NUMBER` | —       | Numeric project number of the Google Cloud project (the Picker's app id).                  |
 | `GOOGLE_WORKSPACE_DOMAINS`    | —       | Comma-separated Workspace domains allowed to connect. Unset, any account the consent screen admits may. |
+
+## Single sign-on (OpenID Connect)
+
+Self-host only; ignored when `IS_HOSTED=true`. With the first three set,
+the identity provider is the only way to sign in: email/password sign-in,
+registration and password reset are switched off. See
+[Single sign-on](./sso).
+
+| Variable               | Default                | Effect                                                                                       |
+| ---------------------- | ---------------------- | -------------------------------------------------------------------------------------------- |
+| `OIDC_ISSUER_URL`      | —                      | Issuer URL; endpoints come from its `/.well-known/openid-configuration`. `https`, or `http` on an internal host only. |
+| `OIDC_CLIENT_ID`       | —                      | Client id of a confidential client.                                                          |
+| `OIDC_CLIENT_SECRET`   | —                      | Client secret.                                                                               |
+| `OIDC_PROVIDER_NAME`   | `SSO`                  | Shown on the button: "Sign in with …".                                                       |
+| `OIDC_SCOPES`          | `openid profile email` | Space- or comma-separated. `openid` is always requested.                                     |
+| `OIDC_SESSION_MAX_AGE` | `86400`                | Session lifetime in seconds (300 to 2592000), not extended by use.                           |
 
 ## Learn (knowledge from recordings)
 

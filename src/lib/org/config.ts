@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { isSsoEnabled } from "@/lib/sso/config";
 
 /**
  * Whether this deployment shows the Organization scope at all: self-host in
@@ -15,12 +16,16 @@ export function isOrgScopeVisible(): boolean {
 /**
  * Whether the Organization scope accepts changes: visible, and configured
  * with its account. With the account's env vars removed, what was shared
- * stays readable and nothing is deleted, but nothing changes either.
+ * stays readable and nothing is deleted, but nothing changes either. Under
+ * single sign-on the account needs no password: nobody signs in with one.
  */
 export function isOrgScopeEnabled(): boolean {
     return (
         isOrgScopeVisible() &&
-        Boolean(env.ORG_ACCOUNT_EMAIL && env.ORG_ACCOUNT_PASSWORD)
+        Boolean(
+            env.ORG_ACCOUNT_EMAIL &&
+                (env.ORG_ACCOUNT_PASSWORD || isSsoEnabled()),
+        )
     );
 }
 
