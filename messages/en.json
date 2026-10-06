@@ -484,6 +484,7 @@
   "Yy_yDL": "Reset password",
   "_XJ5YF": "A Riffado account with this email already exists, but your identity provider has not verified the address. Ask your administrator to verify it.",
   "ti7nHO": "This identity cannot sign in to Riffado. Ask your administrator.",
+  "5Yf5ci": "This Riffado instance does not accept new accounts. Ask your administrator.",
   "-AFL8e": "Your identity provider did not share an email address. Ask your administrator to release it to Riffado.",
   "mM9HCM": "Sign-in was cancelled at the identity provider.",
   "eJ4Gmc": "Sign-in failed. Please try again.",

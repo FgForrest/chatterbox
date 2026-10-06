@@ -88,6 +88,9 @@ function ssoPlugins() {
                     clientSecret,
                     scopes: env.OIDC_SCOPES,
                     pkce: true,
+                    // A closed instance stays closed under single sign-on:
+                    // only existing accounts sign in.
+                    disableSignUp: env.DISABLE_REGISTRATION,
                     overrideUserInfo: true,
                     mapProfileToUser: mapSsoProfile,
                 },

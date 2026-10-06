@@ -13,6 +13,13 @@ provider. Once it is configured, the provider is the **only** way in:
   sign-in. Who may use Riffado is decided at the provider (for example by
   assigning users or groups to the client).
 
+With `DISABLE_REGISTRATION=true` the instance stays closed: only people
+who already have a Riffado account can sign in, and their account is
+linked on the first SSO sign-in as described below. Anyone else sees
+"This Riffado instance does not accept new accounts". To let a new
+colleague in, unset the variable, restart, let them sign in once, and set
+it again.
+
 Hosted Riffado ignores these variables.
 
 ## Provider setup

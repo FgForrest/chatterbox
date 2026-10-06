@@ -33,6 +33,10 @@ export function SsoLogin({ providerName, error }: SsoLoginProps) {
                 return i18n(
                     "This identity cannot sign in to Riffado. Ask your administrator.",
                 );
+            case "signup_disabled":
+                return i18n(
+                    "This Riffado instance does not accept new accounts. Ask your administrator.",
+                );
             case "email_is_missing":
                 return i18n(
                     "Your identity provider did not share an email address. Ask your administrator to release it to Riffado.",

@@ -33,6 +33,7 @@ describe("SsoLogin", () => {
         ["account_not_linked", "has not verified the address"],
         ["unable_to_link_account", "This identity cannot sign in"],
         ["ORG_ACCOUNT_SSO", "This identity cannot sign in"],
+        ["signup_disabled", "does not accept new accounts"],
         ["email_is_missing", "did not share an email address"],
         ["access_denied", "cancelled at the identity provider"],
         ["anything_else", "Sign-in failed. Please try again."],

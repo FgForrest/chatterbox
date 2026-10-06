@@ -35,9 +35,10 @@ import {
     getTestDatabaseUrl,
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
-
-const ISSUER = "https://idp.example.test/realms/acme";
-const APP_URL = "http://localhost:3000";
+import {
+    TEST_APP_URL as APP_URL,
+    createFakeIdentityProvider,
+} from "@/tests/sso/fake-idp";
 
 const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
@@ -120,115 +121,8 @@ function required<T>(value: T | null | undefined): T {
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
-interface Claims {
-    sub: string;
-    email?: string;
-    email_verified?: boolean;
-    name?: string;
-}
-
-let nextClaims: Claims | null = null;
-
-function base64url(value: object): string {
-    return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
-/** An ID token as the token endpoint returns it; better-auth only decodes it. */
-function idToken(claims: Claims): string {
-    const now = Math.floor(Date.now() / 1000);
-    return [
-        base64url({ alg: "RS256", typ: "JWT" }),
-        base64url({
-            iss: ISSUER,
-            aud: "riffado",
-            iat: now,
-            exp: now + 300,
-            ...claims,
-        }),
-        "signature",
-    ].join(".");
-}
-
-const realFetch = globalThis.fetch;
-
-async function fakeIdentityProvider(
-    input: string | URL | Request,
-    init?: RequestInit,
-): Promise<Response> {
-    const url =
-        typeof input === "string"
-            ? input
-            : input instanceof URL
-              ? input.toString()
-              : input.url;
-    if (url === `${ISSUER}/.well-known/openid-configuration`) {
-        return Response.json({
-            issuer: ISSUER,
-            authorization_endpoint: `${ISSUER}/protocol/openid-connect/auth`,
-            token_endpoint: `${ISSUER}/protocol/openid-connect/token`,
-            userinfo_endpoint: `${ISSUER}/protocol/openid-connect/userinfo`,
-        });
-    }
-    if (url === `${ISSUER}/protocol/openid-connect/token`) {
-        if (!nextClaims) throw new Error("no claims queued for the token");
-        return Response.json({
-            access_token: "provider-access-token",
-            refresh_token: "provider-refresh-token",
-            id_token: idToken(nextClaims),
-            token_type: "Bearer",
-            expires_in: 300,
-        });
-    }
-    return realFetch(input, init);
-}
-
-function cookiesFrom(response: Response): string {
-    return response.headers
-        .getSetCookie()
-        .map((cookie) => cookie.split(";")[0])
-        .join("; ");
-}
-
-/** The browser's round trip: start the sign-in, come back from the provider. */
-async function ssoLogin(
-    claims: Claims,
-): Promise<{ location: string; cookie: string }> {
-    nextClaims = claims;
-    const start = await auth.handler(
-        new Request(`${APP_URL}/api/auth/sign-in/oauth2`, {
-            method: "POST",
-            headers: {
-                "content-type": "application/json",
-                origin: APP_URL,
-            },
-            body: JSON.stringify({
-                providerId: "oidc",
-                callbackURL: "/dashboard",
-                errorCallbackURL: "/login",
-            }),
-        }),
-    );
-    expect(start.status).toBe(200);
-    const { url } = (await start.json()) as { url: string };
-    const authorization = new URL(url);
-    expect(authorization.origin + authorization.pathname).toBe(
-        `${ISSUER}/protocol/openid-connect/auth`,
-    );
-    expect(authorization.searchParams.get("code_challenge")).toBeTruthy();
-    const state = authorization.searchParams.get("state");
-
-    const callback = await auth.handler(
-        new Request(
-            `${APP_URL}/api/auth/oauth2/callback/oidc?code=the-code&state=${state}&iss=${encodeURIComponent(ISSUER)}`,
-            { headers: { cookie: cookiesFrom(start) } },
-        ),
-    );
-    expect(callback.status).toBe(302);
-    return {
-        location: callback.headers.get("location") ?? "",
-        cookie: cookiesFrom(callback),
-    };
-}
+const idp = createFakeIdentityProvider(() => auth.handler);
+const ssoLogin = idp.login;
 
 describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
     let database: TestPostgresDatabase | null = null;
@@ -297,7 +191,7 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
             "sso",
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
-        vi.spyOn(globalThis, "fetch").mockImplementation(fakeIdentityProvider);
+        vi.spyOn(globalThis, "fetch").mockImplementation(idp.fetch);
         orgUserId = (await ensureOrgAccount()) ?? "";
     }, 120_000);
 
@@ -309,7 +203,6 @@ describeWithDatabase("single sign-on (PostgreSQL, fake IdP)", () => {
 
     beforeEach(() => {
         mockEnv.SELF_HOST_MODE = "shared";
-        nextClaims = null;
     });
 
     it("created the organization account without a password", async () => {

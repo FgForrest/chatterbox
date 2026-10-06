@@ -171,7 +171,10 @@ const baseEnvSchema = z.object({
                 .max(30 * 24 * 60 * 60),
         ),
 
-    /** Disable email/password sign-up. */
+    /**
+     * Disable sign-up: email/password registration, and under single sign-on
+     * the accounts the identity provider would otherwise create.
+     */
     DISABLE_REGISTRATION: z
         .string()
         .optional()
