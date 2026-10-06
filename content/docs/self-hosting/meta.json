@@ -5,6 +5,7 @@
         "install",
         "environment-variables",
         "organization",
+        "sso",
         "storage-s3",
         "google-drive",
         "email-smtp",

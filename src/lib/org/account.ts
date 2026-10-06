@@ -24,8 +24,10 @@ const DEFAULT_ORG_NAME = "Organization";
 export async function ensureOrgAccount(): Promise<string | null> {
     if (!isOrgScopeEnabled()) return null;
     const email = env.ORG_ACCOUNT_EMAIL;
+    // Absent under single sign-on, where the account has no interactive
+    // login and keeps whatever credential row it had.
     const password = env.ORG_ACCOUNT_PASSWORD;
-    if (!email || !password) return null;
+    if (!email) return null;
     const name = env.ORG_ACCOUNT_NAME ?? DEFAULT_ORG_NAME;
 
     return db.transaction(async (tx) => {
@@ -68,34 +70,8 @@ export async function ensureOrgAccount(): Promise<string | null> {
             orgUserId = created.id;
         }
 
-        const [credential] = await tx
-            .select({ id: accounts.id, password: accounts.password })
-            .from(accounts)
-            .where(
-                and(
-                    eq(accounts.userId, orgUserId),
-                    eq(accounts.providerId, "credential"),
-                ),
-            )
-            .limit(1);
-        if (!credential) {
-            await tx.insert(accounts).values({
-                userId: orgUserId,
-                accountId: orgUserId,
-                providerId: "credential",
-                password: await hashPassword(password),
-            });
-        } else if (
-            !credential.password ||
-            !(await verifyPassword({ hash: credential.password, password }))
-        ) {
-            await tx
-                .update(accounts)
-                .set({
-                    password: await hashPassword(password),
-                    updatedAt: new Date(),
-                })
-                .where(eq(accounts.id, credential.id));
+        if (password) {
+            await ensureOrgCredential(tx, orgUserId, password);
         }
 
         await tx
@@ -108,6 +84,44 @@ export async function ensureOrgAccount(): Promise<string | null> {
         await ensureOrgRootFolder(tx, orgUserId);
         return orgUserId;
     });
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function ensureOrgCredential(
+    tx: Tx,
+    orgUserId: string,
+    password: string,
+): Promise<void> {
+    const [credential] = await tx
+        .select({ id: accounts.id, password: accounts.password })
+        .from(accounts)
+        .where(
+            and(
+                eq(accounts.userId, orgUserId),
+                eq(accounts.providerId, "credential"),
+            ),
+        )
+        .limit(1);
+    if (!credential) {
+        await tx.insert(accounts).values({
+            userId: orgUserId,
+            accountId: orgUserId,
+            providerId: "credential",
+            password: await hashPassword(password),
+        });
+    } else if (
+        !credential.password ||
+        !(await verifyPassword({ hash: credential.password, password }))
+    ) {
+        await tx
+            .update(accounts)
+            .set({
+                password: await hashPassword(password),
+                updatedAt: new Date(),
+            })
+            .where(eq(accounts.id, credential.id));
+    }
 }
 
 /** Retire per-user Public roots on self-host. Idempotent; safe in every process. */

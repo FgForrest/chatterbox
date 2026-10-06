@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import {
     HostedAuthChrome,
     SelfHostAuthChrome,
@@ -6,9 +7,12 @@ import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { isSmtpConfigured } from "@/lib/smtp";
+import { isSsoEnabled } from "@/lib/sso/config";
 
 export default async function ForgotPasswordPage() {
     await redirectIfAuthenticated();
+    // The identity provider owns passwords under single sign-on.
+    if (isSsoEnabled()) redirect("/login");
 
     const smtp = isSmtpConfigured();
 

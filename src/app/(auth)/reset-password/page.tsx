@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import {
     HostedAuthChrome,
     SelfHostAuthChrome,
@@ -6,6 +7,7 @@ import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 import { resetPasswordMode } from "@/lib/auth/reset-password-mode";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
 import { env } from "@/lib/env";
+import { isSsoEnabled } from "@/lib/sso/config";
 
 interface ResetPasswordPageProps {
     // Next.js delivers query params as `string | string[] | undefined` --
@@ -26,6 +28,8 @@ export default async function ResetPasswordPage({
     searchParams,
 }: ResetPasswordPageProps) {
     await redirectIfAuthenticated();
+    // The identity provider owns passwords under single sign-on.
+    if (isSsoEnabled()) redirect("/login");
 
     const params = await searchParams;
     const token = firstParam(params.token);

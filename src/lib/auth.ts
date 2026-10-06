@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -12,6 +13,18 @@ import {
     sendVerifyEmail,
 } from "./notifications/email";
 import { isSmtpConfigured } from "./smtp";
+import {
+    afterSsoSession,
+    guardSsoSession,
+    mapSsoProfile,
+    prepareSsoAccount,
+} from "./sso/auth-hooks";
+import {
+    isSsoEnabled,
+    PASSWORD_AUTH_PATHS,
+    ssoDiscoveryUrl,
+} from "./sso/config";
+import { SSO_PROVIDER_ID } from "./sso/constants";
 
 const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
 
@@ -51,14 +64,64 @@ function authEmailLocale(user: object, request?: Request) {
  */
 export const emailVerificationRequired = verificationActive;
 
+/**
+ * With single sign-on the identity provider is the only way in: passwords,
+ * sign-up and local email changes are off, and an SSO login attaches to an
+ * existing account only when the provider vouches for the email
+ * (`email_verified`). Riffado's own `emailVerified` is not required, since
+ * self-host never verifies addresses.
+ */
+const ssoEnabled = isSsoEnabled();
+
+function ssoPlugins() {
+    const issuer = env.OIDC_ISSUER_URL;
+    const clientId = env.OIDC_CLIENT_ID;
+    const clientSecret = env.OIDC_CLIENT_SECRET;
+    if (!ssoEnabled || !issuer || !clientId || !clientSecret) return [];
+    return [
+        genericOAuth({
+            config: [
+                {
+                    providerId: SSO_PROVIDER_ID,
+                    discoveryUrl: ssoDiscoveryUrl(issuer),
+                    clientId,
+                    clientSecret,
+                    scopes: env.OIDC_SCOPES,
+                    pkce: true,
+                    overrideUserInfo: true,
+                    mapProfileToUser: mapSsoProfile,
+                },
+            ],
+        }),
+    ];
+}
+
 export const auth = betterAuth({
     database: drizzleAdapter(db, {
         provider: "pg",
         schema,
         usePlural: true,
     }),
+    ...(ssoEnabled
+        ? {
+              disabledPaths: [...PASSWORD_AUTH_PATHS],
+              account: {
+                  accountLinking: {
+                      enabled: true,
+                      requireLocalEmailVerified: false,
+                  },
+                  updateAccountOnSignIn: false,
+              },
+              session: {
+                  expiresIn: env.OIDC_SESSION_MAX_AGE,
+                  disableSessionRefresh: true,
+              },
+              onAPIError: { errorURL: `${env.APP_URL}/login` },
+          }
+        : {}),
+    plugins: ssoPlugins(),
     emailAndPassword: {
-        enabled: true,
+        enabled: !ssoEnabled,
         requireEmailVerification: verificationActive,
         disableSignUp: env.DISABLE_REGISTRATION,
         sendResetPassword: async ({ user, url }, request) => {
@@ -91,7 +154,7 @@ export const auth = betterAuth({
             },
         },
         changeEmail: {
-            enabled: true,
+            enabled: !ssoEnabled,
             sendChangeEmailConfirmation: async (
                 { user, newEmail, url },
                 request,
@@ -118,6 +181,17 @@ export const auth = betterAuth({
      * code paths are gated on a non-null plan everywhere.
      */
     databaseHooks: {
+        ...(ssoEnabled
+            ? {
+                  account: { create: { before: prepareSsoAccount } },
+                  session: {
+                      create: {
+                          before: guardSsoSession,
+                          after: afterSsoSession,
+                      },
+                  },
+              }
+            : {}),
         user: {
             create: {
                 after: async (user) => {

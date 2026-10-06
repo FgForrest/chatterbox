@@ -26,6 +26,33 @@ function isHttpUrl(value: string): boolean {
     }
 }
 
+const PRIVATE_IPV4 =
+    /^(10\.\d+|127\.\d+|192\.168|172\.(1[6-9]|2\d|3[01]))\.\d+\.\d+$/;
+
+/**
+ * A host only a private network reaches: loopback, a private IPv4 address,
+ * a single-label name (a compose service such as `keycloak`), or a `.local`
+ * / `.internal` name. Plain http is tolerated there and nowhere else.
+ */
+function isInternalHost(hostname: string): boolean {
+    const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return (
+        host === "localhost" ||
+        host === "::1" ||
+        PRIVATE_IPV4.test(host) ||
+        !host.includes(".") ||
+        host.endsWith(".localhost") ||
+        host.endsWith(".local") ||
+        host.endsWith(".internal")
+    );
+}
+
+/** An https URL, or an http one on an internal host. */
+function isSecureOrInternalUrl(value: string): boolean {
+    const { protocol, hostname } = new URL(value);
+    return protocol === "https:" || isInternalHost(hostname);
+}
+
 const baseEnvSchema = z.object({
     /** True for the Riffado-operated hosted instance; default false (self-host). */
     IS_HOSTED: z
@@ -64,6 +91,85 @@ const baseEnvSchema = z.object({
         .string()
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
+
+    /**
+     * OpenID Connect single sign-on (self-host only). With issuer, client id
+     * and client secret set, the identity provider is the only way in:
+     * email/password sign-in, sign-up and password reset are switched off.
+     */
+    OIDC_ISSUER_URL: z
+        .string()
+        .optional()
+        .transform((val) =>
+            val?.trim() ? val.trim().replace(/\/+$/, "") : undefined,
+        )
+        .refine((val) => val === undefined || isHttpUrl(val), {
+            message: "OIDC_ISSUER_URL must be an http(s) URL",
+        })
+        // Riffado trusts the ID token because it comes straight from the
+        // token endpoint, so that channel must be TLS off a private network.
+        .refine(
+            (val) =>
+                val === undefined ||
+                !isHttpUrl(val) ||
+                isSecureOrInternalUrl(val),
+            {
+                message:
+                    "OIDC_ISSUER_URL must use https unless the provider is on an internal host",
+            },
+        ),
+    OIDC_CLIENT_ID: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    OIDC_CLIENT_SECRET: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /** Name of the identity provider on the sign-in button. */
+    OIDC_PROVIDER_NAME: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || "SSO"),
+    /** Space- or comma-separated scopes; `openid` is always requested. */
+    OIDC_SCOPES: z
+        .string()
+        .optional()
+        .transform((val) => {
+            const scopes = (val ?? "")
+                .split(/[\s,]+/)
+                .map((scope) => scope.trim())
+                .filter(Boolean);
+            const requested = scopes.length > 0 ? scopes : ["profile", "email"];
+            return [...new Set(["openid", ...requested])];
+        }),
+    /**
+     * Lifetime of a session started through the identity provider, in
+     * seconds. Not extended by use, so a user disabled at the provider loses
+     * access within this window. Default 24 hours.
+     */
+    OIDC_SESSION_MAX_AGE: z
+        .string()
+        .optional()
+        .transform((val, ctx) => {
+            const trimmed = val?.trim();
+            if (!trimmed) return 24 * 60 * 60;
+            if (!/^\d+$/.test(trimmed)) {
+                ctx.addIssue({
+                    code: "custom",
+                    message: "OIDC_SESSION_MAX_AGE must be a positive integer",
+                });
+                return z.NEVER;
+            }
+            return Number(trimmed);
+        })
+        .pipe(
+            z
+                .number()
+                .int()
+                .min(5 * 60)
+                .max(30 * 24 * 60 * 60),
+        ),
 
     /** Disable email/password sign-up. */
     DISABLE_REGISTRATION: z
@@ -870,9 +976,29 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
         }
     }
 
+    const oidcFields = [
+        parsed.OIDC_ISSUER_URL,
+        parsed.OIDC_CLIENT_ID,
+        parsed.OIDC_CLIENT_SECRET,
+    ];
+    const oidcConfigured = oidcFields.every(Boolean);
+    if (oidcFields.some(Boolean) && !oidcConfigured) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["OIDC_ISSUER_URL"],
+            message:
+                "OIDC_ISSUER_URL, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be set together",
+        });
+    }
+
+    // With single sign-on nobody signs in with a password, the organization
+    // account included, so its password is optional.
+    const orgPasswordRequired = !(oidcConfigured && !parsed.IS_HOSTED);
     if (
-        Boolean(parsed.ORG_ACCOUNT_EMAIL) !==
-        Boolean(parsed.ORG_ACCOUNT_PASSWORD)
+        (parsed.ORG_ACCOUNT_PASSWORD && !parsed.ORG_ACCOUNT_EMAIL) ||
+        (parsed.ORG_ACCOUNT_EMAIL &&
+            !parsed.ORG_ACCOUNT_PASSWORD &&
+            orgPasswordRequired)
     ) {
         ctx.addIssue({
             code: "custom",
@@ -921,6 +1047,12 @@ function validateEnv(): Env {
             ORG_ACCOUNT_EMAIL: process.env.ORG_ACCOUNT_EMAIL,
             ORG_ACCOUNT_PASSWORD: process.env.ORG_ACCOUNT_PASSWORD,
             ORG_ACCOUNT_NAME: process.env.ORG_ACCOUNT_NAME,
+            OIDC_ISSUER_URL: process.env.OIDC_ISSUER_URL,
+            OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID,
+            OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET,
+            OIDC_PROVIDER_NAME: process.env.OIDC_PROVIDER_NAME,
+            OIDC_SCOPES: process.env.OIDC_SCOPES,
+            OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
             DATABASE_URL: process.env.DATABASE_URL,

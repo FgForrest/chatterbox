@@ -205,8 +205,22 @@ export const accounts = pgTable("accounts", {
     accessToken: text("access_token"),
     refreshToken: text("refresh_token"),
     expiresAt: timestamp("expires_at"),
+    // Better Auth's OAuth account fields. Single sign-on keeps the provider's
+    // tokens out of the database, so these stay null; the columns exist
+    // because Better Auth writes every field of its account model.
+    accessTokenExpiresAt: timestamp("access_token_expires_at"),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+    scope: text("scope"),
+    idToken: text("id_token"),
     password: text("password"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Instance-wide markers for one-time startup work, keyed by a fixed name.
+export const instanceState = pgTable("instance_state", {
+    key: varchar("key", { length: 64 }).primaryKey(),
+    value: text("value").notNull(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

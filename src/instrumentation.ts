@@ -38,6 +38,10 @@ type OrgScopeModule = {
     startOrgScope: () => Promise<void>;
 };
 
+type SsoModule = {
+    startSso: () => Promise<void>;
+};
+
 type VocabularyModule = {
     startCoreVocabularySeed: () => Promise<void>;
 };
@@ -143,6 +147,11 @@ export async function register() {
     // the legacy Public migration and the organization account existing.
     const { startOrgScope } = require("./lib/org/account") as OrgScopeModule;
     await startOrgScope();
+
+    // Before the first request: a password session must not slip through
+    // after single sign-on is switched on.
+    const { startSso } = require("./lib/sso/startup") as SsoModule;
+    await startSso();
 
     // Before the first request too: a person's vocabulary, and a Learn run's
     // prompt, are built on the core types.

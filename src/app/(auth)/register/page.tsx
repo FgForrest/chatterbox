@@ -8,6 +8,7 @@ import { RegisterForm } from "@/components/auth/register-form";
 import { emailVerificationRequired } from "@/lib/auth";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
 import { env } from "@/lib/env";
+import { isSsoEnabled } from "@/lib/sso/config";
 
 export default async function RegisterPage() {
     const i18n = await getExtracted();
@@ -17,7 +18,7 @@ export default async function RegisterPage() {
     // /login rather than rendering a "registration disabled" panel. The
     // dangling deep-link is the only meaningful entry point, and a
     // redirect is a less confusing landing than a dead-end card.
-    if (env.DISABLE_REGISTRATION) {
+    if (env.DISABLE_REGISTRATION || isSsoEnabled()) {
         redirect("/login");
     }
 

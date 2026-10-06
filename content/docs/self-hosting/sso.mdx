@@ -1,0 +1,133 @@
+---
+title: Single sign-on (OpenID Connect)
+description: Let people sign in through your identity provider (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) instead of a Riffado password.
+---
+
+A self-hosted Riffado can hand sign-in to an OpenID Connect identity
+provider. Once it is configured, the provider is the **only** way in:
+
+- the sign-in page shows a single **Sign in with &lt;provider&gt;** button;
+- email/password sign-in, registration and password reset are switched off
+  on the server, not just hidden;
+- everyone the provider lets through gets a Riffado account on their first
+  sign-in. Who may use Riffado is decided at the provider (for example by
+  assigning users or groups to the client).
+
+Hosted Riffado ignores these variables.
+
+## Provider setup
+
+Create a confidential OpenID Connect client (authorization code flow) with:
+
+- **Redirect URI:** `<APP_URL>/api/auth/oauth2/callback/oidc`
+- **Scopes:** `openid`, `profile`, `email`
+- **PKCE:** `S256` (Riffado always sends a code challenge)
+
+Riffado needs the `sub`, `email`, `name` and `email_verified` claims.
+
+<details>
+<summary>Keycloak</summary>
+
+1. In your realm, **Clients → Create client**, type **OpenID Connect**,
+   client id `riffado`.
+2. **Client authentication:** on. **Authentication flow:** Standard flow
+   only.
+3. **Valid redirect URIs:** `<APP_URL>/api/auth/oauth2/callback/oidc`.
+4. **Advanced → Proof Key for Code Exchange Code Challenge Method:** `S256`.
+5. Copy the secret from **Credentials**.
+
+The issuer is `https://<keycloak-host>/realms/<realm>`.
+
+</details>
+
+<details>
+<summary>Microsoft Entra ID</summary>
+
+Register an application with a **Web** redirect URI as above and create a
+client secret. The issuer is
+`https://login.microsoftonline.com/<tenant-id>/v2.0`. Entra does not send
+`email_verified`; see [Existing accounts](#existing-accounts).
+
+</details>
+
+Then set:
+
+```bash
+OIDC_ISSUER_URL=https://sso.example.com/realms/acme
+OIDC_CLIENT_ID=riffado
+OIDC_CLIENT_SECRET=...
+OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
+# OIDC_SCOPES="openid profile email"
+# OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
+```
+
+Riffado reads the provider's endpoints from
+`<OIDC_ISSUER_URL>/.well-known/openid-configuration`. The issuer must be
+`https`: Riffado trusts the ID token it receives directly from the
+provider's token endpoint, so that channel has to be TLS. Plain `http` is
+accepted only for internal hosts (`localhost`, private IP addresses,
+single-label names such as a compose service `keycloak`, and `.local` /
+`.internal` names).
+
+All three of issuer, client id and secret must be set; a partial
+configuration stops the server with an error.
+
+## Existing accounts
+
+When single sign-on is switched on for an instance that already has
+accounts, a person's first SSO sign-in attaches to their existing account
+(recordings, settings and all) **if the email matches and the provider
+marks it verified** (`email_verified: true`).
+
+If the provider has not verified the address, Riffado refuses to attach it
+to the existing account and the sign-in page says why. Verify the email at
+the provider (in Keycloak: the user's **Email verified** switch) and sign
+in again. An unverified email nobody uses yet simply creates a new
+account.
+
+From then on the account is bound to the provider's user id (`sub`): the
+name and email follow the provider on every sign-in. An email that another
+Riffado account already holds is not taken over; the user keeps their
+current one.
+
+## Sessions
+
+- The first start with single sign-on ends **every** existing session, so
+  nobody stays signed in with a password. Switching SSO off and on again
+  does it again.
+- A session lasts `OIDC_SESSION_MAX_AGE` seconds (default 24 hours) and is
+  not extended by use. A user disabled at the provider loses access to
+  Riffado within that window.
+- **Sign out** ends the Riffado session only. The provider's own session
+  stays, so the next **Sign in** may go straight through without a prompt.
+- Personal API tokens are not sessions and keep working.
+
+## The Almanac
+
+Every SSO sign-in records the person (name and email) in the
+Organization's Almanac, or in their own when the
+[Organization](./organization) is not enabled. A known person is matched
+by email and takes the provider's current name; nicknames, notes and facts
+added in Riffado are kept.
+
+## The organization account
+
+With single sign-on, `ORG_ACCOUNT_PASSWORD` is optional and nobody can
+sign in as the organization account: it keeps owning the Organization
+tree, but has no interactive login. An identity provider user whose email
+equals `ORG_ACCOUNT_EMAIL` is refused.
+
+## Trying it locally
+
+The repository's end-to-end stack has a Keycloak override with a test
+realm (`riffado-e2e`, users `alice`, `bob`, `carol`, `dave`, each with the
+password `<name>-password`):
+
+```bash
+RIFFADO_E2E_APP_URL=http://localhost:3310 \
+docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --build
+```
+
+Riffado is then on `http://localhost:3310` and Keycloak on
+`http://localhost:8180`, bound to loopback. The realm is for testing only:
+its admin is `admin/admin` and every password is public.
