@@ -21,17 +21,60 @@ export interface MaterializeOptions {
     format: ExportFormat;
 }
 
+export type OwnedEntryKind = "directory" | "file";
+
+export interface TakenNames {
+    names: Set<string>;
+    foreign: Set<string>;
+}
+
+/**
+ * A target the export writes into. It tracks every file and directory it
+ * creates and never moves, overwrites or deletes anything else.
+ */
 export interface ExportProvider {
+    /** Whether the export's own file at the path matches `expected`. */
     exists(relativePath: string, expected: ExpectedArtifact): Promise<boolean>;
+    /**
+     * Names taken in a directory: all of them, and those of entries the
+     * export did not create.
+     */
+    takenNames(relativePath: string): Promise<TakenNames>;
+    /**
+     * Makes sure the directory at `currentPath` exists, moving the one at
+     * `previousPath` there as a whole when that is safe. `contentPreserved`
+     * says whether files written under the previous path are now under the
+     * current one.
+     */
     reconcileDirectory(
         previousPath: string | null,
         currentPath: string,
     ): Promise<{ contentPreserved: boolean }>;
+    /** Moves one of the export's files to a free path. True if moved. */
+    moveFile(from: string, to: string): Promise<boolean>;
     /**
-     * Removes a directory the export no longer places anything in, but only
-     * while it holds nothing of the export's own. True if removed.
+     * Removes one of the export's files it no longer places. `duplicate`:
+     * the same artifact has another path in the plan. True if removed.
+     */
+    removeFile(
+        relativePath: string,
+        options: { duplicate: boolean },
+    ): Promise<boolean>;
+    /**
+     * Removes a directory the export created and no longer places anything
+     * in, but only while it holds nothing of the export's own. True if
+     * removed.
      */
     removeEmptyDirectory(relativePath: string): Promise<boolean>;
+    /** Every entry the export created, by path. */
+    ownedEntries(): Promise<Map<string, OwnedEntryKind>>;
+    /** Forgets entries the export created that are gone from the target. */
+    forgetMissing(): Promise<void>;
+    /**
+     * Takes entries written before the export tracked what it creates as
+     * its own, where they still exist with the expected kind.
+     */
+    adopt(entries: ReadonlyMap<string, OwnedEntryKind>): Promise<void>;
     materialize(
         relativePath: string,
         content: Buffer | Readable,

@@ -306,6 +306,10 @@ export class FakeDrive implements DriveClient {
 export class MemoryDriveNodeStore implements DriveNodeStore {
     readonly nodes = new Map<string, DriveNode>();
 
+    async list(): Promise<DriveNode[]> {
+        return [...this.nodes.values()].map((node) => ({ ...node }));
+    }
+
     async get(logicalPath: string): Promise<DriveNode | null> {
         return this.nodes.get(logicalPath) ?? null;
     }

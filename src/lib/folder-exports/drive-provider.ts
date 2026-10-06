@@ -13,6 +13,8 @@ import type {
     ExportFormat,
     ExportProvider,
     MaterializeOptions,
+    OwnedEntryKind,
+    TakenNames,
 } from "./types";
 
 /** Drive description of every folder an export creates. */
@@ -85,8 +87,9 @@ export interface DriveExportProviderOptions {
  * Drive addresses items by id and allows duplicate names, so every item the
  * export creates is recorded in the node store and tagged with the export's
  * id, which also lets a retry find what a crashed attempt already created.
- * It only ever trashes folders it created, and only while they hold none of
- * its files: under `drive.file` it cannot see what users put there.
+ * It trashes folders it created only while they hold none of its files, and
+ * files it wrote only when the same artifact is in place elsewhere: under
+ * `drive.file` it cannot see what users put there.
  */
 export class DriveExportProvider implements ExportProvider {
     private readonly exportId: string;
@@ -116,6 +119,16 @@ export class DriveExportProvider implements ExportProvider {
             throw new Error("Export path is outside the export's Drive folder");
         }
         return parts;
+    }
+
+    /** Whether `logicalPath` lies inside the picked folder. */
+    private inRoot(logicalPath: string): boolean {
+        try {
+            this.segments(logicalPath);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     private async verifyRoot(): Promise<void> {
@@ -260,9 +273,7 @@ export class DriveExportProvider implements ExportProvider {
                     : null;
             if (item && isKind(item, "folder")) {
                 if (await this.existingFolder(currentPath)) {
-                    throw new Error(
-                        "Cannot rename an export directory over an existing directory",
-                    );
+                    return { contentPreserved: false };
                 }
                 const parent = await this.ensureFolder(
                     path.posix.dirname(currentPath),
@@ -292,10 +303,103 @@ export class DriveExportProvider implements ExportProvider {
         return { contentPreserved: !ensured.created };
     }
 
+    async takenNames(relativePath: string): Promise<TakenNames> {
+        await this.loadSnapshot();
+        const prefix = `${relativePath}/`;
+        const names = new Set<string>();
+        for (const node of await this.nodes.list()) {
+            const name = node.logicalPath.slice(prefix.length);
+            if (
+                node.logicalPath.startsWith(prefix) &&
+                !name.includes("/") &&
+                (await this.live(node.driveFileId))
+            ) {
+                names.add(name);
+            }
+        }
+        // Under `drive.file` the export sees only what it created.
+        return { names, foreign: new Set() };
+    }
+
+    async moveFile(from: string, to: string): Promise<boolean> {
+        if (!this.inRoot(from) || !this.inRoot(to)) return false;
+        if (this.segments(to).length < 2) return false;
+        await this.verifyRoot();
+        await this.loadSnapshot();
+        const node = await this.nodes.get(from);
+        if (!node || node.kind === "folder") return false;
+        const item = await this.live(node.driveFileId);
+        if (!item || item.appProperties[EXPORT_PROPERTY] !== this.exportId) {
+            return false;
+        }
+        const occupant = await this.nodes.get(to);
+        if (occupant && (await this.live(occupant.driveFileId))) return false;
+        const parent = await this.ensureFolder(path.posix.dirname(to));
+        const moving = !item.parents.includes(parent.id);
+        this.remember(
+            await this.client.updateItem(item.id, {
+                name: path.posix.basename(to),
+                ...(moving
+                    ? {
+                          addParents: parent.id,
+                          removeParents: item.parents.join(","),
+                      }
+                    : {}),
+            }),
+        );
+        await this.nodes.removeSubtree(from);
+        await this.nodes.put({
+            logicalPath: to,
+            driveFileId: item.id,
+            kind: node.kind,
+        });
+        return true;
+    }
+
+    async removeFile(
+        relativePath: string,
+        options: { duplicate: boolean },
+    ): Promise<boolean> {
+        if (!options.duplicate || !this.inRoot(relativePath)) return false;
+        const node = await this.nodes.get(relativePath);
+        if (!node || node.kind === "folder") return false;
+        const item = await this.live(node.driveFileId);
+        await this.nodes.removeSubtree(relativePath);
+        if (!item || item.appProperties[EXPORT_PROPERTY] !== this.exportId) {
+            return false;
+        }
+        await this.client.updateItem(item.id, { trashed: true });
+        this.snapshot?.delete(item.id);
+        return true;
+    }
+
+    async ownedEntries(): Promise<Map<string, OwnedEntryKind>> {
+        return new Map(
+            (await this.nodes.list()).map((node) => [
+                node.logicalPath,
+                node.kind === "folder" ? "directory" : "file",
+            ]),
+        );
+    }
+
+    async forgetMissing(): Promise<void> {
+        await this.verifyRoot();
+        await this.loadSnapshot();
+        for (const node of await this.nodes.list()) {
+            if (!(await this.live(node.driveFileId))) {
+                await this.nodes.removeSubtree(node.logicalPath);
+            }
+        }
+        this.folderIds.clear();
+    }
+
+    async adopt(): Promise<void> {}
+
     async exists(
         relativePath: string,
         expected: ExpectedArtifact,
     ): Promise<boolean> {
+        if (!this.inRoot(relativePath)) return false;
         const parts = this.segments(relativePath);
         if (parts.length < 2) return false;
         await this.verifyRoot();
@@ -319,6 +423,7 @@ export class DriveExportProvider implements ExportProvider {
     }
 
     async removeEmptyDirectory(relativePath: string): Promise<boolean> {
+        if (!this.inRoot(relativePath)) return false;
         if (this.segments(relativePath).length < 2) return false;
         const node = await this.nodes.get(relativePath);
         if (!node || node.kind !== "folder") return false;

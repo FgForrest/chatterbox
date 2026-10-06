@@ -7,6 +7,7 @@ import {
 import { createDriveClient } from "@/lib/integrations/google/drive-client";
 import { DbDriveNodeStore } from "./drive-nodes";
 import { DriveExportProvider } from "./drive-provider";
+import { DbFilesystemNodeStore } from "./filesystem-nodes";
 import { FilesystemExportProvider } from "./filesystem-provider";
 import type { ExportTarget } from "./target";
 import type { ExportProvider } from "./types";
@@ -22,6 +23,7 @@ export async function createExportProvider(
         case "filesystem":
             return new FilesystemExportProvider(
                 env.FILESYSTEM_EXPORT_ROOT ?? "",
+                new DbFilesystemNodeStore(target.userId, target.id),
             );
         case "google-drive": {
             const drive = target.googleDrive;

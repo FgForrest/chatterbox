@@ -79,6 +79,7 @@ async function materializeLocked(
             fileMd5: recordings.fileMd5,
             plaudVersion: recordings.plaudVersion,
             filesize: recordings.filesize,
+            audioReapedAt: recordings.audioReapedAt,
             ownerUserId: recordings.userId,
         })
         .from(folderExportMaterializations)
@@ -130,6 +131,11 @@ async function materializeLocked(
             format: state.format,
         };
         if (state.artifactType === "audio") {
+            if (state.audioReapedAt) {
+                // Retention removed the audio: nothing to write it from.
+                await markProjectionStale(userId, state.id);
+                return false;
+            }
             const currentVersion = digest(
                 [
                     state.fileMd5,
@@ -271,7 +277,7 @@ export async function reconcileFolderExport(
     );
     if (configurations.length === 0) return { checked: 0, pending: 0 };
     for (const configuration of configurations) {
-        await planFolderExport(userId, configuration.id);
+        await planFolderExport(userId, configuration.id, { verify: true });
     }
     let checked = 0;
     let pending = 0;
