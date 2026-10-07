@@ -12,11 +12,12 @@ export function createBaseOptions(docsTitle: string): BaseLayoutProps {
 }
 
 export function createDocsTabs(
-    titles: readonly [string, string, string],
+    titles: readonly [string, string, string, string],
 ): NonNullable<DocsLayoutProps["tabs"]> {
     return [
-        { title: titles[0], url: "/docs/guides" },
-        { title: titles[1], url: "/docs/self-hosting" },
-        { title: titles[2], url: "/docs/reference" },
+        { title: titles[0], url: "/docs/user-guide" },
+        { title: titles[1], url: "/docs/guides" },
+        { title: titles[2], url: "/docs/self-hosting" },
+        { title: titles[3], url: "/docs/reference" },
     ];
 }
