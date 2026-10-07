@@ -37,6 +37,7 @@ import {
     SUMMARY_JOB_KIND,
     SUMMARY_TIMEOUT_MS,
 } from "@/lib/summary/summary-job";
+import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -428,6 +429,10 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             )
             .returning({ id: aiEnhancements.id });
 
+        await dropTasksWithoutSummaryInTx(tx, {
+            recordingId: id,
+            ownerUserId,
+        });
         if (deleted.length > 0) {
             await tx
                 .update(recordings)

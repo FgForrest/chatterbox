@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // No corrections: the transcript exports as it is.
+vi.mock("@/lib/tasks/archive", () => ({
+    tasksForArchive: vi.fn(async () => new Map()),
+}));
 vi.mock("@/lib/learn/llm-input", () => ({
     correctionOverlay: vi.fn(async () => []),
 }));
@@ -190,6 +193,39 @@ describe("buildSummaryMarkdown", () => {
         expect(md).toContain(
             'participants:\n  - "Jana Novak"\n  - "Speaker 1"',
         );
+    });
+
+    it("lists the recording's tasks instead of the action items", () => {
+        const md = buildSummaryMarkdown({
+            title: "Board meeting",
+            recordedAt: RECORDED_AT,
+            provider: "OpenAI",
+            model: "gpt-4o-mini",
+            source: "riffado",
+            transcriptSource: "riffado",
+            summary: "We agreed the budget.",
+            keyPoints: [],
+            actionItems: ["Send the deck", "Send the deck again"],
+            tasks: [
+                {
+                    text: "Send the deck",
+                    done: true,
+                    assignee: "Jana Novak",
+                    dueDate: "2026-10-16",
+                },
+                {
+                    text: "Book a room",
+                    done: false,
+                    assignee: null,
+                    dueDate: null,
+                },
+            ],
+            participants: [],
+        });
+        expect(md).toContain(
+            "## Tasks\n\n- [x] Send the deck (Jana Novak, due 2026-10-16)\n- [ ] Book a room",
+        );
+        expect(md).not.toContain("## Action items");
     });
 
     it("omits empty sections", () => {

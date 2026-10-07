@@ -1,0 +1,1 @@
+ALTER TABLE "recording_tasks" ADD COLUMN "assigned_at" timestamp;

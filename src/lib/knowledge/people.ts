@@ -5,6 +5,7 @@ import {
     knowledgeAliases,
     people,
     personNotes,
+    recordingTasks,
     transcriptCorrections,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -454,6 +455,11 @@ async function mergeInTx(
         .update(transcriptCorrections)
         .set({ targetPersonId: winnerId, updatedAt: new Date() })
         .where(eq(transcriptCorrections.targetPersonId, loserId));
+    // Tasks assigned to the loser are the survivor's to do.
+    await tx
+        .update(recordingTasks)
+        .set({ assigneePersonId: winnerId })
+        .where(eq(recordingTasks.assigneePersonId, loserId));
     const other = alias(knowledgeAliases, "other");
     await tx
         .update(knowledgeAliases)

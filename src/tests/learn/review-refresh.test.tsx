@@ -117,9 +117,14 @@ describe("after a review is finished", () => {
 
     it("counts the People badge again", async () => {
         let waiting = 1;
+        // The Tasks badge counts nothing here.
         vi.stubGlobal(
             "fetch",
-            vi.fn(async () => Response.json({ count: waiting })),
+            vi.fn(async (url: string) =>
+                Response.json({
+                    count: String(url).startsWith("/api/tasks") ? 0 : waiting,
+                }),
+            ),
         );
         render(<AppNav />);
         expect(await screen.findByText("1")).toBeTruthy();

@@ -17,10 +17,10 @@ function tabOf(pathname: string): Tab {
 }
 
 /**
- * The Almanac's sections. Review is there only where Learn is, and counts
- * the reviews waiting, as the Almanac's badge in the app nav does.
+ * The Almanac's sections. Review counts what waits for the viewer (Learn's
+ * reviews and proposed tasks), as the Almanac's badge in the app nav does.
  */
-export function AlmanacTabs({ learn }: { learn: boolean }) {
+export function AlmanacTabs() {
     const i18n = useExtracted();
     const pathname = usePathname();
     const pending = usePendingReviews();
@@ -33,15 +33,7 @@ export function AlmanacTabs({ learn }: { learn: boolean }) {
             href: "/almanac/vocabulary",
             label: i18n("Vocabulary"),
         },
-        ...(learn
-            ? [
-                  {
-                      key: "review" as const,
-                      href: "/almanac/review",
-                      label: i18n("Review"),
-                  },
-              ]
-            : []),
+        { key: "review", href: "/almanac/review", label: i18n("Review") },
     ];
     return (
         <nav

@@ -15,13 +15,22 @@
  *   - `folders`: authorized per folder by `src/lib/folders/folders.ts`.
  *   - `job`: authorized per job by `getJobVisibleTo`.
  *   - `people`: the caller's own knowledge base.
+ *   - `tasks`: authorized per task by the rules in `src/lib/tasks/access.ts`
+ *     (see, close, edit), read under the recording lock for a change.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
-type Rule = "owner" | "access" | "view" | "folders" | "job" | "people";
+type Rule =
+    | "owner"
+    | "access"
+    | "view"
+    | "folders"
+    | "job"
+    | "people"
+    | "tasks";
 
 const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/route.ts": {
@@ -63,6 +72,12 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // Topics are written onto the owner's transcript row: by the owner on
     // the private view, by the organization account on the Organization
     // view while shared.
+    // Tasks: seen by whoever sees the recording, reviewed and changed by
+    // whoever may change it, closed also by the owner and the assignee.
+    "recordings/[id]/tasks/route.ts": { GET: "tasks", POST: "tasks" },
+    "recordings/[id]/tasks/accept/route.ts": { POST: "tasks" },
+    "recordings/[id]/tasks/merge/route.ts": { POST: "tasks" },
+    "recordings/[id]/tasks/updates/[updateId]/route.ts": { PATCH: "tasks" },
     "recordings/[id]/topics/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcribe/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcription/from-browser/route.ts": { POST: "owner" },
@@ -131,6 +146,9 @@ describe("recording route classification", () => {
             }
             if (rules.has("access")) {
                 expect(source, file).toContain("requireRecordingAccess");
+            }
+            if (rules.has("tasks")) {
+                expect(source, file).toContain("requireTaskViewer");
             }
         }
     });

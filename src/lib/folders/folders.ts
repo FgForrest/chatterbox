@@ -28,7 +28,10 @@ import {
 import { notifyOrgChange } from "@/lib/org/events";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
-import { publishSpeakerNamesInTx } from "@/lib/sharing/share-names";
+import {
+    publishSpeakerNamesInTx,
+    publishTaskAssigneesInTx,
+} from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
 import type {
     FolderKind,
@@ -946,7 +949,15 @@ export async function addRecordingToFolder(input: {
                 ownerUserId: input.userId,
                 orgUserId: target.ownerId,
             });
-            await bumpScopeInTx(tx, [...names.scopes, ...knowledge.scopes]);
+            const assignees = await publishTaskAssigneesInTx(tx, {
+                recordingId: input.recordingId,
+                orgUserId: target.ownerId,
+            });
+            await bumpScopeInTx(tx, [
+                ...names.scopes,
+                ...knowledge.scopes,
+                ...assignees,
+            ]);
         }),
     );
     if (target.scope === "org") {

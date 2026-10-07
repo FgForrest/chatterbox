@@ -45,7 +45,7 @@ export function clampRounds(rounds: unknown): number {
  * only to "collapse duplicates" tends to collapse near-duplicates too, which
  * is the exact loss the feature exists to prevent.
  */
-export const DEFAULT_MERGE_PROMPT = `You are given several independent JSON extractions produced from the SAME transcript, each shaped {"summary": string, "keyPoints": string[], "actionItems": string[]}. Merge them into a single extraction. This is a UNION-and-DEDUP task, NOT a re-summarization.
+export const DEFAULT_MERGE_PROMPT = `You are given several independent JSON extractions produced from the SAME transcript, each shaped {"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}. Merge them into a single extraction. This is a UNION-and-DEDUP task, NOT a re-summarization.
 
 - Preserve EVERY distinct key point and action item that appears in ANY version. Never drop one for being minor, or for appearing in only one version.
 - Collapse entries expressing the same idea into one, keeping the clearest and most complete phrasing. Merge only true duplicates: if two entries differ in substance, keep both. When in doubt, keep both -- a redundant entry costs the reader a moment, a dropped one costs them the information.
@@ -237,7 +237,8 @@ export function buildMergeInput(payloads: SummaryPayload[]): string {
                 {
                     summary: payload.summary,
                     keyPoints: payload.keyPoints,
-                    actionItems: payload.actionItems,
+                    actionItems: payload.taskItems,
+                    taskUpdates: payload.taskUpdates,
                 },
                 null,
                 2,

@@ -21,6 +21,7 @@ import {
 } from "@/lib/recordings/reconcile-storage";
 import { sidecarKey } from "@/lib/recordings/storage-files";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { tasksForArchive } from "@/lib/tasks/archive";
 import {
     formatSpeakerLabel,
     parseSpeakerTurns,
@@ -61,7 +62,16 @@ export interface SummarySidecarInput {
     summary: string | null;
     keyPoints: string[];
     actionItems: string[];
+    /** The recording's tasks; when there are any they replace the action items. */
+    tasks?: SummarySidecarTask[];
     participants: string[];
+}
+
+export interface SummarySidecarTask {
+    text: string;
+    done: boolean;
+    assignee: string | null;
+    dueDate: string | null;
 }
 
 export interface RecordingMarkdownDocument {
@@ -119,11 +129,27 @@ export function buildSummaryMarkdown(input: SummarySidecarInput): string {
     if (input.keyPoints.length > 0) {
         sections.push(`## Key points\n\n${bulletList(input.keyPoints)}`);
     }
-    if (input.actionItems.length > 0) {
+    if (input.tasks && input.tasks.length > 0) {
+        sections.push(`## Tasks\n\n${taskList(input.tasks)}`);
+    } else if (input.actionItems.length > 0) {
         sections.push(`## Action items\n\n${bulletList(input.actionItems)}`);
     }
 
     return `${frontMatter}\n\n${sections.join("\n\n")}\n`;
+}
+
+function taskList(tasks: readonly SummarySidecarTask[]): string {
+    return tasks
+        .map((task) => {
+            const details = [
+                task.assignee,
+                task.dueDate ? `due ${task.dueDate}` : null,
+            ].filter(Boolean);
+            const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
+            const text = task.text.replace(/\s+/g, " ").trim();
+            return `- [${task.done ? "x" : " "}] ${text}${suffix}`;
+        })
+        .join("\n");
 }
 
 /**
@@ -396,10 +422,21 @@ async function renderRecordingMarkdownDocument(
             speakerNumberOffset,
         ),
     );
+    const tasks = (
+        (await tasksForArchive(userId, [recording.id])).get(recording.id) ?? []
+    )
+        .filter((task) => task.status !== "dropped")
+        .map((task) => ({
+            text: task.text,
+            done: task.status === "done",
+            assignee: task.assignee?.name ?? task.assigneeHint,
+            dueDate: task.dueDate,
+        }));
     if (
         !summary?.trim() &&
         keyPoints.length === 0 &&
-        actionItems.length === 0
+        actionItems.length === 0 &&
+        tasks.length === 0
     ) {
         return null;
     }
@@ -416,6 +453,7 @@ async function renderRecordingMarkdownDocument(
             summary,
             keyPoints,
             actionItems,
+            tasks,
             participants: projection.participants,
         }),
     };

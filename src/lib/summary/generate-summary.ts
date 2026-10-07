@@ -37,6 +37,15 @@ import {
     contentWriterRefusalNow,
     writerRefusalError,
 } from "@/lib/sharing/writer";
+import { taskViewerById } from "@/lib/tasks/access";
+import {
+    SUMMARY_TASKS_DIRECTIVE,
+    SUMMARY_TASKS_MERGE_DIRECTIVE,
+} from "@/lib/tasks/directive";
+import {
+    loadTasksPromptContext,
+    resolveTaskProposals,
+} from "@/lib/tasks/proposals";
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import {
     clampRounds,
@@ -243,6 +252,21 @@ export async function generateSummaryForRecording(
         );
     }
 
+    // What the summary is told about tasks: the recording's date, the tasks
+    // already decided on it, and open tasks its reviewer may close. Tasks
+    // never cost the summary: without them it is made as before.
+    const tasksContext = await loadTasksPromptContext({
+        recording,
+        transcriptionId: transcription.id,
+        orgView,
+        reviewer: await taskViewerById(
+            orgView ? ctx.settingsUserId : ctx.ownerUserId,
+        ),
+    }).catch((error: unknown) => {
+        console.error("[summary] task context unavailable:", error);
+        return { text: "", refs: new Map<string, string>() };
+    });
+
     // Content settings (prompts, language, merge prompt) follow the view;
     // the engine settings (multi-pass rounds) follow the actor, who pays.
     const [userSettingsRow] = await db
@@ -335,10 +359,14 @@ export async function generateSummaryForRecording(
     // expanded, and (b) `$` sequences in the transcript (e.g. `$1`, `$&`)
     // are inserted verbatim instead of being interpreted as
     // `String.prototype.replace` special patterns.
-    const prompt = promptTemplate.replaceAll(
-        "{transcription}",
-        () => transcriptText,
-    );
+    // The task lists are data the user's recordings hold, so they go with
+    // the user's message rather than the instructions.
+    const prompt = [
+        promptTemplate.replaceAll("{transcription}", () => transcriptText),
+        tasksContext.text,
+    ]
+        .filter(Boolean)
+        .join("\n\n");
 
     const baseSystem =
         "You are a helpful assistant that summarizes audio transcriptions. Always respond with one raw JSON object and nothing else: no code fences, and no text before or after it. Markdown inside the JSON string values is expected.";
@@ -346,6 +374,7 @@ export async function generateSummaryForRecording(
         baseSystem,
         SUMMARY_MARKDOWN_DIRECTIVE,
         SUMMARY_SPEAKER_DIRECTIVE,
+        SUMMARY_TASKS_DIRECTIVE,
         languageDirective,
     ]
         .filter(Boolean)
@@ -430,7 +459,7 @@ export async function generateSummaryForRecording(
 
         const repairPrompt = `Your previous response was rejected by the application's JSON parser: ${firstParse.failure}
 
-Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: {"summary": string, "keyPoints": string[], "actionItems": string[]}. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
+Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: {"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}, keeping each action item and task update object as it was. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
 
         try {
             const repaired = await complete(
@@ -485,6 +514,7 @@ Correct the serialization without dropping or inventing information. Return exac
                         mergePrompt,
                         SUMMARY_MARKDOWN_DIRECTIVE,
                         SUMMARY_SPEAKER_DIRECTIVE,
+                        SUMMARY_TASKS_MERGE_DIRECTIVE,
                         mergeLanguageDirective,
                     ]
                         .filter(Boolean)
@@ -536,6 +566,21 @@ Correct the serialization without dropping or inventing information. Return exac
     }
 
     const { summary, keyPoints, actionItems } = payload;
+    const tasks = await resolveTaskProposals({
+        source: "riffado",
+        items: payload.taskItems,
+        updates: payload.taskUpdates,
+        refs: tasksContext.refs,
+        ownerUserId: ctx.ownerUserId,
+        transcriptionId: transcription.id,
+        turns: input.turns,
+        language: transcription.detectedLanguage,
+        orgView,
+        summaryText: summary,
+    }).catch((error: unknown) => {
+        console.error("[summary] task proposals unavailable:", error);
+        return undefined;
+    });
 
     const { committed, reason } = await upsertEnhancement({
         userId,
@@ -552,6 +597,7 @@ Correct the serialization without dropping or inventing information. Return exac
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         jobId: opts.jobId,
+        tasks,
     });
 
     if (!committed) {

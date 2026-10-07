@@ -5,10 +5,23 @@
  * to parse each pass independently and decide which ones are fit to merge.
  */
 
+import {
+    readTaskItems,
+    readTaskUpdates,
+    type SummaryTaskItem,
+    type SummaryTaskUpdate,
+    taskItemLine,
+} from "@/lib/tasks/summary-items";
+
 export interface SummaryPayload {
     summary: string;
     keyPoints: string[];
+    /** One line per action item, as the summary has always stored them. */
     actionItems: string[];
+    /** The action items with who, by when and where, for task proposals. */
+    taskItems: SummaryTaskItem[];
+    /** What the reply heard about open tasks it was shown. */
+    taskUpdates: SummaryTaskUpdate[];
     /**
      * False when the reply was not JSON at all and `summary` holds the raw
      * text instead.
@@ -92,12 +105,7 @@ export function parseSummaryPayloadResult(
             // Valid JSON, but a scalar -- `"hello"` parses fine and would
             // otherwise yield a payload with no fields and no raw text.
             return {
-                payload: {
-                    summary: raw,
-                    keyPoints: [],
-                    actionItems: [],
-                    structured: false,
-                },
+                payload: unstructured(raw),
                 failure: "JSON.parse returned a non-object top-level value.",
             };
         }
@@ -105,6 +113,7 @@ export function parseSummaryPayloadResult(
         // structured: some models return only `{keyPoints, actionItems}`,
         // and those lists are worth keeping. The raw text stands in for the
         // prose so the recording is never left with a blank summary.
+        const taskItems = readTaskItems(parsed.actionItems);
         return {
             payload: {
                 summary:
@@ -112,22 +121,27 @@ export function parseSummaryPayloadResult(
                         ? parsed.summary
                         : raw,
                 keyPoints: toStringList(parsed.keyPoints),
-                actionItems: toStringList(parsed.actionItems),
+                actionItems: taskItems.map(taskItemLine),
+                taskItems,
+                taskUpdates: readTaskUpdates(parsed.taskUpdates),
                 structured: true,
             },
             failure: null,
         };
     } catch (error) {
-        return {
-            payload: {
-                summary: raw,
-                keyPoints: [],
-                actionItems: [],
-                structured: false,
-            },
-            failure: jsonFailure(error),
-        };
+        return { payload: unstructured(raw), failure: jsonFailure(error) };
     }
+}
+
+function unstructured(raw: string): SummaryPayload {
+    return {
+        summary: raw,
+        keyPoints: [],
+        actionItems: [],
+        taskItems: [],
+        taskUpdates: [],
+        structured: false,
+    };
 }
 
 /** Parse a model reply while preserving the existing payload-only API. */

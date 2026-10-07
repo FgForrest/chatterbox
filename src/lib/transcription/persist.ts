@@ -18,6 +18,7 @@ import {
     sharingOrgUserId,
     type WriterRefusal,
 } from "@/lib/sharing/writer";
+import { type TaskProposals, writeTaskProposalsInTx } from "@/lib/tasks/store";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /**
@@ -119,6 +120,11 @@ export interface UpsertEnhancementArgs {
     producedByUserId?: string;
     /** See `UpsertTranscriptionArgs.jobId`. */
     jobId?: string;
+    /**
+     * The task proposals the summary made, stored with it in its
+     * transaction: they replace the ones its source made before.
+     */
+    tasks?: TaskProposals;
 }
 
 /**
@@ -465,6 +471,14 @@ export async function upsertEnhancement(
                     source,
                     producedByUserId,
                     ...multiPassColumns,
+                });
+            }
+            if (args.tasks) {
+                await writeTaskProposalsInTx(tx, {
+                    recordingId,
+                    ownerUserId: userId,
+                    actorUserId,
+                    proposals: args.tasks,
                 });
             }
 

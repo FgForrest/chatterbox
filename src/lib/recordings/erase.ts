@@ -32,6 +32,7 @@ import {
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
+import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 export type LocalEraseScope = "audio" | "transcript" | "summary";
 export type GeneratedArtifactKind = "transcript" | "summary";
@@ -317,6 +318,10 @@ export async function eraseLocalArtifact(
                         eq(aiEnhancements.userId, userId),
                     ),
                 );
+            await dropTasksWithoutSummaryInTx(tx, {
+                recordingId,
+                ownerUserId: userId,
+            });
             await tx
                 .update(recordings)
                 .set({ summaryReapedAt: now, updatedAt: now })
