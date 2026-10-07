@@ -1403,7 +1403,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
         try {
             await buildAndUploadExportArchive({
-                userId: "user-1",
+                scope: { kind: "personal", userId: "user-1" },
                 sourceStorage: storage,
                 destinationStorage: storage,
                 storageKey: "exports/user-1/job-tasks.zip",

@@ -1,7 +1,11 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, or, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { people, recordingTasks } from "@/db/schema";
+import { people, recordings, recordingTasks } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
+import {
+    type ArchiveScope,
+    archivedRecordingCondition,
+} from "@/lib/export/archive-scope";
 
 /** One task as a backup archive carries it. */
 export interface ArchivedTask {
@@ -25,12 +29,36 @@ function optional(value: string | null): string | null {
 }
 
 /**
- * The accepted tasks of `userId`'s recordings, by recording, for their
- * backup archive and Markdown exports. Proposals waiting for review are
+ * Whose tasks an archive or a Markdown document carries: a backup's scope,
+ * or every task of the owner's recordings (`owner`, the documents rendered
+ * from the owner's rows).
+ */
+export type TaskArchiveScope = ArchiveScope | { kind: "owner"; userId: string };
+
+// A person's own: on a recording they shared, the tasks the summaries
+// proposed and those they added, not those the Organization added by hand.
+// The Organization's: every task of the shared recordings it carries.
+function archivedTaskCondition(scope: TaskArchiveScope): SQL | undefined {
+    if (scope.kind === "organization") {
+        return archivedRecordingCondition(scope);
+    }
+    if (scope.kind === "owner") return eq(recordingTasks.userId, scope.userId);
+    return and(
+        eq(recordingTasks.userId, scope.userId),
+        or(
+            ne(recordingTasks.source, "manual"),
+            eq(recordingTasks.createdByUserId, scope.userId),
+        ),
+    );
+}
+
+/**
+ * The accepted tasks of `recordingIds` a scope carries, by recording, for
+ * backup archives and Markdown exports. Proposals waiting for review are
  * not tasks yet.
  */
 export async function tasksForArchive(
-    userId: string,
+    scope: TaskArchiveScope,
     recordingIds: readonly string[],
 ): Promise<Map<string, ArchivedTask[]>> {
     const byRecording = new Map<string, ArchivedTask[]>();
@@ -54,10 +82,17 @@ export async function tasksForArchive(
             statusChangedAt: recordingTasks.statusChangedAt,
         })
         .from(recordingTasks)
+        .innerJoin(
+            recordings,
+            and(
+                eq(recordings.id, recordingTasks.recordingId),
+                eq(recordings.userId, recordingTasks.userId),
+            ),
+        )
         .leftJoin(people, eq(people.id, recordingTasks.assigneePersonId))
         .where(
             and(
-                eq(recordingTasks.userId, userId),
+                archivedTaskCondition(scope),
                 inArray(recordingTasks.recordingId, [...recordingIds]),
                 ne(recordingTasks.status, "proposed"),
             ),

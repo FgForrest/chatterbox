@@ -423,7 +423,14 @@ async function renderRecordingMarkdownDocument(
         ),
     );
     const tasks = (
-        (await tasksForArchive(userId, [recording.id])).get(recording.id) ?? []
+        (
+            await tasksForArchive(
+                ownerAuthoredOnly
+                    ? { kind: "personal", userId }
+                    : { kind: "owner", userId },
+                [recording.id],
+            )
+        ).get(recording.id) ?? []
     )
         .filter((task) => task.status !== "dropped")
         .map((task) => ({

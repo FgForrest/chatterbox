@@ -240,7 +240,7 @@ export async function buildAndUploadExportArchive(input: {
         enhancementMap.set(enhancement.recordingId, group);
     }
 
-    const taskMap = await tasksForArchive(userId, recordingIds);
+    const taskMap = await tasksForArchive(scope, recordingIds);
 
     const archive = new ZipArchive({ zlib: { level: 6 } });
     // Count bytes as they flow through rather than re-reading the

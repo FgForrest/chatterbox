@@ -96,6 +96,7 @@ import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
+import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import type { ProposedTask, TaskProposals } from "@/lib/tasks/store";
 import {
@@ -700,6 +701,33 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const [mine] = await listTasks(bob, query("mine"));
         expect(mine?.assignee?.personId).toBe(bobOrg);
         expect(await countNewTasks(bob)).toBe(1);
+    });
+
+    it("archives a shared recording's tasks for the Organization, and for the owner only theirs", async () => {
+        await summarize(REC, [proposal("Draft the pricing page")]);
+        await acceptReview(alice, REC);
+        await addTask(alice, LATER, { text: "Call Dana", status: "open" });
+        await share();
+        await addTask(org, REC, { text: "Book the venue", status: "open" });
+
+        const archived = async (scope: TaskArchiveScope) =>
+            Object.fromEntries(
+                [...(await tasksForArchive(scope, [REC, LATER]))].map(
+                    ([id, list]) => [id, list.map((task) => task.text).sort()],
+                ),
+            );
+        expect(await archived({ kind: "personal", userId: ALICE })).toEqual({
+            [REC]: ["Draft the pricing page"],
+            [LATER]: ["Call Dana"],
+        });
+        expect(await archived({ kind: "organization", orgUserId })).toEqual({
+            [REC]: ["Book the venue", "Draft the pricing page"],
+        });
+        expect(await archived({ kind: "owner", userId: ALICE })).toEqual({
+            [REC]: ["Book the venue", "Draft the pricing page"],
+            [LATER]: ["Call Dana"],
+        });
+        expect(await archived({ kind: "personal", userId: BOB })).toEqual({});
     });
 
     it("moves tasks to the survivor of a person merge", async () => {
