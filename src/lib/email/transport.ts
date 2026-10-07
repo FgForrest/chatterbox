@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "@/lib/env";
 import { isSmtpConfigured } from "@/lib/smtp";
 
@@ -21,9 +21,9 @@ export class SmtpNotConfiguredError extends Error {
     }
 }
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 
-function getTransporter(): nodemailer.Transporter | null {
+function getTransporter(): Transporter | null {
     if (!isSmtpConfigured()) return null;
     if (!transporter) {
         transporter = nodemailer.createTransport({

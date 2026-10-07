@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter } from "nodemailer";
 import React from "react";
 import { claimEmailSend, releaseEmailSend } from "@/db/queries/email-log";
 import { env } from "@/lib/env";
@@ -34,13 +34,13 @@ interface EmailOptions {
     text?: string;
 }
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 
 function resolveEmailLocale(locale: AppLocale | null | undefined): AppLocale {
     return normalizeLocale(locale) ?? defaultLocale;
 }
 
-function getTransporter(): nodemailer.Transporter | null {
+function getTransporter(): Transporter | null {
     // Return null if SMTP is not configured
     if (!isSmtpConfigured()) {
         return null;
