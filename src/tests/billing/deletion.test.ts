@@ -17,7 +17,14 @@ const { dbMock, emailMock, envMock, queriesMock, storageMock } = vi.hoisted(
 );
 
 vi.mock("@/db", () => ({ db: dbMock }));
-vi.mock("@/db/schema", () => ({ users: { id: "id", email: "email" } }));
+vi.mock("@/db/schema", () => ({
+    users: {
+        id: "id",
+        email: "email",
+        uiLocale: "ui_locale",
+        accountDeletionScheduledAt: "account_deletion_scheduled_at",
+    },
+}));
 vi.mock("@/lib/env", () => ({ env: envMock }));
 vi.mock("@/db/queries/billing", () => queriesMock);
 vi.mock("@/lib/notifications/email", () => emailMock);
@@ -25,11 +32,11 @@ vi.mock("@/lib/storage/factory", () => ({
     createStorageProvider: () => storageMock,
 }));
 
-function stubEmailLookup(email: string | null) {
+function stubEmailLookup(email: string | null, due = true) {
     dbMock.select.mockReturnValue({
         from: vi.fn().mockReturnValue({
             where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(email ? [{ email }] : []),
+                limit: vi.fn().mockResolvedValue(email ? [{ email, due }] : []),
             }),
         }),
     });
@@ -54,7 +61,7 @@ describe("deleteUserAccount", () => {
             "users/u1/b.opus",
         ]);
         storageMock.deleteFile.mockResolvedValue(undefined);
-        queriesMock.deleteUser.mockResolvedValue(undefined);
+        queriesMock.deleteUser.mockResolvedValue(true);
 
         const result = await deleteUserAccount("u1");
 
@@ -64,7 +71,9 @@ describe("deleteUserAccount", () => {
             1,
             "users/u1/a.opus",
         );
-        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1");
+        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1", {
+            onlyIfDeletionDue: true,
+        });
     });
 
     it("continues past per-object storage errors and still deletes the user row", async () => {
@@ -78,7 +87,7 @@ describe("deleteUserAccount", () => {
             .mockResolvedValueOnce(undefined)
             .mockRejectedValueOnce(new Error("S3 503"))
             .mockResolvedValueOnce(undefined);
-        queriesMock.deleteUser.mockResolvedValue(undefined);
+        queriesMock.deleteUser.mockResolvedValue(true);
 
         const errorSpy = vi
             .spyOn(console, "error")
@@ -87,19 +96,46 @@ describe("deleteUserAccount", () => {
         errorSpy.mockRestore();
 
         expect(result.storageErrors).toBe(1);
-        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1");
+        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1", {
+            onlyIfDeletionDue: true,
+        });
     });
 
     it("deletes the user row even when there are zero stored objects", async () => {
         stubEmailLookup("u1@example.com");
         queriesMock.listRecordingStoragePaths.mockResolvedValue([]);
-        queriesMock.deleteUser.mockResolvedValue(undefined);
+        queriesMock.deleteUser.mockResolvedValue(true);
 
         const result = await deleteUserAccount("u1");
 
         expect(result.storageErrors).toBe(0);
         expect(storageMock.deleteFile).not.toHaveBeenCalled();
-        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1");
+        expect(queriesMock.deleteUser).toHaveBeenCalledWith("u1", {
+            onlyIfDeletionDue: true,
+        });
+    });
+
+    it("leaves a user whose deletion is no longer due untouched", async () => {
+        stubEmailLookup("u1@example.com", false);
+        queriesMock.listRecordingStoragePaths.mockResolvedValue(["a"]);
+
+        const result = await deleteUserAccount("u1");
+
+        expect(result).toEqual({ deleted: false, storageErrors: 0 });
+        expect(storageMock.deleteFile).not.toHaveBeenCalled();
+        expect(queriesMock.deleteUser).not.toHaveBeenCalled();
+        expect(emailMock.sendAccountDeletedEmail).not.toHaveBeenCalled();
+    });
+
+    it("sends no email when another worker deleted the row first", async () => {
+        stubEmailLookup("u1@example.com");
+        queriesMock.listRecordingStoragePaths.mockResolvedValue([]);
+        queriesMock.deleteUser.mockResolvedValue(false);
+
+        const result = await deleteUserAccount("u1");
+
+        expect(result.deleted).toBe(false);
+        expect(emailMock.sendAccountDeletedEmail).not.toHaveBeenCalled();
     });
 });
 
@@ -138,6 +174,7 @@ describe("processDueAccountDeletions", () => {
         });
         queriesMock.deleteUser.mockImplementation(async (id: string) => {
             if (id === "throw") throw new Error("FK violation");
+            return true;
         });
 
         const errorSpy = vi
@@ -151,6 +188,16 @@ describe("processDueAccountDeletions", () => {
             storagePartial: 1,
             errors: 1,
         });
+    });
+
+    it("does not count a user another worker deleted first", async () => {
+        queriesMock.claimUsersDueForDeletion.mockResolvedValue(["u1"]);
+        queriesMock.listRecordingStoragePaths.mockResolvedValue([]);
+        queriesMock.deleteUser.mockResolvedValue(false);
+
+        const result = await processDueAccountDeletions();
+
+        expect(result).toEqual({ deleted: 0, storagePartial: 0, errors: 0 });
     });
 
     it("uses the configured limit", async () => {

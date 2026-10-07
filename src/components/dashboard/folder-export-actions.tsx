@@ -4,6 +4,7 @@ import { FolderOpen, Plus, RefreshCw, Settings, Trash2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { HelpLink } from "@/components/help/help-button";
 import { GoogleConnectionPanel } from "@/components/integrations/google-connection-panel";
 import { Button } from "@/components/ui/button";
 import {
@@ -359,8 +360,12 @@ export function FolderExportActions({
             <Dialog open={open} onOpenChange={setOpen}>
                 <DialogContent className="max-w-xl">
                     <DialogHeader>
-                        <DialogTitle>
+                        <DialogTitle className="flex items-center gap-2">
                             {i18n("Folder export settings")}
+                            <HelpLink
+                                topic="exports.folder"
+                                label={i18n("folder exports")}
+                            />
                         </DialogTitle>
                         <DialogDescription>
                             {i18n("Exports configured on")} {folder.name}{" "}

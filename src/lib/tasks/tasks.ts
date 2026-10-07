@@ -1023,30 +1023,47 @@ async function requireTaskView(
 export async function recordingsAwaitingTaskReview(
     viewer: TaskViewer,
 ): Promise<{ recordingId: string; title: string; proposals: number }[]> {
-    const proposals = sql<number>`(
-        select count(*) from ${recordingTasks}
-        where ${recordingTasks.recordingId} = ${recordings.id}
-            and ${recordingTasks.status} = 'proposed'
-    )::int`;
-    const followUps = sql<number>`(
-        select count(*) from ${taskUpdateProposals}
-        where ${taskUpdateProposals.recordingId} = ${recordings.id}
-            and ${liveFollowUpCondition()}
-    )::int`;
+    const proposals = db
+        .select({
+            recordingId: recordingTasks.recordingId,
+            waiting: sql<number>`count(*)`.as("waiting"),
+        })
+        .from(recordingTasks)
+        .where(
+            and(
+                eq(recordingTasks.status, "proposed"),
+                viewer.isOrg
+                    ? undefined
+                    : eq(recordingTasks.userId, viewer.userId),
+            ),
+        )
+        .groupBy(recordingTasks.recordingId);
+    const followUps = db
+        .select({
+            recordingId: taskUpdateProposals.recordingId,
+            waiting: sql<number>`count(*)`.as("waiting"),
+        })
+        .from(taskUpdateProposals)
+        .where(
+            and(
+                liveFollowUpCondition(),
+                viewer.isOrg
+                    ? undefined
+                    : eq(taskUpdateProposals.userId, viewer.userId),
+            ),
+        )
+        .groupBy(taskUpdateProposals.recordingId);
+    const waiting = proposals.unionAll(followUps).as("waiting");
     const rows = await db
         .select({
             recordingId: recordings.id,
             title: recordings.filename,
-            proposals: sql<number>`${proposals} + ${followUps}`,
+            proposals: sql<number>`sum(${waiting.waiting})::int`,
         })
-        .from(recordings)
-        .where(
-            and(
-                isNull(recordings.deletedAt),
-                taskEditable(viewer),
-                sql`${proposals} + ${followUps} > 0`,
-            ),
-        )
+        .from(waiting)
+        .innerJoin(recordings, eq(recordings.id, waiting.recordingId))
+        .where(and(isNull(recordings.deletedAt), taskEditable(viewer)))
+        .groupBy(recordings.id)
         .orderBy(desc(recordings.startTime));
     return rows.map((row) => ({
         recordingId: row.recordingId,
@@ -1107,7 +1124,10 @@ export async function listTasks(
         conditions.push(
             viewer.isOrg
                 ? taskRecordingShared(viewer)
-                : eq(recordings.userId, viewer.userId),
+                : and(
+                      eq(recordings.userId, viewer.userId),
+                      eq(recordingTasks.userId, viewer.userId),
+                  ),
             not(mine),
         );
     }

@@ -820,9 +820,18 @@ export async function listRecordingStoragePaths(
     return rows.map((r) => r.storagePath);
 }
 
-/** Hard-delete a user while preserving any lifetime founding-capacity claim. */
-export async function deleteUser(userId: string): Promise<void> {
-    await db.transaction(async (tx) => {
+/**
+ * Hard-delete a user while preserving any lifetime founding-capacity claim.
+ * With `onlyIfDeletionDue`, the user is deleted only while their scheduled
+ * deletion is still due, checked under the row lock, so a reactivation or a
+ * concurrent deletion that landed first wins. Returns whether this call
+ * deleted the user.
+ */
+export async function deleteUser(
+    userId: string,
+    opts: { onlyIfDeletionDue?: boolean } = {},
+): Promise<boolean> {
+    return db.transaction(async (tx) => {
         await tx.execute(
             sql`select pg_advisory_xact_lock(hashtextextended('billing_founding_members', 0))`,
         );
@@ -834,12 +843,18 @@ export async function deleteUser(userId: string): Promise<void> {
                 everPaidAt: users.everPaidAt,
             })
             .from(users)
-            .where(eq(users.id, userId))
-            .limit(1);
-        if (
-            user &&
-            (user.foundingMember || user.foundingMemberClaimedAt !== null)
-        ) {
+            .where(
+                and(
+                    eq(users.id, userId),
+                    opts.onlyIfDeletionDue
+                        ? sql`${users.accountDeletionScheduledAt} <= now()`
+                        : undefined,
+                ),
+            )
+            .limit(1)
+            .for("update");
+        if (!user) return false;
+        if (user.foundingMember || user.foundingMemberClaimedAt !== null) {
             const [consumedClaim] = await tx
                 .select({ id: foundingMemberReservations.id })
                 .from(foundingMemberReservations)
@@ -868,7 +883,11 @@ export async function deleteUser(userId: string): Promise<void> {
             }
         }
 
-        await tx.delete(users).where(eq(users.id, userId));
+        const deleted = await tx
+            .delete(users)
+            .where(eq(users.id, userId))
+            .returning({ id: users.id });
+        return deleted.length > 0;
     });
 }
 
@@ -1093,10 +1112,8 @@ export async function claimDueStripeWebhookEvents(input: {
         where event_id in (
             select event_id
             from ${stripeWebhookEvents}
-            where (
-                (status = 'pending' and next_attempt_at <= ${nowIso}::timestamp)
-                or (status = 'processing' and next_attempt_at <= ${nowIso}::timestamp)
-            )
+            where status in ('pending', 'processing')
+              and next_attempt_at <= ${nowIso}::timestamp
             order by next_attempt_at asc, created_at asc
             limit ${input.limit}
             for update skip locked
@@ -1114,6 +1131,32 @@ export async function claimDueStripeWebhookEvents(input: {
         attempts: row.attempts,
         claimToken: row.claim_token,
     }));
+}
+
+/**
+ * Delete up to `limit` completed events received before `olderThan`. Stripe
+ * stops redelivering an event within days, so a completed row past the
+ * window no longer guards against a duplicate. Failed events stay for an
+ * operator to retry. Rows another process is already deleting are skipped.
+ */
+export async function pruneCompletedStripeWebhookEvents(
+    olderThan: Date,
+    limit: number,
+): Promise<number> {
+    const rows = await db.execute<{ event_id: string }>(sql`
+        delete from ${stripeWebhookEvents}
+        where event_id in (
+            select event_id
+            from ${stripeWebhookEvents}
+            where status = 'completed'
+              and created_at < ${olderThan.toISOString()}::timestamp
+            order by created_at asc
+            limit ${limit}
+            for update skip locked
+        )
+        returning event_id
+    `);
+    return rows.length;
 }
 
 /** Serializes event side effects across workers for one Stripe event id. */

@@ -111,7 +111,7 @@ export function useSettingsNav(
 
     const handleKeyDown = useCallback(
         (e: KeyboardEvent) => {
-            if (!open) return;
+            if (!open || e.defaultPrevented) return;
 
             if (e.key === "Escape") {
                 onClose();

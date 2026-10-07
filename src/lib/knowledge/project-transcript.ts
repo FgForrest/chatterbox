@@ -1,8 +1,11 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { namesFromRows } from "@/lib/knowledge/attribution";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    orgOwnedCondition,
+    visibleOwnerCondition,
+} from "@/lib/knowledge/org-people";
 import {
     type OverlayCorrection,
     renderTurnsForPeople,
@@ -79,10 +82,7 @@ export async function buildResolverMap(
             people,
             and(
                 eq(people.id, transcriptSpeakers.personId),
-                or(
-                    eq(people.userId, ownerId),
-                    orgOwnedCondition(people.userId),
-                ),
+                visibleOwnerCondition(people.userId, ownerId),
             ),
         )
         .where(

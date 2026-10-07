@@ -606,11 +606,12 @@ export async function deferJob(input: {
 }
 
 /**
- * Delete finished rows past their retention window.
+ * Delete up to `limit` finished rows past their retention window.
  *
  * Jobs are kept for a while after they settle so a client that reconnects can
  * still be told how the work went, but they are bookkeeping, not history --
- * nothing reads them once that window has passed.
+ * nothing reads them once that window has passed. Rows another process is
+ * already deleting are skipped, so concurrent prunes split the work.
  */
 export async function pruneFinishedJobs(
     olderThanMs: number,
@@ -625,6 +626,7 @@ export async function pruneFinishedJobs(
               and completed_at < now() - make_interval(secs => ${olderThanMs / 1000}::double precision)
             order by completed_at asc
             limit ${limit}
+            for update skip locked
         )
         returning id
     `);

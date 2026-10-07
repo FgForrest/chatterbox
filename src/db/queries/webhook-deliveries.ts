@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, lte, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { webhookDeliveries, webhookEndpoints } from "@/db/schema";
 
@@ -30,15 +30,9 @@ function rowsFromQueryResult<T>(result: QueryResultRows<T>): T[] {
 }
 
 function dueDeliveryPredicate(now: Date): SQL {
-    return or(
-        and(
-            eq(webhookDeliveries.status, "pending"),
-            lte(webhookDeliveries.nextAttemptAt, now),
-        ),
-        and(
-            eq(webhookDeliveries.status, "processing"),
-            lte(webhookDeliveries.nextAttemptAt, now),
-        ),
+    return and(
+        sql`${webhookDeliveries.status} in ('pending', 'processing')`,
+        lte(webhookDeliveries.nextAttemptAt, now),
     ) as SQL;
 }
 
@@ -79,10 +73,8 @@ export async function claimDueWebhookDeliveries(): Promise<ClaimedDelivery[]> {
             from ${webhookDeliveries}
             inner join ${webhookEndpoints}
                 on ${webhookEndpoints.id} = ${webhookDeliveries.endpointId}
-            where (
-                (${webhookDeliveries.status} = 'pending' and ${webhookDeliveries.nextAttemptAt} <= ${nowParam})
-                or (${webhookDeliveries.status} = 'processing' and ${webhookDeliveries.nextAttemptAt} <= ${nowParam})
-            )
+            where ${webhookDeliveries.status} in ('pending', 'processing')
+            and ${webhookDeliveries.nextAttemptAt} <= ${nowParam}
             and ${webhookEndpoints.enabled} = true
         ) ranked_deliveries
         where user_rank <= ${PER_USER_DELIVERY_LIMIT}
@@ -212,4 +204,32 @@ export async function releaseClaimedDelivery(
                 eq(webhookDeliveries.status, "processing"),
             ),
         );
+}
+
+/**
+ * Delete up to `limit` settled deliveries (`success` or `dead`) last touched
+ * before `olderThan`. A redelivery moves a row back to `pending` and bumps
+ * `updated_at`, so only history nobody acted on for the window goes. Rows
+ * another process is already deleting are skipped.
+ */
+export async function pruneSettledWebhookDeliveries(
+    olderThan: Date,
+    limit: number,
+): Promise<number> {
+    const result = await db.execute(sql`
+        delete from ${webhookDeliveries}
+        where ${webhookDeliveries.id} in (
+            select ${webhookDeliveries.id}
+            from ${webhookDeliveries}
+            where ${webhookDeliveries.status} in ('success', 'dead')
+              and ${webhookDeliveries.updatedAt} < ${olderThan.toISOString()}::timestamp
+            order by ${webhookDeliveries.updatedAt} asc
+            limit ${limit}
+            for update skip locked
+        )
+        returning ${webhookDeliveries.id}
+    `);
+    return rowsFromQueryResult(
+        result as unknown as QueryResultRows<{ id: string }>,
+    ).length;
 }

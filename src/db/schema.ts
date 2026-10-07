@@ -171,6 +171,9 @@ export const adminActionLog = pgTable(
     },
     (table) => ({
         createdIdx: index("admin_action_log_created_idx").on(table.createdAt),
+        adminUserIdx: index("admin_action_log_admin_user_id_idx")
+            .on(table.adminUserId)
+            .where(sql`${table.adminUserId} is not null`),
         targetUserIdx: index("admin_action_log_target_user_idx").on(
             table.targetUserId,
             table.createdAt,
@@ -178,44 +181,62 @@ export const adminActionLog = pgTable(
     }),
 );
 
-export const sessions = pgTable("sessions", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    expiresAt: timestamp("expires_at").notNull(),
-    token: text("token").notNull().unique(),
-    userId: text("user_id")
-        .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
-    ipAddress: text("ip_address"),
-    userAgent: text("user_agent"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const sessions = pgTable(
+    "sessions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        expiresAt: timestamp("expires_at").notNull(),
+        token: text("token").notNull().unique(),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        ipAddress: text("ip_address"),
+        userAgent: text("user_agent"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userIdIdx: index("sessions_user_id_idx").on(table.userId),
+        expiresAtIdx: index("sessions_expires_at_idx").on(table.expiresAt),
+    }),
+);
 
-export const accounts = pgTable("accounts", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    userId: text("user_id")
-        .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
-    accountId: text("account_id").notNull(),
-    providerId: text("provider_id").notNull(),
-    accessToken: text("access_token"),
-    refreshToken: text("refresh_token"),
-    expiresAt: timestamp("expires_at"),
-    // Better Auth's OAuth account fields. Single sign-on keeps the provider's
-    // tokens out of the database, so these stay null; the columns exist
-    // because Better Auth writes every field of its account model.
-    accessTokenExpiresAt: timestamp("access_token_expires_at"),
-    refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
-    scope: text("scope"),
-    idToken: text("id_token"),
-    password: text("password"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const accounts = pgTable(
+    "accounts",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        accountId: text("account_id").notNull(),
+        providerId: text("provider_id").notNull(),
+        accessToken: text("access_token"),
+        refreshToken: text("refresh_token"),
+        expiresAt: timestamp("expires_at"),
+        // Better Auth's OAuth account fields. Single sign-on keeps the provider's
+        // tokens out of the database, so these stay null; the columns exist
+        // because Better Auth writes every field of its account model.
+        accessTokenExpiresAt: timestamp("access_token_expires_at"),
+        refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+        scope: text("scope"),
+        idToken: text("id_token"),
+        password: text("password"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userIdIdx: index("accounts_user_id_idx").on(table.userId),
+        // Sign-in by provider looks the account up by (providerId, accountId).
+        providerAccountIdx: index("accounts_provider_account_idx").on(
+            table.providerId,
+            table.accountId,
+        ),
+    }),
+);
 
 // Instance-wide markers for one-time startup work, keyed by a fixed name.
 export const instanceState = pgTable("instance_state", {
@@ -224,49 +245,64 @@ export const instanceState = pgTable("instance_state", {
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const verifications = pgTable("verifications", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    identifier: text("identifier").notNull(),
-    value: text("value").notNull(),
-    expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const verifications = pgTable(
+    "verifications",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        identifier: text("identifier").notNull(),
+        value: text("value").notNull(),
+        expiresAt: timestamp("expires_at").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        identifierIdx: index("verifications_identifier_idx").on(
+            table.identifier,
+        ),
+        expiresAtIdx: index("verifications_expires_at_idx").on(table.expiresAt),
+    }),
+);
 
 // Plaud connection
-export const plaudConnections = pgTable("plaud_connections", {
-    id: text("id")
-        .primaryKey()
-        .$defaultFn(() => nanoid()),
-    userId: text("user_id")
-        .notNull()
-        .references(() => users.id, { onDelete: "cascade" }),
-    // Encrypted bearer token (long-lived ≈300 days per Plaud's JWT claims)
-    bearerToken: text("bearer_token").notNull(),
-    // Regional API server base URL (e.g. https://api-euc1.plaud.ai for EU users)
-    apiBase: text("api_base").notNull().default("https://api.plaud.ai"),
-    // Email of the linked Plaud account (captured during OTP flow). Null for
-    // legacy connections created via the bearer-token paste flow.
-    plaudEmail: text("plaud_email"),
-    // Plaud workspace ID (e.g. ws_xxxxxxxxxxxx) used to mint short-lived
-    // workspace tokens (WT) from the long-lived user token (UT). The WT is
-    // required by recording endpoints (/file/simple/web, /device/list, ...)
-    // on regional servers; without it those endpoints return empty lists.
-    // Null for connections created before this column existed; resolved and
-    // persisted lazily on next sync.
-    workspaceId: text("workspace_id"),
-    // Set when Plaud rejects the stored token during sync (HTTP 401 ->
-    // PLAUD_INVALID_TOKEN), meaning the user must reconnect. Cleared on the
-    // next successful sync (self-healing on transient 401s) and on reconnect.
-    // Distinct from deleting the row: the connection and synced recordings
-    // stay put so reconnect is a modal, not re-onboarding.
-    invalidatedAt: timestamp("invalidated_at"),
-    lastSync: timestamp("last_sync"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+export const plaudConnections = pgTable(
+    "plaud_connections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        // Encrypted bearer token (long-lived ≈300 days per Plaud's JWT claims)
+        bearerToken: text("bearer_token").notNull(),
+        // Regional API server base URL (e.g. https://api-euc1.plaud.ai for EU users)
+        apiBase: text("api_base").notNull().default("https://api.plaud.ai"),
+        // Email of the linked Plaud account (captured during OTP flow). Null for
+        // legacy connections created via the bearer-token paste flow.
+        plaudEmail: text("plaud_email"),
+        // Plaud workspace ID (e.g. ws_xxxxxxxxxxxx) used to mint short-lived
+        // workspace tokens (WT) from the long-lived user token (UT). The WT is
+        // required by recording endpoints (/file/simple/web, /device/list, ...)
+        // on regional servers; without it those endpoints return empty lists.
+        // Null for connections created before this column existed; resolved and
+        // persisted lazily on next sync.
+        workspaceId: text("workspace_id"),
+        // Set when Plaud rejects the stored token during sync (HTTP 401 ->
+        // PLAUD_INVALID_TOKEN), meaning the user must reconnect. Cleared on the
+        // next successful sync (self-healing on transient 401s) and on reconnect.
+        // Distinct from deleting the row: the connection and synced recordings
+        // stay put so reconnect is a modal, not re-onboarding.
+        invalidatedAt: timestamp("invalidated_at"),
+        lastSync: timestamp("last_sync"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userIdIdx: index("plaud_connections_user_id_idx").on(table.userId),
+    }),
+);
 
 // OAuth connections to third-party accounts (Google now, Microsoft later).
 // Not a sign-in method: better-auth never sees these.
@@ -328,8 +364,6 @@ export const plaudDevices = pgTable(
     (table) => ({
         // Ensure each user can only have one entry per device serial number
         userDeviceUnique: unique().on(table.userId, table.serialNumber),
-        // Index for querying devices by user
-        userIdIdx: index("plaud_devices_user_id_idx").on(table.userId),
     }),
 );
 
@@ -419,21 +453,24 @@ export const recordings = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        // Index for querying recordings by user (most common query)
-        userIdIdx: index("recordings_user_id_idx").on(table.userId),
         // The automatic Learn sweep reads only the few held recordings.
         summaryDueIdx: index("recordings_summary_due_at_idx")
             .on(table.summaryDueAt)
             .where(sql`${table.summaryDueAt} is not null`),
-        // Index for sync operations - looking up by plaudFileId
-        plaudFileIdIdx: index("recordings_plaud_file_id_idx").on(
-            table.plaudFileId,
-        ),
-        // Composite index for user recordings sorted by start time (dashboard query)
+        // A user's recordings by start time (dashboard); also every lookup
+        // by user alone.
         userStartTimeIdx: index("recordings_user_id_start_time_idx").on(
             table.userId,
             table.startTime,
         ),
+        // The v1 list: a user's live recordings, newest change first.
+        userUpdatedLiveIdx: index("recordings_user_id_updated_at_live_idx")
+            .on(
+                table.userId,
+                table.updatedAt.desc().nullsFirst(),
+                table.id.desc().nullsFirst(),
+            )
+            .where(sql`${table.deletedAt} is null`),
         userPlaudFileUnique: unique(
             "recordings_user_id_plaud_file_id_unique",
         ).on(table.userId, table.plaudFileId),
@@ -483,10 +520,12 @@ export const recordingFolders = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        userIdIdx: index("recording_folders_user_id_idx").on(table.userId),
         parentIdIdx: index("recording_folders_parent_id_idx").on(
             table.parentId,
         ),
+        createdByIdx: index("recording_folders_created_by_user_id_idx")
+            .on(table.createdByUserId)
+            .where(sql`${table.createdByUserId} is not null`),
         siblingNameUnique: uniqueIndex(
             "recording_folders_user_parent_name_unique",
         ).on(table.userId, table.parentId, table.nameHash),
@@ -721,6 +760,9 @@ export const folderExportDirectories = pgTable(
         userIdIdx: index("folder_export_directories_user_id_idx").on(
             table.userId,
         ),
+        folderIdIdx: index("folder_export_directories_folder_id_idx").on(
+            table.folderId,
+        ),
     }),
 );
 
@@ -765,6 +807,12 @@ export const folderExportPlacements = pgTable(
         userIdIdx: index("folder_export_placements_user_id_idx").on(
             table.userId,
         ),
+        recordingIdIdx: index("folder_export_placements_recording_id_idx").on(
+            table.recordingId,
+        ),
+        placementFolderIdIdx: index(
+            "folder_export_placements_placement_folder_id_idx",
+        ).on(table.placementFolderId),
     }),
 );
 
@@ -824,10 +872,15 @@ export const folderExportMaterializations = pgTable(
         userIdIdx: index("folder_export_materializations_user_id_idx").on(
             table.userId,
         ),
-        pendingIdx: index("folder_export_materializations_pending_idx").on(
-            table.status,
-            table.updatedAt,
-        ),
+        recordingIdIdx: index(
+            "folder_export_materializations_recording_id_idx",
+        ).on(table.recordingId),
+        placementFolderIdIdx: index(
+            "folder_export_materializations_placement_folder_id_idx",
+        ).on(table.placementFolderId),
+        pendingIdx: index("folder_export_materializations_pending_idx")
+            .on(table.userId)
+            .where(sql`${table.status} = 'pending'`),
     }),
 );
 
@@ -897,15 +950,14 @@ export const transcriptions = pgTable(
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
-        // Index for looking up transcription by recording (most common query)
-        recordingIdIdx: index("transcriptions_recording_id_idx").on(
-            table.recordingId,
-        ),
-        // Index for querying user's transcriptions
         userIdIdx: index("transcriptions_user_id_idx").on(table.userId),
+        producedByIdx: index("transcriptions_produced_by_user_id_idx")
+            .on(table.producedByUserId)
+            .where(sql`${table.producedByUserId} is not null`),
         // At most one transcript per (recording, user, source) so a
         // Plaud-imported transcript and the user's own provider can coexist
-        // while each source still upserts cleanly.
+        // while each source still upserts cleanly. Also serves every lookup
+        // by recording.
         recordingUserSourceUnique: unique(
             "transcriptions_recording_user_source_unique",
         ).on(table.recordingId, table.userId, table.source),
@@ -968,7 +1020,6 @@ export const people = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        userIdIdx: index("people_user_id_idx").on(table.userId),
         // Postgres treats NULLs as distinct, so any number of people per user
         // may have no email at all -- which is the common case for someone
         // named from a transcript rather than a calendar invite.
@@ -976,6 +1027,17 @@ export const people = pgTable(
             table.userId,
             table.primaryEmailHash,
         ),
+        // A person by email across scopes: whose tasks are assigned to a
+        // signed-in user.
+        emailHashIdx: index("people_primary_email_hash_idx")
+            .on(table.primaryEmailHash)
+            .where(sql`${table.primaryEmailHash} is not null`),
+        mergedIntoIdx: index("people_merged_into_id_idx")
+            .on(table.mergedIntoId)
+            .where(sql`${table.mergedIntoId} is not null`),
+        createdByIdx: index("people_created_by_user_id_idx")
+            .on(table.createdByUserId)
+            .where(sql`${table.createdByUserId} is not null`),
     }),
 );
 
@@ -1069,6 +1131,9 @@ export const transcriptSpeakers = pgTable(
             table.personId,
         ),
         userIdIdx: index("transcript_speakers_user_id_idx").on(table.userId),
+        confirmedByIdx: index("transcript_speakers_confirmed_by_user_id_idx")
+            .on(table.confirmedByUserId)
+            .where(sql`${table.confirmedByUserId} is not null`),
     }),
 );
 
@@ -1622,6 +1687,9 @@ export const knowledgeFacts = pgTable(
         relationKeyIdx: index("knowledge_facts_relation_key_idx").on(
             table.relationKey,
         ),
+        userRelationKeyIdx: index(
+            "knowledge_facts_user_id_relation_key_idx",
+        ).on(table.userId, table.relationKey),
         subjectKeyIdx: index("knowledge_facts_subject_key_idx").on(
             table.subjectKey,
         ),
@@ -1760,7 +1828,6 @@ export const knowledgeVectors = pgTable(
             )
             .nullsNotDistinct(),
         entityIdx: index("knowledge_vectors_entity_id_idx").on(table.entityId),
-        userIdIdx: index("knowledge_vectors_user_id_idx").on(table.userId),
         factIdx: index("knowledge_vectors_fact_id_idx").on(table.factId),
         oneItem: check(
             "knowledge_vectors_one_item_check",
@@ -1854,6 +1921,10 @@ export const learnRuns = pgTable(
         userIdx: index("learn_runs_user_id_idx").on(table.userId),
         scopeIdx: index("learn_runs_scope_user_id_idx").on(table.scopeUserId),
         actorIdx: index("learn_runs_actor_user_id_idx").on(table.actorUserId),
+        // The review badge: recordings with a run waiting for review.
+        readyIdx: index("learn_runs_ready_idx")
+            .on(table.view, table.userId, table.recordingId)
+            .where(sql`${table.status} = 'ready'`),
         statusCheck: check(
             "learn_runs_status_check",
             sql`${table.status} in ('queued', 'running', 'ready', 'finished', 'failed', 'superseded', 'cancelled')`,
@@ -2106,6 +2177,10 @@ export const aiEnhancements = pgTable(
         transcriptionIdIdx: index("ai_enhancements_transcription_id_idx").on(
             table.transcriptionId,
         ),
+        userIdIdx: index("ai_enhancements_user_id_idx").on(table.userId),
+        producedByIdx: index("ai_enhancements_produced_by_user_id_idx")
+            .on(table.producedByUserId)
+            .where(sql`${table.producedByUserId} is not null`),
     }),
 );
 
@@ -2325,6 +2400,9 @@ export const aiUsageEvents = pgTable(
             table.payerUserId,
         ),
         userIdx: index("ai_usage_events_user_id_idx").on(table.userId),
+        payerIdx: index("ai_usage_events_payer_user_id_idx").on(
+            table.payerUserId,
+        ),
     }),
 );
 
@@ -2375,6 +2453,7 @@ export const apiCredentials = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
+        userIdIdx: index("api_credentials_user_id_idx").on(table.userId),
         // One provider for Learn per user at most.
         oneLearnDefault: uniqueIndex("api_credentials_one_learn_default")
             .on(table.userId)
@@ -2671,10 +2750,15 @@ export const webhookDeliveries = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        pendingScanIdx: index("webhook_deliveries_pending_idx").on(
-            table.status,
-            table.nextAttemptAt,
-        ),
+        // The delivery claim: due rows that still have to go out.
+        dueIdx: index("webhook_deliveries_due_idx")
+            .on(table.nextAttemptAt, table.id)
+            .where(sql`${table.status} in ('pending', 'processing')`),
+        // The prune of settled deliveries.
+        settledIdx: index("webhook_deliveries_settled_idx")
+            .on(table.updatedAt)
+            .where(sql`${table.status} in ('success', 'dead')`),
+        userIdIdx: index("webhook_deliveries_user_id_idx").on(table.userId),
         endpointIdIdx: index("webhook_deliveries_endpoint_id_idx").on(
             table.endpointId,
         ),
@@ -2765,6 +2849,10 @@ export const exportJobs = pgTable(
         ),
         // Cleanup pass scans completed rows past expiry.
         expiresAtIdx: index("export_jobs_expires_at_idx").on(table.expiresAt),
+        // The stale-key sweep reads only rows that still list keys.
+        staleKeysIdx: index("export_jobs_stale_storage_keys_idx")
+            .on(table.createdAt, table.id)
+            .where(sql`${table.staleStorageKeys} <> '[]'::jsonb`),
         // Enforces "one active job per user" at the database layer --
         // the application-level check-then-insert in POST /api/backup is
         // only a fast path; this index is what actually prevents two
@@ -2921,6 +3009,9 @@ export const emailDeliveries = pgTable(
             table.status,
         ),
         userIdIdx: index("email_deliveries_user_id_idx").on(table.userId),
+        subscriberIdIdx: index("email_deliveries_subscriber_id_idx")
+            .on(table.subscriberId)
+            .where(sql`${table.subscriberId} is not null`),
     }),
 );
 
@@ -3076,10 +3167,9 @@ export const stripeWebhookEvents = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        dueScanIdx: index("stripe_webhook_events_due_idx").on(
-            table.status,
-            table.nextAttemptAt,
-        ),
+        dueScanIdx: index("stripe_webhook_events_due_idx")
+            .on(table.nextAttemptAt, table.createdAt)
+            .where(sql`${table.status} in ('pending', 'processing')`),
         createdAtIdx: index("stripe_webhook_events_created_at_idx").on(
             table.createdAt,
         ),
@@ -3183,13 +3273,20 @@ export const asyncJobs = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        // The claim scan: due rows, best priority first, oldest first within
-        // a priority.
-        dueScanIdx: index("async_jobs_due_idx").on(
-            table.status,
-            table.priority,
-            table.nextAttemptAt,
-        ),
+        // The claim scan, one kind at a time: due rows, best priority
+        // first, oldest first within a priority.
+        claimIdx: index("async_jobs_claim_idx")
+            .on(
+                table.kind,
+                table.priority.desc().nullsFirst(),
+                table.nextAttemptAt,
+                table.createdAt,
+            )
+            .where(sql`${table.status} = 'pending'`),
+        // The stale-claim reclaim reads only running rows.
+        processingIdx: index("async_jobs_processing_idx")
+            .on(table.heartbeatAt)
+            .where(sql`${table.status} = 'processing'`),
         userIdIdx: index("async_jobs_user_id_idx").on(table.userId),
         // "Is there a job running for this recording?" -- the reattach query.
         subjectIdx: index("async_jobs_kind_subject_idx").on(
@@ -3197,9 +3294,13 @@ export const asyncJobs = pgTable(
             table.subjectId,
         ),
         // Prune scan over finished rows.
-        completedAtIdx: index("async_jobs_completed_at_idx").on(
-            table.completedAt,
-        ),
+        completedAtIdx: index("async_jobs_completed_at_idx")
+            .on(table.completedAt)
+            .where(sql`${table.completedAt} is not null`),
+        // Live jobs of a subject, whatever their kind.
+        activeSubjectIdx: index("async_jobs_active_subject_idx")
+            .on(table.subjectId)
+            .where(sql`${table.status} in ('pending', 'processing')`),
         // One live job per (kind, subject). Double-clicking "Generate
         // summary" must not buy two summaries, and an application-level
         // check-then-insert cannot be atomic against a concurrent request

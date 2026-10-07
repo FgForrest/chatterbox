@@ -40,6 +40,12 @@ ENV POSTHOG_CLI_API_KEY=$POSTHOG_CLI_API_KEY
 ENV POSTHOG_CLI_PROJECT_ID=$POSTHOG_CLI_PROJECT_ID
 ENV POSTHOG_CLI_HOST=$POSTHOG_CLI_HOST
 
+# The GitHub repository the docs' "Edit on GitHub" links point at, read
+# when the docs are prerendered. The image workflow passes its own
+# repository; a plain `docker build .` keeps the upstream one.
+ARG DOCS_REPOSITORY=riffado/riffado
+ENV DOCS_REPOSITORY=$DOCS_REPOSITORY
+
 # `fumadocs-mdx`'s `lastModified` plugin shells out to `git log` for every
 # MDX page (see source.config.ts). `curl` installs `posthog-cli` for the
 # guarded source-map step below. The pinned `oven/bun:1.4.0` image is
@@ -90,6 +96,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# The same repository at run time, for any docs view rendered on request.
+ARG DOCS_REPOSITORY=riffado/riffado
+ENV DOCS_REPOSITORY=$DOCS_REPOSITORY
 
 # ffmpeg extracts audio from uploaded videos. It is also required by the
 # transcription path: OpenAI Whisper rejects any request body above 25 MiB,

@@ -331,10 +331,11 @@ function reapCandidateWhere(
         : orgUserId
           ? sql`not ${sharedWithOrgCondition(orgUserId)}`
           : undefined;
-    const stillHasSomething = [];
+    const ungoverned = [];
+    const governedKinds = [];
 
     if (policy.remoteOriginalDays !== null) {
-        stillHasSomething.push(
+        ungoverned.push(
             and(
                 lt(
                     recordings.startTime,
@@ -347,26 +348,24 @@ function reapCandidateWhere(
         );
     }
     if (policy.audioDays !== null) {
-        stillHasSomething.push(
+        governedKinds.push(
             and(
                 lt(
                     recordings.startTime,
                     retentionCutoff(policy.audioDays, now),
                 ),
                 isNull(recordings.audioReapedAt),
-                governed,
             ),
         );
     }
     if (policy.transcriptDays !== null) {
-        stillHasSomething.push(
+        governedKinds.push(
             and(
                 lt(
                     recordings.startTime,
                     retentionCutoff(policy.transcriptDays, now),
                 ),
                 isNull(recordings.transcriptReapedAt),
-                governed,
                 exists(
                     db
                         .select({ id: transcriptions.id })
@@ -382,14 +381,13 @@ function reapCandidateWhere(
         );
     }
     if (policy.summaryDays !== null) {
-        stillHasSomething.push(
+        governedKinds.push(
             and(
                 lt(
                     recordings.startTime,
                     retentionCutoff(policy.summaryDays, now),
                 ),
                 isNull(recordings.summaryReapedAt),
-                governed,
                 or(
                     exists(
                         db
@@ -426,14 +424,26 @@ function reapCandidateWhere(
     // Nothing selected: no predicate can be true, and callers treat null
     // as "this policy matches nothing" rather than building a query that
     // would scan the table to return no rows.
-    if (stillHasSomething.length === 0) return null;
+    const periods = [
+        policy.remoteOriginalDays,
+        policy.audioDays,
+        policy.transcriptDays,
+        policy.summaryDays,
+    ].filter((days): days is number => days !== null);
+    if (periods.length === 0) return null;
 
     // The Organization's recordings are other people's; they are selected
     // by being shared, above.
     return and(
         policy.isOrg ? undefined : eq(recordings.userId, policy.userId),
         isNull(recordings.deletedAt),
-        or(...stillHasSomething),
+        lt(recordings.startTime, retentionCutoff(Math.min(...periods), now)),
+        or(
+            ...ungoverned,
+            governedKinds.length > 0
+                ? and(governed, or(...governedKinds))
+                : undefined,
+        ),
     );
 }
 

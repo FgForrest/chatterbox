@@ -2,6 +2,7 @@
 
 import { useExtracted } from "next-intl";
 import { useCallback } from "react";
+import { HelpButton } from "@/components/help/help-button";
 import { SettingsNavMobile } from "@/components/settings-nav-mobile";
 import { SettingsNavSidebar } from "@/components/settings-nav-sidebar";
 import {
@@ -88,21 +89,23 @@ export function SettingsDialog({
 
                     <main className="flex h-[var(--settings-h,600px)] flex-1 flex-col overflow-hidden">
                         {/*
-                          Desktop: header bar is intentionally empty -- the
-                          sidebar's active item plus the section h2 inside
-                          each pane communicate "where am I"; a third
-                          breadcrumb on top was redundant. The h-16 +
+                          Desktop: header bar holds only the Help button --
+                          the sidebar's active item plus the section h2
+                          inside each pane communicate "where am I"; a third
+                          breadcrumb on top was redundant. pr-12 keeps the
+                          button clear of the dialog's close X. The h-16 +
                           border-b stays so the rule lines up with the
                           sidebar's "Settings" header.
                           Mobile: the section picker lives here because the
                           sidebar is hidden below md.
                         */}
-                        <header className="flex h-16 shrink-0 items-center justify-end gap-2 border-b px-4 md:justify-end">
+                        <header className="flex h-16 shrink-0 items-center justify-end gap-2 border-b pr-12 pl-4 md:justify-end">
                             <SettingsNavMobile
                                 activeSection={activeSection}
                                 onSectionChange={handleSectionChange}
                                 isHosted={isHosted}
                             />
+                            <HelpButton topic={`settings.${activeSection}`} />
                         </header>
 
                         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 pt-6">

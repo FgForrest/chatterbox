@@ -108,12 +108,41 @@ const enhancement = {
 
 describe("v1 recordings", () => {
     it("round-trips recording cursors", () => {
-        const cursor = encodeRecordingCursor({ updatedAt: now, id: "rec-1" });
+        const cursor = encodeRecordingCursor({
+            updatedAt: "2026-05-06T12:00:00.123456Z",
+            id: "rec-1",
+        });
         expect(decodeRecordingCursor(cursor)).toEqual({
-            updatedAt: now,
+            updatedAt: "2026-05-06T12:00:00.123456Z",
             id: "rec-1",
         });
         expect(decodeRecordingCursor("not-base64-json")).toBeNull();
+    });
+
+    it("still reads a millisecond cursor issued before", () => {
+        const legacy = Buffer.from(
+            JSON.stringify({ updatedAt: now.toISOString(), id: "rec-1" }),
+        ).toString("base64url");
+        expect(decodeRecordingCursor(legacy)).toEqual({
+            updatedAt: "2026-05-06T12:00:00.000Z",
+            id: "rec-1",
+        });
+    });
+
+    it.each([
+        "2026-05-06",
+        "2026-05-06T12:00:00.123",
+        "2026-05-06T12:00:00.1234567Z",
+        "2026-05-06 12:00:00Z",
+        "2026-02-30T12:00:00Z",
+        "2026-05-06T24:00:00Z",
+        "2026-05-06T12:00:00Z'::date",
+        "now",
+    ])("refuses a cursor timestamp %s", (updatedAt) => {
+        const cursor = Buffer.from(
+            JSON.stringify({ updatedAt, id: "rec-1" }),
+        ).toString("base64url");
+        expect(decodeRecordingCursor(cursor)).toBeNull();
     });
 
     it("serializes stable list payloads", () => {

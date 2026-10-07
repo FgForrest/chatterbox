@@ -97,6 +97,7 @@ jobs:
           build-args: |
             POSTHOG_CLI_API_KEY=${{ secrets.POSTHOG_CLI_API_KEY }}
             POSTHOG_CLI_PROJECT_ID=${{ secrets.POSTHOG_CLI_PROJECT_ID }}
+            DOCS_REPOSITORY=${{ github.repository }}
 
   # Combines the amd64 + arm64 images built above into a single
   # multi-arch manifest list under the canonical tags (`latest`,

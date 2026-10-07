@@ -17,7 +17,10 @@ import {
 import { decryptText } from "@/lib/encryption/fields";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
 import { entitiesVisibleTo } from "@/lib/knowledge/entities";
-import { orgOwnedCondition } from "@/lib/knowledge/org-people";
+import {
+    orgOwnedCondition,
+    visibleOwnerCondition,
+} from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
 import { vocabularyVisibleTo } from "@/lib/knowledge/vocabulary";
 import { sharedRecordingCondition } from "@/lib/sharing/shared";
@@ -94,10 +97,7 @@ export async function factsForPage(
             and(
                 about,
                 isNull(knowledgeFacts.replacedByFactId),
-                or(
-                    eq(knowledgeFacts.userId, viewerUserId),
-                    orgOwnedCondition(knowledgeFacts.userId),
-                ),
+                visibleOwnerCondition(knowledgeFacts.userId, viewerUserId),
             ),
         );
     if (facts.length === 0) return [];

@@ -1,5 +1,5 @@
 import type { SQL } from "drizzle-orm";
-import { and, desc, eq, exists, gte, isNull, lt, not, or } from "drizzle-orm";
+import { and, desc, eq, exists, gte, isNull, not, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -17,6 +17,7 @@ import {
 import {
     decodeRecordingCursor,
     encodeRecordingCursor,
+    recordingCursorUpdatedAt,
     serializeRecording,
 } from "@/lib/v1/serialize";
 
@@ -107,13 +108,7 @@ export const GET = apiHandler(async (request: Request) => {
             });
         }
         conditions.push(
-            or(
-                lt(recordings.updatedAt, cursor.updatedAt),
-                and(
-                    eq(recordings.updatedAt, cursor.updatedAt),
-                    lt(recordings.id, cursor.id),
-                ),
-            ) as SQL,
+            sql`(${recordings.updatedAt}, ${recordings.id}) < (${cursor.updatedAt}::timestamp, ${cursor.id})`,
         );
     }
 
@@ -156,6 +151,7 @@ export const GET = apiHandler(async (request: Request) => {
             device: plaudDevices,
             hasTranscript: transcriptExists,
             hasSummary: enhancementExists,
+            cursorUpdatedAt: recordingCursorUpdatedAt(),
         })
         .from(recordings)
         .leftJoin(
@@ -183,7 +179,7 @@ export const GET = apiHandler(async (request: Request) => {
         next_cursor:
             hasMore && last
                 ? encodeRecordingCursor({
-                      updatedAt: last.recording.updatedAt,
+                      updatedAt: last.cursorUpdatedAt,
                       id: last.recording.id,
                   })
                 : null,

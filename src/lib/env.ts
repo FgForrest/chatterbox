@@ -224,6 +224,19 @@ const baseEnvSchema = z.object({
         .optional()
         .transform((val) => val === "true"),
 
+    /**
+     * The GitHub repository (`owner/name`) the docs' "Edit on GitHub" and
+     * source links point at. Read when the docs are built, so an image
+     * build sets it as a build argument.
+     */
+    DOCS_REPOSITORY: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || "riffado/riffado")
+        .refine((val) => /^[\w.-]+\/[\w.-]+$/.test(val), {
+            message: "DOCS_REPOSITORY must look like owner/name",
+        }),
+
     DATABASE_URL: z.string().optional(),
 
     BETTER_AUTH_SECRET: z.string().optional(),
@@ -1117,6 +1130,7 @@ function validateEnv(): Env {
             MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
+            DOCS_REPOSITORY: process.env.DOCS_REPOSITORY,
             DATABASE_URL: process.env.DATABASE_URL,
             BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
             API_TOKEN_HASH_SECRET: process.env.API_TOKEN_HASH_SECRET,

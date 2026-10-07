@@ -1,0 +1,15 @@
+{
+    "title": "User guide",
+    "pages": [
+        "getting-started",
+        "recordings",
+        "transcripts",
+        "summaries-and-tasks",
+        "almanac",
+        "learn",
+        "organization",
+        "exports-backups-retention",
+        "settings",
+        "administrators"
+    ]
+}

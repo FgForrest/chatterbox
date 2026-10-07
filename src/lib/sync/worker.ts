@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { plaudConnections, users } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -8,6 +8,7 @@ import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 // ponytail: skip users synced in the last 4 min -- they likely just client-synced
 const STALE_THRESHOLD_MS = 4 * 60 * 1000;
 const MAX_USERS_PER_TICK = 20;
+const INVALIDATED_RETRY_MS = 60 * 60 * 1000;
 
 /**
  * Claim users due for a server-side sync tick.
@@ -20,16 +21,27 @@ const MAX_USERS_PER_TICK = 20;
  * to gate on, and unattended background sync is the whole point of running
  * the container without a browser open (#159).
  *
+ * Never-synced connections come first, then the longest unsynced. A
+ * connection Plaud rejected (`invalidatedAt`) keeps its old `lastSync`, so
+ * it is retried at most once per `INVALIDATED_RETRY_MS` (each rejection
+ * restamps `invalidatedAt`) instead of taking a slot every tick.
+ *
  * Exported for testing.
  */
 export async function claimUsersForSync(): Promise<string[]> {
-    const staleThreshold = new Date(Date.now() - STALE_THRESHOLD_MS);
+    const now = Date.now();
+    const staleThreshold = new Date(now - STALE_THRESHOLD_MS);
+    const invalidatedRetryThreshold = new Date(now - INVALIDATED_RETRY_MS);
 
     const conditions = [
         isNull(users.suspendedAt),
         or(
             isNull(plaudConnections.lastSync),
             lt(plaudConnections.lastSync, staleThreshold),
+        ),
+        or(
+            isNull(plaudConnections.invalidatedAt),
+            lt(plaudConnections.invalidatedAt, invalidatedRetryThreshold),
         ),
     ];
     if (env.IS_HOSTED) {
@@ -41,10 +53,7 @@ export async function claimUsersForSync(): Promise<string[]> {
         .from(plaudConnections)
         .innerJoin(users, eq(users.id, plaudConnections.userId))
         .where(and(...conditions))
-        // Oldest/never-synced first (NULLS FIRST is Postgres's default for
-        // ASC) so a large eligible pool cycles through everyone instead of
-        // the same MAX_USERS_PER_TICK subset winning every tick.
-        .orderBy(asc(plaudConnections.lastSync))
+        .orderBy(sql`${plaudConnections.lastSync} asc nulls first`)
         .limit(MAX_USERS_PER_TICK);
 
     return rows.map((r) => r.userId);

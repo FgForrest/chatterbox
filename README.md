@@ -32,6 +32,55 @@ Riffado is an open-source companion app for AI voice recorders. It syncs your re
 - Automation API with signed webhooks for integrations.
 - Zero-config Docker Compose deploy.
 
+## Extended features
+
+This repository builds on Riffado with features for people who work with their recordings every day, alone or as a team. The [user guide](content/docs/user-guide/index.md) walks through all of them with screenshots.
+
+![A recording with named speakers, topics and Learn's proposals](content/docs/user-guide/images/dashboard.png)
+
+**Transcripts you can work with**
+
+- **Named speakers.** Put a name to each voice once and it shows in the transcript, the summary and every export. Names carry over when a recording is transcribed again, and a right-click plays a speaker's next turn.
+- **Topics.** Long recordings split into titled chapters you can jump between. Lectures and monologues read in paragraphs.
+- **Play from the transcript.** Click a sentence to hear it. The transcript follows the player, and scrolling the transcript moves the player.
+- **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people and projects so they spell them right.
+- **Video uploads.** Upload a meeting video; Riffado keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
+
+**Summaries and tasks**
+
+- **Editable templates** for summaries, titles and topics, built-in ones included, with a default and an auto-summary choice.
+- **Multi-pass summaries** that run the prompt several times and merge the results, with live progress and a badge saying how many passes made it.
+- **Tasks.** A summary proposes the action items it heard, with who and by when. Review them in one dialog, then follow them on the **Tasks** page: yours under **Mine**, everyone else's under **Tracked**.
+
+**Knowledge that grows**
+
+- **The Almanac.** The people and things your recordings mention (clients, projects, products, terms, places) with nicknames and facts. Import a list to start.
+- **Learn.** Reads a transcript against the Almanac and proposes speaker names, corrections of misheard names, new people and things, and facts. Nothing changes until you review it. Corrections sit beside the original text and can always be undone; summaries, search and exports read the corrected text. Optionally automatic, with a second pass that fixes other misheard words.
+
+**For teams**
+
+- **The Organization.** A shared folder tree next to each user's private one. Share a recording by filing it there; only recordings with every speaker named and every review finished can be shared. Speakers become shared people, curated by one organization account.
+- **Single sign-on** with any OpenID Connect provider, and registration that can stay closed.
+
+**Your data, your way**
+
+- **Folders**, nested, with drag and drop. A recording can live in several.
+- **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Riffado did not write is touched.
+- **Scheduled backups**, kept apart for each user and for the Organization.
+- **Automatic deletion** of old audio, transcripts, summaries or recorder originals, each on its own schedule, and erasing any one part of a recording by hand.
+
+**Knowing what AI costs**
+
+- **Estimated AI spend** on every recording, by step and by model, from published prices or the price you enter for each provider.
+- **One provider per job**: choose who transcribes, summarizes, detects topics and runs Learn. Duplicate a provider to use a second model on the same key.
+- **Claude Code and Codex** as providers, so a Claude or ChatGPT subscription can pay for summaries and Learn instead of an API key.
+
+**Help where you are:** a Help button on every screen opens the user guide in a side panel at the chapter about that screen, and a small **?** beside a feature opens it right there.
+
+**In your language:** English and Czech.
+
+Setting these up on a self-hosted instance: [For administrators](content/docs/user-guide/administrators.md).
+
 ## Quick start
 
 You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionally) an OpenAI-compatible API key.
@@ -76,7 +125,16 @@ If you signed up to Plaud with **Continue with Google** or **Continue with Apple
 
 ## Documentation
 
-Everything lives at **[riffado.com/docs](https://riffado.com/docs)**. Direct links:
+The **[user guide](content/docs/user-guide/index.md)** in this repository covers every screen, including the extended features. Pages specific to this repository:
+
+- [The Almanac and Learn](content/docs/guides/almanac.mdx)
+- [The Organization](content/docs/self-hosting/organization.mdx)
+- [Single sign-on](content/docs/self-hosting/sso.mdx)
+- [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
+- [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
+- [Meeting recorder (meetrec)](cmd/meetrec/README.md)
+
+Every instance also serves these pages at `/docs`. The upstream documentation lives at **[riffado.com/docs](https://riffado.com/docs)**. Direct links:
 
 - [Install & first run](https://riffado.com/docs/self-hosting/install)
 - [Environment variables](https://riffado.com/docs/self-hosting/environment-variables)
