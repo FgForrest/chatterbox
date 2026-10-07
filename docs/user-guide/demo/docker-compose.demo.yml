@@ -1,0 +1,22 @@
+# Overrides docker-compose.e2e.yml for the user guide's demo stack:
+#   docker compose -p riffado-user-guide -f docker-compose.e2e.yml \
+#     -f docs/user-guide/demo/docker-compose.demo.yml up -d --build
+# Every value here is a throwaway for screenshots, never a real credential.
+services:
+  db:
+    ports: !override
+      - "${USER_GUIDE_DB_PORT:-5435}:5432"
+  app:
+    image: riffado:user-guide
+    ports: !override
+      - "${USER_GUIDE_APP_PORT:-3312}:3000"
+    environment:
+      APP_URL: ${USER_GUIDE_APP_URL:-http://localhost:3312}
+      ORG_ACCOUNT_EMAIL: org@example.com
+      ORG_ACCOUNT_PASSWORD: demo-organization-pass
+      ORG_ACCOUNT_NAME: Northwind Studio
+      FILESYSTEM_EXPORT_ROOT: /app/storage/exports
+      GOOGLE_CLIENT_ID: demo-client.apps.googleusercontent.com
+      GOOGLE_CLIENT_SECRET: demo-secret
+      GOOGLE_PICKER_API_KEY: demo-picker-key
+      GOOGLE_CLOUD_PROJECT_NUMBER: "123456789012"
