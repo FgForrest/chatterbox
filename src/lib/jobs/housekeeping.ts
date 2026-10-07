@@ -5,8 +5,10 @@ import {
     pruneExpiredVerifications,
 } from "@/db/queries/auth-sessions";
 import { pruneCompletedStripeWebhookEvents } from "@/db/queries/billing";
+import { pruneMcpAccessLog } from "@/db/queries/mcp-audit";
 import { pruneExpiredRateLimitBuckets } from "@/db/queries/rate-limit";
 import { pruneSettledWebhookDeliveries } from "@/db/queries/webhook-deliveries";
+import { env } from "@/lib/env";
 import { captureServerException } from "@/lib/posthog-server";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -47,7 +49,8 @@ export async function pruneInBatches(
  * Delete expired bookkeeping rows: finished jobs after a day, settled
  * webhook deliveries after 30 days, closed rate-limit windows after a day,
  * completed Stripe events after 90 days, expired sessions after a day,
- * expired verification values, and admin read-audit rows after 90 days.
+ * expired verification values, admin read-audit rows after 90 days, and
+ * MCP access-log rows after MCP_AUDIT_RETENTION_DAYS.
  *
  * Each table is pruned on its own, so one failing does not stop the rest.
  * Safe to run in several processes at once. Returns the rows deleted per
@@ -89,6 +92,10 @@ export async function runHousekeeping(
             (limit) => pruneExpiredVerifications(new Date(now), limit),
         ],
         ["admin_audit_log", (limit) => pruneAdminAuditLog(limit, 90)],
+        [
+            "mcp_access_log",
+            (limit) => pruneMcpAccessLog(env.MCP_AUDIT_RETENTION_DAYS, limit),
+        ],
     ];
 
     const pruned: Record<string, number> = {};

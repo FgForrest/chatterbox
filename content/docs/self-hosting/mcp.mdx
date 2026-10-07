@@ -311,8 +311,8 @@ row to the `mcp_access_log` table:
 | `ip`          | Client IP, when known                                         |
 
 No arguments and no content are stored. Rows older than
-`MCP_AUDIT_RETENTION_DAYS` (default 90) are deleted hourly, also after
-the server is turned off. There is no screen for the log yet; query the
+`MCP_AUDIT_RETENTION_DAYS` (default 90) are deleted by the hourly
+housekeeping job, also after the server is turned off. There is no screen for the log yet; query the
 table.
 
 `MCP_ALLOWED_CLIENTS` (comma-separated client ids) refuses a token whose

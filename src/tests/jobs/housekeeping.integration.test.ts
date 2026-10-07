@@ -20,6 +20,7 @@ import {
     adminAuditLog,
     apiRateLimitBuckets,
     asyncJobs,
+    mcpAccessLog,
     sessions,
     stripeWebhookEvents,
     users,
@@ -56,6 +57,7 @@ const { dbProxy, dbRef } = vi.hoisted(() => {
 });
 
 vi.mock("@/db", () => ({ db: dbProxy }));
+vi.mock("@/lib/env", () => ({ env: { MCP_AUDIT_RETENTION_DAYS: 90 } }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
@@ -232,6 +234,12 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
                 audit("audit-old", ago(91 * DAY)),
                 audit("audit-recent", ago(89 * DAY)),
             ]);
+        await db()
+            .insert(mcpAccessLog)
+            .values([
+                { id: "mcp-old", at: ago(91 * DAY), outcome: "ok" },
+                { id: "mcp-recent", at: ago(89 * DAY), outcome: "ok" },
+            ]);
 
         expect(await runHousekeeping()).toEqual({
             async_jobs: 2,
@@ -241,6 +249,7 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
             sessions: 1,
             verifications: 1,
             admin_audit_log: 1,
+            mcp_access_log: 1,
         });
 
         expect(
@@ -284,6 +293,9 @@ describeWithDatabase("housekeeping prunes (PostgreSQL)", () => {
                 db().select({ id: adminAuditLog.id }).from(adminAuditLog),
             ),
         ).toEqual(["audit-recent"]);
+        expect(
+            await ids(db().select({ id: mcpAccessLog.id }).from(mcpAccessLog)),
+        ).toEqual(["mcp-recent"]);
     });
 
     function closedBuckets(count: number) {

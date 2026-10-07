@@ -1,7 +1,5 @@
 import { db } from "@/db";
-import { pruneMcpAccessLog } from "@/db/queries/mcp-audit";
 import { mcpAccessLog } from "@/db/schema";
-import { env } from "@/lib/env";
 import type { McpCaller } from "@/lib/mcp/caller";
 
 /** How an MCP call ended, as the access log records it. */
@@ -24,9 +22,6 @@ export interface McpAccessEntry {
 }
 
 const MAX_TARGETS = 200;
-const PRUNE_MS = 60 * 60 * 1000;
-const PRUNE_BATCH = 5_000;
-const PRUNE_MAX_BATCHES = 20;
 
 function message(error: unknown): unknown {
     return error instanceof Error ? error.message : error;
@@ -52,31 +47,4 @@ export async function recordMcpAccess(entry: McpAccessEntry): Promise<void> {
     } catch (error) {
         console.error("[mcp] audit write failed", message(error));
     }
-}
-
-async function pruneExpired(): Promise<void> {
-    for (let batch = 0; batch < PRUNE_MAX_BATCHES; batch++) {
-        const deleted = await pruneMcpAccessLog(
-            env.MCP_AUDIT_RETENTION_DAYS,
-            PRUNE_BATCH,
-        );
-        if (deleted < PRUNE_BATCH) return;
-    }
-}
-
-let pruner: ReturnType<typeof setInterval> | undefined;
-
-/**
- * Hourly pruning of MCP access-log rows past MCP_AUDIT_RETENTION_DAYS. Runs
- * whether or not the MCP server is on, so turning it off still ages out
- * what it logged.
- */
-export function startMcpAuditPruner(): void {
-    if (pruner) return;
-    pruner = setInterval(() => {
-        void pruneExpired().catch((error: unknown) =>
-            console.error("[mcp] audit prune failed", message(error)),
-        );
-    }, PRUNE_MS);
-    pruner.unref?.();
 }
