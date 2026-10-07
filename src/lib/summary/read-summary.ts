@@ -49,8 +49,13 @@ export async function readStoredSummary(
         ? rows[0]
         : (rows.find((row) => row.source === "riffado") ?? rows[0]);
 
-    if (!enhancement) return null;
+    return enhancement ? storedSummaryOf(enhancement) : null;
+}
 
+/** A stored summary row, decrypted into the shape clients render. */
+export function storedSummaryOf(
+    enhancement: typeof aiEnhancements.$inferSelect,
+): StoredSummary {
     return {
         // Legacy plaintext rows pass through verbatim during the backfill
         // window; `decryptText` is a no-op on them.

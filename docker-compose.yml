@@ -57,6 +57,12 @@ services:
       OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-}
       OIDC_SCOPES: ${OIDC_SCOPES:-}
       OIDC_SESSION_MAX_AGE: ${OIDC_SESSION_MAX_AGE:-}
+      # External MCP server (optional; see docs/self-hosting/mcp). Off
+      # unless MCP_AUDIENCE is set; requires single sign-on above and uses
+      # the same realm.
+      MCP_AUDIENCE: ${MCP_AUDIENCE:-}
+      MCP_ALLOWED_CLIENTS: ${MCP_ALLOWED_CLIENTS:-}
+      MCP_AUDIT_RETENTION_DAYS: ${MCP_AUDIT_RETENTION_DAYS:-}
 
       # Encryption
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
