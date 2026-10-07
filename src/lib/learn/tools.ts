@@ -17,14 +17,17 @@
 
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
 import {
-    findByName,
+    type FoundEntity,
+    findEntitiesInView,
+} from "@/lib/knowledge/find-entities";
+import {
     type KnowledgeView,
     knowledgeView,
-    searchByMeaning,
 } from "@/lib/knowledge/knowledge-loader";
 import type { ReadContext } from "@/lib/knowledge/scope";
 import { LearnToolBudgetExhausted } from "@/lib/learn/errors";
 
+export type { FoundEntity } from "@/lib/knowledge/find-entities";
 export { LearnToolBudgetExhausted } from "@/lib/learn/errors";
 
 export interface LearnToolContext {
@@ -34,23 +37,6 @@ export interface LearnToolContext {
     /** The transcript's language: names are matched in their word forms. */
     language?: string | null;
 }
-
-export interface FoundEntity {
-    id: string;
-    kind: "person" | "entity";
-    /** The entity's type; `person` for people. */
-    typeKey: string;
-    name: string;
-    scope: "personal" | "org";
-    /**
-     * Why it matched: `exact`, `token`, `edit`, `trigram`, `stem` (by its
-     * word forms), `part` (the name is part of the text), `meaning`.
-     */
-    reasons: string[];
-    score: number;
-}
-
-const MAX_FOUND = 10;
 
 async function viewFor(context: LearnToolContext): Promise<KnowledgeView> {
     if (context.budget.remaining <= 0) throw new LearnToolBudgetExhausted();
@@ -75,45 +61,12 @@ export async function findEntities(
         byName?: boolean;
     },
 ): Promise<{ byMeaning: boolean; entities: FoundEntity[] }> {
-    const view = await viewFor(context);
-    const items = new Map(view.items.map((item) => [item.id, item]));
-    const found = new Map<string, FoundEntity>();
-    const add = (id: string, reason: string, score: number) => {
-        const item = items.get(id);
-        if (!item) return;
-        const typeKey = item.kind === "person" ? "person" : item.typeKey;
-        if (type && type !== typeKey) return;
-        const held = found.get(id);
-        if (held) {
-            if (!held.reasons.includes(reason)) held.reasons.push(reason);
-            held.score = Math.max(held.score, score);
-            return;
-        }
-        found.set(id, {
-            id,
-            kind: item.kind,
-            typeKey,
-            name: item.name,
-            scope: item.scope,
-            reasons: [reason],
-            score,
-        });
-    };
-    for (const match of findByName(view, text, context.language ?? null)) {
-        add(match.id, match.reason, match.score);
-    }
-    const meaning = byName
-        ? { available: false, hits: [] }
-        : await searchByMeaning(view, text, MAX_FOUND);
-    for (const hit of meaning.hits) {
-        if (hit.kind === "entity") add(hit.id, "meaning", hit.score);
-    }
-    return {
-        byMeaning: meaning.available,
-        entities: [...found.values()]
-            .sort((a, b) => b.score - a.score)
-            .slice(0, MAX_FOUND),
-    };
+    return findEntitiesInView(await viewFor(context), {
+        text,
+        type,
+        byName,
+        language: context.language ?? null,
+    });
 }
 
 /** One person or entity the run may read, or null. */

@@ -659,6 +659,13 @@
       "when": 1791388442145,
       "tag": "0093_rare_warhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791397833756,
+      "tag": "0094_condemned_vermin",
+      "breakpoints": true
     }
   ]
 }

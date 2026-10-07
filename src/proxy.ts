@@ -50,10 +50,11 @@ export const config = {
     // skip both the admin-host isolation gate and the auth-header
     // stripping below for those routes.
     //
-    // /api/recordings/upload is excluded because Next buffers the whole
-    // request body in memory for any route the proxy runs on, and video
-    // uploads run to gigabytes. The route applies the admin-host gate itself.
+    // /api/recordings/upload and /api/mcp are excluded because Next buffers
+    // the whole request body in memory for any route the proxy runs on:
+    // video uploads run to gigabytes, and /api/mcp bounds its body only after
+    // the caller's token passed. Each route applies the admin-host gate itself.
     matcher: [
-        "/((?!api/recordings/upload$|_next/static|_next/image|favicon\\.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|woff|woff2|ttf|otf|map)).*)",
+        "/((?!api/recordings/upload$|api/mcp$|_next/static|_next/image|favicon\\.ico|robots\\.txt|sitemap\\.xml|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|css|woff|woff2|ttf|otf|map)).*)",
     ],
 };

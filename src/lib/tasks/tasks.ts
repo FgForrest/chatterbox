@@ -17,21 +17,20 @@ import {
 import { db } from "@/db";
 import {
     people,
-    recordingFolderAssignments,
     recordings,
     recordingTaskRejections,
     recordingTasks,
     taskUpdateProposals,
     userSettings,
 } from "@/db/schema";
+import { type Keyset, keysetBefore, keysetOrder } from "@/lib/db/keyset";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     exportRecordingSidecarsIfEnabled,
     refreshExistingRecordingSidecars,
 } from "@/lib/export/document-sidecars";
-import { listFolderOrganization } from "@/lib/folders/folders";
-import { descendantFolderIds } from "@/lib/folders/hierarchy";
+import { folderCondition } from "@/lib/folders/condition";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
@@ -39,6 +38,7 @@ import {
     type TaskViewer,
     taskClosable,
     taskEditable,
+    taskListed,
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
@@ -1103,24 +1103,6 @@ function addDays(day: string, days: number): string {
     return date.toISOString().slice(0, 10);
 }
 
-/** A folder filter: the recordings filed in it or below, as `viewer` sees them. */
-async function folderCondition(
-    viewer: TaskViewer,
-    folderId: string,
-): Promise<SQL> {
-    const organization = await listFolderOrganization(viewer.userId);
-    const folder = organization.folders.find((entry) => entry.id === folderId);
-    if (!folder) return sql`false`;
-    // The Private root holds every recording of its owner.
-    if (folder.kind === "private") return eq(recordings.userId, viewer.userId);
-    const ids = [...descendantFolderIds(organization.folders, folderId)];
-    return sql`exists (
-        select 1 from ${recordingFolderAssignments}
-        where ${recordingFolderAssignments.recordingId} = ${recordings.id}
-            and ${inArray(recordingFolderAssignments.folderId, ids)}
-    )`;
-}
-
 /**
  * The viewer's task list. Mine: assigned to them, on their recordings or
  * shared ones. Tracked: everything else on recordings they answer for
@@ -1153,7 +1135,7 @@ export async function listTasks(
         conditions.push(eq(recordingTasks.status, query.state));
     }
     if (query.folderId) {
-        conditions.push(await folderCondition(viewer, query.folderId));
+        conditions.push(await folderCondition(viewer.userId, query.folderId));
     }
     if (query.due === "none") {
         conditions.push(isNull(recordingTasks.dueDate));
@@ -1168,6 +1150,106 @@ export async function listTasks(
         );
     }
 
+    return loadTaskListItems(
+        viewer,
+        conditions,
+        [
+            ...(query.sort === "due"
+                ? [
+                      sql`${recordingTasks.dueDate} asc nulls last`,
+                      desc(recordingTasks.createdAt),
+                  ]
+                : [desc(recordingTasks.createdAt)]),
+            asc(recordingTasks.id),
+        ],
+        LIST_LIMIT,
+    );
+}
+
+/** A query of {@link listCallerTasks}. */
+export interface CallerTaskQuery {
+    status: TaskStateFilter;
+    assigneePersonId: string | null;
+    recordingId: string | null;
+    /** `YYYY-MM-DD`: due strictly before this day; undated tasks drop out. */
+    dueBefore: string | null;
+    /** SQL over `recordings` the task's recording must also pass. */
+    recordingCondition: SQL | null;
+    /** Continue after this position of the newest-first order. */
+    after: Keyset | null;
+    limit: number;
+}
+
+function callerTaskConditions(viewer: TaskViewer): SQL[] {
+    return [
+        ne(recordingTasks.status, "proposed"),
+        isNull(recordings.deletedAt),
+        taskListed(viewer),
+    ];
+}
+
+/**
+ * Every task in the viewer's lists (the Tasks page's tabs together; never
+ * a proposal, never on a deleted recording) that passes the query, newest
+ * first (`createdAt`, then `id`), `limit` at most after `after`.
+ */
+export async function listCallerTasks(
+    viewer: TaskViewer,
+    query: CallerTaskQuery,
+): Promise<TaskListItem[]> {
+    const conditions = callerTaskConditions(viewer);
+    if (query.status !== "all") {
+        conditions.push(eq(recordingTasks.status, query.status));
+    }
+    if (query.assigneePersonId) {
+        conditions.push(
+            eq(recordingTasks.assigneePersonId, query.assigneePersonId),
+        );
+    }
+    if (query.recordingId) {
+        conditions.push(eq(recordingTasks.recordingId, query.recordingId));
+    }
+    if (query.dueBefore) {
+        conditions.push(lt(recordingTasks.dueDate, query.dueBefore));
+    }
+    if (query.recordingCondition) conditions.push(query.recordingCondition);
+    if (query.after) {
+        conditions.push(
+            keysetBefore(
+                recordingTasks.createdAt,
+                recordingTasks.id,
+                query.after,
+            ),
+        );
+    }
+    return loadTaskListItems(
+        viewer,
+        conditions,
+        keysetOrder(recordingTasks.createdAt, recordingTasks.id),
+        query.limit,
+    );
+}
+
+/** One task of the viewer's lists (see {@link listCallerTasks}), or null. */
+export async function getCallerTask(
+    viewer: TaskViewer,
+    taskId: string,
+): Promise<TaskListItem | null> {
+    const [item] = await loadTaskListItems(
+        viewer,
+        [...callerTaskConditions(viewer), eq(recordingTasks.id, taskId)],
+        [],
+        1,
+    );
+    return item ?? null;
+}
+
+async function loadTaskListItems(
+    viewer: TaskViewer,
+    conditions: readonly (SQL | undefined)[],
+    order: readonly SQL[],
+    limit: number,
+): Promise<TaskListItem[]> {
     const rows = await db
         .select({
             ...taskColumns,
@@ -1181,16 +1263,8 @@ export async function listTasks(
         .innerJoin(recordings, eq(recordings.id, recordingTasks.recordingId))
         .leftJoin(people, assigneeJoin())
         .where(and(...conditions))
-        .orderBy(
-            ...(query.sort === "due"
-                ? [
-                      sql`${recordingTasks.dueDate} asc nulls last`,
-                      desc(recordingTasks.createdAt),
-                  ]
-                : [desc(recordingTasks.createdAt)]),
-            asc(recordingTasks.id),
-        )
-        .limit(LIST_LIMIT);
+        .orderBy(...order)
+        .limit(limit);
 
     return rows.map((row) => ({
         ...toView(row),

@@ -8,7 +8,7 @@ import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
-import { decideHostnameGate } from "@/lib/hosted/hostname-gate";
+import { deniedOnAdminHost } from "@/lib/hosted/hostname-gate";
 import { assertNotOrgAccount } from "@/lib/org/config";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
@@ -37,14 +37,7 @@ import {
  * memory, and with it the admin-host gate. Apply that gate here instead.
  */
 function assertNotOnAdminHost(request: Request): void {
-    const decision = decideHostnameGate({
-        requestHostname: (request.headers.get("host") ?? "")
-            .split(":")[0]
-            .toLowerCase(),
-        pathname: new URL(request.url).pathname,
-        adminHostname: env.ADMIN_HOSTNAME,
-    });
-    if (decision.kind !== "next") {
+    if (deniedOnAdminHost(request, env.ADMIN_HOSTNAME)) {
         throw new AppError(ErrorCode.NOT_FOUND, "Not found", 404);
     }
 }

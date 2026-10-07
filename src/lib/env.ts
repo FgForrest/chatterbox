@@ -172,6 +172,44 @@ const baseEnvSchema = z.object({
         ),
 
     /**
+     * External MCP server. The Keycloak client id of the resource whose
+     * client roles grant access; unset, the server is off. Tokens come from
+     * the single sign-on realm (OIDC_ISSUER_URL), which must be configured.
+     */
+    MCP_AUDIENCE: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /** Comma-separated `azp` allowlist; empty admits any client of the realm. */
+    MCP_ALLOWED_CLIENTS: z
+        .string()
+        .optional()
+        .transform((val) =>
+            (val ?? "")
+                .split(",")
+                .map((client) => client.trim())
+                .filter(Boolean),
+        ),
+    /** Days the MCP access log keeps a row. Default 90. */
+    MCP_AUDIT_RETENTION_DAYS: z
+        .string()
+        .optional()
+        .transform((val, ctx) => {
+            const trimmed = val?.trim();
+            if (!trimmed) return 90;
+            if (!/^\d+$/.test(trimmed)) {
+                ctx.addIssue({
+                    code: "custom",
+                    message:
+                        "MCP_AUDIT_RETENTION_DAYS must be a positive integer",
+                });
+                return z.NEVER;
+            }
+            return Number(trimmed);
+        })
+        .pipe(z.number().int().min(1).max(3650)),
+
+    /**
      * Disable sign-up: email/password registration, and under single sign-on
      * the accounts the identity provider would otherwise create.
      */
@@ -1007,6 +1045,24 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
         });
     }
 
+    if (parsed.MCP_AUDIENCE) {
+        if (!oidcConfigured) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["MCP_AUDIENCE"],
+                message:
+                    "MCP_AUDIENCE needs single sign-on (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)",
+            });
+        }
+        if (!parsed.APP_URL) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["APP_URL"],
+                message: "MCP_AUDIENCE needs APP_URL",
+            });
+        }
+    }
+
     // With single sign-on nobody signs in with a password, the organization
     // account included, so its password is optional.
     const orgPasswordRequired = !(oidcConfigured && !parsed.IS_HOSTED);
@@ -1069,6 +1125,9 @@ function validateEnv(): Env {
             OIDC_PROVIDER_NAME: process.env.OIDC_PROVIDER_NAME,
             OIDC_SCOPES: process.env.OIDC_SCOPES,
             OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
+            MCP_AUDIENCE: process.env.MCP_AUDIENCE,
+            MCP_ALLOWED_CLIENTS: process.env.MCP_ALLOWED_CLIENTS,
+            MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
             DOCS_REPOSITORY: process.env.DOCS_REPOSITORY,

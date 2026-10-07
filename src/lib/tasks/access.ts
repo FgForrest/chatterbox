@@ -74,6 +74,20 @@ export function taskVisible(viewer: TaskViewer): SQL {
     return or(eq(recordings.userId, viewer.userId), shared) as SQL;
 }
 
+/**
+ * SQL: the task is in one of the viewer's lists, as the Tasks page shows
+ * them (`recordings` joined): the organization account's are the shared
+ * recordings' tasks; a user's are their own recordings' tasks and the
+ * shared ones assigned to them.
+ */
+export function taskListed(viewer: TaskViewer): SQL {
+    if (viewer.isOrg) return taskRecordingShared(viewer);
+    return or(
+        eq(recordings.userId, viewer.userId),
+        and(taskVisible(viewer), assignedToViewer(viewer)),
+    ) as SQL;
+}
+
 /** SQL: the viewer may mark the task done or open again (`recordings` joined). */
 export function taskClosable(viewer: TaskViewer): SQL {
     const shared = taskRecordingShared(viewer);

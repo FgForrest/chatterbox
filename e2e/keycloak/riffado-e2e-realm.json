@@ -7,6 +7,27 @@
     "duplicateEmailsAllowed": false,
     "verifyEmail": false,
     "resetPasswordAllowed": false,
+    "roles": {
+        "client": {
+            "riffado-mcp": [
+                {
+                    "name": "knowledge:read"
+                },
+                {
+                    "name": "transcripts:read"
+                },
+                {
+                    "name": "summaries:read"
+                },
+                {
+                    "name": "tasks:read"
+                },
+                {
+                    "name": "tasks:write"
+                }
+            ]
+        }
+    },
     "clients": [
         {
             "clientId": "riffado",
@@ -29,8 +50,65 @@
             "attributes": {
                 "pkce.code.challenge.method": "S256"
             }
+        },
+        {
+            "clientId": "riffado-mcp",
+            "name": "Riffado MCP",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "bearerOnly": true,
+            "publicClient": false,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": false
+        },
+        {
+            "clientId": "riffado-mcp-tester",
+            "name": "Riffado MCP tester (test only: password grant)",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": true,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false
+        },
+        {
+            "clientId": "riffado-mcp-bot",
+            "name": "Riffado MCP bot",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": false,
+            "clientAuthenticatorType": "client-secret",
+            "secret": "riffado-mcp-bot-secret",
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": true,
+            "defaultClientScopes": [
+                "web-origins",
+                "acr",
+                "profile",
+                "roles",
+                "basic",
+                "email",
+                "service_account"
+            ]
         }
     ],
+    "clientScopeMappings": {
+        "riffado-mcp": [
+            {
+                "client": "riffado-mcp-tester",
+                "roles": [
+                    "knowledge:read",
+                    "transcripts:read"
+                ]
+            }
+        ]
+    },
     "users": [
         {
             "username": "alice",
@@ -45,7 +123,15 @@
                     "value": "alice-password",
                     "temporary": false
                 }
-            ]
+            ],
+            "clientRoles": {
+                "riffado-mcp": [
+                    "knowledge:read",
+                    "transcripts:read",
+                    "summaries:read",
+                    "tasks:read"
+                ]
+            }
         },
         {
             "username": "bob",
@@ -91,6 +177,18 @@
                     "temporary": false
                 }
             ]
+        },
+        {
+            "username": "service-account-riffado-mcp-bot",
+            "enabled": true,
+            "serviceAccountClientId": "riffado-mcp-bot",
+            "clientRoles": {
+                "riffado-mcp": [
+                    "knowledge:read",
+                    "tasks:read",
+                    "tasks:write"
+                ]
+            }
         }
     ]
 }

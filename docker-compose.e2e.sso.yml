@@ -9,6 +9,9 @@
 #   carol  verified email; register carol@example.com with a password first
 #          (without this override) to see the account linked
 #   dave   unverified email; same, to see linking refused
+# MCP clients: `riffado-mcp` (resource, holds the roles), `riffado-mcp-tester`
+# (public, password grant, test only) and `riffado-mcp-bot` (service account,
+# secret riffado-mcp-bot-secret).
 #
 # The browser reaches Keycloak at RIFFADO_E2E_KEYCLOAK_URL; the app container
 # reaches it over the compose network. KC_HOSTNAME keeps the issuer and the

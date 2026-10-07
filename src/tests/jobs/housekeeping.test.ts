@@ -8,6 +8,7 @@ const { prunes, posthog } = vi.hoisted(() => ({
         pruneExpiredVerifications: vi.fn(),
         pruneCompletedStripeWebhookEvents: vi.fn(),
         pruneExpiredRateLimitBuckets: vi.fn(),
+        pruneMcpAccessLog: vi.fn(),
         pruneSettledWebhookDeliveries: vi.fn(),
     },
     posthog: { captureServerException: vi.fn() },
@@ -26,12 +27,16 @@ vi.mock("@/db/queries/auth-sessions", () => ({
 vi.mock("@/db/queries/billing", () => ({
     pruneCompletedStripeWebhookEvents: prunes.pruneCompletedStripeWebhookEvents,
 }));
+vi.mock("@/db/queries/mcp-audit", () => ({
+    pruneMcpAccessLog: prunes.pruneMcpAccessLog,
+}));
 vi.mock("@/db/queries/rate-limit", () => ({
     pruneExpiredRateLimitBuckets: prunes.pruneExpiredRateLimitBuckets,
 }));
 vi.mock("@/db/queries/webhook-deliveries", () => ({
     pruneSettledWebhookDeliveries: prunes.pruneSettledWebhookDeliveries,
 }));
+vi.mock("@/lib/env", () => ({ env: { MCP_AUDIT_RETENTION_DAYS: 30 } }));
 vi.mock("@/lib/posthog-server", () => posthog);
 
 import { pruneInBatches, runHousekeeping } from "@/lib/jobs/housekeeping";
@@ -91,7 +96,9 @@ describe("runHousekeeping", () => {
             sessions: 4,
             verifications: 0,
             admin_audit_log: 0,
+            mcp_access_log: 0,
         });
+        expect(prunes.pruneMcpAccessLog).toHaveBeenCalledWith(30, 10);
         expect(posthog.captureServerException).toHaveBeenCalledWith(
             expect.any(Error),
             expect.objectContaining({ table: "async_jobs" }),
