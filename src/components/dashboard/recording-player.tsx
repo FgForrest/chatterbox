@@ -1,13 +1,17 @@
 "use client";
 
 import type * as React from "react";
-import { useEffect, useImperativeHandle, useRef } from "react";
+import { type RefObject, useEffect, useImperativeHandle, useRef } from "react";
 import { RecordingPlayerControls } from "@/components/dashboard/recording-player-controls";
 import { RecordingWaveformStatus } from "@/components/dashboard/recording-player-header";
 import { DownloadAudioButton } from "@/components/recordings/download-audio-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { usePlaybackEngine } from "@/hooks/use-playback-engine";
 import { usePlaybackKeyboard } from "@/hooks/use-playback-keyboard";
+import type {
+    PlaybackState,
+    TranscriptPlayback,
+} from "@/hooks/use-transcript-follow";
 import { useWaveform } from "@/hooks/use-waveform";
 import type { Recording } from "@/types/recording";
 
@@ -32,6 +36,31 @@ export interface RecordingPlayerHandle {
     playFrom: (seconds: number, untilSeconds?: number) => void;
     /** Playback position in seconds, read from the audio element. */
     getCurrentTime: () => number;
+    pause: () => void;
+    /** Called with the position now and whenever it moves or playback starts or stops. */
+    subscribe: (listener: (state: PlaybackState) => void) => () => void;
+}
+
+const POSITION_EVENTS = [
+    "timeupdate",
+    "seeking",
+    "seeked",
+    "play",
+    "pause",
+    "ended",
+    "loadedmetadata",
+] as const;
+
+/** A transcript's view of the player behind `ref`, read when it is used. */
+export function transcriptPlayback(
+    ref: RefObject<RecordingPlayerHandle | null>,
+): TranscriptPlayback {
+    return {
+        play: (ms) => ref.current?.playFrom(ms / 1000),
+        pause: () => ref.current?.pause(),
+        seek: (ms) => ref.current?.seekTo(ms / 1000),
+        subscribe: (listener) => ref.current?.subscribe(listener) ?? (() => {}),
+    };
 }
 
 /**
@@ -93,6 +122,27 @@ export function RecordingPlayer({
                 if (!isPlaying) togglePlayPause();
             },
             getCurrentTime: () => audioRef.current?.currentTime ?? 0,
+            pause: () => {
+                if (isPlaying) togglePlayPause();
+            },
+            subscribe: (listener) => {
+                const audio = audioRef.current;
+                if (!audio) return () => {};
+                const emit = () =>
+                    listener({
+                        ms: audio.currentTime * 1000,
+                        playing: !audio.paused && !audio.ended,
+                    });
+                for (const type of POSITION_EVENTS) {
+                    audio.addEventListener(type, emit);
+                }
+                emit();
+                return () => {
+                    for (const type of POSITION_EVENTS) {
+                        audio.removeEventListener(type, emit);
+                    }
+                };
+            },
         }),
         [seekToTime, togglePlayPause, isPlaying, audioRef],
     );

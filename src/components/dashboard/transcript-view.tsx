@@ -1,8 +1,15 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, Play } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { Fragment, useMemo } from "react";
+import {
+    Fragment,
+    type MouseEvent,
+    type RefObject,
+    useMemo,
+    useRef,
+} from "react";
+import { TranscriptPlayMarker } from "@/components/dashboard/transcript-play-marker";
 import { CorrectedText } from "@/components/learn/corrected-text";
 import {
     type LearnCorrectionMark,
@@ -11,13 +18,22 @@ import {
     turnPieces,
 } from "@/components/learn/learn-marks";
 import { MarkedText } from "@/components/learn/marked-text";
-import { speakerAccent } from "@/components/people/speaker-accents";
+import {
+    type SpeakerAccent,
+    speakerAccent,
+} from "@/components/people/speaker-accents";
+import {
+    type TranscriptPlayback,
+    useTranscriptFollow,
+} from "@/hooks/use-transcript-follow";
+import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { speakerKey } from "@/lib/knowledge/speaker-label-rules";
 import type { SpeakerAttributions } from "@/lib/knowledge/speaker-references";
 import type { OverlayCorrection } from "@/lib/learn/render";
 import {
     formatClock,
     paragraphsOf,
+    sentenceStarts,
     type TranscriptParagraph,
     type TranscriptTopic,
 } from "@/lib/topics/timeline";
@@ -45,6 +61,13 @@ export interface TranscriptViewProps {
     speakerAttributions?: SpeakerAttributions;
     /** Seek audio to a timed turn. Omitted when audio is unavailable. */
     onSeekToTurn?: (startMs: number) => void;
+    /**
+     * The player, for timed sentences to play from and to follow. Omitted
+     * when audio is unavailable.
+     */
+    playback?: TranscriptPlayback;
+    /** The scroll box the transcript sits in: it follows playback, and scrolling it seeks. */
+    scrollRef?: RefObject<HTMLElement | null>;
     /**
      * Topics of this transcript. Each is shown as a heading above the stored
      * turn its start falls in; they need `storedTurns` to be placed.
@@ -77,6 +100,44 @@ interface RenderableTurn {
     label: string;
     text: string;
     startMs?: number;
+}
+
+/** A stretch of a paragraph: a sentence that plays, or the whole text. */
+interface TextChunk {
+    /** Index into the sentence starts; null when sentences do not play. */
+    sentence: number | null;
+    pieces: TurnPiece[];
+}
+
+/**
+ * Sentence times inside a turn are interpolated and can start late; playing
+ * from a little earlier keeps their first word.
+ */
+const SENTENCE_PREROLL_MS = 300;
+
+/** A chunk's text without its trailing space, which stays outside the sentence's wash. */
+function withoutTrailingSpace(pieces: readonly TurnPiece[]): {
+    body: TurnPiece[];
+    trailing: string;
+} {
+    const last = pieces.at(-1);
+    if (!last || last.correction || last.mark) {
+        return { body: [...pieces], trailing: "" };
+    }
+    const text = last.text.trimEnd();
+    const body = pieces.slice(0, -1);
+    if (text) body.push({ text });
+    return { body, trailing: last.text.slice(text.length) };
+}
+
+/** A sentence's background: strong while played, soft while paused on, else only on hover. */
+function sentenceWash(
+    accent: SpeakerAccent,
+    active: boolean,
+    playing: boolean,
+): string {
+    if (!active) return accent.hover;
+    return playing ? accent.strong : accent.soft;
 }
 
 function formatTimestamp(milliseconds: number): string {
@@ -161,6 +222,8 @@ export function TranscriptView({
     storedTurns,
     speakerAttributions = {},
     onSeekToTurn,
+    playback,
+    scrollRef,
     topics,
     highlightedTopic = null,
     highlightedTurnIndex = null,
@@ -212,11 +275,17 @@ export function TranscriptView({
             topicParagraphs: [],
         };
     }, [storedTurns, topics, turns]);
+    // Sentences play once their times can be told: from stored turns with
+    // times, and audio to play.
+    const timed = Boolean(storedTurns?.length) && !isUntimed(storedTurns ?? []);
+    const bySentence = playback !== undefined && timed;
     // Each paragraph's text: corrections applied and review marks in place,
-    // both anchored to the stored turn it is cut from.
-    const pieces = useMemo(() => {
-        const out: TurnPiece[][] = [];
-        if (!turns) return out;
+    // both anchored to the stored turn it is cut from, and cut into the
+    // sentences that play.
+    const { chunks, startsMs } = useMemo(() => {
+        const chunks: TextChunk[][] = [];
+        const startsMs: number[] = [];
+        if (!turns) return { chunks, startsMs };
         const list = storedTurns?.length ? (corrections?.list ?? []) : [];
         const cutsByTurn = new Map<number, number[]>();
         for (const paragraph of paragraphs) {
@@ -226,21 +295,58 @@ export function TranscriptView({
             else cutsByTurn.set(paragraph.turnIndex, [paragraph.charStart]);
         }
         turns.forEach((turn, turnIndex) => {
-            const cuts = cutsByTurn.get(turnIndex) ?? [];
-            out.push(
-                ...piecesByParagraph(
-                    turnPieces(
-                        turn.text,
-                        turnIndex,
-                        list,
-                        marksByTurn.get(turnIndex) ?? [],
-                    ),
-                    cuts,
+            const paragraphCuts = cutsByTurn.get(turnIndex) ?? [];
+            const stored = bySentence ? storedTurns?.[turnIndex] : undefined;
+            const sentences = stored ? sentenceStarts(stored) : [];
+            const msAt = new Map(sentences.map(({ at, ms }) => [at, ms]));
+            const cuts = stored
+                ? [
+                      ...new Set([
+                          ...paragraphCuts,
+                          ...sentences.slice(1).map(({ at }) => at),
+                      ]),
+                  ].sort((a, b) => a - b)
+                : paragraphCuts;
+            const parts = piecesByParagraph(
+                turnPieces(
+                    turn.text,
+                    turnIndex,
+                    list,
+                    marksByTurn.get(turnIndex) ?? [],
                 ),
+                cuts,
             );
+            parts.forEach((part, partIndex) => {
+                const at = partIndex === 0 ? 0 : cuts[partIndex - 1];
+                if (partIndex === 0 || paragraphCuts.includes(at)) {
+                    chunks.push([]);
+                }
+                let sentence: number | null = null;
+                if (stored) {
+                    const estimated = msAt.get(at) ?? stored.startMs;
+                    startsMs.push(
+                        partIndex === 0
+                            ? stored.startMs
+                            : Math.max(
+                                  stored.startMs,
+                                  estimated - SENTENCE_PREROLL_MS,
+                              ),
+                    );
+                    sentence = startsMs.length - 1;
+                }
+                chunks[chunks.length - 1].push({ sentence, pieces: part });
+            });
         });
-        return out;
-    }, [turns, storedTurns, corrections, marksByTurn, paragraphs]);
+        return { chunks, startsMs };
+    }, [turns, storedTurns, corrections, marksByTurn, paragraphs, bySentence]);
+    const rootRef = useRef<HTMLDivElement>(null);
+    const follow = useTranscriptFollow({
+        rootRef,
+        scrollRef,
+        playback: bySentence ? playback : undefined,
+        startsMs,
+        holdScroll: highlightedTopic !== null || highlightedTurnIndex !== null,
+    });
     const topicsByParagraph = new Map<number, number[]>();
     topicParagraphs.forEach((paragraphIndex, topicIndex) => {
         topicsByParagraph.set(paragraphIndex, [
@@ -280,9 +386,61 @@ export function TranscriptView({
         const key = speakerKey(turn.speaker);
         if (!firstTurnOf.has(key)) firstTurnOf.set(key, index);
     });
+    const handleSentenceClick = (event: MouseEvent<HTMLDivElement>) => {
+        const target = event.target;
+        if (!playback || !(target instanceof Element)) return;
+        // Corrections, review marks and links answer their own clicks.
+        if (target.closest("button, a")) return;
+        const sentence = target.closest<HTMLElement>("[data-sentence]");
+        if (!sentence || window.getSelection()?.toString()) return;
+        const index = Number(sentence.dataset.sentence);
+        if (index === follow.active && follow.playing) playback.pause();
+        else if (Number.isFinite(startsMs[index])) {
+            playback.play(startsMs[index]);
+        }
+    };
+    const renderPieces = (pieces: readonly TurnPiece[]) =>
+        pieces.map((piece, pieceIndex) =>
+            piece.mark && learnMarks ? (
+                <MarkedText
+                    // Pieces are fixed by the text, its corrections and marks.
+                    // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                    key={pieceIndex}
+                    text={piece.text}
+                    marks={[
+                        {
+                            ...piece.mark,
+                            charStart: 0,
+                            charEnd: piece.text.length,
+                        },
+                    ]}
+                    decide={learnMarks.decide}
+                />
+            ) : piece.correction ? (
+                <CorrectedText
+                    // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                    key={pieceIndex}
+                    segments={[piece]}
+                    onUndo={
+                        corrections?.canUndo ? corrections.onUndo : undefined
+                    }
+                />
+            ) : (
+                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                <Fragment key={pieceIndex}>{piece.text}</Fragment>
+            ),
+        );
 
     return (
-        <div className="space-y-4">
+        // Sentences are a pointer shortcut; each paragraph's play button is
+        // the keyboard path.
+        // biome-ignore lint/a11y/noStaticElementInteractions: delegated sentence clicks
+        // biome-ignore lint/a11y/useKeyWithClickEvents: see above
+        <div
+            ref={rootRef}
+            className="relative space-y-4"
+            onClick={bySentence ? handleSentenceClick : undefined}
+        >
             {paragraphs.map((paragraph, index) => {
                 const turnIndex = paragraph.turnIndex;
                 const turn = turns[turnIndex];
@@ -304,6 +462,40 @@ export function TranscriptView({
                 const canSeek =
                     onSeekToTurn !== undefined &&
                     Number.isFinite(paragraph.startMs);
+                const chunksHere = chunks[index] ?? [];
+                const firstSentence = chunksHere[0]?.sentence ?? null;
+                const gutter = named || bySentence;
+                const time = formatTimestamp(paragraph.startMs);
+                const playButton =
+                    playback && firstSentence !== null ? (
+                        <button
+                            type="button"
+                            className={`group/play absolute top-0 left-0 grid size-5 place-items-center rounded-full ${style.text} ${style.hover} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                            onClick={() =>
+                                playback.play(startsMs[firstSentence])
+                            }
+                            aria-label={
+                                named
+                                    ? i18n("Play from {time}, {speaker}", {
+                                          time,
+                                          speaker: displayName,
+                                      })
+                                    : i18n("Play from {time}", { time })
+                            }
+                        >
+                            {named && (
+                                <span
+                                    className={`size-1.5 rounded-full transition-opacity group-hover/para:opacity-0 group-focus-visible/play:opacity-0 ${style.dot}`}
+                                />
+                            )}
+                            <Play className="absolute size-3 fill-current opacity-0 transition-opacity group-hover/para:opacity-100 group-focus-visible/play:opacity-100" />
+                        </button>
+                    ) : null;
+                const speakerMark = playButton ?? (
+                    <span
+                        className={`absolute top-[7px] left-[7px] size-1.5 rounded-full ${style.dot}`}
+                    />
+                );
                 return (
                     <Fragment
                         key={`${turn.speaker}-${turnIndex}-${paragraph.charStart}`}
@@ -350,12 +542,14 @@ export function TranscriptView({
                         })}
                         <div
                             data-turn-index={opensTurn ? turnIndex : undefined}
-                            className={`space-y-1 rounded-md transition-colors duration-700 ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
+                            data-accent={Math.max(0, position)}
+                            className={`group/para relative space-y-1 rounded-md transition-colors duration-700 ${gutter ? "pl-6" : ""} ${firstTopicParagraph !== null && index >= firstTopicParagraph ? "ml-10" : ""} ${highlightedParagraph === index || highlightedTurnIndex === turnIndex ? "bg-primary/10" : ""}`}
                         >
+                            {!named && canSeek && playButton}
                             {!named && canSeek && (
                                 <button
                                     type="button"
-                                    className="rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="inline-flex min-h-5 items-center rounded-sm font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                     onClick={() =>
                                         onSeekToTurn(paragraph.startMs)
                                     }
@@ -369,10 +563,8 @@ export function TranscriptView({
                                 </button>
                             )}
                             {named && opensTurn && (
-                                <div className="relative flex items-center gap-2">
-                                    <span
-                                        className={`size-1.5 rounded-full shrink-0 ${style.dot}`}
-                                    />
+                                <div className="flex min-h-5 items-center gap-2">
+                                    {speakerMark}
                                     {canSeek ? (
                                         <button
                                             type="button"
@@ -405,6 +597,11 @@ export function TranscriptView({
                                             className={`text-xs font-medium ${style.text} ${nameStyle}`}
                                         >
                                             {displayName}
+                                        </span>
+                                    )}
+                                    {timed && (
+                                        <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                                            {time}
                                         </span>
                                     )}
                                     {proposed &&
@@ -446,50 +643,57 @@ export function TranscriptView({
                                         )}
                                 </div>
                             )}
-                            <p
-                                className={`text-sm whitespace-pre-wrap leading-relaxed ${named ? "pl-3.5" : ""}`}
-                            >
-                                {pieces[index]?.map((piece, pieceIndex) =>
-                                    piece.mark && learnMarks ? (
-                                        <MarkedText
-                                            // Pieces are fixed by the text, its corrections and marks.
-                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                            key={pieceIndex}
-                                            text={piece.text}
-                                            marks={[
-                                                {
-                                                    ...piece.mark,
-                                                    charStart: 0,
-                                                    charEnd: piece.text.length,
-                                                },
-                                            ]}
-                                            decide={learnMarks.decide}
-                                        />
-                                    ) : piece.correction ? (
-                                        <CorrectedText
-                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                            key={pieceIndex}
-                                            segments={[piece]}
-                                            onUndo={
-                                                corrections?.canUndo
-                                                    ? corrections.onUndo
-                                                    : undefined
-                                            }
-                                        />
-                                    ) : (
-                                        <Fragment
-                                            // biome-ignore lint/suspicious/noArrayIndexKey: stable order
-                                            key={pieceIndex}
-                                        >
-                                            {piece.text}
+                            <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                                {chunksHere.map((chunk, chunkIndex) => {
+                                    if (chunk.sentence === null) {
+                                        return (
+                                            <Fragment
+                                                // Chunks are fixed by the text and its sentences.
+                                                // biome-ignore lint/suspicious/noArrayIndexKey: stable order
+                                                key={chunkIndex}
+                                            >
+                                                {renderPieces(chunk.pieces)}
+                                            </Fragment>
+                                        );
+                                    }
+                                    const { body, trailing } =
+                                        withoutTrailingSpace(chunk.pieces);
+                                    if (body.length === 0) {
+                                        return (
+                                            <Fragment key={chunk.sentence}>
+                                                {trailing}
+                                            </Fragment>
+                                        );
+                                    }
+                                    const wash = sentenceWash(
+                                        style,
+                                        follow.active === chunk.sentence,
+                                        follow.playing,
+                                    );
+                                    return (
+                                        <Fragment key={chunk.sentence}>
+                                            <span
+                                                data-sentence={chunk.sentence}
+                                                className={`cursor-pointer rounded-[3px] box-decoration-clone transition-colors ${wash}`}
+                                            >
+                                                {renderPieces(body)}
+                                            </span>
+                                            {trailing}
                                         </Fragment>
-                                    ),
-                                )}
+                                    );
+                                })}
                             </p>
                         </div>
                     </Fragment>
                 );
             })}
+            {bySentence && (
+                <TranscriptPlayMarker
+                    rootRef={rootRef}
+                    active={follow.active}
+                    playing={follow.playing}
+                />
+            )}
         </div>
     );
 }

@@ -60,6 +60,25 @@ function sentencesOf(raw: string): { text: string; at: number }[] {
 }
 
 /**
+ * Where each of a turn's sentences starts, in its text and in the audio.
+ * The first starts with the turn; the others are interpolated by character
+ * position, so they can be a few seconds off.
+ */
+export function sentenceStarts(
+    turn: Pick<TranscriptTurn, "startMs" | "endMs" | "text">,
+): { at: number; ms: number }[] {
+    const length = turn.text.length;
+    const duration = turn.endMs - turn.startMs;
+    return sentencesOf(turn.text).map(({ at }, index) => ({
+        at,
+        ms:
+            index === 0 || length === 0
+                ? turn.startMs
+                : turn.startMs + Math.round((at / length) * duration),
+    }));
+}
+
+/**
  * Time marks for every turn: one at its start, and for a long turn more at
  * sentence boundaries inside it.
  *
@@ -288,10 +307,7 @@ export function paragraphsOf(
         }
 
         const length = turn.text.length;
-        const sentences = sentencesOf(turn.text).map(({ at }) => ({
-            at,
-            ms: turn.startMs + Math.round((at / length) * duration),
-        }));
+        const sentences = sentenceStarts(turn);
         const topicAt = new Map<number, number[]>();
         for (const { ms, topicIndex } of headed) {
             const at = ((ms - turn.startMs) / duration) * length;
