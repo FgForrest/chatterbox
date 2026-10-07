@@ -11,6 +11,8 @@ const { dbMock, archivedTasks } = vi.hoisted(() => ({
 vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/lib/tasks/archive", () => ({
     tasksForArchive: vi.fn(async () => archivedTasks),
+    taskUpdatesForArchive: vi.fn(async () => new Map()),
+    archivedAssigneeIds: vi.fn(() => []),
 }));
 vi.mock("@/db/schema", () => ({
     users: { id: "users.id", role: "users.role" },

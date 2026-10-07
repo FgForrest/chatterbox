@@ -46,7 +46,11 @@ import {
 } from "@/lib/export/archive-scope";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { StorageProvider } from "@/lib/storage/types";
-import { tasksForArchive } from "@/lib/tasks/archive";
+import {
+    archivedAssigneeIds,
+    tasksForArchive,
+    taskUpdatesForArchive,
+} from "@/lib/tasks/archive";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
 
@@ -76,6 +80,7 @@ interface ManifestRecording {
     summaries: { included: boolean; path: string | null; count: number };
     aiUsage?: { included: boolean; path: string | null; count: number };
     tasks?: { included: boolean; path: string | null; count: number };
+    taskUpdates?: { included: boolean; path: string | null; count: number };
 }
 
 // Which transcript `transcript.txt` renders when a recording has more than
@@ -240,7 +245,16 @@ export async function buildAndUploadExportArchive(input: {
         enhancementMap.set(enhancement.recordingId, group);
     }
 
-    const taskMap = await tasksForArchive(scope, recordingIds);
+    // Proposals and the follow-ups heard come along: a review half done is
+    // part of the work, as Learn's open items are.
+    const taskMap = await tasksForArchive(scope, recordingIds, {
+        proposals: true,
+    });
+    const taskUpdateMap = await taskUpdatesForArchive(
+        scope,
+        recordingIds,
+        new Set([...taskMap.values()].flat().map((task) => task.id)),
+    );
 
     const archive = new ZipArchive({ zlib: { level: 6 } });
     // Count bytes as they flow through rather than re-reading the
@@ -591,6 +605,19 @@ export async function buildAndUploadExportArchive(input: {
                 count: recordingTaskList.length,
             };
         }
+        const recordingTaskUpdates = taskUpdateMap.get(recording.id) ?? [];
+        if (recordingTaskUpdates.length > 0) {
+            const updatesPath = `${folder}/task-updates.json`;
+            archive.append(
+                Buffer.from(JSON.stringify(recordingTaskUpdates, null, 2)),
+                { name: updatesPath },
+            );
+            entry.taskUpdates = {
+                included: true,
+                path: updatesPath,
+                count: recordingTaskUpdates.length,
+            };
+        }
 
         manifest.recordings.push(entry);
     }
@@ -644,7 +671,10 @@ export async function buildAndUploadExportArchive(input: {
     // in the archive. Export parity is the proof a user can leave, so a
     // backup that restores recordings but loses who was speaking in them is
     // not a backup of this feature at all.
-    const knowledge = await collectKnowledgeBase(scope);
+    const knowledge = await collectKnowledgeBase(
+        scope,
+        archivedAssigneeIds(taskMap.values()),
+    );
     if (
         knowledge.people.length > 0 ||
         knowledge.attributions.length > 0 ||
@@ -972,6 +1002,8 @@ function exportedSpeakerRows(
 // it would pin the archive to one instance's secret.
 async function collectKnowledgeBase(
     scope: ArchiveScope,
+    /** People the archive names elsewhere: its tasks' assignees. */
+    referencedPeople: readonly string[] = [],
 ): Promise<ArchivedKnowledgeBase> {
     const userId = scopeUserId(scope);
     const personColumns = {
@@ -1034,17 +1066,21 @@ async function collectKnowledgeBase(
         ]);
 
     // Organization people the archive's rows name: a restore must still
-    // know who spoke. A person carries those the person created in full and
-    // only the name of a colleague's; both with this person's own notes.
-    // Anything else the rows point at stays behind.
+    // know who spoke and whose a task is. A person carries those the person
+    // created in full and only the name of a colleague's; both with this
+    // person's own notes. Anything else the rows point at stays behind.
     const own = new Set(peopleRows.map((row) => row.id));
     const sharedIds = [
         ...new Set(
-            [...attributionRows, ...rejectionRows, ...correctionRows].flatMap(
-                (row) =>
-                    row.personId && !own.has(row.personId)
-                        ? [row.personId]
-                        : [],
+            [
+                ...[
+                    ...attributionRows,
+                    ...rejectionRows,
+                    ...correctionRows,
+                ].map((row) => row.personId),
+                ...referencedPeople,
+            ].flatMap((personId) =>
+                personId && !own.has(personId) ? [personId] : [],
             ),
         ),
     ];

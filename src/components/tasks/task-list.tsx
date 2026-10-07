@@ -1,18 +1,17 @@
 "use client";
 
 import { ArrowDownWideNarrow, ListChecks, Loader2 } from "lucide-react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useExtracted, useFormatter } from "next-intl";
+import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AssigneePicker } from "@/components/tasks/assignee-picker";
 import {
     announceTasksChanged,
     changeTask,
     TaskRequestError,
 } from "@/components/tasks/task-api";
-import { DueDateField, localToday } from "@/components/tasks/task-fields";
+import { localToday } from "@/components/tasks/task-fields";
+import { TaskRow } from "@/components/tasks/task-row";
 import {
     Select,
     SelectContent,
@@ -21,7 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useOrgEvents } from "@/hooks/use-org-events";
-import type { TaskChange, TaskListItem } from "@/lib/tasks/tasks";
+import type { TaskChange, TaskListItem, TaskView } from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 
@@ -57,7 +56,6 @@ function flattenFolders(
  */
 export function TaskList({ organization }: { organization: boolean }) {
     const i18n = useExtracted();
-    const format = useFormatter();
     const router = useRouter();
     const pathname = usePathname();
     const params = useSearchParams();
@@ -141,7 +139,7 @@ export function TaskList({ organization }: { organization: boolean }) {
     const update = (
         task: TaskListItem,
         change: Omit<TaskChange, "version">,
-        optimistic: Partial<TaskListItem>,
+        optimistic: Partial<TaskView>,
     ) => {
         setTasks(
             (current) =>
@@ -359,107 +357,18 @@ export function TaskList({ organization }: { organization: boolean }) {
                 </p>
             ) : (
                 <ul className="divide-y rounded-lg border">
-                    {tasks.map((task) => {
-                        const done = task.status === "done";
-                        const dropped = task.status === "dropped";
-                        const href = `/dashboard?recording=${encodeURIComponent(task.recording.id)}${task.recording.view === "org" ? "&view=org" : ""}`;
-                        return (
-                            <li
-                                key={task.id}
-                                className="flex items-start gap-3 p-3 text-sm"
-                            >
-                                <input
-                                    type="checkbox"
-                                    className="mt-1 size-4 shrink-0 accent-primary"
-                                    checked={done}
-                                    disabled={!task.canClose || dropped}
-                                    onChange={(event) => {
-                                        const status = event.target.checked
-                                            ? "done"
-                                            : "open";
-                                        update(task, { status }, { status });
-                                    }}
-                                    aria-label={i18n("Done")}
-                                />
-                                <div className="min-w-0 flex-1 space-y-1.5">
-                                    <p
-                                        className={cn(
-                                            (done || dropped) &&
-                                                "text-muted-foreground line-through",
-                                        )}
-                                    >
-                                        {task.text}
-                                    </p>
-                                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                                        {(tab === "tracked" ||
-                                            task.canEdit) && (
-                                            <AssigneePicker
-                                                value={task.assignee}
-                                                hint={task.assigneeHint}
-                                                speakers={[]}
-                                                organizationOnly={
-                                                    task.recording.view ===
-                                                    "org"
-                                                }
-                                                disabled={
-                                                    !task.canEdit || dropped
-                                                }
-                                                onChange={(person) =>
-                                                    update(
-                                                        task,
-                                                        {
-                                                            assigneePersonId:
-                                                                person?.personId ??
-                                                                null,
-                                                        },
-                                                        {
-                                                            assignee: person,
-                                                            assigneeHint: null,
-                                                        },
-                                                    )
-                                                }
-                                            />
-                                        )}
-                                        <DueDateField
-                                            value={task.dueDate}
-                                            overdue={task.status === "open"}
-                                            disabled={!task.canEdit || dropped}
-                                            onChange={(dueDate) =>
-                                                update(
-                                                    task,
-                                                    { dueDate },
-                                                    { dueDate },
-                                                )
-                                            }
-                                        />
-                                        <Link
-                                            href={href}
-                                            className="truncate hover:text-primary hover:underline"
-                                        >
-                                            {task.recording.title}
-                                        </Link>
-                                        <span>
-                                            {format.dateTime(
-                                                new Date(
-                                                    task.recording.startTime,
-                                                ),
-                                                {
-                                                    day: "numeric",
-                                                    month: "short",
-                                                    year: "numeric",
-                                                },
-                                            )}
-                                        </span>
-                                        {dropped && (
-                                            <span className="rounded bg-muted px-1.5">
-                                                {i18n("Dropped")}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            </li>
-                        );
-                    })}
+                    {tasks.map((task) => (
+                        <TaskRow
+                            key={task.id}
+                            task={task}
+                            recording={task.recording}
+                            showAssignee={tab === "tracked" || task.canEdit}
+                            organizationOnly={task.recording.view === "org"}
+                            onChange={(change, optimistic) =>
+                                update(task, change, optimistic)
+                            }
+                        />
+                    ))}
                 </ul>
             )}
         </div>

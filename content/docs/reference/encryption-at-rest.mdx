@@ -20,6 +20,12 @@ This is **server-held-key envelope encryption.** It is not zero-knowledge.
 | `ai_enhancements.action_items` | jsonb | Same envelope shape |
 | `user_settings.summary_prompt` | jsonb | Custom prompt configs may carry user context |
 | `user_settings.title_generation_prompt` | jsonb | Same |
+| `recording_tasks.text`, `.assignee_hint`, `.due_phrase`, `.quote` | text | A task, the name heard for whoever does it, the deadline and the words it was said in |
+| `task_update_proposals.due_phrase`, `.quote` | text | A follow-up heard on a later recording |
+
+A task proposal you rejected is kept only as an HMAC of its wording
+(`recording_task_rejections.fingerprint_hmac`), so the same item is not
+proposed again; the wording itself is not stored.
 
 Pre-existing encryption (unchanged):
 
