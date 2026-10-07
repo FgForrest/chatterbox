@@ -6,6 +6,7 @@ import { useRef } from "react";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
+    transcriptPlayback,
 } from "@/components/dashboard/recording-player";
 import { RecordingPlayerHeader } from "@/components/dashboard/recording-player-header";
 import {
@@ -245,6 +246,11 @@ export function WorkstationDetailPane({
                                                   ? undefined
                                                   : endMs / 1000,
                                           )
+                            }
+                            playback={
+                                currentRecording.audioReaped
+                                    ? undefined
+                                    : transcriptPlayback(playerRef)
                             }
                             getPlaybackMs={() =>
                                 (playerRef.current?.getCurrentTime() ?? 0) *

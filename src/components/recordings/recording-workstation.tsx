@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
+    transcriptPlayback,
 } from "@/components/dashboard/recording-player";
 import { RecordingPlayerHeader } from "@/components/dashboard/recording-player-header";
 import {
@@ -275,6 +276,11 @@ export function RecordingWorkstation({
                                                   ? undefined
                                                   : endMs / 1000,
                                           )
+                            }
+                            playback={
+                                recording.audioReaped
+                                    ? undefined
+                                    : transcriptPlayback(playerRef)
                             }
                             getPlaybackMs={() =>
                                 (playerRef.current?.getCurrentTime() ?? 0) *

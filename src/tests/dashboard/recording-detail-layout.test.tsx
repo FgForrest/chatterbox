@@ -6,6 +6,7 @@ import type { Recording } from "@/types/recording";
 
 vi.mock("@/components/dashboard/recording-player", () => ({
     RecordingPlayer: () => <div data-testid="recording-player" />,
+    transcriptPlayback: () => undefined,
 }));
 
 vi.mock("@/components/dashboard/recording-player-header", () => ({

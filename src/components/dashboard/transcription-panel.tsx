@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
 import { useSummaryPresetCopy } from "@/hooks/use-preset-copy";
+import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import {
     type SummarySource,
@@ -115,6 +116,8 @@ interface TranscriptionPanelProps {
     onPlayFromTurn?: (startMs: number, endMs?: number) => void;
     /** Playback position in milliseconds, to mark the topic being played. */
     getPlaybackMs?: () => number;
+    /** The player, for the transcript's sentences to play from and follow. */
+    playback?: TranscriptPlayback;
     /**
      * The recording is not the viewer's to change: while it is shared only
      * the organization account changes it, on the Organization view.
@@ -235,6 +238,7 @@ export function TranscriptionPanel({
     onSeekToTurn,
     onPlayFromTurn,
     getPlaybackMs,
+    playback,
     readOnly = false,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
@@ -925,6 +929,8 @@ export function TranscriptionPanel({
                                                 speakerAttributions
                                             }
                                             onSeekToTurn={onSeekToTurn}
+                                            playback={playback}
+                                            scrollRef={transcriptSectionRef}
                                             topics={topics}
                                             highlightedTopic={
                                                 topicJump?.index ?? null
