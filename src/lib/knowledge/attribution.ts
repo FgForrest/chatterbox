@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     people,
@@ -17,6 +17,7 @@ import {
 import {
     lockOrgPeopleShared,
     orgOwnedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import {
     type SpeakerVersion,
@@ -106,7 +107,7 @@ export interface NameScopeOptions {
 function namePeopleCondition(ownerId: string, options: NameScopeOptions) {
     return options.orgPeopleOnly
         ? orgOwnedCondition(people.userId)
-        : or(eq(people.userId, ownerId), orgOwnedCondition(people.userId));
+        : visibleOwnerCondition(people.userId, ownerId);
 }
 
 interface CopyMatchingSpeakerAttributionsArgs {

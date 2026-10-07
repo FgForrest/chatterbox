@@ -41,8 +41,8 @@ import {
     lockOrgPeople,
     lockOrgPeopleShared,
     lockRecordingsNaming,
-    orgOwnedCondition,
     recordingSharedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { speakerLabelsForTranscript } from "@/lib/knowledge/speaker-label-rules";
@@ -131,8 +131,10 @@ export async function findUsableRelationInTx(
                     eq(knowledgeRelationTypes.status, "active"),
                     or(
                         isNull(knowledgeRelationTypes.userId),
-                        orgOwnedCondition(knowledgeRelationTypes.userId),
-                        eq(knowledgeRelationTypes.userId, scopeUserId),
+                        visibleOwnerCondition(
+                            knowledgeRelationTypes.userId,
+                            scopeUserId,
+                        ),
                     ),
                 ),
             )
@@ -694,10 +696,7 @@ export async function listFacts(
             and(
                 about,
                 isNull(knowledgeFacts.replacedByFactId),
-                or(
-                    eq(knowledgeFacts.userId, viewerUserId),
-                    orgOwnedCondition(knowledgeFacts.userId),
-                ),
+                visibleOwnerCondition(knowledgeFacts.userId, viewerUserId),
             ),
         )
         .orderBy(desc(knowledgeFacts.updatedAt));

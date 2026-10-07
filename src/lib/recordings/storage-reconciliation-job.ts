@@ -1,7 +1,7 @@
-import { isNull } from "drizzle-orm";
+import { and, eq, exists, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { type EnqueueJobResult, enqueueJob } from "@/db/queries/async-jobs";
-import { recordings } from "@/db/schema";
+import { recordings, users } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
 import { captureServerException } from "@/lib/posthog-server";
@@ -67,9 +67,21 @@ export async function enqueueStorageReconciliationScan(
 /** Seed one durable, user-scoped scan per owner after every application boot. */
 export async function seedStorageReconciliationJobs(): Promise<number> {
     const owners = await db
-        .selectDistinct({ userId: recordings.userId })
-        .from(recordings)
-        .where(isNull(recordings.deletedAt));
+        .select({ userId: users.id })
+        .from(users)
+        .where(
+            exists(
+                db
+                    .select({ id: recordings.id })
+                    .from(recordings)
+                    .where(
+                        and(
+                            eq(recordings.userId, users.id),
+                            isNull(recordings.deletedAt),
+                        ),
+                    ),
+            ),
+        );
     let queued = 0;
     for (const { userId } of owners) {
         const result = await enqueueStorageReconciliationScan(userId);

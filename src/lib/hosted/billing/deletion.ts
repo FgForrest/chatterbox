@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     claimUsersDueForDeletion,
@@ -23,7 +23,8 @@ export interface DeletionResult {
 }
 
 /**
- * Delete a single user's stored audio objects, then the user row.
+ * Delete a single user whose scheduled deletion is due: their stored audio
+ * objects, then the user row.
  *
  * Storage cleanup is best-effort: a flaky storage call for one object
  * does not block the user-row delete. The intent is that the user can
@@ -31,16 +32,26 @@ export interface DeletionResult {
  * later if needed. The DB row deletion cascades through every FK-bound
  * dependent table (recordings, transcriptions, plaud connections,
  * etc.) so encrypted secrets at rest are removed in the same statement.
+ *
+ * Nothing is deleted once the deletion is no longer due (the user
+ * reactivated), and only the call that actually deletes the row sends the
+ * account-deleted email, so two workers claiming the same user send one.
  */
 export async function deleteUserAccount(userId: string): Promise<{
+    deleted: boolean;
     storageErrors: number;
 }> {
     const [emailRow] = await db
-        .select({ email: users.email, uiLocale: users.uiLocale })
+        .select({
+            email: users.email,
+            uiLocale: users.uiLocale,
+            due: sql<boolean>`${users.accountDeletionScheduledAt} <= now()`,
+        })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
-    const capturedEmail = emailRow?.email ?? null;
+    if (!emailRow?.due) return { deleted: false, storageErrors: 0 };
+    const capturedEmail = emailRow.email ?? null;
 
     const paths = await listRecordingStoragePaths(userId);
     const storage = createStorageProvider();
@@ -58,7 +69,9 @@ export async function deleteUserAccount(userId: string): Promise<{
         }
     }
 
-    await deleteUser(userId);
+    if (!(await deleteUser(userId, { onlyIfDeletionDue: true }))) {
+        return { deleted: false, storageErrors };
+    }
 
     if (capturedEmail) {
         const base = env.APP_URL?.replace(/\/$/, "");
@@ -76,7 +89,7 @@ export async function deleteUserAccount(userId: string): Promise<{
         }
     }
 
-    return { storageErrors };
+    return { deleted: true, storageErrors };
 }
 
 /**
@@ -98,6 +111,7 @@ export async function processDueAccountDeletions(options?: {
     for (const id of ids) {
         try {
             const result = await deleteUserAccount(id);
+            if (!result.deleted) continue;
             deleted += 1;
             if (result.storageErrors > 0) storagePartial += 1;
         } catch (error) {

@@ -777,16 +777,26 @@ export async function pricingSnapshot() {
     };
 }
 
-/** Prune read-audit rows older than `olderThanDays`. Mutation log is never pruned. */
-export async function pruneAdminAuditLog(olderThanDays = 90): Promise<number> {
+/**
+ * Prune up to `limit` read-audit rows older than `olderThanDays`, skipping
+ * rows another process is already deleting. Mutation log is never pruned.
+ */
+export async function pruneAdminAuditLog(
+    limit: number,
+    olderThanDays = 90,
+): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanDays * DAY_MS).toISOString();
-    const rows = await db.execute<{ n: number }>(sql`
-        with deleted as (
-            delete from ${adminAuditLog}
-            where ${adminAuditLog.createdAt} < ${cutoff}::timestamp
-            returning 1
+    const rows = await db.execute<{ id: string }>(sql`
+        delete from ${adminAuditLog}
+        where id in (
+            select id
+            from ${adminAuditLog}
+            where created_at < ${cutoff}::timestamp
+            order by created_at asc
+            limit ${limit}
+            for update skip locked
         )
-        select count(*)::int as n from deleted
+        returning id
     `);
-    return Number(rows[0]?.n ?? 0);
+    return rows.length;
 }

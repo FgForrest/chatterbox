@@ -4,12 +4,12 @@ const mocks = vi.hoisted(() => ({
     enqueueJob: vi.fn(),
     nudge: vi.fn(),
     owners: [] as { userId: string }[],
-    selectDistinct: vi.fn(),
+    select: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
     db: {
-        selectDistinct: mocks.selectDistinct,
+        select: mocks.select,
     },
 }));
 vi.mock("@/db/queries/async-jobs", () => ({
@@ -33,7 +33,7 @@ describe("storage reconciliation jobs", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         mocks.owners = [];
-        mocks.selectDistinct.mockReturnValue({
+        mocks.select.mockReturnValue({
             from: vi.fn().mockReturnValue({
                 where: vi.fn().mockImplementation(() => mocks.owners),
             }),

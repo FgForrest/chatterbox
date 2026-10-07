@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -17,7 +17,11 @@ type TranscriptionRow = typeof transcriptions.$inferSelect;
 type AiEnhancementRow = typeof aiEnhancements.$inferSelect;
 
 export type RecordingCursor = {
-    updatedAt: Date;
+    /**
+     * The row's `updated_at` as an ISO timestamp in UTC, to the microsecond
+     * (`recordingCursorUpdatedAt`); cursors issued before carry milliseconds.
+     */
+    updatedAt: string;
     id: string;
 };
 
@@ -122,10 +126,20 @@ function stringArrayOrNull(value: unknown): string[] | null {
     return strings.length > 0 ? strings : [];
 }
 
+const CURSOR_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+/**
+ * SQL: `recordings.updated_at` at full precision, in the form
+ * `RecordingCursor.updatedAt` carries.
+ */
+export function recordingCursorUpdatedAt(): SQL<string> {
+    return sql<string>`to_char(${recordings.updatedAt}, 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+}
+
 export function encodeRecordingCursor(cursor: RecordingCursor): string {
     return Buffer.from(
         JSON.stringify({
-            updatedAt: toIso(cursor.updatedAt),
+            updatedAt: cursor.updatedAt,
             id: cursor.id,
         }),
     ).toString("base64url");
@@ -146,8 +160,15 @@ export function decodeRecordingCursor(cursor: string): RecordingCursor | null {
             return null;
         }
 
-        const updatedAt = new Date(payload.updatedAt);
-        if (Number.isNaN(updatedAt.getTime()) || !payload.id) return null;
+        const updatedAt = payload.updatedAt;
+        if (!CURSOR_TIMESTAMP.test(updatedAt) || !payload.id) return null;
+        const parsed = new Date(updatedAt);
+        if (
+            Number.isNaN(parsed.getTime()) ||
+            parsed.toISOString().slice(0, 19) !== updatedAt.slice(0, 19)
+        ) {
+            return null;
+        }
 
         return { updatedAt, id: payload.id };
     } catch {

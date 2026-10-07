@@ -34,6 +34,7 @@ import {
     lockOrgPeople,
     lockRecordingsNaming,
     orgOwnedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
@@ -93,10 +94,7 @@ const entityColumns = {
 
 /** SQL predicate: an entity `userId` may see -- their own, or the Organization's. */
 export function entitiesVisibleTo(userId: string) {
-    return or(
-        eq(knowledgeEntities.userId, userId),
-        orgOwnedCondition(knowledgeEntities.userId),
-    );
+    return visibleOwnerCondition(knowledgeEntities.userId, userId);
 }
 
 function entityNotFound(): AppError {
@@ -255,8 +253,10 @@ async function assertTypeUsable(
                 eq(knowledgeEntityTypes.status, "active"),
                 or(
                     isNull(knowledgeEntityTypes.userId),
-                    orgOwnedCondition(knowledgeEntityTypes.userId),
-                    eq(knowledgeEntityTypes.userId, ownerUserId),
+                    visibleOwnerCondition(
+                        knowledgeEntityTypes.userId,
+                        ownerUserId,
+                    ),
                 ),
             ),
         )
@@ -562,8 +562,10 @@ async function factNotFittingInTx(
                     eq(knowledgeRelationTypes.key, fact.relationKey),
                     or(
                         isNull(knowledgeRelationTypes.userId),
-                        orgOwnedCondition(knowledgeRelationTypes.userId),
-                        eq(knowledgeRelationTypes.userId, fact.userId),
+                        visibleOwnerCondition(
+                            knowledgeRelationTypes.userId,
+                            fact.userId,
+                        ),
                     ),
                 ),
             )
@@ -944,8 +946,10 @@ export async function planEntityPromotionInTx(
                 eq(knowledgeEntityTypes.key, row.typeKey),
                 or(
                     isNull(knowledgeEntityTypes.userId),
-                    orgOwnedCondition(knowledgeEntityTypes.userId),
-                    eq(knowledgeEntityTypes.userId, row.userId),
+                    visibleOwnerCondition(
+                        knowledgeEntityTypes.userId,
+                        row.userId,
+                    ),
                 ),
             ),
         )

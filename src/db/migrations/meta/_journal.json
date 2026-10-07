@@ -652,6 +652,13 @@
       "when": 1791367597565,
       "tag": "0092_known_champions",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791388442145,
+      "tag": "0093_rare_warhawk",
+      "breakpoints": true
     }
   ]
 }

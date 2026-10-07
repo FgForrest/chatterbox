@@ -432,6 +432,7 @@ export async function selectStaleStorageKeys(
     const rows = await db.execute<{ id: string; key: string }>(sql`
         select j.id, elem as key
         from ${exportJobs} j, jsonb_array_elements_text(j.stale_storage_keys) elem
+        where j.stale_storage_keys <> '[]'::jsonb
         order by j.created_at asc, j.id asc
         limit ${limit}
     `);

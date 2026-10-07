@@ -22,7 +22,6 @@ import {
     isNull,
     ne,
     notExists,
-    notInArray,
     or,
     sql,
 } from "drizzle-orm";
@@ -366,34 +365,25 @@ export async function embedScope(
     let removed = 0;
     await db.transaction(async (tx) => {
         // What no longer renders (gone, replaced, its description cleared).
-        const current = rendered.map((item) => item.entityId ?? item.factId);
+        const current = sql.param(
+            rendered.flatMap((item) => {
+                const id = item.entityId ?? item.factId;
+                return id ? [id] : [];
+            }),
+        );
         const gone = await tx
             .delete(knowledgeVectors)
             .where(
                 and(
                     eq(knowledgeVectors.userId, scope),
-                    current.length > 0
-                        ? and(
-                              or(
-                                  isNull(knowledgeVectors.entityId),
-                                  notInArray(
-                                      knowledgeVectors.entityId,
-                                      current.filter((id): id is string =>
-                                          Boolean(id),
-                                      ),
-                                  ),
-                              ),
-                              or(
-                                  isNull(knowledgeVectors.factId),
-                                  notInArray(
-                                      knowledgeVectors.factId,
-                                      current.filter((id): id is string =>
-                                          Boolean(id),
-                                      ),
-                                  ),
-                              ),
-                          )
-                        : undefined,
+                    or(
+                        isNull(knowledgeVectors.entityId),
+                        sql`${knowledgeVectors.entityId} <> all(${current}::text[])`,
+                    ),
+                    or(
+                        isNull(knowledgeVectors.factId),
+                        sql`${knowledgeVectors.factId} <> all(${current}::text[])`,
+                    ),
                     eq(knowledgeVectors.vectorGeneration, generation),
                 ),
             )
