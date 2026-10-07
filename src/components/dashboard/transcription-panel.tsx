@@ -29,6 +29,8 @@ import {
 } from "@/components/people/speaker-tags";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
+import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
+import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -678,6 +680,13 @@ export function TranscriptionPanel({
         }
         wasSummarizing.current = isSummarizing;
     }, [isSummarizing]);
+    const taskState = useRecordingTasks(
+        recording.id,
+        `${summarySource}:${summariesMade}`,
+    );
+    const playTask = onPlayFromTurn
+        ? (startMs: number) => onPlayFromTurn(startMs)
+        : undefined;
     const taskSpeakers = useMemo<SpeakerChoice[]>(() => {
         const seen = new Map<string, SpeakerChoice>();
         for (const attribution of Object.values(summarySpeakerAttributions)) {
@@ -1152,23 +1161,31 @@ export function TranscriptionPanel({
                             </div>
                         ) : summaryData?.summary ? (
                             <div className="space-y-4">
-                                <button
-                                    type="button"
-                                    aria-expanded={summaryExpanded}
-                                    onClick={() =>
-                                        setSummaryExpanded(!summaryExpanded)
-                                    }
-                                    className="flex items-center gap-1 text-sm font-medium hover:text-primary transition-colors"
-                                >
-                                    {summaryExpanded ? (
-                                        <ChevronUp className="size-4" />
-                                    ) : (
-                                        <ChevronDown className="size-4" />
-                                    )}
-                                    {summaryExpanded
-                                        ? i18n("Collapse summary")
-                                        : i18n("Expand summary")}
-                                </button>
+                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                                    <button
+                                        type="button"
+                                        aria-expanded={summaryExpanded}
+                                        onClick={() =>
+                                            setSummaryExpanded(!summaryExpanded)
+                                        }
+                                        className="flex items-center gap-1 text-sm font-medium hover:text-primary transition-colors"
+                                    >
+                                        {summaryExpanded ? (
+                                            <ChevronUp className="size-4" />
+                                        ) : (
+                                            <ChevronDown className="size-4" />
+                                        )}
+                                        {summaryExpanded
+                                            ? i18n("Collapse summary")
+                                            : i18n("Expand summary")}
+                                    </button>
+                                    <TaskReviewLink
+                                        state={taskState}
+                                        speakers={taskSpeakers}
+                                        organizationOnly={orgView}
+                                        onPlay={playTask}
+                                    />
+                                </div>
 
                                 {summaryExpanded && (
                                     <section
@@ -1294,16 +1311,10 @@ export function TranscriptionPanel({
                                 {/* Tasks, or the summary's own action items: outside the
                                     scrolled summary, and shown while it is collapsed */}
                                 <RecordingTasks
-                                    recordingId={recording.id}
+                                    state={taskState}
                                     speakers={taskSpeakers}
                                     organizationOnly={orgView}
-                                    reloadKey={`${summarySource}:${summariesMade}`}
-                                    onPlay={
-                                        onPlayFromTurn
-                                            ? (startMs) =>
-                                                  onPlayFromTurn(startMs)
-                                            : undefined
-                                    }
+                                    onPlay={playTask}
                                     fallback={
                                         summaryData.actionItems &&
                                         summaryData.actionItems.length > 0 && (
@@ -1363,18 +1374,19 @@ export function TranscriptionPanel({
                                               )}
                                 </p>
                                 {/* Tasks a replaced summary left, until a new one comes */}
-                                <div className="mt-6 w-full text-left">
-                                    <RecordingTasks
-                                        recordingId={recording.id}
+                                <div className="mt-6 w-full space-y-3 text-left">
+                                    <TaskReviewLink
+                                        state={taskState}
                                         speakers={taskSpeakers}
                                         organizationOnly={orgView}
-                                        reloadKey={`${summarySource}:${summariesMade}`}
-                                        onPlay={
-                                            onPlayFromTurn
-                                                ? (startMs) =>
-                                                      onPlayFromTurn(startMs)
-                                                : undefined
-                                        }
+                                        allowAdd={false}
+                                        onPlay={playTask}
+                                    />
+                                    <RecordingTasks
+                                        state={taskState}
+                                        speakers={taskSpeakers}
+                                        organizationOnly={orgView}
+                                        onPlay={playTask}
                                         fallback={null}
                                         allowAdd={false}
                                     />

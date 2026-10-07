@@ -20,6 +20,7 @@ import {
 } from "@/lib/knowledge/project-transcript";
 import { confirmedOverlays } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { type ArchivedTask, tasksForArchive } from "@/lib/tasks/archive";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
 
 // GET - Export recordings in specified format
@@ -171,6 +172,10 @@ export const GET = apiHandler(async (request: Request) => {
         });
         transcriptionGroups.set(transcript.recordingId, group);
     }
+    const taskMap =
+        exportFormat === "json"
+            ? await tasksForArchive(scope, recordingIds)
+            : new Map<string, ArchivedTask[]>();
     const preferredSource = settings?.preferredTranscriptSource ?? "plaud";
     const transcriptionMap = new Map(
         Array.from(transcriptionGroups, ([recordingId, rows]) => [
@@ -236,6 +241,7 @@ export const GET = apiHandler(async (request: Request) => {
                             actionItems: item.actionItems,
                             keyPoints: item.keyPoints,
                         })),
+                        tasks: taskMap.get(recording.id) ?? [],
                     };
                 }),
                 null,

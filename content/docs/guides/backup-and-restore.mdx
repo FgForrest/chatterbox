@@ -29,6 +29,16 @@ storage — and the panel reports progress.
 A recording whose audio cannot be read does not fail the archive; it is
 noted in the manifest and skipped, so you still get everything else.
 
+**Tasks** come along per recording: `tasks.json` holds the accepted
+tasks and the proposals still waiting for review (with whether each is
+ticked), and `task-updates.json` the follow-ups heard on that recording
+("mark done", "move the due date") for tasks in the same archive. People
+the tasks are assigned to are listed in `knowledge/people.json`. A task
+follows its recording, not its assignee: a task a colleague assigned to
+you on their shared recording is in the Organization's backup, not yours.
+On a recording you shared, your backup leaves out the tasks the
+Organization added by hand.
+
 Finished archives stay downloadable for **7 days**, then a cleanup pass
 deletes them.
 

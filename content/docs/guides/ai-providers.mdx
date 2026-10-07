@@ -152,8 +152,18 @@ endpoint, so keep a separate provider as your summarization default.
 Plaintext audio (for transcription) and plaintext transcript text
 (for summarization). ElevenLabs Scribe v2 and Speechmatics also get up to
 500 names from your Almanac with the audio (see
-[Names from the Almanac](./almanac#names-from-the-almanac)). The trust
-boundary is the provider you picked.
+[Names from the Almanac](./almanac#names-from-the-almanac)).
+
+A summary request also carries what its action items need: the day the
+recording was made (to turn "by Friday" into a date), the tasks already
+accepted on that recording (so they are not proposed again), and up to 30
+open tasks of the recording's speakers from other recordings, so the model
+can notice one being done. Only tasks the recording's reviewer may close
+are sent: on a private recording, the owner's own tasks and the shared
+tasks assigned to them; on a shared recording, the Organization's. They go
+to the provider of whoever asked for the summary.
+
+The trust boundary is the provider you picked.
 Riffado's at-rest encryption protects the database, not the network
 hop to your AI provider — see
 [Encryption at rest](../reference/encryption-at-rest) for the explicit

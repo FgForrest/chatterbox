@@ -19,6 +19,9 @@ vi.mock("@/lib/export/resolve-archive-scope", () => ({
 vi.mock("@/db", () => ({
     db: { select: vi.fn() },
 }));
+vi.mock("@/lib/tasks/archive", () => ({
+    tasksForArchive: vi.fn(async () => new Map()),
+}));
 
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),

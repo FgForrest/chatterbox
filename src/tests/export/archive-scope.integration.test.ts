@@ -29,6 +29,8 @@ import {
     personNotes,
     recordingFolders,
     recordings,
+    recordingTasks,
+    taskUpdateProposals,
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
@@ -449,6 +451,125 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         expect(folders.assignments).toContainEqual(
             expect.objectContaining({ recordingId: SHARED }),
         );
+    });
+
+    it("carries tasks, proposals and follow-ups by the same rules, and none to an assignee", async () => {
+        // A colleague's Organization person, named only by a task.
+        const [petra] = await db()
+            .insert(people)
+            .values({
+                userId: orgUserId,
+                displayName: encryptText("Petra Malá"),
+                primaryEmail: encryptText("BRAVO-PETRA@example.test"),
+                createdByUserId: BRAVO,
+            })
+            .returning({ id: people.id });
+        const [call] = await db()
+            .insert(recordingTasks)
+            .values({
+                recordingId: SHARED,
+                userId: ALICE,
+                status: "open",
+                text: encryptText("Call Petra"),
+                assigneePersonId: petra?.id,
+                source: "riffado",
+                createdByUserId: ALICE,
+            })
+            .returning({ id: recordingTasks.id });
+        await db()
+            .insert(recordingTasks)
+            .values([
+                {
+                    recordingId: SHARED,
+                    userId: ALICE,
+                    status: "proposed",
+                    text: encryptText("Book the venue"),
+                    source: "riffado",
+                    ticked: true,
+                },
+                {
+                    recordingId: SHARED,
+                    userId: ALICE,
+                    status: "open",
+                    text: encryptText("BRAVO-ORG-TASK"),
+                    source: "manual",
+                    createdByUserId: orgUserId,
+                },
+                {
+                    recordingId: PRIVATE_BRAVO,
+                    userId: BRAVO,
+                    status: "open",
+                    text: encryptText("BRAVO-PRIVATE-TASK"),
+                    source: "manual",
+                    createdByUserId: BRAVO,
+                },
+            ]);
+        await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: call?.id ?? "",
+                recordingId: PRIVATE_ALICE,
+                userId: ALICE,
+                kind: "done",
+                quote: encryptText("I called Petra"),
+            });
+        type Archive = Awaited<ReturnType<typeof archive>>;
+        const listed = (from: Archive, recordingId: string, file: string) => {
+            const entry = from
+                .json("manifest.json")
+                .recordings.find(
+                    (row: { id: string }) => row.id === recordingId,
+                );
+            const path = entry?.[file]?.path;
+            return path ? from.json(path) : [];
+        };
+        const texts = (from: Archive, recordingId: string) =>
+            listed(from, recordingId, "tasks")
+                .map((task: { text: string }) => task.text)
+                .sort();
+
+        const alice = await archive({ kind: "personal", userId: ALICE });
+        expect(texts(alice, SHARED)).toEqual(["Book the venue", "Call Petra"]);
+        expect(listed(alice, SHARED, "tasks")).toContainEqual(
+            expect.objectContaining({
+                status: "proposed",
+                review: { ticked: true, assigneeCheck: false },
+            }),
+        );
+        expect(listed(alice, PRIVATE_ALICE, "taskUpdates")).toEqual([
+            expect.objectContaining({
+                taskId: call?.id,
+                kind: "done",
+                quote: "I called Petra",
+            }),
+        ]);
+        // The assignee goes by name, as a colleague's person does.
+        expect(alice.json("knowledge/people.json").people).toContainEqual(
+            expect.objectContaining({
+                id: petra?.id,
+                displayName: "Petra Malá",
+                organization: true,
+                primaryEmail: null,
+            }),
+        );
+        expect(alice.text).not.toContain("BRAVO");
+
+        // The colleague: their own task, none of Alice's, whoever they name.
+        const bravo = await archive({ kind: "personal", userId: BRAVO });
+        expect(texts(bravo, PRIVATE_BRAVO)).toEqual(["BRAVO-PRIVATE-TASK"]);
+        for (const words of ["Call Petra", "Book the venue", "I called"]) {
+            expect(bravo.text).not.toContain(words);
+        }
+
+        // The Organization: every task of the shared recording, nothing private.
+        const organization = await archive({ kind: "organization", orgUserId });
+        expect(texts(organization, SHARED)).toEqual([
+            "BRAVO-ORG-TASK",
+            "Book the venue",
+            "Call Petra",
+        ]);
+        expect(organization.text).not.toContain("BRAVO-PRIVATE-TASK");
+        expect(organization.text).not.toContain("I called Petra");
     });
 
     it("renders a person's exports without the Organization's corrections", async () => {

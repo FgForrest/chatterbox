@@ -2,6 +2,7 @@
 
 import { CalendarDays, X } from "lucide-react";
 import { useExtracted, useFormatter } from "next-intl";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 
 /** Today in the viewer's time zone, `YYYY-MM-DD`. */
@@ -9,6 +10,53 @@ export function localToday(): string {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60_000;
     return new Date(now.getTime() - offset).toISOString().slice(0, 10);
+}
+
+/**
+ * A task's text, edited in place: saved on blur or Enter, put back on
+ * Escape or when left empty or unchanged.
+ */
+export function TaskTextInput({
+    text,
+    className,
+    onSave,
+}: {
+    text: string;
+    className?: string;
+    onSave: (text: string) => void;
+}) {
+    const i18n = useExtracted();
+    const [draft, setDraft] = useState(text);
+    useEffect(() => setDraft(text), [text]);
+
+    const save = () => {
+        const next = draft.trim();
+        if (!next || next === text) {
+            setDraft(text);
+            return;
+        }
+        onSave(next);
+    };
+
+    return (
+        <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={save}
+            onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") {
+                    setDraft(text);
+                    event.currentTarget.blur();
+                }
+            }}
+            aria-label={i18n("Task")}
+            className={cn(
+                "rounded border border-transparent bg-transparent px-1 hover:border-border focus:border-ring focus:outline-none",
+                className,
+            )}
+        />
+    );
 }
 
 /**
