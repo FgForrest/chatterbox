@@ -1,4 +1,5 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { cache } from "react";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -29,19 +30,23 @@ export function isOrgScopeEnabled(): boolean {
     );
 }
 
+async function selectOrgAccountId(): Promise<string | null> {
+    const [row] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(sql`${users.role} = 'org'`)
+        .limit(1);
+    return row?.id ?? null;
+}
+
 /**
  * Id of the organization account, or null when the scope is not visible or
  * no account was ever created. Resolved by role, so it outlives its env vars.
  */
-export async function getOrgUserId(): Promise<string | null> {
+export const getOrgUserId = cache(async (): Promise<string | null> => {
     if (!isOrgScopeVisible()) return null;
-    const [row] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.role, "org"))
-        .limit(1);
-    return row?.id ?? null;
-}
+    return selectOrgAccountId();
+});
 
 /**
  * Id of the organization account whatever the deployment mode.
@@ -52,12 +57,7 @@ export async function getOrgUserId(): Promise<string | null> {
  */
 export async function findOrgAccountId(): Promise<string | null> {
     if (env.IS_HOSTED) return null;
-    const [row] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.role, "org"))
-        .limit(1);
-    return row?.id ?? null;
+    return selectOrgAccountId();
 }
 
 /** Reject a change to the Organization scope while it is read-only. */

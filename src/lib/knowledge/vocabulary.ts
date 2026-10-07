@@ -40,6 +40,7 @@ import {
     lockOrgPeople,
     lockRecordingsNaming,
     orgOwnedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
@@ -234,7 +235,7 @@ export async function vocabularyVisibleTo(
     ) =>
         sharedOnly
             ? or(isNull(column), orgOwnedCondition(column))
-            : or(isNull(column), orgOwnedCondition(column), eq(column, userId));
+            : or(isNull(column), visibleOwnerCondition(column, userId));
 
     const entityRows = await db
         .select({
@@ -346,8 +347,7 @@ async function assertLabelFree(
                 eq(table.labelHmac, labelHmac),
                 or(
                     isNull(table.userId),
-                    orgOwnedCondition(table.userId),
-                    eq(table.userId, ownerUserId),
+                    visibleOwnerCondition(table.userId, ownerUserId),
                 ),
                 eq(table.status, "active"),
             ),
@@ -381,8 +381,10 @@ async function assertEntityTypesUsable(
                 inArray(knowledgeEntityTypes.key, [...keys]),
                 or(
                     isNull(knowledgeEntityTypes.userId),
-                    orgOwnedCondition(knowledgeEntityTypes.userId),
-                    eq(knowledgeEntityTypes.userId, ownerUserId),
+                    visibleOwnerCondition(
+                        knowledgeEntityTypes.userId,
+                        ownerUserId,
+                    ),
                 ),
                 eq(knowledgeEntityTypes.status, "active"),
             ),
@@ -1354,9 +1356,11 @@ async function factsNotFittingInTx(
             and(
                 eq(knowledgeRelationTypes.key, shapeKey),
                 or(
-                    eq(knowledgeRelationTypes.userId, userId),
                     isNull(knowledgeRelationTypes.userId),
-                    orgOwnedCondition(knowledgeRelationTypes.userId),
+                    visibleOwnerCondition(
+                        knowledgeRelationTypes.userId,
+                        userId,
+                    ),
                 ),
             ),
         )

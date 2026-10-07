@@ -11,7 +11,7 @@
  * Organization's aliases are everyone's.
  */
 
-import { and, eq, isNotNull, or } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     knowledgeAliases,
@@ -25,7 +25,7 @@ import { entitiesVisibleTo } from "@/lib/knowledge/entities";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
     lockOrgPeopleShared,
-    orgOwnedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import { peopleVisibleTo } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -52,10 +52,7 @@ export interface Alias {
 
 /** SQL predicate: an alias `userId` may see -- their own, or the Organization's. */
 export function aliasesVisibleTo(userId: string) {
-    return or(
-        eq(knowledgeAliases.userId, userId),
-        orgOwnedCondition(knowledgeAliases.userId),
-    );
+    return visibleOwnerCondition(knowledgeAliases.userId, userId);
 }
 
 function aliasNotFound(): AppError {

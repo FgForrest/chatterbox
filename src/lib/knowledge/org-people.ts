@@ -1,4 +1,11 @@
-import { type Column, inArray, or, type SQL, sql } from "drizzle-orm";
+import {
+    type Column,
+    inArray,
+    or,
+    type SQL,
+    type SQLWrapper,
+    sql,
+} from "drizzle-orm";
 import type { db } from "@/db";
 import {
     knowledgeFactEvidence,
@@ -17,15 +24,28 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const ORG_PEOPLE_LOCK = sql`hashtext('riffado:org-people')`;
 
+const orgAccountIds = sql`array(select ${users.id} from ${users} where ${users.role} = 'org')`;
+
 /**
  * SQL predicate: the row belongs to the organization account.
  *
  * By role rather than by a configured id, so knowledge code needs neither
  * the environment nor the org account's id, and an Organization person
- * keeps resolving if the scope is later switched off.
+ * keeps resolving if the scope is later switched off. The ids are read
+ * once per statement and compared with `= any`, which an index on
+ * `column` serves even inside an `or`.
  */
 export function orgOwnedCondition(column: Column) {
-    return sql`${column} in (select ${users.id} from ${users} where ${users.role} = 'org')`;
+    return sql`${column} = any(${orgAccountIds})`;
+}
+
+/**
+ * SQL predicate: the row belongs to `viewerId` or to the organization
+ * account, what the viewer sees of a knowledge base. One `= any` over both
+ * owners: `viewer or orgOwnedCondition` would scan every account's rows.
+ */
+export function visibleOwnerCondition(column: Column, viewerId: string) {
+    return sql`${column} = any(array[${viewerId}]::text[] || ${orgAccountIds})`;
 }
 
 /**
@@ -69,6 +89,10 @@ export async function lockOrgPeopleShared(tx: Tx): Promise<void> {
     );
 }
 
+function anyOf(column: Column, ids: readonly string[]): SQL {
+    return sql`${column} = any(${sql.param(ids)}::text[])`;
+}
+
 /**
  * Lock, in id order, the recordings of every transcript that names one of
  * these people or entities: a speaker answer (confirmation or rejection),
@@ -91,70 +115,52 @@ export async function lockRecordingsNaming(
         factIds?: readonly string[];
     },
 ): Promise<void> {
-    const persons = [...personIds];
-    const entities = [...entityIds];
-    const inTranscripts: SQL[] = [];
+    const namingTranscripts: SQLWrapper[] = [];
     const factNaming: SQL[] = [];
-    if (persons.length > 0) {
-        inTranscripts.push(
-            inArray(
-                transcriptions.id,
-                tx
-                    .select({ id: transcriptSpeakers.transcriptionId })
-                    .from(transcriptSpeakers)
-                    .where(inArray(transcriptSpeakers.personId, persons)),
-            ),
-            inArray(
-                transcriptions.id,
-                tx
-                    .select({ id: transcriptSpeakerRejections.transcriptionId })
-                    .from(transcriptSpeakerRejections)
-                    .where(
-                        inArray(transcriptSpeakerRejections.personId, persons),
-                    ),
-            ),
-            inArray(
-                transcriptions.id,
-                tx
-                    .select({ id: transcriptCorrections.transcriptionId })
-                    .from(transcriptCorrections)
-                    .where(
-                        inArray(transcriptCorrections.targetPersonId, persons),
-                    ),
-            ),
+    if (personIds.length > 0) {
+        namingTranscripts.push(
+            tx
+                .select({ id: transcriptSpeakers.transcriptionId })
+                .from(transcriptSpeakers)
+                .where(anyOf(transcriptSpeakers.personId, personIds)),
+            tx
+                .select({ id: transcriptSpeakerRejections.transcriptionId })
+                .from(transcriptSpeakerRejections)
+                .where(anyOf(transcriptSpeakerRejections.personId, personIds)),
+            tx
+                .select({ id: transcriptCorrections.transcriptionId })
+                .from(transcriptCorrections)
+                .where(anyOf(transcriptCorrections.targetPersonId, personIds)),
         );
         factNaming.push(
-            inArray(knowledgeFacts.subjectPersonId, persons),
-            inArray(knowledgeFacts.objectPersonId, persons),
+            anyOf(knowledgeFacts.subjectPersonId, personIds),
+            anyOf(knowledgeFacts.objectPersonId, personIds),
         );
     }
-    if (entities.length > 0) {
-        inTranscripts.push(
-            inArray(
-                transcriptions.id,
-                tx
-                    .select({ id: transcriptCorrections.transcriptionId })
-                    .from(transcriptCorrections)
-                    .where(
-                        inArray(transcriptCorrections.targetEntityId, entities),
-                    ),
-            ),
+    if (entityIds.length > 0) {
+        namingTranscripts.push(
+            tx
+                .select({ id: transcriptCorrections.transcriptionId })
+                .from(transcriptCorrections)
+                .where(anyOf(transcriptCorrections.targetEntityId, entityIds)),
         );
         factNaming.push(
-            inArray(knowledgeFacts.subjectEntityId, entities),
-            inArray(knowledgeFacts.objectEntityId, entities),
+            anyOf(knowledgeFacts.subjectEntityId, entityIds),
+            anyOf(knowledgeFacts.objectEntityId, entityIds),
         );
     }
     if (factIds.length > 0) {
-        factNaming.push(inArray(knowledgeFacts.id, [...factIds]));
+        factNaming.push(anyOf(knowledgeFacts.id, factIds));
     }
     if (factNaming.length === 0) return;
     const named =
-        inTranscripts.length > 0
+        namingTranscripts.length > 0
             ? await tx
                   .selectDistinct({ recordingId: transcriptions.recordingId })
                   .from(transcriptions)
-                  .where(or(...inTranscripts))
+                  .where(
+                      sql`${transcriptions.id} in (${sql.join(namingTranscripts, sql` union `)})`,
+                  )
             : [];
     const evidenced = await tx
         .selectDistinct({ recordingId: knowledgeFactEvidence.recordingId })
@@ -175,7 +181,7 @@ export async function lockRecordingsNaming(
     await tx
         .select({ id: recordings.id })
         .from(recordings)
-        .where(inArray(recordings.id, touched))
+        .where(anyOf(recordings.id, touched))
         .orderBy(recordings.id)
         .for("share");
 }

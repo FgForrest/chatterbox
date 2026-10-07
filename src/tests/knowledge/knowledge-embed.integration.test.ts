@@ -98,6 +98,7 @@ import {
 import { confirmManualFact, deleteFact } from "@/lib/knowledge/facts";
 import {
     embedScope,
+    renderEntity,
     seedKnowledgeEmbedJobs,
 } from "@/lib/knowledge/knowledge-embed";
 import {
@@ -105,6 +106,7 @@ import {
     knowledgeView,
     searchByMeaning,
 } from "@/lib/knowledge/knowledge-loader";
+import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -320,6 +322,76 @@ describeWithDatabase("knowledge vectors (PostgreSQL, fake embeddings)", () => {
         await deleteEntity(ALICE, orion);
         expect(await vectorsOf(ALICE)).toEqual([]);
     });
+
+    it("drops what no longer renders in a scope too large for a bind parameter per item", async () => {
+        // Past 65,535 parameters when every id is bound twice on its own.
+        const count = 33_000;
+        const things = Array.from({ length: count }, (_, index) => ({
+            name: `Thing ${index}`,
+            description: `Description ${index}`,
+        }));
+        const ids: string[] = [];
+        for (let start = 0; start < count; start += 2_000) {
+            const rows = await db()
+                .insert(knowledgeEntities)
+                .values(
+                    things.slice(start, start + 2_000).map((thing) => ({
+                        userId: ALICE,
+                        typeKey: "project",
+                        name: encryptText(thing.name),
+                        nameHmac: domainLookupHash("entity-name", thing.name),
+                        description: encryptText(thing.description),
+                    })),
+                )
+                .returning({ id: knowledgeEntities.id });
+            ids.push(...rows.map((row) => row.id));
+        }
+        const [gone] = await db()
+            .insert(knowledgeEntities)
+            .values({
+                userId: ALICE,
+                typeKey: "project",
+                name: encryptText("Gone"),
+                nameHmac: domainLookupHash("entity-name", "Gone"),
+            })
+            .returning({ id: knowledgeEntities.id });
+        const vector = (entityId: string, text: string) => ({
+            userId: ALICE,
+            entityId,
+            vectorGeneration: "fake-a#r1",
+            dim: DIM,
+            vector: "unused",
+            inputHmac: domainLookupHash("vector-input", text),
+        });
+        // Every item already embedded, so the run only collects.
+        for (let start = 0; start < count; start += 2_000) {
+            await db()
+                .insert(knowledgeVectors)
+                .values(
+                    ids.slice(start, start + 2_000).map((id, offset) => {
+                        const thing = things[start + offset];
+                        return vector(
+                            id,
+                            renderEntity({
+                                name: thing?.name ?? "",
+                                typeLabel: "Project",
+                                description: thing?.description ?? "",
+                            }),
+                        );
+                    }),
+                );
+        }
+        await db()
+            .insert(knowledgeVectors)
+            .values(vector(gone?.id ?? "", "Gone (Project): cleared"));
+
+        const result = await embedScope(ALICE, client());
+
+        expect(result).toMatchObject({ embedded: 0, removed: 1 });
+        const left = await vectorsOf(ALICE);
+        expect(left).toHaveLength(count);
+        expect(left.some((row) => row.entityId === gone?.id)).toBe(false);
+    }, 120_000);
 
     it("queues a run for a scope whose knowledge moved past its vectors", async () => {
         await aliceKnows();

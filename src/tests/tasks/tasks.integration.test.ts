@@ -107,6 +107,7 @@ import {
     listTasks,
     markTasksSeen,
     mergeProposals,
+    recordingsAwaitingTaskReview,
     tickUpdateProposal,
     updateTask,
 } from "@/lib/tasks/tasks";
@@ -758,6 +759,84 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             new Date(),
         );
         expect((await review(alice)).tasks).toEqual([]);
+    });
+
+    async function propose(recordingId: string, text: string) {
+        await db()
+            .insert(recordingTasks)
+            .values({
+                recordingId,
+                userId: ALICE,
+                status: "proposed",
+                text: encryptText(text),
+                source: "riffado",
+            });
+    }
+
+    async function followUp(taskId: string, recordingId: string) {
+        await db()
+            .insert(taskUpdateProposals)
+            .values({ taskId, recordingId, userId: ALICE, kind: "done" });
+    }
+
+    it("lists the recordings awaiting their reviewer, newest first, with what waits", async () => {
+        const open = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        const closed = await addTask(alice, REC, {
+            text: "Book the venue",
+            status: "open",
+        });
+        await updateTask(alice, closed.id, {
+            version: closed.version,
+            status: "done",
+        });
+        await propose(REC, "Call Dana");
+        await propose(LATER, "Draft the pricing page");
+        await propose(LATER, "Share the draft");
+        await followUp(open.id, LATER);
+        // About a task done since: nothing to review.
+        await followUp(closed.id, LATER);
+        await addRecording("rec-gone", "2026-10-09T10:00:00Z");
+        await propose("rec-gone", "Gone with its recording");
+        await db()
+            .update(recordings)
+            .set({ deletedAt: new Date() })
+            .where(eq(recordings.id, "rec-gone"));
+
+        expect(await recordingsAwaitingTaskReview(alice)).toEqual([
+            {
+                recordingId: LATER,
+                title: `Recording ${LATER}`,
+                proposals: 3,
+            },
+            { recordingId: REC, title: `Recording ${REC}`, proposals: 1 },
+        ]);
+        expect(await recordingsAwaitingTaskReview(bob)).toEqual([]);
+        expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
+    });
+
+    it("lists a shared recording's review for the Organization only", async () => {
+        const open = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await share(REC);
+        await propose(REC, "Call Dana");
+        await followUp(open.id, REC);
+        await propose(LATER, "Draft the pricing page");
+
+        expect(await recordingsAwaitingTaskReview(org)).toEqual([
+            { recordingId: REC, title: `Recording ${REC}`, proposals: 2 },
+        ]);
+        expect(await recordingsAwaitingTaskReview(alice)).toEqual([
+            {
+                recordingId: LATER,
+                title: `Recording ${LATER}`,
+                proposals: 1,
+            },
+        ]);
     });
 
     it("refuses an accept when the proposals changed since they were shown", async () => {

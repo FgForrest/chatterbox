@@ -32,12 +32,12 @@ import {
     deferJob,
     failJobAttempt,
     heartbeatJob,
-    pruneFinishedJobs,
     reclaimStaleJobs,
     releaseClaimedJobs,
 } from "@/db/queries/async-jobs";
 import { captureServerException } from "@/lib/posthog-server";
 import { backoffDelayMs } from "./backoff";
+import { runHousekeeping } from "./housekeeping";
 import { setJobTicker } from "./nudge";
 import { listJobHandlers } from "./registry";
 import {
@@ -70,10 +70,7 @@ const TICK_MS = 5_000;
 const STALE_MS = 120_000;
 const HEARTBEAT_MS = 12_000;
 
-/** Finished rows are bookkeeping, not history. */
-const FINISHED_RETENTION_MS = 24 * 60 * 60 * 1000;
-const PRUNE_EVERY_MS = 60 * 60 * 1000;
-const MAX_PRUNE_PER_TICK = 200;
+const HOUSEKEEPING_EVERY_MS = 60 * 60 * 1000;
 
 /** Default wait between attempts when a handler does not set its own. */
 const DEFAULT_JOB_BACKOFF = { baseMs: 20_000, maxMs: 10 * 60_000, jitter: 0.3 };
@@ -274,7 +271,29 @@ function track(job: ClaimedAsyncJob, handler: JobHandler<unknown>): void {
 }
 
 let ticking = false;
-let lastPruneAt = 0;
+let lastHousekeepingAt = 0;
+let housekeeping: Promise<void> | null = null;
+
+function startHousekeeping(): void {
+    if (housekeeping || Date.now() - lastHousekeepingAt < HOUSEKEEPING_EVERY_MS)
+        return;
+    lastHousekeepingAt = Date.now();
+    housekeeping = runHousekeeping()
+        .then((pruned) => {
+            const counts = Object.entries(pruned).filter(([, n]) => n > 0);
+            if (counts.length > 0) {
+                console.log(
+                    `[job-worker] housekeeping pruned ${counts.map(([table, n]) => `${table}=${n}`).join(" ")}`,
+                );
+            }
+        })
+        .catch((error) => {
+            console.error("[job-worker] housekeeping failed:", error);
+        })
+        .finally(() => {
+            housekeeping = null;
+        });
+}
 
 /** Exported for testing. */
 export async function tick(): Promise<void> {
@@ -303,16 +322,7 @@ export async function tick(): Promise<void> {
             }
         }
 
-        if (Date.now() - lastPruneAt >= PRUNE_EVERY_MS) {
-            lastPruneAt = Date.now();
-            const pruned = await pruneFinishedJobs(
-                FINISHED_RETENTION_MS,
-                MAX_PRUNE_PER_TICK,
-            );
-            if (pruned > 0) {
-                console.log(`[job-worker] pruned ${pruned} finished job(s)`);
-            }
-        }
+        startHousekeeping();
     } catch (error) {
         console.error("[job-worker] tick failed:", error);
         captureServerException(error, { source: "worker:jobs" });
@@ -323,8 +333,8 @@ export async function tick(): Promise<void> {
 
 /** Exported for testing: settle everything currently running. */
 export async function waitForIdle(): Promise<void> {
-    while (inFlight.size > 0) {
-        await Promise.allSettled([...inFlight.values()]);
+    while (inFlight.size > 0 || housekeeping) {
+        await Promise.allSettled([...inFlight.values(), housekeeping]);
     }
 }
 
@@ -420,7 +430,8 @@ export function startJobWorker(): void {
 export function __resetJobWorkerForTests(): void {
     started = false;
     ticking = false;
-    lastPruneAt = 0;
+    lastHousekeepingAt = 0;
+    housekeeping = null;
     inFlight.clear();
     inFlightByKind.clear();
     claimsHeld.clear();

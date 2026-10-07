@@ -78,6 +78,7 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 
 import {
+    countReapCandidates,
     dueOnWithdrawal,
     listArmedRetentionPolicies,
     listReapCandidates,
@@ -300,6 +301,39 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
             orgUserId,
         );
         expect(outcome.reaped.sort()).toEqual(["audio", "transcript"]);
+    });
+
+    it("selects an unshared recording past its shortest period only", async () => {
+        await unshareRecording(OWNER, REC, { withdraw: true });
+        const transcriptDue: RetentionPolicy = {
+            ...ownerAudio30,
+            audioDays: 90,
+            transcriptDays: 45,
+        };
+        const nothingDue: RetentionPolicy = {
+            ...transcriptDue,
+            transcriptDays: 90,
+        };
+
+        expect(
+            (
+                await listReapCandidates(
+                    transcriptDue,
+                    new Date(),
+                    10,
+                    orgUserId,
+                )
+            ).map((candidate) => candidate.id),
+        ).toEqual([REC]);
+        expect(
+            await countReapCandidates(transcriptDue, Date.now(), orgUserId),
+        ).toBe(1);
+        expect(
+            await listReapCandidates(nothingDue, new Date(), 10, orgUserId),
+        ).toEqual([]);
+        expect(
+            await countReapCandidates(nothingDue, Date.now(), orgUserId),
+        ).toBe(0);
     });
 
     it("leaves a recording shared after the sweep chose it", async () => {

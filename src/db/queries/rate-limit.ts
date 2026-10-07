@@ -69,3 +69,27 @@ export async function upsertRateLimitBucket({
 
     return bucket;
 }
+
+/**
+ * Delete up to `limit` buckets whose window closed before `olderThan`. An
+ * expired bucket carries nothing: the next hit on its key starts a fresh
+ * window either way. Rows another process is already deleting are skipped.
+ */
+export async function pruneExpiredRateLimitBuckets(
+    olderThan: Date,
+    limit: number,
+): Promise<number> {
+    const rows = await db.execute<{ key: string }>(sql`
+        delete from ${apiRateLimitBuckets}
+        where ${apiRateLimitBuckets.key} in (
+            select ${apiRateLimitBuckets.key}
+            from ${apiRateLimitBuckets}
+            where ${apiRateLimitBuckets.resetAt} < ${olderThan.toISOString()}::timestamp
+            order by ${apiRateLimitBuckets.resetAt} asc
+            limit ${limit}
+            for update skip locked
+        )
+        returning ${apiRateLimitBuckets.key}
+    `);
+    return rows.length;
+}

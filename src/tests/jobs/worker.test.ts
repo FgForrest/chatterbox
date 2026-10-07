@@ -13,7 +13,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { queries } = vi.hoisted(() => ({
+const { queries, housekeeping } = vi.hoisted(() => ({
+    housekeeping: { runHousekeeping: vi.fn() },
     queries: {
         claimDueJobs: vi.fn(),
         completeJob: vi.fn(),
@@ -22,13 +23,13 @@ const { queries } = vi.hoisted(() => ({
         heartbeatJob: vi.fn(),
         reclaimStaleJobs: vi.fn(),
         buryExhaustedStaleJobs: vi.fn(),
-        pruneFinishedJobs: vi.fn(),
         releaseClaimedJobs: vi.fn(),
         countPendingJobs: vi.fn(),
     },
 }));
 
 vi.mock("@/db/queries/async-jobs", () => queries);
+vi.mock("@/lib/jobs/housekeeping", () => housekeeping);
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
@@ -116,7 +117,7 @@ describe("job worker", () => {
         queries.claimDueJobs.mockResolvedValue([]);
         queries.reclaimStaleJobs.mockResolvedValue(0);
         queries.buryExhaustedStaleJobs.mockResolvedValue(0);
-        queries.pruneFinishedJobs.mockResolvedValue(0);
+        housekeeping.runHousekeeping.mockResolvedValue({});
         queries.heartbeatJob.mockResolvedValue(true);
         queries.completeJob.mockResolvedValue(true);
         queries.releaseClaimedJobs.mockResolvedValue(0);
@@ -505,15 +506,45 @@ describe("job worker", () => {
         expect(queries.releaseClaimedJobs).not.toHaveBeenCalled();
     });
 
-    it("prunes finished rows once, not on every sweep", async () => {
+    it("runs housekeeping once, not on every sweep", async () => {
         registerJobHandler(testHandler());
 
         await runTick();
-        expect(queries.pruneFinishedJobs).toHaveBeenCalledTimes(1);
+        expect(housekeeping.runHousekeeping).toHaveBeenCalledTimes(1);
 
         await runTick();
-        // Finished rows expire in a day; sweeping is every few seconds.
-        // Checking each time would be thousands of pointless statements.
-        expect(queries.pruneFinishedJobs).toHaveBeenCalledTimes(1);
+        expect(housekeeping.runHousekeeping).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps claiming while housekeeping is still running", async () => {
+        registerJobHandler(testHandler());
+        let finishHousekeeping: (value: Record<string, number>) => void =
+            () => {};
+        housekeeping.runHousekeeping.mockReturnValue(
+            new Promise((resolve) => {
+                finishHousekeeping = resolve;
+            }),
+        );
+
+        await tick();
+        await tick();
+
+        expect(queries.claimDueJobs).toHaveBeenCalledTimes(2);
+        expect(housekeeping.runHousekeeping).toHaveBeenCalledTimes(1);
+        finishHousekeeping({});
+        await waitForIdle();
+    });
+
+    it("survives a housekeeping failure", async () => {
+        registerJobHandler(testHandler());
+        housekeeping.runHousekeeping.mockRejectedValue(new Error("db down"));
+        const errorSpy = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => {});
+
+        await runTick();
+        errorSpy.mockRestore();
+
+        expect(queries.claimDueJobs).toHaveBeenCalledTimes(1);
     });
 });

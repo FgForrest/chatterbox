@@ -22,6 +22,7 @@ import {
     lockOrgPeopleShared,
     lockRecordingsNaming,
     orgOwnedCondition,
+    visibleOwnerCondition,
 } from "@/lib/knowledge/org-people";
 import {
     bumpScopeInTx,
@@ -101,7 +102,7 @@ export { orgOwnedCondition };
 
 /** SQL predicate: a person `userId` may see -- their own, or the Organization's. */
 export function peopleVisibleTo(userId: string) {
-    return or(eq(people.userId, userId), orgOwnedCondition(people.userId));
+    return visibleOwnerCondition(people.userId, userId);
 }
 
 function toPerson(row: PersonRow, viewerNotes?: string | null): Person {
