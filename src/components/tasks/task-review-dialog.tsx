@@ -1,14 +1,6 @@
 "use client";
 
-import {
-    Combine,
-    ListChecks,
-    Loader2,
-    Play,
-    Plus,
-    Trash2,
-    X,
-} from "lucide-react";
+import { Combine, ListChecks, Loader2, Play, Plus, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import {
@@ -34,8 +26,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * The proposed tasks of a recording, the way Learn's findings are: a link
- * with how many wait, opening a review to tick, correct, merge or drop
- * them and the follow-ups heard about earlier tasks, then accept.
+ * with how many wait, opening a review to tick, correct or merge them and
+ * the follow-ups heard about earlier tasks, then accept. Unticking is the
+ * one way to say no: it stays undoable until the review is accepted.
  */
 export function TaskReviewLink({
     state,
@@ -203,7 +196,6 @@ export function TaskReviewLink({
                                                     optimistic,
                                                 )
                                             }
-                                            onReject={() => state.reject(task)}
                                         />
                                     ))}
                                 </ul>
@@ -293,7 +285,6 @@ function ProposalRow({
     onPlay,
     selection,
     onChange,
-    onReject,
 }: {
     task: TaskView;
     speakers: readonly SpeakerChoice[];
@@ -301,7 +292,6 @@ function ProposalRow({
     onPlay?: (startMs: number) => void;
     selection: { selected: boolean; onToggle: () => void } | null;
     onChange: TaskRowChange;
-    onReject: () => void;
 }) {
     const i18n = useExtracted();
 
@@ -388,17 +378,6 @@ function ProposalRow({
                     )}
                 </div>
             </div>
-            {!selection && (
-                <button
-                    type="button"
-                    className="mt-1 text-muted-foreground hover:text-destructive"
-                    onClick={onReject}
-                    aria-label={i18n("Reject this task")}
-                    title={i18n("Reject this task")}
-                >
-                    <Trash2 className="size-4" />
-                </button>
-            )}
         </li>
     );
 }
