@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { UserMenu } from "@/components/dashboard/user-menu";
+import { HelpButton } from "@/components/help/help-button";
 import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,6 +146,7 @@ export function WorkstationHeader({
                         )}
                     </TooltipContent>
                 </Tooltip>
+                <HelpButton />
                 <UserMenu
                     isAdmin={isAdmin}
                     initialTheme={initialTheme}
