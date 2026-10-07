@@ -11,7 +11,6 @@ import {
     changeTask,
     fetchRecordingTasks,
     mergeTaskProposals,
-    rejectTaskProposal,
     TaskRequestError,
     tickTaskUpdate,
 } from "@/components/tasks/task-api";
@@ -42,7 +41,6 @@ export interface RecordingTasksState {
         change: Omit<TaskChange, "version">,
         optimistic: Partial<TaskView>,
     ) => void;
-    reject: (task: TaskView) => void;
     add: (status: "proposed" | "open") => Promise<void>;
     merge: (ids: readonly string[]) => Promise<boolean>;
     tickUpdate: (update: TaskUpdateView, ticked: boolean) => void;
@@ -158,25 +156,6 @@ export function useRecordingTasks(
                 ...(change.status !== undefined && { status }),
             });
             if (change.status) announceTasksChanged();
-        });
-    };
-
-    const reject = (task: TaskView) => {
-        setData((current) =>
-            current
-                ? {
-                      ...current,
-                      proposals: current.proposals.filter(
-                          (row) => row.id !== task.id,
-                      ),
-                  }
-                : current,
-        );
-        void enqueue(task.id, async () => {
-            await rejectTaskProposal(
-                task.id,
-                versions.current.get(task.id) ?? task.version,
-            );
         });
     };
 
@@ -301,7 +280,6 @@ export function useRecordingTasks(
         waiting,
         accepting,
         update,
-        reject,
         add,
         merge,
         tickUpdate,

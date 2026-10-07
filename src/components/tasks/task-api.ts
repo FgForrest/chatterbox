@@ -60,15 +60,6 @@ export function changeTask(
     });
 }
 
-export function rejectTaskProposal(
-    taskId: string,
-    version: number,
-): Promise<void> {
-    return send(`/api/tasks/${encodeURIComponent(taskId)}?version=${version}`, {
-        method: "DELETE",
-    });
-}
-
 export function addRecordingTask(
     recordingId: string,
     task: {

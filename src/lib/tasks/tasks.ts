@@ -654,22 +654,6 @@ export async function updateTask(
     return requireTaskView(viewer, taskId);
 }
 
-/** Delete a proposal, remembering it was rejected. */
-export async function rejectProposal(
-    viewer: TaskViewer,
-    taskId: string,
-    version: number,
-): Promise<void> {
-    await db.transaction(async (tx) => {
-        const task = await lockTask(tx, viewer, taskId);
-        if (!task.canEdit) throw forbidden();
-        if (task.status !== "proposed") throw notFound();
-        if (task.version !== version) throw versionConflict();
-        await rejectInTx(tx, task, [task.text]);
-        await tx.delete(recordingTasks).where(eq(recordingTasks.id, taskId));
-    });
-}
-
 async function rejectInTx(
     tx: Tx,
     { recordingId, ownerUserId }: { recordingId: string; ownerUserId: string },
