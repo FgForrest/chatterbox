@@ -13,7 +13,10 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
-import { getRecordingMarkdownDocument } from "@/lib/export/document-sidecars";
+import {
+    folderExportDocumentOptions,
+    getRecordingMarkdownDocument,
+} from "@/lib/export/document-sidecars";
 import { listExportFolderOrganization } from "@/lib/folders/folders";
 import {
     descendantFolderIds,
@@ -573,8 +576,7 @@ async function planLocked(
                     transcript.userId,
                     recording.id,
                     "transcript",
-                    transcript.source,
-                    isOrg,
+                    folderExportDocumentOptions(transcript.source, isOrg),
                 );
                 if (!document) continue;
                 const content = Buffer.from(document.content);
@@ -602,8 +604,7 @@ async function planLocked(
                     summary.userId,
                     recording.id,
                     "summary",
-                    summary.source,
-                    isOrg,
+                    folderExportDocumentOptions(summary.source, isOrg),
                 );
                 if (!document) continue;
                 const content = Buffer.from(document.content);

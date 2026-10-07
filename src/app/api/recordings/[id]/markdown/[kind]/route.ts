@@ -37,9 +37,7 @@ export const GET = apiHandler<MarkdownContext>(async (request, context) => {
         access.ownerUserId,
         id,
         kind,
-        source,
-        view === "org",
-        access.shared,
+        { source, orgPeopleOnly: view === "org", sharedAs: access.shared },
     );
     if (!document) {
         throw new AppError(

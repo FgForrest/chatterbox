@@ -191,7 +191,7 @@ export async function exportRecordingSidecars(
                 title,
                 kind,
                 storagePath,
-                contentSource,
+                { source: contentSource },
             );
             if (!document) continue;
 
@@ -208,7 +208,36 @@ export async function exportRecordingSidecars(
     return written;
 }
 
-/** Build the same portable Markdown document used for disk sidecars. */
+/** How a Markdown document is rendered for its reader. */
+export interface RecordingMarkdownOptions {
+    source?: string;
+    /** Rendering for the Organization view: name Organization people only. */
+    orgPeopleOnly?: boolean;
+    /**
+     * The sharing state the reader was authorized in; its corrections are
+     * read only in that state (see `correctionOverlay`).
+     */
+    sharedAs?: boolean;
+    /**
+     * An export of the owner's own content: on a shared recording, only the
+     * corrections the owner made.
+     */
+    ownerAuthoredOnly?: boolean;
+}
+
+/**
+ * How a folder export renders a document: the Organization's view for the
+ * organization account, the owner's own content for everyone else.
+ */
+export function folderExportDocumentOptions(
+    source: string,
+    organization: boolean,
+): RecordingMarkdownOptions {
+    return organization
+        ? { source, orgPeopleOnly: true }
+        : { source, ownerAuthoredOnly: true };
+}
+
 /**
  * Render a recording's transcript or summary as Markdown, from the rows its
  * owner holds: a shared recording is one recording.
@@ -217,14 +246,7 @@ export async function getRecordingMarkdownDocument(
     ownerUserId: string,
     recordingId: string,
     kind: SidecarKind,
-    source?: string,
-    /** Rendering for the Organization view: name Organization people only. */
-    orgPeopleOnly = false,
-    /**
-     * The sharing state the reader was authorized in; its corrections are
-     * read only in that state (see `correctionOverlay`).
-     */
-    sharedAs?: boolean,
+    options: RecordingMarkdownOptions = {},
 ): Promise<RecordingMarkdownDocument | null> {
     const [recording] = await db
         .select()
@@ -246,9 +268,7 @@ export async function getRecordingMarkdownDocument(
         title,
         kind,
         recording.storagePath,
-        source,
-        orgPeopleOnly,
-        sharedAs,
+        options,
     );
 }
 
@@ -258,9 +278,12 @@ async function renderRecordingMarkdownDocument(
     title: string,
     kind: SidecarKind,
     storagePath: string,
-    source?: string,
-    orgPeopleOnly = false,
-    sharedAs?: boolean,
+    {
+        source,
+        orgPeopleOnly = false,
+        sharedAs,
+        ownerAuthoredOnly = false,
+    }: RecordingMarkdownOptions = {},
 ): Promise<RecordingMarkdownDocument | null> {
     if (kind === "transcript") {
         const projection = await loadSidecarProjectionContext(
@@ -286,7 +309,7 @@ async function renderRecordingMarkdownDocument(
                 recordingId: recording.id,
                 revision: primary.revision,
             },
-            { pending: false, sharedAs },
+            { pending: false, sharedAs, ownerAuthoredOnly },
         );
         const text = projectTranscript(
             {

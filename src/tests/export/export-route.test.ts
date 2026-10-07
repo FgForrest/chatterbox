@@ -9,6 +9,13 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
+// Every caller here is an ordinary account: its own content.
+vi.mock("@/lib/export/resolve-archive-scope", () => ({
+    resolveArchiveScope: async (userId: string) => ({
+        kind: "personal",
+        userId,
+    }),
+}));
 vi.mock("@/db", () => ({
     db: { select: vi.fn() },
 }));
@@ -112,8 +119,11 @@ describe("GET /api/export (regression: summary decryption)", () => {
         expect(JSON.stringify(body)).not.toContain("enc:");
         // Every transcript's corrections read at once, not one by one.
         expect(confirmedOverlays).toHaveBeenCalledTimes(1);
+        // Only the corrections the owner made: no colleague's work leaves
+        // with a person's own export.
         expect(confirmedOverlays).toHaveBeenCalledWith({
             ownerUserId: "user-1",
+            ownerAuthoredOnly: true,
         });
     });
 });

@@ -1,6 +1,6 @@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
-import { people, transcriptSpeakers } from "@/db/schema";
+import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { namesFromRows } from "@/lib/knowledge/attribution";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import {
@@ -88,6 +88,50 @@ export async function buildResolverMap(
         .where(
             and(
                 eq(transcriptSpeakers.userId, ownerId),
+                eq(transcriptSpeakers.status, "confirmed"),
+                inArray(
+                    transcriptSpeakers.transcriptionId,
+                    transcriptionIds as string[],
+                ),
+            ),
+        );
+
+    return resolverMapFromRows(rows);
+}
+
+/**
+ * `buildResolverMap` for the Organization's export: shared transcripts of
+ * many owners, each named by its owner's attributions, but only with the
+ * Organization's people, as the Organization view names them.
+ */
+export async function buildOrgResolverMap(
+    transcriptionIds: readonly string[],
+): Promise<Map<string, SpeakerNameResolver>> {
+    if (transcriptionIds.length === 0) return new Map();
+
+    const rows = await db
+        .select({
+            transcriptionId: transcriptSpeakers.transcriptionId,
+            label: transcriptSpeakers.label,
+            displayName: people.displayName,
+        })
+        .from(transcriptSpeakers)
+        .innerJoin(
+            people,
+            and(
+                eq(people.id, transcriptSpeakers.personId),
+                orgOwnedCondition(people.userId),
+            ),
+        )
+        .innerJoin(
+            transcriptions,
+            and(
+                eq(transcriptions.id, transcriptSpeakers.transcriptionId),
+                eq(transcriptions.userId, transcriptSpeakers.userId),
+            ),
+        )
+        .where(
+            and(
                 eq(transcriptSpeakers.status, "confirmed"),
                 inArray(
                     transcriptSpeakers.transcriptionId,

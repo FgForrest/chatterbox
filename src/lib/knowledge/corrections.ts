@@ -57,12 +57,21 @@ const HEARD_DOMAIN = "correction-heard";
 /**
  * SQL predicate: the correction is in the scope a view of the transcript
  * reads: the Organization's while the recording is shared, the owner's
- * otherwise.
+ * otherwise. `ownerAuthoredOnly` narrows the Organization's to those the
+ * owner made: what leaves the instance as the owner's own content.
  */
-function correctionsIn(ownerUserId: string, shared: boolean) {
-    return shared
-        ? orgOwnedCondition(transcriptCorrections.userId)
-        : eq(transcriptCorrections.userId, ownerUserId);
+function correctionsIn(
+    ownerUserId: string,
+    shared: boolean,
+    ownerAuthoredOnly = false,
+) {
+    if (!shared) return eq(transcriptCorrections.userId, ownerUserId);
+    return ownerAuthoredOnly
+        ? and(
+              orgOwnedCondition(transcriptCorrections.userId),
+              eq(transcriptCorrections.createdByUserId, ownerUserId),
+          )
+        : orgOwnedCondition(transcriptCorrections.userId);
 }
 
 /**
@@ -303,12 +312,19 @@ export async function listCorrections(
     executor: Pick<typeof db, "select"> = db,
     {
         shared,
+        ownerAuthoredOnly = false,
     }: {
         /**
          * The sharing state the reader was authorized in; looked up when
          * not given.
          */
         shared?: boolean;
+        /**
+         * On a shared recording, only the Organization's corrections the
+         * owner made: an export of the owner's own content carries no
+         * colleague's.
+         */
+        ownerAuthoredOnly?: boolean;
     } = {},
 ): Promise<Correction[]> {
     const scope = shared ?? (await transcriptShared(executor, transcriptionId));
@@ -336,7 +352,7 @@ export async function listCorrections(
             and(
                 eq(transcriptions.userId, ownerUserId),
                 eq(transcriptCorrections.transcriptionId, transcriptionId),
-                correctionsIn(ownerUserId, scope),
+                correctionsIn(ownerUserId, scope, ownerAuthoredOnly),
             ),
         )
         .orderBy(
@@ -352,11 +368,12 @@ export async function listCorrections(
 
 /**
  * Which transcripts a library holds: an owner's (their live recordings,
- * each read in its view, the Organization's corrections where shared), or
- * the Organization's (every live shared recording, the Organization's).
+ * each read in its view, the Organization's corrections where shared, or
+ * with `ownerAuthoredOnly` only those of them the owner made), or the
+ * Organization's (every live shared recording, the Organization's).
  */
 export type CorrectionLibrary =
-    | { ownerUserId: string }
+    | { ownerUserId: string; ownerAuthoredOnly?: boolean }
     | { organization: true };
 
 /**
@@ -411,6 +428,12 @@ export async function listLibraryCorrections(
                           and(
                               shared,
                               orgOwnedCondition(transcriptCorrections.userId),
+                              library.ownerAuthoredOnly
+                                  ? eq(
+                                        transcriptCorrections.createdByUserId,
+                                        library.ownerUserId,
+                                    )
+                                  : undefined,
                           ),
                           and(
                               not(shared),

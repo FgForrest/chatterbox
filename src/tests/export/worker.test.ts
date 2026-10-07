@@ -34,6 +34,12 @@ vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/db/schema", () => ({ users: { id: "id", email: "email" } }));
 vi.mock("@/db/queries/export-jobs", () => queriesMock);
 vi.mock("@/lib/export/build-archive", () => buildArchiveMock);
+vi.mock("@/lib/export/resolve-archive-scope", () => ({
+    resolveArchiveScope: async (userId: string) => ({
+        kind: "personal",
+        userId,
+    }),
+}));
 vi.mock("@/lib/notifications/email", () => emailMock);
 vi.mock("@/lib/env", () => ({ env: envMock }));
 vi.mock("@/lib/storage/factory", () => ({
@@ -101,7 +107,7 @@ describe("export worker tick", () => {
             buildArchiveMock.buildAndUploadExportArchive,
         ).toHaveBeenCalledWith(
             expect.objectContaining({
-                userId: "user-1",
+                scope: { kind: "personal", userId: "user-1" },
                 storageKey: "exports/user-1/job-1-token-1.zip",
             }),
         );

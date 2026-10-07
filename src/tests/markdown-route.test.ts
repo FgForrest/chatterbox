@@ -61,10 +61,12 @@ describe("recording Markdown route", () => {
             "user-1",
             "rec-1",
             "transcript",
-            undefined,
-            false,
-            // Corrections are read in the sharing state it was authorized in.
-            false,
+            {
+                source: undefined,
+                orgPeopleOnly: false,
+                // Corrections are read in the sharing state it was authorized in.
+                sharedAs: false,
+            },
         );
     });
 

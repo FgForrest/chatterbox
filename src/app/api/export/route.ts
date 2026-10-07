@@ -1,4 +1,4 @@
-import { and, eq, getTableColumns, isNull } from "drizzle-orm";
+import { and, eq, getTableColumns } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -10,8 +10,11 @@ import {
 import { requireApiSession } from "@/lib/auth-server";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { archivedRecordingCondition } from "@/lib/export/archive-scope";
 import { isExportFormat } from "@/lib/export/formats";
+import { resolveArchiveScope } from "@/lib/export/resolve-archive-scope";
 import {
+    buildOrgResolverMap,
     buildResolverMap,
     projectTranscript,
 } from "@/lib/knowledge/project-transcript";
@@ -56,20 +59,17 @@ export const GET = apiHandler(async (request: Request) => {
         );
     }
 
-    // Get all recordings for user
+    // The account decides whose recordings: its own, or for the
+    // organization account every shared one. Never both.
+    const scope = await resolveArchiveScope(session.user.id);
     const userRecordings = await db
         .select()
         .from(recordings)
-        .where(
-            and(
-                eq(recordings.userId, session.user.id),
-                isNull(recordings.deletedAt),
-            ),
-        );
+        .where(archivedRecordingCondition(scope));
 
-    // Get transcriptions for all recordings
+    // The rows the recordings' owners hold, of live recordings only: a
+    // deleted one's never reach the file.
     const recordingIds = userRecordings.map((r) => r.id);
-    // Of live recordings only: a deleted one's never reach the file.
     const userTranscriptions =
         recordingIds.length > 0
             ? await db
@@ -77,22 +77,27 @@ export const GET = apiHandler(async (request: Request) => {
                   .from(transcriptions)
                   .innerJoin(
                       recordings,
-                      eq(recordings.id, transcriptions.recordingId),
-                  )
-                  .where(
                       and(
-                          eq(transcriptions.userId, session.user.id),
-                          isNull(recordings.deletedAt),
+                          eq(recordings.id, transcriptions.recordingId),
+                          eq(recordings.userId, transcriptions.userId),
                       ),
                   )
+                  .where(archivedRecordingCondition(scope))
             : [];
 
     const userEnhancements =
         recordingIds.length > 0
             ? await db
-                  .select()
+                  .select(getTableColumns(aiEnhancements))
                   .from(aiEnhancements)
-                  .where(eq(aiEnhancements.userId, session.user.id))
+                  .innerJoin(
+                      recordings,
+                      and(
+                          eq(recordings.id, aiEnhancements.recordingId),
+                          eq(recordings.userId, aiEnhancements.userId),
+                      ),
+                  )
+                  .where(archivedRecordingCondition(scope))
             : [];
     // Decrypt content fields up front so each format branch can rely on
     // plaintext. The export file is the user's plaintext data — they own
@@ -126,10 +131,11 @@ export const GET = apiHandler(async (request: Request) => {
     // is a rendering for the user, so it should read the way the app does.
     // Only confirmed attributions project; a machine guess never reaches a
     // file the user will treat as a record.
-    const resolvers = await buildResolverMap(
-        session.user.id,
-        userTranscriptions.map((t) => t.id),
-    );
+    const transcriptionIds = userTranscriptions.map((t) => t.id);
+    const resolvers =
+        scope.kind === "personal"
+            ? await buildResolverMap(scope.userId, transcriptionIds)
+            : await buildOrgResolverMap(transcriptionIds);
     const transcriptionGroups = new Map<
         string,
         Array<
@@ -138,10 +144,15 @@ export const GET = apiHandler(async (request: Request) => {
             }
         >
     >();
-    // Every transcript's confirmed corrections, read at once.
+    // Every transcript's confirmed corrections, read at once: on a shared
+    // recording of a person's own export, only those they made.
     const overlays =
         userTranscriptions.length > 0
-            ? await confirmedOverlays({ ownerUserId: session.user.id })
+            ? await confirmedOverlays(
+                  scope.kind === "personal"
+                      ? { ownerUserId: scope.userId, ownerAuthoredOnly: true }
+                      : { organization: true },
+              )
             : new Map<string, never[]>();
     for (const transcript of userTranscriptions) {
         const group = transcriptionGroups.get(transcript.recordingId) ?? [];

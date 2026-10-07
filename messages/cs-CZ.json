@@ -1558,6 +1558,8 @@
   "mc-u98": "Nepodařilo se spustit zálohu",
   "lZMjQI": "Export a záloha",
   "GdPYtO": "Vezměte si svá data s sebou: nahrávky, přepisy a shrnutí.",
+  "JDo7t_": "Exporty a zálohy tohoto účtu obsahují Organizaci: každou sdílenou nahrávku s jejím vlastníkem a lidi a znalosti Organizace. Soukromé nahrávky nikoho v nich nejsou a stáhnout je může jen tento účet.",
+  "739w1f": "Exporty a zálohy obsahují jen váš vlastní obsah: vaše nahrávky včetně sdílených, bez toho, co k nim doplnili kolegové. Stáhnout je můžete jen vy.",
   "xS4yI1": "Výchozí formát exportu",
   "9y9QQh": "JSON",
   "pVUqmm": "Frekvence záloh",
