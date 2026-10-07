@@ -11,6 +11,7 @@ import {
     useState,
 } from "react";
 import { toast } from "sonner";
+import { HelpLink } from "@/components/help/help-button";
 import {
     type LearnMarks,
     learnMarksFrom,
@@ -857,7 +858,13 @@ export function LearnReview({
             <Dialog open={open && ready} onOpenChange={setOpen}>
                 <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl">
                     <DialogHeader className="border-b px-6 pt-6 pb-4 pr-12">
-                        <DialogTitle>{i18n("Review")}</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2">
+                            {i18n("Review")}
+                            <HelpLink
+                                topic="learn.review"
+                                label={i18n("reviewing what Learn found")}
+                            />
+                        </DialogTitle>
                         <DialogDescription>
                             {i18n(
                                 "What Learn found in this transcript. Ticked items are applied when you finish; unticked ones are not proposed again.",

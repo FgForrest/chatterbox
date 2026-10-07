@@ -17,6 +17,7 @@ import { MarkdownActions } from "@/components/dashboard/markdown-actions";
 import { TranscribeInBrowserButton } from "@/components/dashboard/transcribe-in-browser-button";
 import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
 import { TranscriptView } from "@/components/dashboard/transcript-view";
+import { HelpLink } from "@/components/help/help-button";
 import type { LearnMarks } from "@/components/learn/learn-marks";
 import { LearnReview } from "@/components/learn/learn-review";
 import { SpeakerGuesses } from "@/components/learn/speaker-guesses";
@@ -744,6 +745,10 @@ export function TranscriptionPanel({
                         <CardTitle className="flex items-center gap-2">
                             <FileText className="size-5" />{" "}
                             {i18n("Transcription")}
+                            <HelpLink
+                                topic="transcripts"
+                                label={i18n("reading a transcript")}
+                            />
                         </CardTitle>
                         <div className="flex flex-wrap items-center gap-2">
                             {transcriptList.length > 1 && activeTranscript && (
@@ -1059,6 +1064,10 @@ export function TranscriptionPanel({
                             <CardTitle className="flex items-center gap-2">
                                 <ListChecks className="size-5" />{" "}
                                 {i18n("Summary")}
+                                <HelpLink
+                                    topic="summaries"
+                                    label={i18n("summaries")}
+                                />
                             </CardTitle>
                             <div className="flex flex-wrap items-center gap-2">
                                 {canHavePlaudSummary && (

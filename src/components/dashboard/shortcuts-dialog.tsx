@@ -35,6 +35,7 @@ export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
             rows: [
                 { keys: ["⌘", "K"], description: i18n("Command palette") },
                 { keys: ["?"], description: i18n("Show this cheatsheet") },
+                { keys: ["h"], description: i18n("Open the user guide") },
                 { keys: [","], description: i18n("Open settings") },
                 { keys: ["/"], description: i18n("Focus search") },
             ],

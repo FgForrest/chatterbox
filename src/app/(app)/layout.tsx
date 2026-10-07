@@ -1,11 +1,12 @@
 import { Footer } from "@/components/footer";
+import { HelpProvider } from "@/components/help/help-provider";
 import { RebrandBanner } from "@/components/rebrand-banner";
 import { Toaster } from "@/components/ui/sonner";
 import { env } from "@/lib/env";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
-        <>
+        <HelpProvider>
             <div className="flex flex-col min-h-[100vh]">
                 {/* In-app rebrand banner. Hosted-only: existing OpenPlaud
                     users land here directly (auth redirect from `/`) and
@@ -18,6 +19,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <Footer />
             </div>
             <Toaster />
-        </>
+        </HelpProvider>
     );
 }

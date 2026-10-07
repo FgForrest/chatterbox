@@ -3,6 +3,7 @@
 import { Combine, ListChecks, Loader2, Play, Plus, X } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
+import { HelpLink } from "@/components/help/help-button";
 import {
     AssigneePicker,
     type SpeakerChoice,
@@ -99,7 +100,13 @@ export function TaskReviewLink({
             >
                 <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl">
                     <DialogHeader className="border-b px-6 pt-6 pb-4 pr-12">
-                        <DialogTitle>{i18n("Proposed tasks")}</DialogTitle>
+                        <DialogTitle className="flex items-center gap-2">
+                            {i18n("Proposed tasks")}
+                            <HelpLink
+                                topic="tasks.review"
+                                label={i18n("reviewing proposed tasks")}
+                            />
+                        </DialogTitle>
                         <DialogDescription>
                             {merging
                                 ? i18n(
