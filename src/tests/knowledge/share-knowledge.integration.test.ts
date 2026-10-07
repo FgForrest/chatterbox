@@ -93,6 +93,7 @@ import {
     encryptJsonField,
     encryptText,
 } from "@/lib/encryption/fields";
+import type { ArchiveScope } from "@/lib/export/archive-scope";
 import { buildAndUploadExportArchive } from "@/lib/export/build-archive";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { acceptCorrection } from "@/lib/knowledge/corrections";
@@ -978,7 +979,7 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         expect(shared?.entityId).not.toBeNull();
     });
 
-    it("exports, for the owner, the Organization's corrections on their shared recording and whom they name", async () => {
+    it("exports, for the owner, only the corrections they made on their shared recording, and the Organization all of them", async () => {
         await correct("Novák", { personId: jan }, OWNER, "Novotný");
         await share();
         const apollo = (
@@ -989,30 +990,53 @@ describeWithDatabase("knowledge through sharing (PostgreSQL)", () => {
         ).id;
         await correct("Orion", { entityId: apollo }, orgUserId, "Apollo");
 
-        const storage = new ArchiveStorage();
-        await buildAndUploadExportArchive({
-            userId: OWNER,
-            sourceStorage: storage,
-            destinationStorage: storage,
-            storageKey: "exports/owner.zip",
-        });
-        const directory = await unzipper.Open.buffer(storage.uploaded);
-        const read = async (path: string) => {
-            const file = directory.files.find((entry) => entry.path === path);
-            return JSON.parse(
-                (await file?.buffer())?.toString("utf-8") ?? "{}",
-            );
+        const archive = async (scope: ArchiveScope) => {
+            const storage = new ArchiveStorage();
+            await buildAndUploadExportArchive({
+                scope,
+                sourceStorage: storage,
+                destinationStorage: storage,
+                storageKey: "exports/archive.zip",
+            });
+            const directory = await unzipper.Open.buffer(storage.uploaded);
+            return async (path: string) => {
+                const file = directory.files.find(
+                    (entry) => entry.path === path,
+                );
+                return JSON.parse(
+                    (await file?.buffer())?.toString("utf-8") ?? "{}",
+                );
+            };
         };
-        const knowledge = await read("knowledge/people.json");
+
+        // The owner's: published when shared, still theirs. The
+        // Organization's own correction, and what only it names, stay out.
+        const owner = await archive({ kind: "personal", userId: OWNER });
+        const knowledge = await owner("knowledge/people.json");
         expect(
             knowledge.corrections.map((row: { heard: string }) => row.heard),
-        ).toEqual(expect.arrayContaining(["Novák", "Orion"]));
-        expect(knowledge.corrections).toHaveLength(2);
-        expect(knowledge.people.map((row: { id: string }) => row.id)).toContain(
-            jan,
+        ).toEqual(["Novák"]);
+        expect(knowledge.people).toContainEqual(
+            expect.objectContaining({ id: jan, organization: true }),
         );
-        const entities = await read("knowledge/entities.json");
-        expect(entities.entities).toContainEqual(
+        const entities = await owner("knowledge/entities.json");
+        expect(
+            (entities.entities ?? []).map((row: { id: string }) => row.id),
+        ).not.toContain(apollo);
+
+        // The Organization's: every correction on the shared transcript.
+        const organization = await archive({
+            kind: "organization",
+            orgUserId,
+        });
+        const shared = await organization("knowledge/people.json");
+        expect(
+            shared.corrections.map((row: { heard: string }) => row.heard),
+        ).toEqual(expect.arrayContaining(["Novák", "Orion"]));
+        expect(shared.corrections).toHaveLength(2);
+        expect(
+            (await organization("knowledge/entities.json")).entities,
+        ).toContainEqual(
             expect.objectContaining({ id: apollo, organization: true }),
         );
     });

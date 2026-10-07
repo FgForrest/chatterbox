@@ -11,6 +11,14 @@ const { queriesMock, envMock } = vi.hoisted(() => ({
     envMock: { IS_HOSTED: false },
 }));
 
+// Every caller here is an ordinary account: its own content.
+vi.mock("@/lib/export/resolve-archive-scope", () => ({
+    resolveArchiveScope: async (userId: string) => ({
+        kind: "personal",
+        userId,
+    }),
+    archiveScopeKind: async () => "personal",
+}));
 vi.mock("@/db/queries/export-jobs", () => queriesMock);
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),

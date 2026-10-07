@@ -379,7 +379,7 @@ describe("buildAndUploadExportArchive", () => {
         );
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/usage.zip",
@@ -465,7 +465,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -569,7 +569,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/corrections.zip",
@@ -658,7 +658,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/folders.zip",
@@ -718,7 +718,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/vocabulary.zip",
@@ -830,7 +830,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/entities.zip",
@@ -921,7 +921,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/facts.zip",
@@ -1019,7 +1019,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1075,7 +1075,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1134,7 +1134,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1188,7 +1188,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1233,7 +1233,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1260,7 +1260,7 @@ describe("buildAndUploadExportArchive", () => {
         mockSelectSequence([[], [], []]);
 
         await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1317,7 +1317,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         const result = await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-1.zip",
@@ -1399,7 +1399,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         const result = await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: late,
             destinationStorage: late,
             storageKey: "exports/user-1/job-late.zip",
@@ -1434,7 +1434,7 @@ describe("buildAndUploadExportArchive", () => {
         ]);
 
         const result = await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-2.zip",
@@ -1460,7 +1460,7 @@ describe("buildAndUploadExportArchive", () => {
 
         await expect(
             buildAndUploadExportArchive({
-                userId: "user-1",
+                scope: { kind: "personal", userId: "user-1" },
                 sourceStorage: storage,
                 destinationStorage: storage,
                 storageKey: "exports/user-1/job-3.zip",
@@ -1473,7 +1473,7 @@ describe("buildAndUploadExportArchive", () => {
         mockSelectSequence([[], [], []]);
 
         const result = await buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-4.zip",
@@ -1512,7 +1512,7 @@ describe("buildAndUploadExportArchive", () => {
 
         const controller = new AbortController();
         const promise = buildAndUploadExportArchive({
-            userId: "user-1",
+            scope: { kind: "personal", userId: "user-1" },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/user-1/job-5.zip",

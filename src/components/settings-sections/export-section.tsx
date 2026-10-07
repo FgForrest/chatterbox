@@ -90,6 +90,9 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
     const [isExporting, setIsExporting] = useState(false);
     const [isStartingBackup, setIsStartingBackup] = useState(false);
     const [backupJob, setBackupJob] = useState<ExportJobStatus | null>(null);
+    const [backupScope, setBackupScope] = useState<"personal" | "organization">(
+        "personal",
+    );
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -119,6 +122,9 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                 if (!response.ok) return;
                 const data = await response.json();
                 if (data.jobs?.[0]) setBackupJob(data.jobs[0]);
+                if (data.scope === "organization") {
+                    setBackupScope("organization");
+                }
             } catch {
                 // Non-fatal -- the user can still start a fresh backup.
             }
@@ -272,6 +278,15 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                 )}
                 icon={Download}
             />
+            <p className="text-sm text-muted-foreground">
+                {backupScope === "organization"
+                    ? i18n(
+                          "Exports and backups of this account hold the Organization: every shared recording with its owner, and the Organization's people and knowledge. Nobody's private recordings are included, and only this account can download them.",
+                      )
+                    : i18n(
+                          "Exports and backups hold your own content only: your recordings, shared ones included, without what colleagues added to them. Only you can download them.",
+                      )}
+            </p>
             <div className="space-y-4">
                 <div className="space-y-2">
                     <Label htmlFor="export-format">

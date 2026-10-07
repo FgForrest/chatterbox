@@ -1558,6 +1558,8 @@
   "mc-u98": "Failed to start backup",
   "lZMjQI": "Export & Backup",
   "GdPYtO": "Take your data with you: recordings, transcripts, and summaries.",
+  "JDo7t_": "Exports and backups of this account hold the Organization: every shared recording with its owner, and the Organization's people and knowledge. Nobody's private recordings are included, and only this account can download them.",
+  "739w1f": "Exports and backups hold your own content only: your recordings, shared ones included, without what colleagues added to them. Only you can download them.",
   "xS4yI1": "Default export format",
   "9y9QQh": "JSON",
   "pVUqmm": "Backup frequency",

@@ -15,6 +15,7 @@ import {
 } from "@/db/queries/export-jobs";
 import { users } from "@/db/schema";
 import { env } from "@/lib/env";
+import { resolveArchiveScope } from "@/lib/export/resolve-archive-scope";
 import { normalizeLocale } from "@/lib/i18n/config";
 import { sendExportReadyEmail } from "@/lib/notifications/email";
 import { captureServerException } from "@/lib/posthog-server";
@@ -129,10 +130,14 @@ async function processJob(job: {
     const storageKey = `exports/${job.userId}/${job.id}-${job.claimToken}.zip`;
 
     try {
+        // Decided when the archive is built, from the account: the
+        // organization account's carries the Organization, anyone else's
+        // their own content.
+        const scope = await resolveArchiveScope(job.userId);
         const result = await runWithStallGuard(
             (signal, onProgress) =>
                 buildAndUploadExportArchive({
-                    userId: job.userId,
+                    scope,
                     sourceStorage,
                     destinationStorage: storage,
                     storageKey,

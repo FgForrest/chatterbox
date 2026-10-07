@@ -1,6 +1,16 @@
 import { PassThrough, type Readable, Transform } from "node:stream";
 import { ZipArchive } from "archiver";
-import { and, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import {
+    and,
+    eq,
+    getTableColumns,
+    inArray,
+    isNotNull,
+    isNull,
+    or,
+    type SQL,
+    sql,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -26,8 +36,14 @@ import {
     transcriptions,
     transcriptSpeakerRejections,
     transcriptSpeakers,
+    users,
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import {
+    type ArchiveScope,
+    archivedRecordingCondition,
+    scopeUserId,
+} from "@/lib/export/archive-scope";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { StorageProvider } from "@/lib/storage/types";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
@@ -40,6 +56,8 @@ export interface ArchiveResult {
 
 interface ManifestRecording {
     id: string;
+    /** Whose recording it is: in the Organization's archive only. */
+    owner?: { id: string; name: string | null; email: string };
     filename: string;
     startTime: string;
     endTime: string;
@@ -75,7 +93,7 @@ function folderName(recording: { id: string; startTime: Date }): string {
 }
 
 /**
- * Streams a full-data archive for `userId` into `destinationStorage` at
+ * Streams a full-data archive of `scope` into `destinationStorage` at
  * `storageKey`. Audio is streamed recording-by-recording straight out of
  * `sourceStorage` into the zip and back out to the destination -- at no
  * point is the whole archive, or more than one recording's audio, held
@@ -91,7 +109,8 @@ function folderName(recording: { id: string; startTime: Date }): string {
  * skipped, so the user still gets everything else.
  */
 export async function buildAndUploadExportArchive(input: {
-    userId: string;
+    /** Whose content: one person's own, or the Organization's. */
+    scope: ArchiveScope;
     /** Where the recordings' audio is read from. */
     sourceStorage: StorageProvider;
     /** Where the finished archive is written. */
@@ -109,7 +128,7 @@ export async function buildAndUploadExportArchive(input: {
     onProgress?: () => void;
 }): Promise<ArchiveResult> {
     const {
-        userId,
+        scope,
         sourceStorage,
         destinationStorage,
         storageKey,
@@ -121,17 +140,22 @@ export async function buildAndUploadExportArchive(input: {
         throw new Error("Export aborted before starting");
     }
 
+    const userId = scopeUserId(scope);
     const userRecordings = await db
-        .select()
+        .select({
+            ...getTableColumns(recordings),
+            ownerName: users.name,
+            ownerEmail: users.email,
+        })
         .from(recordings)
-        .where(
-            and(eq(recordings.userId, userId), isNull(recordings.deletedAt)),
-        );
+        .innerJoin(users, eq(users.id, recordings.userId))
+        .where(archivedRecordingCondition(scope));
 
     const recordingIds = userRecordings.map((r) => r.id);
 
+    // What a recording cost is its payer's: never in the Organization's.
     const userUsage =
-        recordingIds.length > 0
+        recordingIds.length > 0 && scope.kind === "personal"
             ? await db
                   .select()
                   .from(aiUsageEvents)
@@ -149,12 +173,20 @@ export async function buildAndUploadExportArchive(input: {
         usageMap.set(usage.recordingId, group);
     }
 
+    // The rows the recordings' owners hold.
     const userTranscriptions =
         recordingIds.length > 0
             ? await db
-                  .select()
+                  .select(getTableColumns(transcriptions))
                   .from(transcriptions)
-                  .where(eq(transcriptions.userId, userId))
+                  .innerJoin(
+                      recordings,
+                      and(
+                          eq(recordings.id, transcriptions.recordingId),
+                          eq(recordings.userId, transcriptions.userId),
+                      ),
+                  )
+                  .where(archivedRecordingCondition(scope))
             : [];
     // Grouped, not keyed: `transcriptions_recording_user_source_unique` lets a
     // Plaud import and the user's own provider coexist for one recording, and
@@ -170,9 +202,16 @@ export async function buildAndUploadExportArchive(input: {
     const userEnhancements =
         recordingIds.length > 0
             ? await db
-                  .select()
+                  .select(getTableColumns(aiEnhancements))
                   .from(aiEnhancements)
-                  .where(eq(aiEnhancements.userId, userId))
+                  .innerJoin(
+                      recordings,
+                      and(
+                          eq(recordings.id, aiEnhancements.recordingId),
+                          eq(recordings.userId, aiEnhancements.userId),
+                      ),
+                  )
+                  .where(archivedRecordingCondition(scope))
             : [];
     // `summary` is a `text` column (encryptText); `actionItems`/`keyPoints`
     // are `jsonb` envelopes (encryptJsonField) -- same at-rest scheme the
@@ -263,6 +302,8 @@ export async function buildAndUploadExportArchive(input: {
 
     const manifest: {
         version: string;
+        /** Whose content it carries; a restore must not mix the two. */
+        scope: ArchiveScope["kind"];
         createdAt: string;
         userId: string;
         recordings: ManifestRecording[];
@@ -283,7 +324,8 @@ export async function buildAndUploadExportArchive(input: {
         learn?: { runs: number; items: number };
         aiProviderRates?: { count: number; path: string };
     } = {
-        version: "2.0",
+        version: "2.1",
+        scope: scope.kind,
         createdAt: new Date().toISOString(),
         userId,
         recordings: [],
@@ -306,6 +348,15 @@ export async function buildAndUploadExportArchive(input: {
         const folder = folderName(recording);
         const entry: ManifestRecording = {
             id: recording.id,
+            ...(scope.kind === "organization"
+                ? {
+                      owner: {
+                          id: recording.userId,
+                          name: recording.ownerName,
+                          email: recording.ownerEmail,
+                      },
+                  }
+                : {}),
             filename: decryptText(recording.filename),
             startTime: recording.startTime.toISOString(),
             endTime: recording.endTime.toISOString(),
@@ -575,7 +626,7 @@ export async function buildAndUploadExportArchive(input: {
     // in the archive. Export parity is the proof a user can leave, so a
     // backup that restores recordings but loses who was speaking in them is
     // not a backup of this feature at all.
-    const knowledge = await collectKnowledgeBase(userId);
+    const knowledge = await collectKnowledgeBase(scope);
     if (
         knowledge.people.length > 0 ||
         knowledge.attributions.length > 0 ||
@@ -594,7 +645,7 @@ export async function buildAndUploadExportArchive(input: {
     }
 
     const organization = await collectFolderOrganization(
-        userId,
+        scope,
         new Set(recordingIds),
     );
     if (organization.folders.length > 0) {
@@ -629,7 +680,7 @@ export async function buildAndUploadExportArchive(input: {
     // Organization's entities; the Organization's entities and people those
     // point at come along, as referenced people do in `people.json`.
     const entities = await collectEntities(
-        userId,
+        scope,
         new Set(knowledge.people.map((person) => person.id)),
     );
     if (
@@ -736,10 +787,14 @@ interface ArchivedFolderOrganization {
     assignments: { recordingId: string; folderId: string }[];
 }
 
+// The scope's own tree: a person's Private folders and their filing in
+// them, or the Organization's tree with every shared recording filed in it
+// (an assignment row keeps its owner's id, whoever's folder it is in).
 async function collectFolderOrganization(
-    userId: string,
+    scope: ArchiveScope,
     activeRecordingIds: Set<string>,
 ): Promise<ArchivedFolderOrganization> {
+    const userId = scopeUserId(scope);
     const [folderRows, assignmentRows] = await Promise.all([
         db
             .select({
@@ -763,10 +818,12 @@ async function collectFolderOrganization(
                 eq(recordingFolders.id, recordingFolderAssignments.folderId),
             )
             .where(
-                and(
-                    eq(recordingFolderAssignments.userId, userId),
-                    eq(recordingFolders.userId, userId),
-                ),
+                scope.kind === "personal"
+                    ? and(
+                          eq(recordingFolderAssignments.userId, userId),
+                          eq(recordingFolders.userId, userId),
+                      )
+                    : eq(recordingFolders.userId, userId),
             ),
     ]);
 
@@ -792,6 +849,10 @@ interface ArchivedKnowledgeBase {
         primaryEmail: string | null;
         notes: string | null;
         mergedIntoId: string | null;
+        /** An Organization person the archive's own rows point at. */
+        organization: boolean;
+        /** Who first named it: in the Organization's archive only. */
+        createdByUserId?: string | null;
         createdAt: string;
     }[];
     attributions: {
@@ -829,33 +890,79 @@ interface ArchivedKnowledgeBase {
     }[];
 }
 
-// The corrections a user's archive carries: their own, and the
-// Organization's on their own transcripts -- a recording they shared is
-// still theirs, and the overlay on it the Organization's while shared.
-function exportedCorrections(userId: string) {
+// The transcripts an archive carries: those of its live recordings, as
+// their owners hold them.
+function archivedTranscriptIds(scope: ArchiveScope) {
+    return db
+        .select({ id: transcriptions.id })
+        .from(transcriptions)
+        .innerJoin(
+            recordings,
+            and(
+                eq(recordings.id, transcriptions.recordingId),
+                eq(recordings.userId, transcriptions.userId),
+            ),
+        )
+        .where(archivedRecordingCondition(scope));
+}
+
+// The corrections an archive carries. A person's: their own, and of the
+// Organization's on their own transcripts only those they made -- a
+// recording they shared is still theirs, a colleague's work on it is not.
+// The Organization's: its own, on the shared transcripts.
+function exportedCorrections(scope: ArchiveScope) {
+    if (scope.kind === "organization") {
+        return and(
+            eq(transcriptCorrections.userId, scope.orgUserId),
+            inArray(
+                transcriptCorrections.transcriptionId,
+                archivedTranscriptIds(scope),
+            ),
+        );
+    }
     return or(
-        eq(transcriptCorrections.userId, userId),
+        eq(transcriptCorrections.userId, scope.userId),
         and(
             orgOwnedCondition(transcriptCorrections.userId),
-            sql`${transcriptCorrections.transcriptionId} in (select ${transcriptions.id} from ${transcriptions} where ${transcriptions.userId} = ${userId})`,
+            eq(transcriptCorrections.createdByUserId, scope.userId),
+            sql`${transcriptCorrections.transcriptionId} in (select ${transcriptions.id} from ${transcriptions} where ${transcriptions.userId} = ${scope.userId})`,
         ),
     );
 }
 
-// The knowledge base for one user, decrypted for the archive.
+// The rows naming speakers an archive carries: a person's own, or the
+// owners' rows on the shared transcripts naming nobody or the
+// Organization's people (a private person never leaves with them).
+function exportedSpeakerRows(
+    scope: ArchiveScope,
+    table: typeof transcriptSpeakers | typeof transcriptSpeakerRejections,
+): SQL | undefined {
+    if (scope.kind === "personal") return eq(table.userId, scope.userId);
+    return and(
+        inArray(table.transcriptionId, archivedTranscriptIds(scope)),
+        or(
+            isNull(table.personId),
+            sql`${table.personId} in (select ${people.id} from ${people} where ${orgOwnedCondition(people.userId)})`,
+        ),
+    );
+}
+
+// The knowledge base of one scope, decrypted for the archive.
 //
 // `primaryEmailHash` is deliberately not exported: it is derived from the
 // email with a server secret and a restore can recompute it, while carrying
 // it would pin the archive to one instance's secret.
 async function collectKnowledgeBase(
-    userId: string,
+    scope: ArchiveScope,
 ): Promise<ArchivedKnowledgeBase> {
+    const userId = scopeUserId(scope);
     const personColumns = {
         id: people.id,
         displayName: people.displayName,
         primaryEmail: people.primaryEmail,
         notes: people.notes,
         mergedIntoId: people.mergedIntoId,
+        createdByUserId: people.createdByUserId,
         createdAt: people.createdAt,
     };
     const [peopleRows, attributionRows, rejectionRows, correctionRows] =
@@ -877,7 +984,7 @@ async function collectKnowledgeBase(
                     confirmedByUserId: transcriptSpeakers.confirmedByUserId,
                 })
                 .from(transcriptSpeakers)
-                .where(eq(transcriptSpeakers.userId, userId)),
+                .where(exportedSpeakerRows(scope, transcriptSpeakers)),
             db
                 .select({
                     transcriptionId:
@@ -887,7 +994,7 @@ async function collectKnowledgeBase(
                     createdAt: transcriptSpeakerRejections.createdAt,
                 })
                 .from(transcriptSpeakerRejections)
-                .where(eq(transcriptSpeakerRejections.userId, userId)),
+                .where(exportedSpeakerRows(scope, transcriptSpeakerRejections)),
             db
                 .select({
                     transcriptionId: transcriptCorrections.transcriptionId,
@@ -905,11 +1012,13 @@ async function collectKnowledgeBase(
                     createdAt: transcriptCorrections.createdAt,
                 })
                 .from(transcriptCorrections)
-                .where(exportedCorrections(userId)),
+                .where(exportedCorrections(scope)),
         ]);
 
-    // Organization people the user's own transcripts name: a restore must
-    // still know who spoke. They carry only this user's own notes.
+    // Organization people the archive's rows name: a restore must still
+    // know who spoke. A person carries those the person created in full and
+    // only the name of a colleague's; both with this person's own notes.
+    // Anything else the rows point at stays behind.
     const own = new Set(peopleRows.map((row) => row.id));
     const sharedIds = [
         ...new Set(
@@ -926,7 +1035,12 @@ async function collectKnowledgeBase(
             ? await db
                   .select(personColumns)
                   .from(people)
-                  .where(inArray(people.id, sharedIds))
+                  .where(
+                      and(
+                          inArray(people.id, sharedIds),
+                          orgOwnedCondition(people.userId),
+                      ),
+                  )
             : [];
     const overlay =
         sharedRows.length > 0
@@ -950,10 +1064,13 @@ async function collectKnowledgeBase(
         overlay.map((row) => [row.personId, row.notes]),
     );
     const archivedRows = [
-        ...peopleRows,
+        ...peopleRows.map((row) => ({ ...row, organization: false })),
         ...sharedRows.map((row) => ({
             ...row,
+            primaryEmail:
+                row.createdByUserId === userId ? row.primaryEmail : null,
             notes: overlayByPerson.get(row.id) ?? null,
+            organization: true,
         })),
     ];
 
@@ -966,9 +1083,21 @@ async function collectKnowledgeBase(
                 : null,
             notes: row.notes ? decryptText(row.notes) : null,
             mergedIntoId: row.mergedIntoId,
+            organization: scope.kind === "organization" || row.organization,
+            ...(scope.kind === "organization"
+                ? { createdByUserId: row.createdByUserId }
+                : {}),
             createdAt: row.createdAt.toISOString(),
         })),
-        attributions: attributionRows,
+        // Who confirmed a speaker is said only when it was this person.
+        attributions:
+            scope.kind === "personal"
+                ? attributionRows.map((row) => ({
+                      ...row,
+                      confirmedByUserId:
+                          row.confirmedByUserId === userId ? userId : null,
+                  }))
+                : attributionRows,
         rejections: rejectionRows.map((row) => ({
             ...row,
             createdAt: row.createdAt.toISOString(),
@@ -1069,8 +1198,10 @@ interface ArchivedEntities {
         name: string;
         description: string | null;
         mergedIntoId: string | null;
-        /** An Organization entity the user's knowledge points at. */
+        /** An Organization entity the archive's knowledge points at. */
         organization: boolean;
+        /** Who first named it: in the Organization's archive only. */
+        createdByUserId?: string | null;
         createdAt: string;
     }[];
     aliases: {
@@ -1088,16 +1219,33 @@ interface ArchivedEntities {
     people: { id: string; displayName: string; mergedIntoId: string | null }[];
 }
 
+// The names a person taught: their own, and those of the Organization's
+// they taught before sharing. The Organization's: its own.
+function exportedAliases(scope: ArchiveScope) {
+    if (scope.kind === "organization") {
+        return eq(knowledgeAliases.userId, scope.orgUserId);
+    }
+    return or(
+        eq(knowledgeAliases.userId, scope.userId),
+        and(
+            orgOwnedCondition(knowledgeAliases.userId),
+            eq(knowledgeAliases.createdByUserId, scope.userId),
+        ),
+    );
+}
+
 async function collectEntities(
-    userId: string,
+    scope: ArchiveScope,
     archivedPeople: ReadonlySet<string>,
 ): Promise<ArchivedEntities> {
+    const userId = scopeUserId(scope);
     const entityColumns = {
         id: knowledgeEntities.id,
         typeKey: knowledgeEntities.typeKey,
         name: knowledgeEntities.name,
         description: knowledgeEntities.description,
         mergedIntoId: knowledgeEntities.mergedIntoId,
+        createdByUserId: knowledgeEntities.createdByUserId,
         createdAt: knowledgeEntities.createdAt,
     };
     const [ownRows, aliasRows, noteRows, correctionRows] = await Promise.all([
@@ -1116,7 +1264,7 @@ async function collectEntities(
                 createdAt: knowledgeAliases.createdAt,
             })
             .from(knowledgeAliases)
-            .where(eq(knowledgeAliases.userId, userId)),
+            .where(exportedAliases(scope)),
         db
             .select({
                 entityId: knowledgeEntityNotes.entityId,
@@ -1129,7 +1277,7 @@ async function collectEntities(
             .from(transcriptCorrections)
             .where(
                 and(
-                    exportedCorrections(userId),
+                    exportedCorrections(scope),
                     isNotNull(transcriptCorrections.targetEntityId),
                 ),
             ),
@@ -1148,7 +1296,12 @@ async function collectEntities(
             ? await db
                   .select(entityColumns)
                   .from(knowledgeEntities)
-                  .where(inArray(knowledgeEntities.id, referencedIds))
+                  .where(
+                      and(
+                          inArray(knowledgeEntities.id, referencedIds),
+                          orgOwnedCondition(knowledgeEntities.userId),
+                      ),
+                  )
             : [];
     const personIds = [
         ...new Set(
@@ -1168,9 +1321,20 @@ async function collectEntities(
                       mergedIntoId: people.mergedIntoId,
                   })
                   .from(people)
-                  .where(inArray(people.id, personIds))
+                  .where(
+                      and(
+                          inArray(people.id, personIds),
+                          orgOwnedCondition(people.userId),
+                      ),
+                  )
             : [];
 
+    // A person's archive describes an Organization entity only when the
+    // person created it; a colleague's goes by its name alone.
+    const describes = (row: (typeof ownRows)[number], organization: boolean) =>
+        scope.kind === "organization" ||
+        !organization ||
+        row.createdByUserId === userId;
     const archived = (
         row: (typeof ownRows)[number],
         organization: boolean,
@@ -1178,9 +1342,15 @@ async function collectEntities(
         id: row.id,
         typeKey: row.typeKey,
         name: decryptText(row.name),
-        description: row.description ? decryptText(row.description) : null,
+        description:
+            row.description && describes(row, organization)
+                ? decryptText(row.description)
+                : null,
         mergedIntoId: row.mergedIntoId,
-        organization,
+        organization: scope.kind === "organization" || organization,
+        ...(scope.kind === "organization"
+            ? { createdByUserId: row.createdByUserId }
+            : {}),
         createdAt: row.createdAt.toISOString(),
     });
     return {
@@ -1377,7 +1547,12 @@ async function collectFacts(
                       mergedIntoId: people.mergedIntoId,
                   })
                   .from(people)
-                  .where(inArray(people.id, personIds))
+                  .where(
+                      and(
+                          inArray(people.id, personIds),
+                          orgOwnedCondition(people.userId),
+                      ),
+                  )
             : [];
     const entityRows =
         entityIds.length > 0
@@ -1389,7 +1564,12 @@ async function collectFacts(
                       mergedIntoId: knowledgeEntities.mergedIntoId,
                   })
                   .from(knowledgeEntities)
-                  .where(inArray(knowledgeEntities.id, entityIds))
+                  .where(
+                      and(
+                          inArray(knowledgeEntities.id, entityIds),
+                          orgOwnedCondition(knowledgeEntities.userId),
+                      ),
+                  )
             : [];
     return {
         facts: factRows.map((row) => ({

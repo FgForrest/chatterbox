@@ -14,6 +14,13 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
+// Every caller here is an ordinary account: its own content.
+vi.mock("@/lib/export/resolve-archive-scope", () => ({
+    resolveArchiveScope: async (userId: string) => ({
+        kind: "personal",
+        userId,
+    }),
+}));
 vi.mock("@/db", () => ({
     db: { select: vi.fn(), update: vi.fn(), insert: vi.fn() },
 }));

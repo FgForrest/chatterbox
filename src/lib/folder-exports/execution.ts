@@ -8,7 +8,10 @@ import {
     recordings,
     transcriptions,
 } from "@/db/schema";
-import { getRecordingMarkdownDocument } from "@/lib/export/document-sidecars";
+import {
+    folderExportDocumentOptions,
+    getRecordingMarkdownDocument,
+} from "@/lib/export/document-sidecars";
 import { listExportFolderOrganization } from "@/lib/folders/folders";
 import {
     ancestorFolderIds,
@@ -199,8 +202,7 @@ async function materializeLocked(
                       source[0].userId,
                       state.recordingId,
                       state.artifactType,
-                      source[0].source,
-                      isOrg,
+                      folderExportDocumentOptions(source[0].source, isOrg),
                   )
                 : null;
             if (!document) {

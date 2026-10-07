@@ -1992,7 +1992,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                             OWNER,
                             REC,
                             "transcript",
-                            "riffado",
+                            { source: "riffado" },
                         )
                     )?.content;
                 // Ticked in a review not yet finished: not in an export.
@@ -2289,7 +2289,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
 
         const storage = new ArchiveStorage();
         await buildAndUploadExportArchive({
-            userId: OWNER,
+            scope: { kind: "personal", userId: OWNER },
             sourceStorage: storage,
             destinationStorage: storage,
             storageKey: "exports/owner.zip",

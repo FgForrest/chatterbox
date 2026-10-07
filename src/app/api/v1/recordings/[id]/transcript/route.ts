@@ -72,7 +72,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         });
     }
 
-    // Its confirmed corrections beside the text as heard.
+    // Its confirmed corrections beside the text as heard; on a shared
+    // recording only those the owner made.
     const corrections = await correctionOverlay(
         {
             id: primary.id,
@@ -80,7 +81,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             recordingId: recording.id,
             revision: primary.revision,
         },
-        { pending: false },
+        { pending: false, ownerAuthoredOnly: true },
     );
     return NextResponse.json(serializeTranscript(primary, corrections));
 });

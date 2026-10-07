@@ -92,6 +92,7 @@ export async function correctionOverlay(
         pending = true,
         turns,
         sharedAs,
+        ownerAuthoredOnly = false,
     }: {
         pending?: boolean;
         /**
@@ -108,6 +109,12 @@ export async function correctionOverlay(
          * whoever read the Organization's.
          */
         sharedAs?: boolean;
+        /**
+         * On a shared recording, only the confirmed corrections the owner
+         * made (`listCorrections`): what an export of the owner's own
+         * content carries.
+         */
+        ownerAuthoredOnly?: boolean;
     } = {},
 ): Promise<OverlayCorrection[]> {
     const orgUserId = await sharingOrgUserId();
@@ -126,7 +133,7 @@ export async function correctionOverlay(
                           transcript.userId,
                           transcript.id,
                           db,
-                          { shared: sharedNow },
+                          { shared: sharedNow, ownerAuthoredOnly },
                       ),
                   };
               })()
@@ -156,7 +163,7 @@ export async function correctionOverlay(
                           transcript.userId,
                           transcript.id,
                           tx,
-                          { shared: sharedNow },
+                          { shared: sharedNow, ownerAuthoredOnly },
                       ),
                   };
               });

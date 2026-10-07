@@ -9,6 +9,10 @@ import {
 import { requireApiSession } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { apiHandler } from "@/lib/errors";
+import {
+    archiveScopeKind,
+    resolveArchiveScope,
+} from "@/lib/export/resolve-archive-scope";
 import { serializeExportJob as serializeJob } from "@/lib/export/serialize-job";
 import { captureServerEvent } from "@/lib/posthog-server";
 
@@ -25,10 +29,15 @@ import { captureServerEvent } from "@/lib/posthog-server";
  * is to process the queue, not police who's allowed to add to it. A
  * self-hosted instance pays for its own disk, so there a new backup is
  * always built: the last one may be exactly the archive to replace.
+ *
+ * Whose content the archive carries follows from the account (see
+ * `resolveArchiveScope`); a scope it cannot have is refused here, before
+ * anything is queued.
  */
 export const POST = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
     const userId = session.user.id;
+    await resolveArchiveScope(userId);
 
     const active = await getActiveExportJobForUser(userId);
     if (active) {
@@ -58,9 +67,15 @@ export const POST = apiHandler(async (request: Request) => {
     return NextResponse.json({ job: serializeJob(job) }, { status: 202 });
 });
 
-/** List the user's recent export jobs (most recent first, capped at 10). */
+/**
+ * List the user's recent export jobs (most recent first, capped at 10), and
+ * whose content their backups carry.
+ */
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
-    const jobs = await listExportJobsForUser(session.user.id);
-    return NextResponse.json({ jobs: jobs.map(serializeJob) });
+    const [jobs, scope] = await Promise.all([
+        listExportJobsForUser(session.user.id),
+        archiveScopeKind(session.user.id),
+    ]);
+    return NextResponse.json({ jobs: jobs.map(serializeJob), scope });
 });
