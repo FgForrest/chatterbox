@@ -57,16 +57,14 @@ If you can't or won't install the extension:
 
 1. Open [web.plaud.ai](https://web.plaud.ai) in a tab and sign in with
    Google or Apple as usual.
-2. Open browser devtools (F12 / Cmd+Option+I) → **Network** tab. Refresh
-   the page.
-3. Click any request whose host starts with `api.plaud.ai`,
-   `api-euc1.plaud.ai`, or `api-apse1.plaud.ai`.
-4. Under **Headers → Request Headers**, find `Authorization`. Copy
-   everything after `Bearer ` — the long `eyJ…` JWT.
-5. In Riffado, switch to the **Paste token** tab, pick the region that
-   matches the host you copied the token from (EU if it was
-   `api-euc1.plaud.ai`, APAC for `api-apse1.plaud.ai`, otherwise
-   Global), and paste.
+2. Open browser devtools (F12 / Cmd+Option+I) and find **Application →
+   Local Storage → https://web.plaud.ai** (called **Storage** in some
+   browsers).
+3. Copy the value of `pld_tokenstr`. This is your long-lived user token.
+   Do not copy the `Authorization` header from `/device/list` or
+   `/file/simple/web`: those requests use short-lived workspace tokens.
+4. In Riffado, switch to the **Paste token** tab, select your Plaud
+   account region (Global, EU, or APAC), and paste the value.
 
 The pasted token is encrypted at rest the same way as a code-flow token.
 

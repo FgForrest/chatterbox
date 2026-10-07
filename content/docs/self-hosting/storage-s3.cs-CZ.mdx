@@ -1,0 +1,135 @@
+---
+title: S3-kompatibilní úložiště
+description: Nakonfigurujte AWS S3, Cloudflare R2, MinIO, Backblaze B2 nebo jakoukoli S3-kompatibilní službu.
+---
+
+Ve výchozím nastavení ukládá Riffado zvukové soubory do místního souborového systému (Docker
+svazek připojený na `/app/audio`). Toto výchozí nastavení je vhodné – žádná další konfigurace,
+funguje offline, je zcela pod vaší kontrolou. Přepněte na S3, pokud
+chcete vyšší odolnost mimo váš server, nižší cenu za bajt nebo sdílet úložiště
+mezi více instancemi.
+
+Riffado komunikuje s libovolnou službou, která implementuje S3 protokol —
+AWS S3, Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces, Wasabi
+a další.
+
+<span id="configuring-s3" />
+
+## Nastavení S3
+
+Úložiště můžete nakonfigurovat dvěma způsoby:
+
+1. **Pro jednotlivé uživatele, přes uživatelské rozhraní Nastavení** — `Settings → Storage`. Každý uživatel
+   na instanci s vlastním hostingem může použít jiný bucket. Přihlašovací údaje
+   jsou šifrovány uložených dat.
+2. **Pro celou instanci, přes proměnné prostředí** – nastavte
+   `DEFAULT_STORAGE_TYPE=s3` a také níže uvedené proměnné `S3_*`. To je užitečné,
+   pokud chcete, aby každý nový účet standardně používal sdílený bucket.
+
+Konfigurace přes proměnné prostředí je výchozí, kterou získají noví uživatelé.
+Nastavení v UI toto chování přebírá pro konkrétního uživatele. Kompletní
+seznam najdete v
+[Proměnné prostředí](./environment-variables).
+
+<span id="provider-settings" />
+
+## Nastavení poskytovatele
+
+### AWS S3
+
+```bash
+S3_ENDPOINT=        # leave blank
+S3_BUCKET=your-bucket-name
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=YOUR_KEY
+S3_SECRET_ACCESS_KEY=YOUR_SECRET
+```
+
+### Cloudflare R2
+
+```bash
+S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+S3_BUCKET=riffado
+S3_REGION=auto
+S3_ACCESS_KEY_ID=YOUR_KEY
+S3_SECRET_ACCESS_KEY=YOUR_SECRET
+```
+
+R2 nabízí 10 GB prostoru zdarma a nemá poplatky za výstupní data,
+což z něj dělá vhodnou výchozí volbu pro osobní instance s vlastním hostingem.
+
+<span id="minio-self-hosted" />
+
+### MinIO (vlastní hosting)
+
+```bash
+S3_ENDPOINT=http://minio:9000
+S3_BUCKET=riffado
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+```
+
+Pokud MinIO běží ve stejné Docker síti jako Riffado, endpoint je
+jméno služby (`http://minio:9000`), nikoliv `localhost`.
+
+### Backblaze B2
+
+```bash
+S3_ENDPOINT=https://s3.<region>.backblazeb2.com
+S3_BUCKET=your-bucket-name
+S3_REGION=<region>
+S3_ACCESS_KEY_ID=YOUR_KEY
+S3_SECRET_ACCESS_KEY=YOUR_SECRET
+```
+
+B2 je nejlevnější volba pro dlouhodobé uchovávání v tzv. „studeném“ úložišti.
+
+### DigitalOcean Spaces
+
+```bash
+S3_ENDPOINT=https://<region>.digitaloceanspaces.com
+S3_BUCKET=your-space-name
+S3_REGION=<region>
+S3_ACCESS_KEY_ID=YOUR_KEY
+S3_SECRET_ACCESS_KEY=YOUR_SECRET
+```
+
+<span id="test-the-connection" />
+
+## Otestování připojení
+
+V uživatelském rozhraní Nastavení je tlačítko **Testovat připojení**,
+které volá `testConnection()` na poskytovateli úložiště — jde o rychlý dotaz,
+který včas upozorní na nedostatky v oprávněních nebo přihlašovacích údajích,
+ještě než přepnete aktivní backend.
+
+<span id="encryption-at-the-storage-layer" />
+
+## Šifrování na úrovni úložiště
+
+Šifrování uložených dat v Riffado se týká **položek v databázi**,
+nikoli zvukových objektů v úložišti. Pro S3 doporučujeme **šifrování
+na úrovni bucketu na straně serveru** (SSE-S3, SSE-KMS nebo ekvivalent
+u vašeho poskytovatele). Šifrování každého objektu na úrovni aplikace
+je výrazně složitější změna a zatím není podporována.
+
+Více viz [Šifrování uložených dat](../reference/encryption-at-rest) pro
+přesný rozsah šifrování na úrovni databáze.
+
+<span id="migrating-between-backends" />
+
+## Migrace mezi backendy
+
+Riffado neobsahuje vestavěný nástroj na přesunutí všech nahrávek z lokálního úložiště do S3.
+Doporučený postup:
+
+1. Zastavte synchronizaci (aby se nevytvářely nové soubory).
+2. Zrcadlete lokální adresář se zvukovými soubory do vašeho bucketu pomocí `aws s3 sync`,
+   `rclone` nebo obdobného nástroje.
+3. Přepněte nastavení úložiště v Nastavení.
+4. Znovu povolte synchronizaci.
+
+Záznamy o nahrávkách ukládají přímo klíč v úložišti; rozložení je stejné
+ve všech backendech (`{userId}/{filename}.mp3`, s příponami `(2)`, `(3)`&nbsp;…
+při kolizích), takže běžné zrcadlení lokálního adresáře do bucketu je dostačující.

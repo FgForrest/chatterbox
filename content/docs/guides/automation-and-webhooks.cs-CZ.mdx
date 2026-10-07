@@ -1,0 +1,160 @@
+---
+title: Automatizační API a webhooky
+description: Osobní API klíče, podepsané doručování webhooků a použití rozhraní /api/v1 z externích nástrojů.
+---
+
+Riffado zpřístupňuje malou, stabilní automatizační plochu pro externí
+nástroje – integrace ve stylu Zapieru, n8n toky, vlastní skripty. Dva
+hlavní prvky:
+
+- **Osobní API klíče** ověřují přístup pro čtení k `/api/v1/*`
+  rozhraní.
+- **Webhook endpointy** posílají události na Váš vlastní server, kdykoliv se
+  stane něco zajímavého (nová nahrávka, dokončený přepis).
+
+Kompletní referenci endpointů a ukázky kódu najdete v
+[Veřejná API](../reference/public-api).
+
+<span id="personal-api-keys" />
+
+## Osobní API klíče
+
+**Nastavení → Vývojář → API klíče → Vytvořit API klíč.** Pojmenujte jej,
+případně nastavte dobu platnosti, a zkopírujte jednorázově zobrazený klíč. Klíč
+je zobrazen pouze jednou – uložte jej do svého správce hesel nebo bezpečnostního úložiště
+nástroje, který jej bude používat.
+
+Formát: `op_<24 url-safe chars>` (např. `op_K7vR8x...`). Klíče mají v tuto chvíli
+pouze práva pro čtení; zápis není součástí veřejné plochy.
+
+Ověření probíhá zasláním klíče jako Bearer tokenu:
+
+```bash
+curl -H "Authorization: Bearer op_K7vR8x..." \
+  https://your-riffado-host/api/v1/recordings
+```
+
+Interně Riffado ukládá HMAC-SHA256 hash klíče (s použitím
+`API_TOKEN_HASH_SECRET`, v případě nedostupnosti `BETTER_AUTH_SECRET`) namísto samotného klíče. Případný průnik
+do databáze tedy neohrozí platné tokeny. Prefix klíče (prvních 12 znaků) je uložen v nezašifrované podobě,
+aby uživatelské rozhraní mohlo zobrazit „který klíč to byl?“, aniž by bylo možné jej zpětně získat.
+
+**Odvolání klíče** je jemné odvolání – řádek je označen jako `revokedAt` a
+autentizace jej okamžitě začne odmítat. Při vytváření lze také nastavit
+`expiresAt`; po vypršení platnosti jsou klíče odmítány stejným způsobem.
+
+<span id="webhook-endpoints" />
+
+## Webhook endpointy
+
+**Nastavení → Vývojář → Webhooky → Vytvořit webhook.** Zadejte:
+
+- **URL** endpointu, kam se budou události odesílat (POST).
+- **Události** – jedno nebo více podporovaných typů událostí (viz níže).
+- **Popis** volitelně, pro vlastní evidenci.
+
+Obdržíte podpisové tajemství ve formátu `whsec_<32 chars>`. Toto
+tajemství je zobrazeno pouze jednou a je uloženo se šifrováním uložených dat. Použijte jej pro ověření
+příchozích požadavků.
+
+<span id="supported-events" />
+
+### Podporované události
+
+| Událost                   | Kdy se spouští                                    |
+| ------------------------- | ------------------------------------------------- |
+| `recording.synced`          | Nová nahrávka dokončila synchronizaci z Plaud      |
+| `recording.updated`         | Metadatům existující nahrávky proběhla změna        |
+| `recording.deleted`         | Nahrávka byla měkce smazána                         |
+| `transcription.completed`   | Přepis byl úspěšně dokončen                          |
+| `transcription.failed`      | Přepis selhal (konečné, po opakovaných pokusech)     |
+| `summary.completed`         | Automatické shrnutí bylo úspěšně dokončeno              |
+| `summary.failed`            | Automatické shrnutí selhalo (přepis stále uchován)    |
+
+<span id="delivery-shape" />
+
+### Podoba doručování
+
+Každá doručená událost je `POST` na Vaši URL s JSON tělem a těmito
+hlavičkami:
+
+| Hlavička               | Význam                                               |
+| ---------------------- | ---------------------------------------------------- |
+| `X-Riffado-Event`     | Název události (např. `recording.synced`)                |
+| `X-Riffado-Delivery`  | Jedinečný identifikátor doručení, užitečné pro idempotentní příjemce   |
+| `X-Riffado-Timestamp` | Unixový čas v sekundách, je také součástí signovaného payloadu  |
+| `X-Riffado-Signature` | `t=<timestamp>,v1=<hex hmac>` — viz níže                  |
+
+Tělo vždy obsahuje název události, id dotčené nahrávky
+a serializovaná data nahrávky dle
+[tvaru `/api/v1/recordings/{id}`](../reference/public-api).
+
+<span id="verifying-signatures" />
+
+### Ověřování podpisů
+
+Formát podpisové hlavičky: `t=1700000000,v1=<hex>`.
+
+Podepsaný payload je `${timestamp}.${rawBody}` a algoritmus je
+HMAC-SHA256 s Vaším tajemstvím `whsec_…`. Doručení odmítněte, pokud:
+
+- Hodnota `t=` je vzdálena o více než **pět minut** od času příjemce
+  (ochrana před přehráním).
+- Přepočítaný digest `v1` se neshoduje konstantním časem s doručeným.
+
+Referenční příjemce v Node.js:
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verify(secret, header, rawBody, toleranceSeconds = 300) {
+  const parts = new Map(
+    header.split(",").map((p) => p.split("=")),
+  );
+  const t = Number(parts.get("t"));
+  const sig = parts.get("v1");
+  if (!Number.isFinite(t) || !sig) return false;
+  if (Math.abs(Date.now() / 1000 - t) > toleranceSeconds) return false;
+
+  const expected = createHmac("sha256", secret)
+    .update(`${t}.${rawBody}`)
+    .digest("hex");
+
+  const a = Buffer.from(expected, "hex");
+  const b = Buffer.from(sig, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+Stejný algoritmus je použit také v `src/lib/webhooks/signature.ts`.
+
+<span id="allowed-urls" />
+
+### Povolené URL adresy
+
+Výchozí nastavení povoluje webhook URL s protokolem `http://` nebo `https://` a směrování
+na jakýkoli hostitelský stroj, který kontejner Riffado dokáže kontaktovat.
+Fungují Docker bridge hostname (`http://n8n:5678/...`), i privátní síťové IP adresy.
+URL s vloženými přihlašovacími údaji jsou odmítány.
+
+Pokud požadujete přísnější kontrolu – pouze HTTPS URL, povoleny jen veřejné IP adresy,
+výslovně zakázané RFC1918/loopback/link-local/ULA – nastavte
+`WEBHOOKS_REQUIRE_PUBLIC_TARGETS=true` v souboru `.env`. To je užitečné, pokud
+je Vaše Riffado instance přístupná dalším osobám a nechcete,
+aby se dala zneužít jako SSRF relay proti vaší privátní síti.
+
+<span id="retry-behaviour" />
+
+### Chování při selhání doručení
+
+Webhook doručení jsou frontována a zpracovávána pozadím. Odpověď mimo rozsah 2xx nebo síťové selhání způsobí exponential-backoff
+a opakované doručení. Po vyčerpání pokusů označí worker doručení jako neúspěšné,
+které se zobrazí v **Nastavení → Vývojář → Webhooky → Poslední doručení**.
+
+<span id="what-writes-look-like" />
+
+## Jak vypadá zápis
+
+Zatím neexistují žádné veřejné endpointy pro zápis. Aktuální rozhraní `/api/v1/*`
+je záměrně pouze pro čtení: seznam nahrávek, detail nahrávky, její přepis, stream jejího audia. Pokud potřebujete data zasílat *dovnitř*,
+spusťte uživatelské rozhraní Riffado nebo synchronizujte zdrojový účet Plaud.

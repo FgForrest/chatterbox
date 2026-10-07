@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { env } from "@/lib/env";
+import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
 // `force-dynamic` so `env.IS_HOSTED` / `env.APP_URL` are read at request
@@ -41,7 +42,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     }));
 
     const docsEntries: MetadataRoute.Sitemap = source
-        .getPages()
+        .getPages(defaultLocale)
         .map((page) => ({
             url: `${baseUrl}${page.url}`,
             lastModified: page.data.lastModified,

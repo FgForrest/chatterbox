@@ -1,0 +1,72 @@
+---
+title: Export do Google Drive
+description: Umožněte uživatelům exportovat složky do Google Drive prostřednictvím projektu Google Cloud ve Vašem vlastním Workspace.
+---
+
+Export složky může zapisovat do Google Drive místo do souborového systému serveru. Funguje stejně jako export do souborového systému: každá nahrávka ve stromu složky dostane svou vlastní složku obsahující audio, přepisy a souhrny, které se průběžně aktualizují při změnách. Přepisy a souhrny lze zapisovat jako soubory Markdown, jako Google Docs, nebo obojí.
+
+Integrace je určena pro instance s vlastním hostingem v rámci jednoho Google Workspace. Používá OAuth consent screen typu **Interní**, který mohou využívat pouze účty Vašeho Workspace a který Google nekontroluje.
+
+<span id="what-riffado-can-see" />
+
+## Co Riffado může vidět
+
+Riffado vyžaduje rozsah `drive.file`. Díky tomu Riffado vidí pouze:
+
+- složku, kterou uživatel vybere v Google Pickeru, a
+- složky a soubory, které Riffado samo vytvoří.
+
+Nemůže zobrazit ani číst žádné jiné položky v Google Drive uživatele. Na druhou stranu: Riffado také nemůže vidět soubory, které lidé vloží do složek vytvořených Riffadem. Sleduje pouze své vlastní složky a kdykoliv nějakou složku už nepotřebuje a nemá v ní žádné své soubory, přesune ji do koše Google Drive. Jakékoliv položky, které tam uživatelé vložili, jdou do koše spolu s ní a zůstávají obnovitelné po dobu 30 dnů. Každá složka vytvořená Riffadem nese v popisu Drive text: „Spravuje Riffado. Obsah, který zde přidáte, může být odstraněn.“
+
+Google Docs jsou znovu generovány pokaždé, když se změní přepis nebo souhrn, a to do téhož dokumentu (jeho odkaz i sdílení zůstává platné). Úpravy provedené přímo v dokumentu jsou přepsány.
+
+<span id="google-cloud-setup" />
+
+## Nastavení Google Cloud
+
+1. V [Google Cloud konzoli](https://console.cloud.google.com/)
+   vytvořte projekt ve Vaší organizaci Workspace.
+2. **APIs & Services → Library**: povolte **Google Drive API** a
+   **Google Picker API**.
+3. **APIs & Services → OAuth consent screen** (Google Auth Platform →
+   Branding / Audience): zvolte typ uživatele **Interní**, vyplňte název aplikace a email podpory. V části **Přístup k datům** přidejte rozsahy `openid`,
+   `email` a `https://www.googleapis.com/auth/drive.file`.
+4. **Credentials → Create credentials → OAuth client ID**, typ **Web
+   application**:
+   - Oprávněný původ JavaScriptu: Vaše `APP_URL` (např.
+     `https://riffado.example.com`).
+   - Oprávněné URI pro přesměrování:
+     `<APP_URL>/api/integrations/google/callback`.
+
+   Zkopírujte client id a secret.
+5. **Credentials → Create credentials → API key**. Omezte jej na
+   **Google Picker API** a na HTTP referrery `<APP_URL>/*`.
+6. Číslo projektu naleznete na dashboardu projektu (**Project info**).
+
+Poté nastavte:
+
+```bash
+GOOGLE_CLIENT_ID=1234567890-abc.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-...
+GOOGLE_PICKER_API_KEY=AIza...
+GOOGLE_CLOUD_PROJECT_NUMBER=1234567890
+# Optional: refuse accounts of other domains even if the client allows them.
+GOOGLE_WORKSPACE_DOMAINS=example.com
+```
+
+Restartujte Riffado. V části **Nastavení → Google účet** nyní můžete propojit účet a v dialogu exportu složky zvolit **Přidat export do Google Drive**.
+
+<span id="exporting-the-organization-tree-to-a-shared-drive" />
+
+## Export stromu Organizace do sdíleného disku
+
+Účet organizace exportuje strom Organizace stejně jako každý jiný. Propojte jej s dedikovanou služební schránkou (například
+`riffado@example.com`, licenci Workspace uživatele), ne s osobním účtem: export probíhá přes tento účet a pokud je odstraněn, export se zastaví. Přidejte schránku na sdílený disk jako **Správce obsahu**, přihlaste se do Riffada jako účet organizace, propojte schránku a vyberte složku sdíleného disku.
+
+<span id="when-the-connection-breaks" />
+
+## Když dojde k přerušení propojení
+
+Pokud je přístup k účtu odvolán, změní se heslo účtu způsobem, který odvolá tokeny, nebo je účet odstraněn z Workspace, Google přestane přijímat obnovovací token Riffado. Propojení je pak označeno k opětovnému připojení, exporty na Drive tohoto uživatele se pozastaví a dialog exportu i nastavení na to upozorňují. Opětovné propojení téhož účtu automaticky obnoví všechny pozastavené exporty.
+
+Export se také zastaví, pokud je jeho složka smazána nebo přesunuta do koše, nebo pokud účet již nemůže přidávat do složky soubory. Chcete-li pokračovat, vyberte jinou složku v nastavení exportu.

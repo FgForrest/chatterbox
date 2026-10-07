@@ -1,0 +1,15 @@
+{
+    "title": "Vlastní hosting",
+    "pages": [
+        "index",
+        "install",
+        "environment-variables",
+        "organization",
+        "sso",
+        "mcp",
+        "storage-s3",
+        "google-drive",
+        "email-smtp",
+        "upgrading"
+    ]
+}

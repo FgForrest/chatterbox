@@ -1,0 +1,34 @@
+---
+title: Vlastní hosting
+description: Provozujte Riffado na vlastní infrastruktuře pomocí Docker Compose.
+---
+
+Riffado je software pod AGPL-3.0 licencí, který můžete provozovat sami. Stejný kód
+pohání jak hostovanou instanci na riffado.com, tak i nasazení s vlastním hostingem
+za `docker compose up`. Tato sekce je určena operátorům —
+vše, co nemusíte řešit, pokud využíváte hostovanou instanci.
+
+<span id="where-to-start" />
+
+## Kde začít
+
+- **[Instalace](./install)** — jednorázový instalátor přes Docker Compose.
+- **[Proměnné prostředí](./environment-variables)** — veškerá nastavení,
+  která Riffado načítá při startu, s vyznačením těch, která jsou povinná za běhu.
+- **[Organizace](./organization)** — sdílejte nahrávky, přepisy
+  a jména mluvčích se všemi uživateli instance.
+- **[S3-kompatibilní úložiště](./storage-s3)** — přesměrujte zvuk na AWS S3,
+  Cloudflare R2, MinIO, Backblaze B2, nebo jakýkoli S3-kompatibilní systém.
+- **[Nastavení e‑mailu (SMTP)](./email-smtp)** — propojte SMTP server,
+  aby backend pro e‑mailová oznámení mohl doručovat poštu.
+- **[Aktualizace](./upgrading)** — tagy obrazů, příkaz pro upgrade
+  a co zálohovat před zásadní aktualizací verze.
+
+<span id="not-here" />
+
+## Co zde nenajdete
+
+Chování produktu na úrovni jednotlivých uživatelů — propojení Plaud účtu, volba AI
+poskytovatelů, aktivace oznámení, využití veřejného API, export
+vašich dat — najdete v sekci [Příručky](../guides) a platí
+pro uživatele hostované i s vlastním hostingem.

@@ -1,0 +1,106 @@
+---
+title: Jednotné přihlášení (OpenID Connect)
+description: Umožněte lidem přihlašovat se prostřednictvím vašeho poskytovatele identity (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) místo hesla k Riffado.
+---
+
+Riffado ve vlastním hostingu může předat přihlašování poskytovateli identity OpenID Connect. Jakmile je nastaveno, je **jedinou** možností přihlášení:
+
+- na přihlašovací stránce se zobrazuje pouze jedno tlačítko **Přihlásit se pomocí &lt;provider&gt;**;
+- přihlašování e-mailem a heslem, registrace a obnova hesla jsou na serveru vypnuty, nejen skryty;
+- každý, koho poskytovatel propustí, získá při prvním přihlášení účet Riffado. Kdo může Riffado používat, je rozhodnuto u poskytovatele (například přiřazením uživatelů nebo skupin ke klientovi).
+
+S `DISABLE_REGISTRATION=true` zůstává instance uzavřená: přihlásit se mohou pouze lidé, kteří už mají účet Riffado, a jejich účet je propojen při prvním přihlášení přes SSO, jak je popsáno níže. Všichni ostatní uvidí hlášení „Tato instance Riffado nepřijímá nové účty“. Pokud chcete pustit nového kolegu, proměnnou vypněte, restartujte, nechte ho jednou přihlásit a poté opět zapněte.
+
+Hostovaný Riffado tyto proměnné ignoruje.
+
+<span id="provider-setup" />
+
+## Nastavení poskytovatele
+
+Vytvořte důvěrného klienta OpenID Connect (authorization code flow) s těmito parametry:
+
+- **Přesměrovací URI:** `<APP_URL>/api/auth/oauth2/callback/oidc`
+- **Scope:** `openid`, `profile`, `email`
+- **PKCE:** `S256` (Riffado vždy posílá code challenge)
+
+Riffado potřebuje položky `sub`, `email`, `name` a `email_verified`.
+
+<details>
+<summary>Keycloak</summary>
+
+1. Ve svém realm **Clients → Create client**, zvolte **OpenID Connect**,
+   client id `riffado`.
+2. **Client authentication:** zapnuto. **Authentication flow:** pouze Standard flow.
+3. **Valid redirect URIs:** `<APP_URL>/api/auth/oauth2/callback/oidc`.
+4. **Advanced → Proof Key for Code Exchange Code Challenge Method:** `S256`.
+5. Zkopírujte tajný klíč v **Credentials**.
+
+Issuer je `https://<keycloak-host>/realms/<realm>`.
+
+</details>
+
+<details>
+<summary>Microsoft Entra ID</summary>
+
+Zaregistrujte aplikaci s **Web** přesměrovacím URI výše a vytvořte klientský tajný klíč. Issuer je `https://login.microsoftonline.com/<tenant-id>/v2.0`. Entra neposílá `email_verified`; viz [Stávající účty](#existing-accounts).
+
+</details>
+
+Nastavte tedy:
+
+```bash
+OIDC_ISSUER_URL=https://sso.example.com/realms/acme
+OIDC_CLIENT_ID=riffado
+OIDC_CLIENT_SECRET=...
+OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
+# OIDC_SCOPES="openid profile email"
+# OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
+```
+
+Riffado načítá endpoints poskytovatele z `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Issuer musí být `https`: Riffado věří ID tokenu, který získá přímo od endpoints poskytovatele, proto tento kanál musí být přes TLS. Prostý `http` je akceptován pouze pro interní hosty (`localhost`, privátní IP adresy, jednoznačné názvy jako služba compose `keycloak` a názvy `.local` / `.internal`).
+
+Všechny tři údaje – issuer, client id a secret – musí být nastaveny; částečná konfigurace zastaví server s chybou.
+
+<span id="existing-accounts" />
+
+## Stávající účty
+
+Když je pro instanci zapnuto jednotné přihlášení, která již má účty, první SSO přihlášení osoby se spáruje s jejich existujícím účtem (včetně nahrávek, nastavení a všeho), **pokud se e-mail shoduje a poskytovatel jej označí jako ověřený** (`email_verified: true`).
+
+Pokud poskytovatel adresu neověřil, Riffado odmítne propojit s existujícím účtem a přihlašovací stránka ukáže důvod. Ověřte e-mail u poskytovatele (v Keycloak: přepínač **Email verified** uživatele) a přihlašte se znovu. Neověřený e-mail, který zatím nikdo nepoužívá, prostě vytvoří nový účet.
+
+Od této chvíle je účet vázán na uživatelské id poskytovatele (`sub`): jméno i e-mail odpovídají údajům u poskytovatele při každém přihlášení. E-mail, který už používá jiný účet Riffado, nebude převzat; uživatel si ponechá svůj stávající.
+
+<span id="sessions" />
+
+## Relace
+
+- První spuštění s jednotným přihlášením ukončí **všechny** existující relace, takže nikdo nezůstane přihlášen přes heslo. Vypnutí a opětovné zapnutí SSO to způsobí znovu.
+- Relace trvá `OIDC_SESSION_MAX_AGE` sekund (výchozí 24 hodin) a její délka se nepřidlužuje použitím. Uživatel deaktivovaný u poskytovatele ztratí přístup do Riffado v tomto intervalu.
+- **Odhlásit se** ukončí pouze relaci Riffado. Relace poskytovatele zůstává, takže další **Přihlášení** může automaticky projít bez výzvy.
+- Osobní API tokeny nejsou relace a nadále fungují.
+
+<span id="the-almanac" />
+
+## Almanach
+
+Každé přihlášení přes SSO zaznamená osobu (jméno a e-mail) do Almanachu organizace, případně do jejího vlastního almanachu, pokud [Organizace](./organization) není aktivní. Známá osoba je určena podle e-mailu a přebírá aktuální jméno od poskytovatele; přezdívky, poznámky a fakta přidaná v Riffado se zachovávají.
+
+<span id="the-organization-account" />
+
+## Účet Organizace
+
+Při jednotném přihlášení je `ORG_ACCOUNT_PASSWORD` volitelné a nikdo se nemůže přihlásit jako účet Organizace: zůstává vlastníkem stromu Organizace, ale nelze se k němu interaktivně přihlásit. Uživatel poskytovatele identity, jehož e-mail se shoduje s `ORG_ACCOUNT_EMAIL`, je odmítnut.
+
+<span id="trying-it-locally" />
+
+## Vyzkoušení lokálně
+
+End-to-end stack v repozitáři má Keycloak override s testovacím realm (`riffado-e2e`, uživatelé `alice`, `bob`, `carol`, `dave`, všichni s heslem `<name>-password`):
+
+```bash
+RIFFADO_E2E_APP_URL=http://localhost:3310 \
+docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --build
+```
+
+Riffado pak běží na `http://localhost:3310` a Keycloak na `http://localhost:8180`, oba na loopbacku. Realm je pouze pro testování: administrátorem je `admin/admin` a všechna hesla jsou veřejná.

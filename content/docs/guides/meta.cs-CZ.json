@@ -1,0 +1,11 @@
+{
+    "title": "Návody",
+    "pages": [
+        "connect-plaud-account",
+        "ai-providers",
+        "almanac",
+        "notifications",
+        "automation-and-webhooks",
+        "backup-and-restore"
+    ]
+}

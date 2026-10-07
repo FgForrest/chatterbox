@@ -1,0 +1,166 @@
+---
+title: Proměnné prostředí
+description: Všechny proměnné prostředí, které Riffado načítá, jejich funkce a výchozí hodnoty.
+---
+
+Riffado ověřuje každou proměnnou prostředí pomocí schématu Zod v
+`src/lib/env.ts` při startu procesu. Nesprávně nastavené prostředí způsobí
+pád serveru s přesnou chybovou zprávou namísto spuštění v poškozeném
+stavu — to je záměrné. Tato stránka slouží jako zdroj pravdy
+pro instalaci s vlastním hostingem.
+
+<span id="required-at-runtime" />
+
+## Povinné za běhu
+
+Tyto proměnné musí být nastavené pokaždé, když server skutečně běží (vývoj i produkce).
+Jsou volitelné ve vrstvě **build** (sestavení), aby `next build`
+nezávisel na produkčních tajemstvích.
+
+| Proměnná                   | Typ      | Poznámky                                                                 |
+| -------------------------- | -------- | ------------------------------------------------------------------------ |
+| `DATABASE_URL`              | string   | Připojovací řetězec k Postgresu                                         |
+| `BETTER_AUTH_SECRET`        | string   | Alespoň 32 znaků; podepisuje cookies s relací                          |
+| `APP_URL`                   | URL      | Veřejný původ (např. `https://riffado.example.com`)                    |
+| `ENCRYPTION_KEY`            | hex(64)  | Přesně 64 hex znaků (32 bajtů); viz [Šifrování uložených dat](../reference/encryption-at-rest)|
+
+<span id="optional-knobs" />
+
+## Volitelné ovladače
+
+| Proměnná                            | Výchozí hodnota                      | Efekt                                                                                                             |
+| ------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `DISABLE_REGISTRATION`              | `false`                            | Při `true` je registrace odmítnuta na straně serveru a stránka `/register` je zakázána. Stávající uživatelé dál fungují. S [jednotným přihlašováním](./sso) se mohou přihlásit pouze existující účty. |
+| `DISABLE_UPDATE_CHECK`              | `false`                            | Při hodnotě `true` patička nikdy nekontroluje u `api.github.com` nové vydané verze.                                 |
+| `DOCS_REPOSITORY`                   | `riffado/riffado`                  | GitHub repozitář (`owner/name`), na který směřují odkazy **Upravit na GitHubu** v dokumentaci. Čte se při buildu dokumentace: předává se jako build argument Dockeru. |
+| `SELF_HOST_MODE`                    | `shared`                           | `shared` umožňuje úroveň Organization; `local` drží každý účet striktně soukromě.                           |
+| `ORG_ACCOUNT_EMAIL`                 | nenastaveno                          | Při `ORG_ACCOUNT_PASSWORD` povolí úroveň Organization: sdílenou stromovou strukturu složek a jeden účet organizace, který ji spravuje. Nesmí odpovídat e-mailu žádného stávajícího uživatele. |
+| `ORG_ACCOUNT_PASSWORD`              | nenastaveno                          | Heslo účtu organizace (alespoň 12 znaků). Při každém startu se opětovně nastavuje. Volitelné při jednotném přihlašování, kde účet nemá interaktivní přihlášení. |
+| `ORG_ACCOUNT_NAME`                  | `Organization`                     | Zobrazované jméno účtu organizace.                                                                                |
+| `RIFFADO_VERSION`                 | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které image tagy Compose stahuje.                                  |
+| `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
+| `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro bucketování rate-limitů. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
+| `API_TOKEN_HASH_SECRET`             | pokud není, použije `BETTER_AUTH_SECRET` | Alespoň 32 znaků. HMAC klíč pro hashování osobních API tokenů. Nastavte samostatně pro rotaci hashů tokenů bez rotace session secretu. |
+
+Nastavení `RATE_LIMIT_TRUST_PROXY_HEADERS=true` bez proxy,
+která přepisuje forwarding záhlaví, umožní klientům falšovat vlastní IP adresy
+a zcela obejít rate limiting. Pokud si nejste jistí, že Vaše proxy tato záhlaví
+přepisuje/maže, ponechte nenastaveno.
+
+<span id="storage" />
+
+## Úložiště
+
+| Proměnná                | Výchozí     | Efekt                                                               |
+| ----------------------- | ----------- | ------------------------------------------------------------------- |
+| `DEFAULT_STORAGE_TYPE`  | `local`     | `local` nebo `s3`. Výchozí pro nové uživatele; možnost individuálně změnit v UI.|
+| `LOCAL_STORAGE_PATH`    | `./storage` | Systémová cesta k souborům, pokud `DEFAULT_STORAGE_TYPE=local`.                  |
+| `S3_ENDPOINT`           | —           | URL endpointu. Prázdné pro AWS S3.                                    |
+| `S3_BUCKET`             | —           | Název bucketu.                                                        |
+| `S3_REGION`             | —           | Region (`auto` na R2).                                            |
+| `S3_ACCESS_KEY_ID`      | —           |                                                                   |
+| `S3_SECRET_ACCESS_KEY`  | —           |                                                                   |
+| `BACKUP_STORAGE_PATH`   | —           | Cesta v systému pro archivy záloh. Pokud není, ukládají se vedle nahrávek. |
+
+Viz [S3-kompatibilní úložiště](./storage-s3) pro šablony konfigurací jednotlivých poskytovatelů.
+
+`BACKUP_STORAGE_PATH` stojí za nastavení, pokud používáte **Nastavení →
+Export/Záloha → Frekvence záloh**. Bez něj se každý plánovaný archiv
+zápisuje do stejného místa jako zvuková data, která obsahuje – složka se
+tak zhruba zdvojnásobí a záloha sdílí disk s originálem. Nastavte na samostatné
+úložiště (externí disk, NAS), a archivy půjdou tam bez ohledu na backend k nahrávkám.
+Vždy se uvádí lokální systémová cesta, včetně případů, kdy instance běží na S3: záloha,
+kterou nelze bez běžící aplikace přečíst, není opravdu záloha.
+
+<span id="google-integration-drive-export" />
+
+## Google integrace (export na Disk)
+
+Pouze vlastní hosting; ignoruje se, pokud je `IS_HOSTED=true`. Po nastavení
+prvních čtyř mohou uživatelé propojit svůj Google účet a exportovat složky na Google Disk.
+Viz [Export na Google Drive](./google-drive) pro nastavení v Google Cloud.
+
+| Proměnná                      | Výchozí | Efekt                                                                                      |
+| ----------------------------- | ------- | ----------------------------------------------------------------------------------------- |
+| `GOOGLE_CLIENT_ID`            | —       | OAuth client id („Web application“ klient).                                                |
+| `GOOGLE_CLIENT_SECRET`        | —       | OAuth client secret.                                                                       |
+| `GOOGLE_PICKER_API_KEY`       | —       | Prohlížečový API klíč pro Google Picker. Omezte pouze na Picker API a svou `APP_URL`.     |
+| `GOOGLE_CLOUD_PROJECT_NUMBER` | —       | Číselné projektové číslo v Google Cloud (app id pro Picker).                             |
+| `GOOGLE_WORKSPACE_DOMAINS`    | —       | Čárkou oddělené Workspace domény, které smějí připojit účet. Pokud není, může kdokoliv koho schválí consent screen. |
+
+<span id="single-sign-on-openid-connect" />
+
+## Jednotné přihlášení (OpenID Connect)
+
+Pouze vlastní hosting; ignoruje se, když `IS_HOSTED=true`. Při nastavení
+prvních tří je poskytovatel identity jediný způsob přihlášení: přihlášení
+e-mailem/heslem, registrace a obnovení hesla jsou vypnuty. Viz
+[Jednotné přihlášení](./sso).
+
+| Proměnná               | Výchozí                | Efekt                                                                                       |
+| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
+| `OIDC_ISSUER_URL`      | —                      | Issuer URL; endpointy se berou z jeho `/.well-known/openid-configuration`. `https`, nebo `http` pouze na interním hostu. |
+| `OIDC_CLIENT_ID`       | —                      | Client id důvěryhodného klienta.                                                            |
+| `OIDC_CLIENT_SECRET`   | —                      | Client secret.                                                                              |
+| `OIDC_PROVIDER_NAME`   | `SSO`                  | Zobrazené na tlačítku: „Přihlásit se pomocí …“.                                              |
+| `OIDC_SCOPES`          | `openid profile email` | Oddělené mezerami nebo čárkami. `openid` je vždy vyžadován.                                 |
+| `OIDC_SESSION_MAX_AGE` | `86400`                | Doba platnosti relace v sekundách (300 až 2592000), neprodlužuje se používáním.             |
+
+<span id="external-mcp-server" />
+
+## Externí MCP server
+
+Pouze vlastní hosting; vypnuto při `IS_HOSTED=true`. Vyžaduje [jednotné přihlášení](#single-sign-on-openid-connect)
+a `APP_URL`; tokeny jsou ze stejné oblasti. Viz
+[Externí MCP server](./mcp).
+
+| Proměnná                   | Výchozí | Efekt                                                                                                  |
+| -------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `riffado-mcp`). Pokud není, `/api/mcp` vrací 404. |
+| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Pokud není, může každý klient z realm s požadovanou rolí. |
+| `MCP_AUDIT_RETENTION_DAYS` | `90`    | Počet dní po které se záznam v tabulce `mcp_access_log` uchovává (1 až 3650).                              |
+
+<span id="learn-knowledge-from-recordings" />
+
+## Learn (znalosti z nahrávek)
+
+Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
+
+| Proměnná             | Výchozí  | Efekt                                                                                                   |
+| -------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `EMBEDDING_BASE_URL` | —        | OpenAI-kompatibilní endpoint `embeddings`. Pokud není, Learn páruje pouze podle slov, a informuje o tom. |
+| `EMBEDDING_MODEL`    | `bge-m3` | Embedding model, který bude endpointu požadován.                                                            |
+| `EMBEDDING_API_KEY`  | —        | Posílá se jako bearer token, pokud ho endpoint vyžaduje.                                                         |
+| `LEARN_MCP_URL`      | —        | Jediná URL read-only znalostních nástrojů Riffada, kterou Learn bridge může volat zpět.                      |
+| `LEARN_BRIDGE_URL`   | —        | Základní URL agent bridge tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Learn přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
+| `KNOWLEDGE_MEMORY_MB`| `256`    | Kolik dešifrovaných znalostí drží v paměti jeden proces, než vytlačí nejméně používanou položku.         |
+
+<span id="smtp-email-notifications" />
+
+## SMTP (e-mailová upozornění)
+
+| Proměnná        | Výchozí                | Efekt                                                                                |
+| --------------- | ---------------------- | ------------------------------------------------------------------------------------- |
+| `SMTP_HOST`     | —                      | Pokud není, e-mailový backend je čistě vypnutý.                                       |
+| `SMTP_PORT`     | 465 pokud secure, jindy 587| Celé číslo.                                                                              |
+| `SMTP_SECURE`   | `false`                | `true` => implicitní TLS (port 465). `false` => STARTTLS (port 587).                   |
+| `SMTP_USER`     | —                      |                                                                                       |
+| `SMTP_PASSWORD` | —                      |                                                                                       |
+| `SMTP_FROM`     | —                      | Buď `user@example.com` nebo `Name <user@example.com>`. Validováno.                      |
+
+<span id="when-values-are-missing" />
+
+## Co když hodnoty chybí
+
+Při startu serveru loader prostředí provede dva průchody:
+
+1. **Ověření schématu** – typy, formáty, rozsahy. Chyby vyústí v
+   vícenásobnou `Environment validation failed:` chybu, která vypíše
+   konkrétní pole s problémem.
+2. **Kontrola přítomnosti hodnot za běhu** – proměnné požadované za běhu
+   (`DATABASE_URL`, `BETTER_AUTH_SECRET`, `APP_URL`, `ENCRYPTION_KEY`)
+   se ověří, že nejsou prázdné a mají správnou sílu. Tyto kontroly se přeskakují
+   při `next build` (fáze `phase-production-build`), aby
+   build front-endu nezávisel na serverových tajemstvích.
+
+Pokud je hodnota špatná, server odmítne start. To je smluvené chování.

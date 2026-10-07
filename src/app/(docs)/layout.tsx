@@ -43,7 +43,11 @@ export default async function DocsRootLayout({
                 },
             }}
         >
-            <DocsLayout tree={source.pageTree} tabs={docsTabs} {...baseOptions}>
+            <DocsLayout
+                tree={source.getPageTree(locale)}
+                tabs={docsTabs}
+                {...baseOptions}
+            >
                 {children}
             </DocsLayout>
         </RootProvider>

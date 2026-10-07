@@ -1,0 +1,122 @@
+---
+title: Bezpečnostní model
+description: Autentizace, šifrování uložených dat, API tokeny a hranice důvěry.
+---
+
+Tato stránka nabízí kompletní pohled. Podrobnější rozbor šifrování databáze naleznete v sekci
+[Šifrování uložených dat](./encryption-at-rest); pro detaily na úrovni sloupců odkážeme tam.
+
+<span id="authentication" />
+
+## Autentizace
+
+Riffado podporuje dva způsoby autentizace na HTTP rozhraní:
+
+1. **Relace prohlížeče** (lepší autentizace). E-mail + heslo, přičemž relace je potvrzena cookie podepsanou pomocí `BETTER_AUTH_SECRET`. Používají ji všechny stránky pod `(app)`, dashboard a interní trasy `/api/*`.
+2. **Osobní API klíč** (`op_<24 chars>`). Určeno pro externí integrace na rozhraní `/api/v1/*`. Posílá se jako Bearer token. Má pouze práva pro čtení.
+
+Kbelíky pro omezení počtu požadavků jsou ve výchozím nastavení navázány na přímou IP adresu klienta. Pokud vaše instance běží za reverzní proxy přepisující
+`X-Forwarded-For`, nastavte `RATE_LIMIT_TRUST_PROXY_HEADERS=true`, aby se jako klíč kbelíku použila původní klientská IP adresa. Nestavte tento parametr bez skutečné proxy přepisující hlavičku – klienti ji mohou zfalšovat a vaše omezení počtu požadavků je pak pouze formální.
+
+<span id="encryption-at-rest" />
+
+## Šifrování uložených dat
+
+Citlivá pole jsou šifrována pomocí AES-256-GCM, s klíčem odvozeným z
+`ENCRYPTION_KEY` (povinný 64znakový hexadecimální řetězec).
+
+| Pole                                   | Důvod                                 |
+| --------------------------------------- | ------------------------------------- |
+| `recordings.filename`                   | Obvykle obsahuje AI-generované názvy  |
+| `transcriptions.text`                   | Kompletní přepis                      |
+| `ai_enhancements.summary`               | Shrnutí LLM                            |
+| `ai_enhancements.key_points`            | Uloženo pod `{ "c": "v1:..." }`       |
+| `ai_enhancements.action_items`          | Stejný šifrovací obal                   |
+| `user_settings.summary_prompt`          | Může obsahovat uživatelský kontext       |
+| `user_settings.title_generation_prompt` | Totéž                                  |
+| `recording_tasks.text` a jeho hint, due phrase a quote | Úkoly ze shrnutí         |
+| `plaud_connections.bearer_token`        | Plaud token ekvivalentní OAuth           |
+| `api_credentials.api_key`               | Klíč poskytovatele AI z nastavení      |
+| `webhook_endpoints.url`                 | Uživatelsky nastavený cíl webhooku     |
+| `webhook_endpoints.secret`              | Tajný klíč pro podepisování `whsec_…`  |
+
+**Mimo rozsah** aplikační vrstvy šifrování:
+
+- Zvukové soubory na disku nebo v S3. Pokud potřebujete ochranu, použijte na S3 šifrování na úrovni bucketu (SSE) nebo šifrování disku na serveru.
+- Postgres na disku. Použijte šifrování disku nebo spravovanou databázi, která tuto funkci nabízí.
+- Cesta dešifrování při požadavku – server drží klíč a dešifruje obsah, když potřebuje spustit AI. Toto je nevyhnutelné, dokud jsou serverová transkripce a sumarizace součástí produktu. Pokud požadujete skutečně nulové znalosti (zero-knowledge), viz níže.
+
+Kompletní popis formátu šifrovaného textu, verzovací prefix (`v1:`) a skript pro zpětnou kompatibilitu najdete v sekci [Šifrování uložených dat](./encryption-at-rest).
+
+<span id="api-token-hashing" />
+
+## Hashování API tokenů
+
+Osobní API klíče jsou před uložením hashovány pomocí HMAC-SHA256. HMAC klíč je `API_TOKEN_HASH_SECRET`, pokud je nastaven, jinak platí `BETTER_AUTH_SECRET`. Únik databáze tedy nevede k úniku platných tokenů (útočník by stále potřeboval HMAC klíč, který žije pouze v runtime prostředí).
+
+Dva důležité důsledky:
+
+- Pro tokeny nikdy nepoužíváme čistý SHA-256. Vysoká entropie náhodného klíče to sama o sobě neřeší – bez HMACu by bylo možné vytvořit předpočítanou tabulku pro celý `op_` keyspace ve velkém měřítku.
+- Nikdy nepoužíváme `ENCRYPTION_KEY` jako HMAC klíč. Tento klíč je vyhrazen pro šifrování uložených dat pomocí AES-GCM. Sdílení klíče pro různé účely je kryptograficky nežádoucí.
+
+<span id="webhook-signatures" />
+
+## Podepisování webhooků
+
+Odchozí požadavky webhook jsou podepisovány:
+
+- Hlavička: `X-Riffado-Signature: t=<unix>,v1=<hex hmac>`
+- Algoritmus: HMAC-SHA256 hodnoty `${timestamp}.${rawBody}` s tajným klíčem pro daný endpoint.
+- Okno pro opakování: ±5 minut.
+
+Příjemci musí ověřovat podpis konstantním časem (ochrana proti time-based útokům) – referenční implementaci v Node najdete v sekci [Automatizační API a webhooky](../guides/automation-and-webhooks).
+
+<span id="webhook-target-hardening" />
+
+## Zpřísnění cílových URL webhooků
+
+Ve výchozím nastavení mohou webhook URL používat `http://` nebo `https://` a směřovat na libovolné místo, které je dosažitelné z kontejneru Riffado (jména služeb na Docker bridge, RFC1918 IP adresy, veřejné servery). URL s embedovanými přihlašovacími údaji jsou odmítnuty.
+
+Pokud je vaše instance dostupná více lidem – například při víceuživatelském vlastním hostování, nebo pokud povolujete registraci komukoliv, komu zcela nedůvěřujete – nastavte `WEBHOOKS_REQUIRE_PUBLIC_TARGETS=true`. S tímto příznakem musí webhook URL používat HTTPS, resolvovat na veřejnou IP adresu a nesmí obsahovat embedované přihlašovací údaje. Loopback, RFC1918, link-local, ULA, multicast a rozsahy vyhrazené pro dokumentaci IPv6 jsou všechny odmítnuty. Tím zabráníte použití vaší instance jako SSRF relé vůči interní síti.
+
+<span id="per-user-query-isolation" />
+
+## Izolace dotazů dle uživatele
+
+Každý databázový dotaz pracující s uživatelskými daty nese `where(eq(table.userId, session.user.id))`. Kódová báze toto považuje za povinný požadavek pro **každý** dotaz, vždy – ne "přidám později", ne "je to jen interní endpoint". Code review toto vyžaduje při každém PR.
+
+Trasy `/api/v1/*` získávají user id z osobního API klíče po ověření; interní trasy jej získávají ze session. Dotazy s userId tedy běží v obou případech stejně.
+
+<span id="account-suspension" />
+
+## Pozastavení účtu
+
+Pozastavení uživatelé (`users.suspendedAt` není null) jsou odmítnuti **ještě před** spuštěním libovolné aplikační logiky:
+
+- Žádosti ověřené relací dostanou `403 ACCOUNT_SUSPENDED` při kontrole session.
+- Žádosti ověřené API klíčem dostanou stejný kód v rámci cesty `authenticateRequest`.
+
+Tato kontrola je hned vedle ověřování, ne zařazena jako middleware pro konkrétní trasy, takže na ni nelze zapomenout u nové trasy.
+
+<span id="trust-boundaries-riffado-does-not-own" />
+
+## Hranice důvěry, které Riffado *nevlastní*
+
+Některá rizika spadají zcela mimo samotnou aplikaci, pojmenováváme je explicitně, abychom netvrdili opak:
+
+- **Váš AI poskytovatel.** Surová audio data i přepisy ve formátu prostého textu jsou přenášeny poskytovateli, kterého jste si nakonfigurovali. Ochrana těchto dat je závislá na politice a infrastruktuře vašeho poskytovatele. Pokud jim nedůvěřujete, provozujte lokálního poskytovatele (Ollama / LM Studio) na stejném stroji jako je vaše instance Riffado.
+- **Kompromitovaný aplikační server.** Server drží `ENCRYPTION_KEY` a dešifruje data na požádání. Šifrování uložených dat chrání před únikem databáze, ne před vzdáleným spuštěním kódu (RCE).
+- **Kompromitovaný `ENCRYPTION_KEY`.** S klíčem zacházejte jako s hlavním přístupovým údajem k databázi. Jeho ztráta znamená neobnovitelnost zašifrovaného obsahu.
+
+<span id="compliance-claims" />
+
+## Soulad s předpisy
+
+Riffado neprohlašuje shodu s HIPAA, SOC2 ani s právní výsadou mezi advokátem a klientem. Tyto nároky náleží vašemu AI poskytovateli (který certifikaci HIPAA může mít, ale nemusí) a vaší vlastní instalaci s vlastním hostingem, kterou plně ovládáte.
+
+<span id="reporting-a-vulnerability" />
+
+## Hlášení zranitelnosti
+
+Pokyny k nahlášení naleznete v souboru [SECURITY.md](https://github.com/riffado/riffado/blob/main/SECURITY.md)
+v repozitáři.
