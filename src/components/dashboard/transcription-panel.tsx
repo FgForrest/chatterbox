@@ -27,6 +27,8 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
+import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
+import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -667,6 +669,25 @@ export function TranscriptionPanel({
         summaryElapsedMs > 0
             ? `${summaryStatusLabel} · ${formatElapsed(summaryElapsedMs)}`
             : summaryStatusLabel;
+    // A summary just made may have proposed tasks: read them again.
+    const [summariesMade, setSummariesMade] = useState(0);
+    const wasSummarizing = useRef(false);
+    useEffect(() => {
+        if (wasSummarizing.current && !isSummarizing) {
+            setSummariesMade((count) => count + 1);
+        }
+        wasSummarizing.current = isSummarizing;
+    }, [isSummarizing]);
+    const taskSpeakers = useMemo<SpeakerChoice[]>(() => {
+        const seen = new Map<string, SpeakerChoice>();
+        for (const attribution of Object.values(summarySpeakerAttributions)) {
+            seen.set(attribution.personId, {
+                personId: attribution.personId,
+                name: attribution.name,
+            });
+        }
+        return [...seen.values()];
+    }, [summarySpeakerAttributions]);
     const summarySpeakerNumberOffset = useMemo(() => {
         if (!summaryData) return 0;
         return inferSummarySpeakerNumberOffset(
@@ -1209,47 +1230,6 @@ export function TranscriptionPanel({
                                                 </div>
                                             )}
 
-                                        {/* Action items */}
-                                        {summaryData.actionItems &&
-                                            summaryData.actionItems.length >
-                                                0 && (
-                                                <div>
-                                                    <h4 className="text-sm font-medium mb-2">
-                                                        {i18n("Action Items")}
-                                                    </h4>
-                                                    <ul className="space-y-1">
-                                                        {summaryData.actionItems.map(
-                                                            (item) => {
-                                                                const key = `ai-${item.slice(0, 32)}`;
-                                                                return (
-                                                                    <li
-                                                                        key={
-                                                                            key
-                                                                        }
-                                                                        className="text-sm text-muted-foreground flex items-start gap-2"
-                                                                    >
-                                                                        <ListChecks className="size-3.5 mt-0.5 text-primary shrink-0" />
-                                                                        <Markdown
-                                                                            inline
-                                                                            speakerAttributions={
-                                                                                summarySpeakerAttributions
-                                                                            }
-                                                                            speakerNumberOffset={
-                                                                                summarySpeakerNumberOffset
-                                                                            }
-                                                                        >
-                                                                            {
-                                                                                item
-                                                                            }
-                                                                        </Markdown>
-                                                                    </li>
-                                                                );
-                                                            },
-                                                        )}
-                                                    </ul>
-                                                </div>
-                                            )}
-
                                         {/* Summary metadata */}
                                         <div className="flex items-center border-t pt-2">
                                             <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -1311,6 +1291,56 @@ export function TranscriptionPanel({
                                         </div>
                                     </section>
                                 )}
+                                {/* Tasks, or the summary's own action items: outside the
+                                    scrolled summary, and shown while it is collapsed */}
+                                <RecordingTasks
+                                    recordingId={recording.id}
+                                    speakers={taskSpeakers}
+                                    organizationOnly={orgView}
+                                    reloadKey={`${summarySource}:${summariesMade}`}
+                                    onPlay={
+                                        onPlayFromTurn
+                                            ? (startMs) =>
+                                                  onPlayFromTurn(startMs)
+                                            : undefined
+                                    }
+                                    fallback={
+                                        summaryData.actionItems &&
+                                        summaryData.actionItems.length > 0 && (
+                                            <div>
+                                                <h4 className="text-sm font-medium mb-2">
+                                                    {i18n("Action Items")}
+                                                </h4>
+                                                <ul className="space-y-1">
+                                                    {summaryData.actionItems.map(
+                                                        (item) => {
+                                                            const key = `ai-${item.slice(0, 32)}`;
+                                                            return (
+                                                                <li
+                                                                    key={key}
+                                                                    className="text-sm text-muted-foreground flex items-start gap-2"
+                                                                >
+                                                                    <ListChecks className="size-3.5 mt-0.5 text-primary shrink-0" />
+                                                                    <Markdown
+                                                                        inline
+                                                                        speakerAttributions={
+                                                                            summarySpeakerAttributions
+                                                                        }
+                                                                        speakerNumberOffset={
+                                                                            summarySpeakerNumberOffset
+                                                                        }
+                                                                    >
+                                                                        {item}
+                                                                    </Markdown>
+                                                                </li>
+                                                            );
+                                                        },
+                                                    )}
+                                                </ul>
+                                            </div>
+                                        )
+                                    }
+                                />
                             </div>
                         ) : (
                             <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -1332,6 +1362,23 @@ export function TranscriptionPanel({
                                                   "A custom transcript is required before generating a custom summary.",
                                               )}
                                 </p>
+                                {/* Tasks a replaced summary left, until a new one comes */}
+                                <div className="mt-6 w-full text-left">
+                                    <RecordingTasks
+                                        recordingId={recording.id}
+                                        speakers={taskSpeakers}
+                                        organizationOnly={orgView}
+                                        reloadKey={`${summarySource}:${summariesMade}`}
+                                        onPlay={
+                                            onPlayFromTurn
+                                                ? (startMs) =>
+                                                      onPlayFromTurn(startMs)
+                                                : undefined
+                                        }
+                                        fallback={null}
+                                        allowAdd={false}
+                                    />
+                                </div>
                             </div>
                         )}
                     </CardContent>

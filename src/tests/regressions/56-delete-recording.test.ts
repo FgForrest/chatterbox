@@ -298,6 +298,9 @@ import {
     asyncJobs,
     learnDismissals,
     recordings as recordingsTable,
+    recordingTaskRejections,
+    recordingTasks,
+    taskUpdateProposals,
     transcriptions as transcriptionsTable,
     webhookDeliveries,
 } from "@/db/schema";
@@ -344,7 +347,13 @@ describe("DELETE /api/recordings/[id]", () => {
                         ? "async_jobs"
                         : t === learnDismissals
                           ? "learn_dismissals"
-                          : "unknown";
+                          : t === recordingTasks
+                            ? "recording_tasks"
+                            : t === recordingTaskRejections
+                              ? "recording_task_rejections"
+                              : t === taskUpdateProposals
+                                ? "task_update_proposals"
+                                : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -517,13 +526,16 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(6);
+        expect(txCalls).toHaveLength(9);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
         // Learn dismissals → webhook redaction → recordings.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:task_update_proposals",
+            "delete:recording_tasks",
+            "delete:recording_task_rejections",
             "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",
@@ -587,6 +599,9 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
+            "delete:task_update_proposals",
+            "delete:recording_tasks",
+            "delete:recording_task_rejections",
             "delete:learn_dismissals",
             "update:webhook_deliveries",
             "update:recordings",

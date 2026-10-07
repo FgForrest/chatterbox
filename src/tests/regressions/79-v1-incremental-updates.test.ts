@@ -13,6 +13,19 @@ const mockEnv = vi.hoisted(() => ({
     WHISPER_COMPRESS_BITRATE_KBPS: 12,
     WHISPER_REQUEST_TIMEOUT_MS: 60 * 60 * 1000,
 }));
+// Task proposals read and write the database; covered on their own.
+vi.mock("@/lib/tasks/access", () => ({
+    taskViewerById: vi.fn(async () => ({})),
+}));
+vi.mock("@/lib/tasks/store", () => ({
+    dropTasksWithoutSummaryInTx: vi.fn(async () => undefined),
+    writeTaskProposalsInTx: vi.fn(async () => undefined),
+}));
+vi.mock("@/lib/tasks/proposals", () => ({
+    loadTasksPromptContext: vi.fn(async () => ({ text: "", refs: new Map() })),
+    resolveTaskProposals: vi.fn(async () => undefined),
+}));
+
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 vi.mock("@/db", () => ({

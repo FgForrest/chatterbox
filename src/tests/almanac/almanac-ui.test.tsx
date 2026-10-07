@@ -71,7 +71,7 @@ describe("AlmanacTabs", () => {
     it("marks the tab a page belongs to, a person's page under People", () => {
         respond({ "GET /api/learn/pending": { count: 2 } });
         pathname = "/almanac/p-1";
-        render(<AlmanacTabs learn />);
+        render(<AlmanacTabs />);
         expect(
             screen
                 .getByRole("link", { name: "People" })
@@ -79,7 +79,7 @@ describe("AlmanacTabs", () => {
         ).toBe("page");
         cleanup();
         pathname = "/almanac/things/e-1";
-        render(<AlmanacTabs learn />);
+        render(<AlmanacTabs />);
         expect(
             screen
                 .getByRole("link", { name: "Things" })
@@ -87,15 +87,12 @@ describe("AlmanacTabs", () => {
         ).toBe("page");
     });
 
-    it("counts the reviews waiting, and has no Review tab without Learn", async () => {
+    it("counts the reviews waiting", async () => {
         respond({ "GET /api/learn/pending": { count: 2 } });
-        render(<AlmanacTabs learn />);
+        render(<AlmanacTabs />);
         expect(
             await screen.findByRole("link", { name: /Review\s*2/ }),
         ).toBeTruthy();
-        cleanup();
-        render(<AlmanacTabs learn={false} />);
-        expect(screen.queryByRole("link", { name: /Review/ })).toBeNull();
     });
 });
 

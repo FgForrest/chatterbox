@@ -46,6 +46,7 @@ import {
 } from "@/lib/export/archive-scope";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import type { StorageProvider } from "@/lib/storage/types";
+import { tasksForArchive } from "@/lib/tasks/archive";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import { resolvePrimaryTranscript } from "@/lib/v1/serialize";
 
@@ -74,6 +75,7 @@ interface ManifestRecording {
     summary: { included: boolean; path: string | null };
     summaries: { included: boolean; path: string | null; count: number };
     aiUsage?: { included: boolean; path: string | null; count: number };
+    tasks?: { included: boolean; path: string | null; count: number };
 }
 
 // Which transcript `transcript.txt` renders when a recording has more than
@@ -237,6 +239,8 @@ export async function buildAndUploadExportArchive(input: {
         });
         enhancementMap.set(enhancement.recordingId, group);
     }
+
+    const taskMap = await tasksForArchive(scope, recordingIds);
 
     const archive = new ZipArchive({ zlib: { level: 6 } });
     // Count bytes as they flow through rather than re-reading the
@@ -571,6 +575,20 @@ export async function buildAndUploadExportArchive(input: {
                 included: true,
                 path: usagePath,
                 count: recordingUsage.length,
+            };
+        }
+
+        const recordingTaskList = taskMap.get(recording.id) ?? [];
+        if (recordingTaskList.length > 0) {
+            const tasksPath = `${folder}/tasks.json`;
+            archive.append(
+                Buffer.from(JSON.stringify(recordingTaskList, null, 2)),
+                { name: tasksPath },
+            );
+            entry.tasks = {
+                included: true,
+                path: tasksPath,
+                count: recordingTaskList.length,
             };
         }
 

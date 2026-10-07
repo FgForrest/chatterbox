@@ -4,6 +4,10 @@
  */
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+// Task proposals read and write the database; covered on their own.
+vi.mock("@/lib/tasks/proposals", () => ({
+    resolveTaskProposals: vi.fn(async () => undefined),
+}));
 vi.mock("@/lib/env", () => ({
     env: {
         DEFAULT_STORAGE_TYPE: "local",

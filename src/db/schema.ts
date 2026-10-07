@@ -2109,6 +2109,191 @@ export const aiEnhancements = pgTable(
     }),
 );
 
+// What a recording's summaries say somebody has to do. A summary proposes
+// rows (`proposed`); whoever may change the recording reviews them, and the
+// accepted ones are tasks (`open`, `done`, `dropped`). One row from proposal
+// to task, so a task keeps its id and its recording. The rows are the
+// recording's owner's in both views, like its summary; they go when its
+// last summary does.
+export const recordingTasks = pgTable(
+    "recording_tasks",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        // The recording's owner.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        status: varchar("status", { length: 16 })
+            .$type<"proposed" | "open" | "done" | "dropped">()
+            .notNull(),
+        // Encrypted.
+        text: text("text").notNull(),
+        // Who has to do it: a person of the Almanac (the owner's, or the
+        // Organization's on a shared recording); null for nobody yet.
+        assigneePersonId: text("assignee_person_id").references(
+            () => people.id,
+            { onDelete: "set null" },
+        ),
+        // Encrypted: the name heard when no person of the Almanac matched.
+        assigneeHint: text("assignee_hint"),
+        // The person was matched on a first name alone: check before accepting.
+        assigneeCheck: boolean("assignee_check").notNull().default(false),
+        dueDate: date("due_date", { mode: "string" }),
+        // Encrypted: the deadline as it was said ("by next Friday").
+        duePhrase: text("due_phrase"),
+        // Encrypted: a few words of the transcript it was heard in.
+        quote: text("quote"),
+        evidenceStartMs: integer("evidence_start_ms"),
+        source: varchar("source", { length: 16 })
+            .$type<"riffado" | "plaud" | "manual">()
+            .notNull(),
+        // A proposal's draft: whether accepting the review keeps it.
+        ticked: boolean("ticked").notNull().default(true),
+        // Order within the recording, as the summary listed them.
+        position: integer("position").notNull().default(0),
+        version: integer("version").notNull().default(0),
+        createdByUserId: text("created_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        acceptedAt: timestamp("accepted_at"),
+        // Since when its assignee can see it as theirs: accepted, assigned
+        // anew, or its recording shared. The assignee's badge counts from it.
+        assignedAt: timestamp("assigned_at"),
+        acceptedByUserId: text("accepted_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        // The last move between open, done and dropped.
+        statusChangedAt: timestamp("status_changed_at"),
+        statusChangedByUserId: text("status_changed_by_user_id").references(
+            () => users.id,
+            { onDelete: "set null" },
+        ),
+        updatedByUserId: text("updated_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        recordingStatusIdx: index("recording_tasks_recording_status_idx").on(
+            table.recordingId,
+            table.status,
+        ),
+        assigneeIdx: index("recording_tasks_assignee_person_id_idx").on(
+            table.assigneePersonId,
+        ),
+        userStatusIdx: index("recording_tasks_user_status_idx").on(
+            table.userId,
+            table.status,
+        ),
+        createdByIdx: index("recording_tasks_created_by_user_id_idx").on(
+            table.createdByUserId,
+        ),
+        acceptedByIdx: index("recording_tasks_accepted_by_user_id_idx").on(
+            table.acceptedByUserId,
+        ),
+        statusChangedByIdx: index(
+            "recording_tasks_status_changed_by_user_id_idx",
+        ).on(table.statusChangedByUserId),
+        updatedByIdx: index("recording_tasks_updated_by_user_id_idx").on(
+            table.updatedByUserId,
+        ),
+        statusCheck: check(
+            "recording_tasks_status_check",
+            sql`${table.status} in ('proposed', 'open', 'done', 'dropped')`,
+        ),
+        sourceCheck: check(
+            "recording_tasks_source_check",
+            sql`${table.source} in ('riffado', 'plaud', 'manual')`,
+        ),
+    }),
+);
+
+// A task proposal somebody said no to, so the next summary of the recording
+// does not propose it again. A keyed HMAC, nothing readable.
+export const recordingTaskRejections = pgTable(
+    "recording_task_rejections",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        // The recording's owner.
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        fingerprintHmac: varchar("fingerprint_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        unique: unique("recording_task_rejections_unique").on(
+            table.recordingId,
+            table.fingerprintHmac,
+        ),
+        userIdIdx: index("recording_task_rejections_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// What a later recording's summary heard about an open task: it was done,
+// or its deadline moved. Reviewed with that recording's task proposals.
+export const taskUpdateProposals = pgTable(
+    "task_update_proposals",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        // Where it was heard, and that recording's owner.
+        recordingId: text("recording_id")
+            .notNull()
+            .references(() => recordings.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        kind: varchar("kind", { length: 8 }).$type<"done" | "due">().notNull(),
+        dueDate: date("due_date", { mode: "string" }),
+        // Encrypted, as on `recording_tasks`.
+        duePhrase: text("due_phrase"),
+        quote: text("quote"),
+        evidenceStartMs: integer("evidence_start_ms"),
+        ticked: boolean("ticked").notNull().default(false),
+        version: integer("version").notNull().default(0),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        unique: unique("task_update_proposals_unique").on(
+            table.taskId,
+            table.recordingId,
+            table.kind,
+        ),
+        recordingIdx: index("task_update_proposals_recording_id_idx").on(
+            table.recordingId,
+        ),
+        userIdIdx: index("task_update_proposals_user_id_idx").on(table.userId),
+        kindCheck: check(
+            "task_update_proposals_kind_check",
+            sql`${table.kind} in ('done', 'due')`,
+        ),
+        dueCheck: check(
+            "task_update_proposals_due_check",
+            sql`${table.kind} = 'done' or ${table.dueDate} is not null`,
+        ),
+    }),
+);
+
 export const aiUsageEvents = pgTable(
     "ai_usage_events",
     {
@@ -2385,6 +2570,9 @@ export const userSettings = pgTable("user_settings", {
     // After a Learn run finished, the Learn model reads the whole transcript
     // again with the Almanac and corrects misheard words.
     correctAfterLearn: boolean("correct_after_learn").notNull().default(true),
+    // When the user last opened their task list: tasks assigned to them
+    // since then count in its badge.
+    tasksSeenAt: timestamp("tasks_seen_at"),
     topicPrompt: jsonb("topic_prompt"), // TemplateConfiguration, see lib/ai/prompt-templates.ts
     // AI output language (applies to summaries, AI-generated titles and topics).
     // null or "auto" => match transcript language (default behavior).

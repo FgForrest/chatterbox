@@ -43,6 +43,7 @@ import {
     writerRefusalError,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
+import { deleteRecordingTasksInTx } from "@/lib/tasks/store";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { createRedactedWebhookPayload } from "@/lib/webhooks/payload";
 
@@ -419,6 +420,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         await tx
             .delete(aiEnhancements)
             .where(eq(aiEnhancements.recordingId, id));
+        await deleteRecordingTasksInTx(tx, id);
         // Learn runs and their items went with the transcripts; what was
         // dismissed has nothing left to answer for.
         await tx

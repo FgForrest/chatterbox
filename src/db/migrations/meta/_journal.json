@@ -638,6 +638,20 @@
       "when": 1791289853074,
       "tag": "0090_noisy_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1791365092350,
+      "tag": "0091_neat_stardust",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1791367597565,
+      "tag": "0092_known_champions",
+      "breakpoints": true
     }
   ]
 }

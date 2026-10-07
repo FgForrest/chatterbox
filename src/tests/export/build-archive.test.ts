@@ -3,9 +3,15 @@ import unzipper from "unzipper";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StorageProvider } from "@/lib/storage/types";
 
-const { dbMock } = vi.hoisted(() => ({ dbMock: { select: vi.fn() } }));
+const { dbMock, archivedTasks } = vi.hoisted(() => ({
+    dbMock: { select: vi.fn() },
+    archivedTasks: new Map<string, unknown[]>(),
+}));
 
 vi.mock("@/db", () => ({ db: dbMock }));
+vi.mock("@/lib/tasks/archive", () => ({
+    tasksForArchive: vi.fn(async () => archivedTasks),
+}));
 vi.mock("@/db/schema", () => ({
     users: { id: "users.id", role: "users.role" },
     learnRuns: {
@@ -1372,6 +1378,55 @@ describe("buildAndUploadExportArchive", () => {
         );
         expect(audioEntry?.[1].compressionMethod).toBe(0);
         expect(entries.get("manifest.json")?.compressionMethod).toBe(8);
+    });
+
+    it("carries a recording's accepted tasks", async () => {
+        archivedTasks.set("rec-1", [
+            { id: "task-1", status: "done", text: "Draft the pricing page" },
+        ]);
+        mockSelectSequence([
+            [
+                {
+                    id: "rec-1",
+                    userId: "user-1",
+                    filename: "enc-filename",
+                    startTime: new Date("2026-01-01T00:00:00Z"),
+                    endTime: new Date("2026-01-01T00:01:00Z"),
+                    duration: 60000,
+                    filesize: 18,
+                    deviceSn: "SN123",
+                    storagePath: "audio/missing.mp3",
+                },
+            ],
+            [],
+            [],
+        ]);
+        try {
+            await buildAndUploadExportArchive({
+                scope: { kind: "personal", userId: "user-1" },
+                sourceStorage: storage,
+                destinationStorage: storage,
+                storageKey: "exports/user-1/job-tasks.zip",
+            });
+        } finally {
+            archivedTasks.clear();
+        }
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        const tasksEntry = [...entries.entries()].find(([name]) =>
+            name.endsWith("/tasks.json"),
+        );
+        expect(
+            JSON.parse(tasksEntry?.[1].buffer.toString("utf-8") ?? "[]"),
+        ).toEqual([
+            { id: "task-1", status: "done", text: "Draft the pricing page" },
+        ]);
+        const manifest = JSON.parse(
+            entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+        );
+        expect(manifest.recordings[0].tasks).toMatchObject({
+            included: true,
+            count: 1,
+        });
     });
 
     it("records the size of what was stored when the storage starts reading late", async () => {

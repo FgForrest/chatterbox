@@ -113,12 +113,26 @@ describe("buildMergeInput", () => {
                 summary: "a",
                 keyPoints: ["k1"],
                 actionItems: [],
+                taskItems: [],
+                taskUpdates: [],
                 structured: true,
             },
             {
                 summary: "b",
                 keyPoints: [],
                 actionItems: ["a1"],
+                taskItems: [
+                    {
+                        text: "a1",
+                        speaker: "speaker_0",
+                        assignee: null,
+                        due: { phrase: "by Friday", date: "2026-10-09" },
+                        quote: null,
+                    },
+                ],
+                taskUpdates: [
+                    { ref: "T1", kind: "done", due: null, quote: "sent it" },
+                ],
                 structured: true,
             },
         ]);
@@ -126,6 +140,10 @@ describe("buildMergeInput", () => {
         expect(input).toContain("Version 2:");
         expect(input).toContain("k1");
         expect(input).toContain("a1");
+        // The merge gets the items' structure, not their one-line form.
+        expect(input).toContain('"speaker": "speaker_0"');
+        expect(input).toContain('"date": "2026-10-09"');
+        expect(input).toContain('"ref": "T1"');
         // The internal `structured` flag is bookkeeping, not model input.
         expect(input).not.toContain("structured");
     });

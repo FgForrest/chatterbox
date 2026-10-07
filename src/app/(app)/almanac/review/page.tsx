@@ -10,6 +10,8 @@ import {
 } from "@/lib/knowledge/vocabulary";
 import { reviewQueue } from "@/lib/learn/pending";
 import { isOrgAccount } from "@/lib/org/config";
+import { taskViewer } from "@/lib/tasks/access";
+import { recordingsAwaitingTaskReview } from "@/lib/tasks/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,8 @@ export const dynamic = "force-dynamic";
  * owner's on their own recordings (opened on their page), the organization
  * account's on shared ones (opened from the Organization library). The
  * organization account also decides the phrases members suggested, most
- * frequent first, alike ones grouped (Phase 6).
+ * frequent first, alike ones grouped (Phase 6). Below, the recordings whose
+ * proposed tasks wait for the viewer's review.
  */
 export default async function ReviewQueuePage() {
     const session = await requireAuth();
@@ -27,6 +30,9 @@ export default async function ReviewQueuePage() {
     const rows = isLearnDeploymentAvailable()
         ? await reviewQueue(session.user.id, organization)
         : [];
+    const taskRows = await recordingsAwaitingTaskReview(
+        await taskViewer({ id: session.user.id, email: session.user.email }),
+    );
     const phrases = organization
         ? await listVocabularyProposals(session.user.id)
         : [];
@@ -84,6 +90,47 @@ export default async function ReviewQueuePage() {
                     </ul>
                 )}
             </section>
+            {taskRows.length > 0 && (
+                <section className="space-y-3">
+                    <h2 className="text-lg font-semibold">
+                        {i18n("Proposed tasks")}
+                    </h2>
+                    <ul className="divide-y rounded-lg border">
+                        {taskRows.map((row) => (
+                            <li
+                                key={row.recordingId}
+                                className="flex items-center justify-between gap-4 p-3 text-sm"
+                            >
+                                <span className="min-w-0 truncate">
+                                    {row.title}
+                                </span>
+                                <span className="flex shrink-0 items-center gap-4">
+                                    <span className="text-muted-foreground">
+                                        {i18n(
+                                            "{count, plural, one {# task} other {# tasks}}",
+                                            { count: row.proposals },
+                                        )}
+                                    </span>
+                                    <Link
+                                        href={
+                                            organization
+                                                ? "/dashboard"
+                                                : `/recordings/${row.recordingId}`
+                                        }
+                                        className="text-primary hover:underline"
+                                    >
+                                        {organization
+                                            ? i18n(
+                                                  "Open the Organization library",
+                                              )
+                                            : i18n("Review")}
+                                    </Link>
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                </section>
+            )}
             {organization && (
                 <section className="space-y-3">
                     <h2 className="text-lg font-semibold">

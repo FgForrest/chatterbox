@@ -18,6 +18,15 @@ import {
 import { DEFAULT_MERGE_PROMPT } from "@/lib/summary/multi-pass";
 
 // Without corrections a model reads the stored text as it is.
+// Task proposals read and write the database; covered on their own.
+vi.mock("@/lib/tasks/access", () => ({
+    taskViewerById: vi.fn(async () => ({})),
+}));
+vi.mock("@/lib/tasks/proposals", () => ({
+    loadTasksPromptContext: vi.fn(async () => ({ text: "", refs: new Map() })),
+    resolveTaskProposals: vi.fn(async () => undefined),
+}));
+
 vi.mock("@/lib/learn/llm-input", () => ({
     modelInput: vi.fn(async (transcript: { text: string }) => ({
         text: transcript.text,

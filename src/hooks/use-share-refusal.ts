@@ -46,6 +46,10 @@ export function useShareRefusal(): (error: ApiErrorBody) => string | null {
                         return i18n(
                             "Finish reviewing what Learn found before sharing.",
                         );
+                    case "tasks_unreviewed":
+                        return i18n(
+                            "Accept or reject the proposed tasks before sharing.",
+                        );
                     default:
                         return null;
                 }

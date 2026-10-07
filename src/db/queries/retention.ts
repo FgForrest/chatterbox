@@ -15,6 +15,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    recordingTasks,
     transcriptions,
     userSettings,
     users,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 /** One kind of data a retention policy can remove. */
 export type RetentionKind =
@@ -388,16 +390,34 @@ function reapCandidateWhere(
                 ),
                 isNull(recordings.summaryReapedAt),
                 governed,
-                exists(
-                    db
-                        .select({ id: aiEnhancements.id })
-                        .from(aiEnhancements)
-                        .where(
-                            and(
-                                eq(aiEnhancements.recordingId, recordings.id),
-                                eq(aiEnhancements.userId, recordings.userId),
+                or(
+                    exists(
+                        db
+                            .select({ id: aiEnhancements.id })
+                            .from(aiEnhancements)
+                            .where(
+                                and(
+                                    eq(
+                                        aiEnhancements.recordingId,
+                                        recordings.id,
+                                    ),
+                                    eq(
+                                        aiEnhancements.userId,
+                                        recordings.userId,
+                                    ),
+                                ),
                             ),
-                        ),
+                    ),
+                    // Tasks left by a summary a re-run replaced and nothing
+                    // made again: they age with the summaries.
+                    exists(
+                        db
+                            .select({ id: recordingTasks.id })
+                            .from(recordingTasks)
+                            .where(
+                                eq(recordingTasks.recordingId, recordings.id),
+                            ),
+                    ),
                 ),
             ),
         );
@@ -574,6 +594,7 @@ export async function deleteSummaryForRecording(
                 ),
             )
             .returning({ id: aiEnhancements.id });
+        await dropTasksWithoutSummaryInTx(tx, { recordingId, ownerUserId });
         if (rows.length > 0) {
             await tx
                 .update(recordings)

@@ -1,6 +1,11 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import { people, transcriptions, transcriptSpeakers } from "@/db/schema";
+import {
+    people,
+    recordingTasks,
+    transcriptions,
+    transcriptSpeakers,
+} from "@/db/schema";
 import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { promotePersonInTx } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
@@ -102,4 +107,54 @@ export async function publishSpeakerNamesInTx(
     }
     scopes.add(orgUserId);
     return { promoted, scopes };
+}
+
+/**
+ * Make the people a recording's tasks are assigned to the Organization's,
+ * as it is shared: a shared task names someone everyone can see, and the
+ * assignee finds it in their list. Same promotion, and the same locks
+ * held by the caller, as `publishSpeakerNamesInTx`. Returns the scopes the
+ * change reached, for the caller to bump.
+ */
+export async function publishTaskAssigneesInTx(
+    tx: Tx,
+    { recordingId, orgUserId }: { recordingId: string; orgUserId: string },
+): Promise<Set<string>> {
+    const rows = await tx
+        .selectDistinct({ personId: recordingTasks.assigneePersonId })
+        .from(recordingTasks)
+        .innerJoin(people, eq(people.id, recordingTasks.assigneePersonId))
+        .where(
+            and(
+                eq(recordingTasks.recordingId, recordingId),
+                sql`not ${orgOwnedCondition(people.userId)}`,
+            ),
+        );
+    // From now on its assignees see these tasks: news for their badge.
+    await tx
+        .update(recordingTasks)
+        .set({ assignedAt: new Date() })
+        .where(
+            and(
+                eq(recordingTasks.recordingId, recordingId),
+                eq(recordingTasks.status, "open"),
+                sql`${recordingTasks.assigneePersonId} is not null`,
+            ),
+        );
+    const personIds = rows.flatMap((row) =>
+        row.personId ? [row.personId] : [],
+    );
+    if (personIds.length === 0) return new Set();
+    const scopes = await scopesNamingInTx(tx, { personIds });
+    for (const personId of personIds) {
+        const promoted = await promotePersonInTx(tx, personId, orgUserId);
+        if (promoted && promoted !== personId) {
+            await tx
+                .update(recordingTasks)
+                .set({ assigneePersonId: promoted })
+                .where(eq(recordingTasks.assigneePersonId, personId));
+        }
+    }
+    scopes.add(orgUserId);
+    return scopes;
 }

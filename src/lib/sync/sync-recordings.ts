@@ -47,6 +47,8 @@ import {
     listAutoTranscribeRetryIds,
     releaseAutoTranscribeIds,
 } from "@/lib/sync/auto-transcribe-state";
+import { resolveTaskProposals } from "@/lib/tasks/proposals";
+import { readTaskItems } from "@/lib/tasks/summary-items";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 import {
     upsertEnhancement,
@@ -1276,6 +1278,25 @@ async function importPlaudContent(
                             source: "plaud",
                             provider: "plaud",
                             model: "plaud-native",
+                            // Plaud's own action items are proposals too.
+                            tasks: await resolveTaskProposals({
+                                source: "plaud",
+                                items: readTaskItems(parsed.actionItems),
+                                updates: [],
+                                refs: new Map(),
+                                ownerUserId: context.userId,
+                                transcriptionId: plaudTranscript.id,
+                                turns: null,
+                                language: null,
+                                orgView: false,
+                                summaryText: parsed.summary,
+                            }).catch((error: unknown) => {
+                                console.error(
+                                    "[sync] task proposals unavailable:",
+                                    error,
+                                );
+                                return undefined;
+                            }),
                         });
                         if (committed) {
                             await exportRecordingSidecarsIfEnabled(
