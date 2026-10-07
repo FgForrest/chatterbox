@@ -2792,6 +2792,51 @@ export const apiRateLimitBuckets = pgTable(
     }),
 );
 
+// One row per call to the external MCP server (`/api/mcp`): who called,
+// through which client, what it touched and how it ended. Never arguments
+// or content. Pruned after MCP_AUDIT_RETENTION_DAYS.
+export const mcpAccessLog = pgTable(
+    "mcp_access_log",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        at: timestamp("at").notNull().defaultNow(),
+        // Null when the token resolved to no caller.
+        callerKind: varchar("caller_kind", { length: 8 }).$type<
+            "user" | "service"
+        >(),
+        // The Riffado user a user caller is; set null so the trail outlives
+        // the account.
+        userId: text("user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        // The token's `sub` and `azp` (else `client_id`).
+        subject: text("subject"),
+        clientId: text("client_id"),
+        // Null for a request refused before any tool ran.
+        tool: varchar("tool", { length: 64 }),
+        outcome: varchar("outcome", { length: 16 })
+            .$type<
+                "ok" | "denied" | "conflict" | "error" | "not_found" | "invalid"
+            >()
+            .notNull(),
+        // Ids of the recordings, tasks or records the call read or changed.
+        targetIds: jsonb("target_ids")
+            .$type<string[]>()
+            .notNull()
+            .default(sql`'[]'::jsonb`),
+        ip: text("ip"),
+    },
+    (table) => ({
+        atIdx: index("mcp_access_log_at_idx").on(table.at),
+        userAtIdx: index("mcp_access_log_user_at_idx").on(
+            table.userId,
+            table.at,
+        ),
+    }),
+);
+
 /**
  * Aggregate hit counter for the install.sh routes. Counts every fetch of
  * `/install.sh` and `/{version}/install.sh` on the hosted instance.

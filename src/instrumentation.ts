@@ -62,6 +62,7 @@ type EnvModule = {
 };
 
 type AutoLearnModule = { startAutoLearnSweeper: () => void };
+type McpAuditModule = { startMcpAuditPruner: () => void };
 type PosthogServerModule = {
     captureServerException: (
         error: unknown,
@@ -174,6 +175,12 @@ export async function register() {
     const { startAutoLearnSweeper } =
         require("./lib/learn/auto-learn") as AutoLearnModule;
     startAutoLearnSweeper();
+
+    // Ages out the external MCP server's access log, also after it is
+    // switched off.
+    const { startMcpAuditPruner } =
+        require("./lib/mcp/audit") as McpAuditModule;
+    startMcpAuditPruner();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

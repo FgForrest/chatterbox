@@ -97,6 +97,18 @@ registration and password reset are switched off. See
 | `OIDC_SCOPES`          | `openid profile email` | Space- or comma-separated. `openid` is always requested.                                     |
 | `OIDC_SESSION_MAX_AGE` | `86400`                | Session lifetime in seconds (300 to 2592000), not extended by use.                           |
 
+## External MCP server
+
+Self-host only; off when `IS_HOSTED=true`. Needs [single sign-on](#single-sign-on-openid-connect)
+and `APP_URL`; tokens come from the same realm. See
+[External MCP server](./mcp).
+
+| Variable                   | Default | Effect                                                                                               |
+| -------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `riffado-mcp`). Unset, `/api/mcp` answers 404. |
+| `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Unset, any client of the realm whose token carries the roles. |
+| `MCP_AUDIT_RETENTION_DAYS` | `90`    | Days a row of the `mcp_access_log` table is kept (1 to 3650).                                         |
+
 ## Learn (knowledge from recordings)
 
 Self-host only; ignored when `IS_HOSTED=true`. All optional.

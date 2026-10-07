@@ -83,6 +83,7 @@ Everything lives at **[riffado.com/docs](https://riffado.com/docs)**. Direct lin
 - [Upgrading](https://riffado.com/docs/self-hosting/upgrading)
 - [S3-compatible storage](https://riffado.com/docs/self-hosting/storage-s3)
 - [Email / SMTP](https://riffado.com/docs/self-hosting/email-smtp)
+- [External MCP server](https://riffado.com/docs/self-hosting/mcp)
 - [Connect your Plaud account](https://riffado.com/docs/guides/connect-plaud-account)
 - [AI providers](https://riffado.com/docs/guides/ai-providers)
 - [Backup & restore](https://riffado.com/docs/guides/backup-and-restore)

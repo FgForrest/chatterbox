@@ -1,0 +1,332 @@
+---
+title: External MCP server
+description: Let AI clients and backend services read the Almanac, transcripts, summaries and tasks over the Model Context Protocol, with access decided by Keycloak roles.
+---
+
+A self-hosted Riffado that signs in through [single sign-on](./sso) can
+also serve an MCP (Model Context Protocol) endpoint. People connect their
+AI client to it and ask about their recordings; backend services read
+what the Organization knows. Riffado is the resource server: the realm
+issues the tokens, and client roles in the realm decide which areas a
+caller may use.
+
+The server is read-only except for one thing: a task's status and
+assignee.
+
+## What it exposes
+
+Five client roles on the resource client (`riffado-mcp` below) open five
+areas. A caller sees only the tools its roles allow; any other tool
+answers "Unknown tool", the same as a name that does not exist.
+
+| Role               | Tools                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `knowledge:read`   | `list_types`, `list_knowledge`, `find_knowledge`, `get_entity`, `get_facts`, `list_mishearings`    |
+| `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
+| `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
+| `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
+| `tasks:write`      | `update_task` (status and assignee only)                                                           |
+
+`list_folders` and `list_recordings` come with any of `transcripts:read`,
+`summaries:read` or `tasks:read`.
+
+- **Almanac** (`knowledge:read`): people and things, their types,
+  descriptions, other names (aliases and how transcription heard them),
+  facts, and mishearings (forms taught as heard-as, and words people
+  corrected in transcripts, with the replacement).
+- **Transcripts** (`transcripts:read`): the transcript as people read it
+  in Riffado, confirmed corrections applied, speakers named where someone
+  confirmed them, timed turns.
+- **Summaries** (`summaries:read`): the summary text and key points.
+- **Tasks** (`tasks:read`): open, done and dropped tasks. Proposals
+  waiting for review are never listed.
+
+Roles combine, and some fields need two of them:
+
+- A fact's evidence (up to three quotes, with recording and position)
+  needs `transcripts:read` as well as `knowledge:read`.
+- A summary's action items, in `get_summary` and in what
+  `search_summaries` searches, need `tasks:read`.
+- The `entity` filter of the recording tools needs `knowledge:read`.
+- `tasks:write` counts only together with `tasks:read`.
+
+A role never widens what a caller already sees: Riffado's usual rules
+choose the rows (see [What callers see](#what-callers-see)).
+
+## Turning it on
+
+```bash
+MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
+# MCP_ALLOWED_CLIENTS=claude-desktop,acme-reports
+# MCP_AUDIT_RETENTION_DAYS=90
+```
+
+- The server needs single sign-on (`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
+  `OIDC_CLIENT_SECRET`) and `APP_URL`. Without them the server refuses to
+  start with "MCP_AUDIENCE needs single sign-on (OIDC_ISSUER_URL,
+  OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)" or "MCP_AUDIENCE needs APP_URL".
+- Tokens must come from the single sign-on realm. There is no separate
+  issuer setting: a second realm could issue a token whose `sub` equals a
+  real user's.
+- With `MCP_AUDIENCE` unset, `/api/mcp` and its metadata answer 404.
+- Hosted Riffado ignores single sign-on, so the server stays off there.
+- `docker-compose.yml` passes all three variables through.
+
+Riffado reads the realm's `issuer` and signing keys from
+`<OIDC_ISSUER_URL>/.well-known/openid-configuration`. A token's `iss`
+must equal that `issuer` exactly. When `OIDC_ISSUER_URL` is an internal
+address (for example a compose service), fix Keycloak's public hostname
+(`KC_HOSTNAME`) so the realm names the same issuer to Riffado and to the
+clients that fetch tokens.
+
+## Keycloak setup
+
+<details>
+<summary>Step 1: the resource client</summary>
+
+1. **Clients → Create client**, type **OpenID Connect**, client id
+   `riffado-mcp` (the value of `MCP_AUDIENCE`).
+2. **Client authentication:** off. Turn off every authentication flow:
+   nobody signs in to this client, it only holds the roles.
+3. **Roles → Create role**, five times: `knowledge:read`,
+   `transcripts:read`, `summaries:read`, `tasks:read`, `tasks:write`.
+4. Assign the roles to the users or groups that may use each area
+   (**Role mapping → Assign role → Filter by clients**).
+
+No audience mapper is needed. The realm's default `roles` client scope
+carries an audience-resolve mapper that adds `riffado-mcp` to `aud`
+whenever one of its roles is in the token, and puts the roles under
+`resource_access.riffado-mcp.roles`, where Riffado reads them. Riffado
+checks that `aud` contains `MCP_AUDIENCE`.
+
+</details>
+
+<details>
+<summary>Step 2: clients for people (AI clients)</summary>
+
+One client per application, so each can be narrowed and told apart in
+the access log.
+
+1. **Create client**, type **OpenID Connect**. **Client authentication:**
+   off (public client). **Authentication flow:** Standard flow only.
+2. **Valid redirect URIs:** the ones the application documents.
+3. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
+   `S256`.
+4. **Client scopes → `<client>-dedicated` → Scope:** turn **Full scope
+   allowed** off, then **Assign role** and pick the `riffado-mcp` roles
+   this application may carry.
+
+A token then holds the roles the user has **and** the client's scope
+allows. A notes app that should only search summaries gets
+`summaries:read` alone, even for a user who holds all five.
+
+</details>
+
+<details>
+<summary>Step 3: service accounts (backends)</summary>
+
+1. **Create client**, type **OpenID Connect**. **Client authentication:**
+   on. **Authentication flow:** Service accounts roles only.
+2. **Service accounts roles → Assign role:** the `riffado-mcp` roles the
+   backend needs.
+3. Recommended: **Credentials → Client Authenticator:** Signed JWT
+   (`private_key_jwt`) instead of a shared secret, and
+   **Advanced → Access Token Lifespan** of 5 to 15 minutes.
+
+Keycloak's `service_account` scope adds the `client_id` claim, which is
+how Riffado recognizes a service account. A service account acts as the
+Organization account, so it needs the [Organization](./organization)
+enabled (`SELF_HOST_MODE=shared` and `ORG_ACCOUNT_EMAIL`); otherwise its
+calls are refused.
+
+</details>
+
+<details>
+<summary>Step 4: token exchange</summary>
+
+A backend that already holds a user's token can trade it for a token
+meant for Riffado with Keycloak's **standard token exchange** (V2,
+Keycloak 26.2 and later): turn on **Standard token exchange** on the
+backend's client and request `audience=riffado-mcp`. The user's token
+must have been issued to that backend (its client in `aud`). The result
+is still the user, within the roles the new token carries.
+
+Keep refresh tokens out of exchanges (client **Advanced → Allow refresh
+token in Standard Token Exchange:** No), so a backend's access ends with
+the token it received. Check the setting on your Keycloak version.
+
+**Legacy token exchange (V1) with impersonation is not supported** and
+must stay off. A client allowed to impersonate can mint a token for any
+user (`requested_subject`) without that user's token, login, MFA or
+consent. Riffado decides who a caller is by `sub`, so such a token
+reads that user's private recordings and knowledge, and task changes are
+recorded as theirs. Nothing in the token tells it from a real sign-in;
+only `azp` (the client) in the access log differs.
+
+- Leave the preview `token-exchange` feature disabled (the default since
+  Keycloak 26.2) and grant no client the *impersonate* permission.
+- Restrict the admin `impersonation` role. Realm administrators can
+  always sign in as any user; Riffado treats them as fully trusted.
+- Set `MCP_ALLOWED_CLIENTS` to the clients you configured, as a second
+  line of defense against a misconfigured realm.
+
+</details>
+
+## Connecting clients
+
+| What                       | Where                                                    |
+| -------------------------- | -------------------------------------------------------- |
+| MCP endpoint               | `<APP_URL>/api/mcp`                                      |
+| Protected-resource metadata | `<APP_URL>/.well-known/oauth-protected-resource/api/mcp` |
+
+The endpoint speaks stateless Streamable HTTP: `POST` only, JSON
+responses, no sessions or server-sent events, one JSON-RPC message per
+request. A batch (a JSON array) is refused with 400 and JSON-RPC error
+`-32600`, as MCP 2025-06-18 dropped batching. A request without a
+usable token gets 401 with
+`WWW-Authenticate: Bearer resource_metadata="…"`, pointing at the
+metadata, which names the realm as the authorization server. The same
+metadata is also served at `<APP_URL>/.well-known/oauth-protected-resource`.
+
+Give each client application the client id you created for it in step 2.
+Dynamic Client Registration is not needed for that. Open anonymous
+registration in the realm only if a client cannot take a pre-registered
+id, and then only with the **Trusted Hosts** client registration policy
+limiting who may register. `MCP_ALLOWED_CLIENTS` lists fixed client ids,
+so it also keeps dynamically registered clients out.
+
+A service account, by hand:
+
+```bash
+TOKEN=$(curl -s https://sso.example.com/realms/acme/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=acme-reports -d client_secret=... \
+  | jq -r .access_token)
+
+curl -s https://riffado.example.com/api/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+## What callers see
+
+| Token                                                   | Caller                                                                 |
+| ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `sub` of a person who signed in to Riffado through SSO | That user. Almanac: their own and the Organization's. Recordings: their own and the Organization-shared ones, as their recordings list shows them. |
+| No such `sub`, but a `client_id` claim                  | A service account, acting as the Organization account. Almanac: the Organization's only. Recordings: Organization-shared only. |
+| Anything else                                           | Refused with 403 "Sign in to Riffado once first".                     |
+
+Accounts are never created from a token: a person must sign in to
+Riffado once before their AI client can call it. A suspended account, a
+token without any of the five roles, a client outside
+`MCP_ALLOWED_CLIENTS`, and a service account while the Organization is
+off get 403 "Forbidden".
+
+**Tasks** follow the Tasks page:
+
+- A user sees the tasks on their own recordings, and on
+  Organization-shared recordings those assigned to them. A service
+  account sees the tasks of every shared recording.
+- With `tasks:write`, `update_task` marks a task done, open again or
+  dropped, or changes its assignee. Done and open again need `can_close`
+  (the recording's owner, the assignee on a shared recording, or the
+  Organization). Dropping, reopening a dropped task and reassigning need
+  `can_edit` (the owner of a private recording; on a shared recording
+  only the Organization, that is a service account). On a shared
+  recording only the Organization's people can be assigned.
+- Every task carries a `version`; `update_task` requires it, and a task
+  changed since answers with its current state instead of changing.
+- Proposals cannot be changed: review stays in the app. Task text, due
+  dates and new tasks stay in the app too.
+- A change is recorded as the user's, or as the Organization account's
+  for a service account; the access log names the client.
+
+**Names work wherever ids do.** `entity`, `person`, `assignee` and
+`recording` take an id or text. People and things match by name, alias,
+heard-as form or word forms; recordings by title, among the newest 500
+the caller reads. A clear match is used and echoed back as `resolved`;
+an ambiguous one answers with up to five candidates. Without
+`knowledge:read`, only people the caller already meets resolve
+(confirmed speakers of its recordings, assignees of its tasks), never
+things.
+
+**Searches are bounded.** Titles, transcripts, summaries and tasks are
+encrypted at rest, so a search decrypts as it goes, newest first, and
+stops at a limit:
+
+| Search                              | Reads at most  | Returns at most |
+| ----------------------------------- | -------------- | --------------- |
+| `list_recordings` with `title`      | 500 recordings | 50              |
+| `search_transcripts`                | 200 recordings | 50 recordings, 3 snippets each |
+| `search_summaries`                  | 500 summaries  | 50 recordings, 3 snippets each |
+| `search_tasks`                      | 2000 tasks     | 50              |
+
+Each also stops after 10 seconds. The answer reports `scanned`,
+`complete` and `continue_before`; pass `continue_before` back as `before`
+(as `cursor` for `list_recordings`) to search further back. Matching
+ignores case and accents and matches word forms in the recording's
+language. Listings return 50 items per page with `next_cursor`
+(`list_mishearings` 200); `get_transcript` pages by about 40,000
+characters, splitting a longer turn into pieces that keep its speaker and
+timing.
+
+Tool descriptions tell the consumer's model that returned text is what
+people said, data and not instructions.
+
+## Limits and audit
+
+| Limit                                  | Value                                   |
+| -------------------------------------- | --------------------------------------- |
+| Requests per client IP, before the token is checked | 120 per minute                |
+| Requests per caller (subject and client), refused ones included | 60 per minute  |
+| Searches per caller                     | 10 per minute                           |
+| Request body                            | 256 KB (413 above)                      |
+
+Searches are the `search_*` tools, `list_recordings` with `title`,
+`list_mishearings` (it reads the correction libraries), and any
+`recording` given as a title rather than an id. Over a limit, the answer
+is 429 with `Retry-After`; a search over its own limit answers "Too many
+searches; retry in a minute". The per-IP
+limit needs a known client IP, that is
+`RATE_LIMIT_TRUST_PROXY_HEADERS=true` behind a proxy that overwrites the
+forwarding headers (see [Environment variables](./environment-variables)).
+While the realm's discovery document or signing keys cannot be reached,
+the endpoint answers 503 rather than 401, so a client does not discard a
+good token.
+
+Every tool call, and every valid token that names no caller, writes one
+row to the `mcp_access_log` table:
+
+| Column        | Holds                                                         |
+| ------------- | ------------------------------------------------------------- |
+| `at`          | When                                                          |
+| `caller_kind` | `user` or `service`; empty when the token named no caller     |
+| `user_id`     | The Riffado user (cleared if the account is deleted)          |
+| `subject`     | The token's `sub`                                             |
+| `client_id`   | The token's `azp`, else `client_id`                           |
+| `tool`        | The tool called                                               |
+| `outcome`     | `ok`, `denied`, `conflict`, `not_found`, `invalid` or `error` |
+| `target_ids`  | Ids of the recordings, tasks or records read or changed (up to 200) |
+| `ip`          | Client IP, when known                                         |
+
+No arguments and no content are stored. Rows older than
+`MCP_AUDIT_RETENTION_DAYS` (default 90) are deleted hourly, also after
+the server is turned off. There is no screen for the log yet; query the
+table.
+
+`MCP_ALLOWED_CLIENTS` (comma-separated client ids) refuses a token whose
+`azp` is not listed, for users and service accounts alike. Unset, any
+client of the realm whose token carries `riffado-mcp` roles may call.
+
+Tokens are checked for the exact issuer, `aud` containing
+`MCP_AUDIENCE`, an expiry (30 seconds of clock skew allowed), an
+`RS256`, `PS256` or `ES256` signature, and a `typ` of `Bearer` when they
+carry one: Keycloak access tokens do, so an ID token is refused. Riffado
+never forwards them.
+
+## Trying it locally
+
+The end-to-end Keycloak realm from [Single sign-on](./sso#trying-it-locally)
+has no MCP clients yet; they are added to it separately. Until then,
+create the clients above in that realm by hand.

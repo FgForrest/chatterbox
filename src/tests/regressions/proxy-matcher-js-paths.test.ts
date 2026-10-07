@@ -45,4 +45,13 @@ describe("proxy middleware matcher", () => {
         expect(pattern.test("/api/recordings/upload/x")).toBe(true);
         expect(pattern.test("/api/recordings")).toBe(true);
     });
+
+    // The MCP route caps its body before reading it, after the token check.
+    it("skips the MCP route, and only that route", () => {
+        expect(pattern.test("/api/mcp")).toBe(false);
+        expect(pattern.test("/api/mcp/x")).toBe(true);
+        expect(
+            pattern.test("/.well-known/oauth-protected-resource/api/mcp"),
+        ).toBe(true);
+    });
 });

@@ -60,3 +60,21 @@ export function decideHostnameGate(input: GateInput): GateDecision {
 
     return { kind: "next" };
 }
+
+/**
+ * Whether the admin-host gate turns `request` away, for a route
+ * `src/proxy.ts` skips so it can bound the request body itself.
+ */
+export function deniedOnAdminHost(
+    request: Request,
+    adminHostname: string | undefined,
+): boolean {
+    const decision = decideHostnameGate({
+        requestHostname: (request.headers.get("host") ?? "")
+            .split(":")[0]
+            .toLowerCase(),
+        pathname: new URL(request.url).pathname,
+        adminHostname,
+    });
+    return decision.kind !== "next";
+}
