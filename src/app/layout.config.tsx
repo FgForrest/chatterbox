@@ -1,5 +1,6 @@
 import type { DocsLayoutProps } from "fumadocs-ui/layouts/docs";
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+import { env } from "@/lib/env";
 
 export function createBaseOptions(docsTitle: string): BaseLayoutProps {
     return {
@@ -7,7 +8,7 @@ export function createBaseOptions(docsTitle: string): BaseLayoutProps {
             title: docsTitle,
             url: "/docs",
         },
-        githubUrl: "https://github.com/riffado/riffado",
+        githubUrl: `https://github.com/${env.DOCS_REPOSITORY}`,
     };
 }
 

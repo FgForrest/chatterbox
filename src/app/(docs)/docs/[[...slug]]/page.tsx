@@ -7,15 +7,13 @@ import {
 } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { env } from "@/lib/env";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
 interface PageProps {
     params: Promise<{ slug?: string[] }>;
 }
-
-const GITHUB_OWNER = "riffado";
-const GITHUB_REPO = "riffado";
 
 export default async function Page({ params }: PageProps) {
     const { slug } = await params;
@@ -24,14 +22,15 @@ export default async function Page({ params }: PageProps) {
 
     const MDX = page.data.body;
     const lastModified = page.data.lastModified;
+    const [owner, repo] = env.DOCS_REPOSITORY.split("/");
 
     return (
         <DocsPage
             toc={page.data.toc}
             full={page.data.full}
             editOnGithub={{
-                owner: GITHUB_OWNER,
-                repo: GITHUB_REPO,
+                owner,
+                repo,
                 sha: "main",
                 path: `content/docs/${page.path}`,
             }}
