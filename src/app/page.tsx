@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getExtracted } from "next-intl/server";
+import { getExtracted, getLocale } from "next-intl/server";
 import { Deploy } from "@/components/landing/deploy";
 import { FAQ } from "@/components/landing/faq";
 import { Features } from "@/components/landing/features";
@@ -15,6 +15,7 @@ import { TheMath } from "@/components/landing/the-math";
 import { LandingFooter } from "@/components/landing-footer";
 import { getFoundingMemberAvailability } from "@/db/queries/billing";
 import { getSession } from "@/lib/auth-server";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import {
     resolveCurrency,
@@ -25,10 +26,11 @@ import { marketingMetadata } from "@/lib/seo/marketing-metadata";
 
 export async function generateMetadata(): Promise<Metadata> {
     const i18n = await getExtracted();
+    const name = productName(await getLocale());
     return marketingMetadata({
         title: i18n(
             "Riffado | Open-source AI transcription for voice recorders",
-        ),
+        ).replace("Riffado", name),
         description: i18n(
             "Open-source transcription for the voice recorder you already own. Choose your AI, own your transcripts, deploy where you want. Currently supports the Plaud Note family: Note, Note Pro, and NotePin.",
         ),

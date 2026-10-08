@@ -2,7 +2,7 @@
 
 import { ArrowLeft, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -19,6 +19,7 @@ import {
     OnboardingStepWelcome,
 } from "@/components/onboarding-steps";
 import { Button } from "@/components/ui/button";
+import { productName } from "@/lib/brand";
 
 type OnboardingStep = "welcome" | "plaud" | "ai-provider" | "complete";
 
@@ -50,6 +51,8 @@ export function OnboardingDialog({
     mandatory = false,
 }: OnboardingDialogProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const name = productName(locale);
     const { refresh } = useRouter();
     const [step, setStep] = useState<OnboardingStep>("welcome");
     const [hasPlaudConnection, setHasPlaudConnection] = useState(false);
@@ -139,7 +142,9 @@ export function OnboardingDialog({
             >
                 <DialogHeader>
                     <DialogTitle className="text-2xl" hidden>
-                        {i18n("Welcome to Riffado")}
+                        {locale === "cs-CZ"
+                            ? `Vítejte v aplikaci ${name}`
+                            : `Welcome to ${name}`}
                     </DialogTitle>
                 </DialogHeader>
 

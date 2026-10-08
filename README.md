@@ -1,6 +1,8 @@
 <div align="center">
 
-![Riffado](.github/assets/banner.png)
+# Klepna / Chatterbox
+
+**Chatterbox based on [Riffado](https://github.com/riffado/riffado).**
 
 **Open-source AI transcription companion for voice recorders.**
 
@@ -16,9 +18,9 @@
 
 ---
 
-> **OpenPlaud is now Riffado.** Same project, same code, same team, same license &mdash; renamed in May 2026 so the project isn't tied to one device vendor in its name. [Read the rebrand note &rarr;](https://riffado.com/rebrand)
+> Klepna is the Czech name; Chatterbox is the English name. This project is based on [Riffado](https://github.com/riffado/riffado), which was previously called OpenPlaud. [Read the original rebrand note &rarr;](https://riffado.com/rebrand)
 
-Riffado is an open-source companion app for AI voice recorders. It syncs your recordings from the manufacturer's cloud, transcribes them with any OpenAI-compatible API (or in the browser, for free), and stores everything on infrastructure you control. **Currently supports the Plaud Note family — Note, Note Pro, and NotePin. More device support on the way.** AGPL-3.0.
+Chatterbox is an open-source companion app for AI voice recorders. It syncs your recordings from the manufacturer's cloud, transcribes them with any OpenAI-compatible API (or in the browser, for free), and stores everything on infrastructure you control. **Currently supports the Plaud Note family — Note, Note Pro, and NotePin. More device support on the way.** AGPL-3.0.
 
 ## Features
 
@@ -117,7 +119,7 @@ Full install guide, version pinning, image tags, and Windows/WSL notes: [riffado
 
 ## Connecting Plaud
 
-Riffado signs into Plaud using your email — the same OTP flow as the official app. The verification code is forwarded directly to Plaud and never stored. Your access token is encrypted with AES-256-GCM before hitting the database. Region (Global, EU, APAC) is auto-detected.
+Chatterbox signs into Plaud using your email — the same OTP flow as the official app. The verification code is forwarded directly to Plaud and never stored. Your access token is encrypted with AES-256-GCM before hitting the database. Region (Global, EU, APAC) is auto-detected.
 
 If you signed up to Plaud with **Continue with Google** or **Continue with Apple**, the email-code flow won't return any recordings — that's a different identity on Plaud's side. Use the [Riffado Connector browser extension](https://github.com/riffado/connector), or paste a token manually. Full instructions: [riffado.com/docs/guides/connect-plaud-account](https://riffado.com/docs/guides/connect-plaud-account).
 
@@ -154,14 +156,10 @@ Every instance also serves these pages at `/docs`. The upstream documentation li
 
 ## Sponsors
 
-Riffado is AGPL-3.0 and stays that way. Sponsorship is what pays for the parts
-that aren't fun: chasing vendor API changes that break sync, buying recorders to
-test new device support against, CI and registry costs, and the mobile app.
+Chatterbox is AGPL-3.0. The upstream Riffado project accepts sponsorship to
+support development, device testing, CI, and registry costs.
 
 [**Sponsor Riffado on GitHub &rarr;**](https://github.com/sponsors/riffado)
-
-If your team self-hosts Riffado at work, a company tier is the cheapest
-maintenance contract you'll ever buy.
 
 <!-- sponsors -->
 <!-- /sponsors -->
@@ -180,9 +178,9 @@ AGPL-3.0 — see [LICENSE](LICENSE). Free to use, modify, and self-host. If you 
 
 ## Disclaimer
 
-- **Not affiliated.** Riffado is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Plaud Inc. or any of its subsidiaries. "Plaud" and related marks are the property of their respective owners and are used here only for descriptive interoperability purposes (nominative fair use).
-- **Third-party devices and services.** Riffado is designed to interoperate with hardware and services from third parties that users choose to connect — including recording devices (such as Plaud) and storage and AI providers. Users are solely responsible for complying with the applicable terms of service, acceptable-use policies, and laws governing any third-party device or service they connect to this software.
+- **Not affiliated.** Chatterbox is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Plaud Inc. or any of its subsidiaries. "Plaud" and related marks are the property of their respective owners and are used here only for descriptive interoperability purposes (nominative fair use).
+- **Third-party devices and services.** Chatterbox is designed to interoperate with hardware and services from third parties that users choose to connect — including recording devices (such as Plaud) and storage and AI providers. Users are solely responsible for complying with the applicable terms of service, acceptable-use policies, and laws governing any third-party device or service they connect to this software.
 
 ## Acknowledgments
 
-Originally created by **Perier**. Maintained by the Riffado community.
+Based on [Riffado](https://github.com/riffado/riffado), originally created by **Perier**. The original project is maintained by the Riffado community.

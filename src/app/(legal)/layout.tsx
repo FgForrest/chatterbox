@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { useExtracted } from "next-intl";
-import { LogoWordmark } from "@/components/icons/logo";
+import { useLocale } from "next-intl";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { LandingFooter } from "@/components/landing-footer";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 
 /**
@@ -23,7 +24,7 @@ export default function LegalLayout({
 }: {
     children: React.ReactNode;
 }) {
-    const i18n = useExtracted();
+    const name = productName(useLocale());
     if (!env.IS_HOSTED) {
         notFound();
     }
@@ -35,9 +36,9 @@ export default function LegalLayout({
                     <Link
                         href="/"
                         className="flex items-center hover:opacity-80 transition-opacity"
-                        aria-label={i18n("Riffado")}
+                        aria-label={name}
                     >
-                        <LogoWordmark className="h-7 w-auto" />
+                        <BrandWordmark className="h-7" />
                     </Link>
                 </div>
             </header>

@@ -9,6 +9,7 @@ import { RybbitAnalytics } from "@/components/rybbit-analytics";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import "./globals.css";
 
@@ -24,9 +25,10 @@ const geistMono = Geist_Mono({
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getExtracted();
+    const name = productName(await getLocale());
     const title = t(
         "Riffado — Open-source AI transcription for voice recorders",
-    );
+    ).replace("Riffado", name);
     const description = t(
         "Open-source transcription for the voice recorder you already own. Choose your AI, own your transcripts, deploy where you want. Currently supports the Plaud Note family: Note, Note Pro, and NotePin.",
     );
@@ -45,14 +47,14 @@ export async function generateMetadata(): Promise<Metadata> {
         metadataBase: new URL(env.APP_URL ?? "https://riffado.com"),
         title: {
             default: title,
-            template: "%s · Riffado",
+            template: `%s · ${name}`,
         },
         description,
-        applicationName: "Riffado",
+        applicationName: name,
         manifest: "/manifest.webmanifest",
         openGraph: {
             type: "website",
-            siteName: "Riffado",
+            siteName: name,
             title,
             description: socialDescription,
             images: [{ url: "/og-home.png", width: 1200, height: 630 }],
@@ -67,7 +69,7 @@ export async function generateMetadata(): Promise<Metadata> {
         },
         appleWebApp: {
             capable: true,
-            title: "Riffado",
+            title: name,
             statusBarStyle: "black-translucent",
         },
     };

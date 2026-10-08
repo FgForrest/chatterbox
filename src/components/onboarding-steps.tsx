@@ -1,13 +1,16 @@
 "use client";
 
 import { Bot, CheckCircle2, Mic, Sparkles } from "lucide-react";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { PlaudConnectTabs } from "@/components/plaud-connect-tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { productName } from "@/lib/brand";
 
 export function OnboardingStepWelcome() {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const name = productName(locale);
     return (
         <div className="space-y-4">
             <div className="text-center space-y-2">
@@ -18,9 +21,9 @@ export function OnboardingStepWelcome() {
                     {i18n("Your AI-Powered Recording Hub")}
                 </h3>
                 <p className="text-muted-foreground">
-                    {i18n(
-                        "Riffado helps you manage, transcribe, and enhance your Plaud recordings with AI. Let's set up your account.",
-                    )}
+                    {locale === "cs-CZ"
+                        ? `${name} vám pomůže spravovat, přepisovat a pomocí AI zpracovávat nahrávky z Plaud. Nastavme váš účet.`
+                        : `${name} helps you manage, transcribe, and enhance your Plaud recordings with AI. Let's set up your account.`}
                 </p>
             </div>
 
@@ -241,6 +244,8 @@ export function OnboardingStepComplete({
     hasIncludedProvider: boolean;
 }) {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const name = productName(locale);
     return (
         <div className="space-y-4">
             <div className="text-center space-y-2">
@@ -251,7 +256,9 @@ export function OnboardingStepComplete({
                     {i18n("You're All Set!")}
                 </h3>
                 <p className="text-muted-foreground">
-                    {i18n("Start recording and let Riffado handle the rest")}
+                    {locale === "cs-CZ"
+                        ? `Začněte nahrávat a ${name} se postará o zbytek`
+                        : `Start recording and let ${name} handle the rest`}
                 </p>
             </div>
 

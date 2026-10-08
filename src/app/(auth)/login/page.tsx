@@ -1,4 +1,4 @@
-import { getExtracted } from "next-intl/server";
+import { getExtracted, getLocale } from "next-intl/server";
 import {
     HostedAuthChrome,
     SelfHostAuthChrome,
@@ -6,6 +6,7 @@ import {
 import { LoginForm } from "@/components/auth/login-form";
 import { SsoLogin } from "@/components/auth/sso-login";
 import { redirectIfAuthenticated } from "@/lib/auth-server";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import { isSmtpConfigured } from "@/lib/smtp";
 import { isSsoEnabled } from "@/lib/sso/config";
@@ -16,6 +17,12 @@ interface LoginPageProps {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
     const i18n = await getExtracted();
+    const locale = await getLocale();
+    const name = productName(locale);
+    const instanceSubtitle =
+        locale === "cs-CZ"
+            ? "Přihlaste se ke své instanci Klepna."
+            : "Sign in to your Chatterbox instance.";
     await redirectIfAuthenticated();
 
     if (isSsoEnabled()) {
@@ -23,7 +30,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         return (
             <SelfHostAuthChrome
                 title={i18n("Sign in")}
-                subtitle={i18n("Sign in to your Riffado instance.")}
+                subtitle={instanceSubtitle}
             >
                 <SsoLogin
                     providerName={env.OIDC_PROVIDER_NAME}
@@ -42,7 +49,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         return (
             <HostedAuthChrome
                 title={i18n("Sign in")}
-                subtitle={i18n("Welcome back to Riffado.")}
+                subtitle={
+                    locale === "cs-CZ"
+                        ? "Vítejte zpět v aplikaci Klepna."
+                        : `Welcome back to ${name}.`
+                }
             >
                 <LoginForm {...formProps} />
             </HostedAuthChrome>
@@ -50,10 +61,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     }
 
     return (
-        <SelfHostAuthChrome
-            title={i18n("Sign in")}
-            subtitle={i18n("Sign in to your Riffado instance.")}
-        >
+        <SelfHostAuthChrome title={i18n("Sign in")} subtitle={instanceSubtitle}>
             <LoginForm {...formProps} />
         </SelfHostAuthChrome>
     );
