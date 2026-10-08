@@ -8,6 +8,8 @@ import {
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getLocale } from "next-intl/server";
+import type { ComponentProps } from "react";
+import { normalizeDocsHref } from "@/lib/docs-links";
 import { env } from "@/lib/env";
 import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
@@ -25,6 +27,10 @@ export default async function Page({ params }: PageProps) {
     const MDX = page.data.body;
     const lastModified = page.data.lastModified;
     const [owner, repo] = env.DOCS_REPOSITORY.split("/");
+    const RelativeLink = createRelativeLink(source, page);
+    const Link = ({ href, ...props }: ComponentProps<"a">) => (
+        <RelativeLink href={href ? normalizeDocsHref(href) : href} {...props} />
+    );
 
     return (
         <DocsPage
@@ -41,11 +47,7 @@ export default async function Page({ params }: PageProps) {
             <DocsTitle>{page.data.title}</DocsTitle>
             <DocsDescription>{page.data.description}</DocsDescription>
             <DocsBody>
-                <MDX
-                    components={getMDXComponents({
-                        a: createRelativeLink(source, page),
-                    })}
-                />
+                <MDX components={getMDXComponents({ a: Link })} />
             </DocsBody>
         </DocsPage>
     );

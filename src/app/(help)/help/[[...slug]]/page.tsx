@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { getLocale } from "next-intl/server";
 import type { ComponentProps } from "react";
 import { HelpChapterPicker } from "@/components/help/help-chapter-picker";
+import { normalizeDocsHref } from "@/lib/docs-links";
 import { defaultLocale } from "@/lib/i18n/config";
 import { helpSource, userGuideChapters } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
@@ -27,7 +28,9 @@ export default async function HelpPage({ params }: PageProps) {
         }
         return (
             <RelativeLink
-                href={href.replace(/^\/docs(?=\/|$|#)/, "/help")}
+                href={normalizeDocsHref(
+                    href.replace(/^\/docs(?=\/|$|#)/, "/help"),
+                )}
                 {...props}
             />
         );
