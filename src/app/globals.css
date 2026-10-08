@@ -3,15 +3,15 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Riffado Color Scheme - Modern Audiophile Design */
+/* Klepna color scheme */
 :root {
     --background: oklch(0.9818 0.0054 95.0986);
-    --foreground: oklch(0.3438 0.0269 95.7226);
+    --foreground: #243348;
     --card: oklch(0.9818 0.0054 95.0986);
     --card-foreground: oklch(0.1908 0.002 106.5859);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.2671 0.0196 98.939);
-    --primary: oklch(0.6171 0.1375 39.0427);
+    --primary: #c63b50;
     --primary-foreground: oklch(1 0 0);
     --secondary: oklch(0.9245 0.0138 92.9892);
     --secondary-foreground: oklch(0.4334 0.0177 98.6048);
@@ -23,26 +23,23 @@
     --destructive-foreground: oklch(1 0 0);
     --border: oklch(0.8847 0.0069 97.3627);
     --input: oklch(0.7621 0.0156 98.3528);
-    --ring: oklch(0.6171 0.1375 39.0427);
-    --chart-1: oklch(0.5583 0.1276 42.9956);
+    --ring: #c63b50;
+    --chart-1: #c63b50;
     --chart-2: oklch(0.6898 0.1581 290.4107);
     --chart-3: oklch(0.8816 0.0276 93.128);
     --chart-4: oklch(0.8822 0.0403 298.1792);
-    --chart-5: oklch(0.5608 0.1348 42.0584);
+    --chart-5: #e35364;
     --sidebar: oklch(0.9663 0.008 98.8792);
     --sidebar-foreground: oklch(0.359 0.0051 106.6524);
-    --sidebar-primary: oklch(0.6171 0.1375 39.0427);
+    --sidebar-primary: #c63b50;
     --sidebar-primary-foreground: oklch(0.9881 0 0);
     --sidebar-accent: oklch(0.9245 0.0138 92.9892);
     --sidebar-accent-foreground: oklch(0.325 0 0);
     --sidebar-border: oklch(0.9401 0 0);
     --sidebar-ring: oklch(0.7731 0 0);
 
-    /* Theme-stable surface for marketing chrome (auth split-panel, etc.).
-       Locked to the light-mode foreground / background pair so the panel
-       stays dark-sepia + cream-text in BOTH light and dark themes -- it
-       intentionally does NOT invert. */
-    --auth-brand: oklch(0.3438 0.0269 95.7226);
+    /* Theme-stable surface for marketing chrome (auth split-panel, etc.). */
+    --auth-brand: #14263c;
     --auth-brand-foreground: oklch(0.9818 0.0054 95.0986);
 
     --font-sans:
@@ -107,8 +104,8 @@
     --card-foreground: oklch(0.9818 0.0054 95.0986);
     --popover: oklch(0.3085 0.0035 106.6039);
     --popover-foreground: oklch(0.9211 0.004 106.4781);
-    --primary: oklch(0.6724 0.1308 38.7559);
-    --primary-foreground: oklch(1 0 0);
+    --primary: #f35f6d;
+    --primary-foreground: #14263c;
     --secondary: oklch(0.9818 0.0054 95.0986);
     --secondary-foreground: oklch(0.3085 0.0035 106.6039);
     --muted: oklch(0.2213 0.0038 106.707);
@@ -119,16 +116,16 @@
     --destructive-foreground: oklch(1 0 0);
     --border: oklch(0.3618 0.0101 106.8928);
     --input: oklch(0.4336 0.0113 100.2195);
-    --ring: oklch(0.6724 0.1308 38.7559);
-    --chart-1: oklch(0.5583 0.1276 42.9956);
+    --ring: #f35f6d;
+    --chart-1: #f35f6d;
     --chart-2: oklch(0.6898 0.1581 290.4107);
     --chart-3: oklch(0.213 0.0078 95.4245);
     --chart-4: oklch(0.3074 0.0516 289.323);
-    --chart-5: oklch(0.5608 0.1348 42.0584);
+    --chart-5: #c63b50;
     --sidebar: oklch(0.2357 0.0024 67.7077);
     --sidebar-foreground: oklch(0.8074 0.0142 93.0137);
-    --sidebar-primary: oklch(0.325 0 0);
-    --sidebar-primary-foreground: oklch(0.9881 0 0);
+    --sidebar-primary: #f35f6d;
+    --sidebar-primary-foreground: #14263c;
     --sidebar-accent: oklch(0.168 0.002 106.6177);
     --sidebar-accent-foreground: oklch(0.8074 0.0142 93.0137);
     --sidebar-border: oklch(0.9401 0 0);

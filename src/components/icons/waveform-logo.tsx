@@ -1,21 +1,16 @@
-import type { SVGProps } from "react";
+import Image from "next/image";
 
-/** Compact waveform mark for the signed-in application header. */
-export function WaveformLogo(props: SVGProps<SVGSVGElement>) {
+/** Compact Klepna mark for navigation and small brand placements. */
+export function WaveformLogo({ className }: { className?: string }) {
     return (
-        <svg
-            viewBox="0 0 36 40"
-            fill="none"
+        <Image
+            src="/brand/klepna-icon.svg"
+            alt=""
             aria-hidden="true"
-            focusable="false"
-            {...props}
-        >
-            <path
-                d="M3 16v8M8 11v18M13 6v28M18 12v16M23 3v34M28 10v20M33 15v10"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-            />
-        </svg>
+            className={className}
+            width={40}
+            height={40}
+            unoptimized
+        />
     );
 }

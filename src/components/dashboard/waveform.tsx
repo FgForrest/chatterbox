@@ -113,8 +113,7 @@ export function Waveform({
 
         const styles = getComputedStyle(wrap);
         const primary =
-            styles.getPropertyValue("--primary").trim() ||
-            "oklch(0.6171 0.1375 39.0427)";
+            styles.getPropertyValue("--primary").trim() || "#c63b50";
         const muted =
             styles.getPropertyValue("--muted-foreground").trim() ||
             "rgba(0,0,0,0.5)";

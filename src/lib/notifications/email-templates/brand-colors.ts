@@ -1,16 +1,12 @@
-// Brand colors extracted from email styles
-// Matches Riffado's technical aesthetic with WCAG AA contrast compliance
-
 export const brandColors = {
-    // Primary brand color - terracotta/orange
-    primary: "#c96442",
+    primary: "#c63b50",
 
     // Background colors
     background: "#faf9f5", // Off-white/cream background
     white: "#ffffff", // Pure white for containers
 
     // Text colors
-    foreground: "#3d3929", // Dark brown/charcoal - high contrast text
+    foreground: "#243348", // Dark navy - high contrast text
     mutedForeground: "#83827d", // Gray - secondary text
 
     // Border colors
