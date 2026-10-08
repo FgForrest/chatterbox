@@ -7,7 +7,9 @@ import {
 } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import { env } from "@/lib/env";
+import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
@@ -16,8 +18,8 @@ interface PageProps {
 }
 
 export default async function Page({ params }: PageProps) {
-    const { slug } = await params;
-    const page = source.getPage(slug);
+    const [{ slug }, locale] = await Promise.all([params, getLocale()]);
+    const page = source.getPage(slug, locale);
     if (!page) notFound();
 
     const MDX = page.data.body;
@@ -50,18 +52,19 @@ export default async function Page({ params }: PageProps) {
 }
 
 export function generateStaticParams() {
-    return source.generateParams();
+    return source.getPages(defaultLocale).map((page) => ({ slug: page.slugs }));
 }
 
 export async function generateMetadata({
     params,
 }: PageProps): Promise<Metadata> {
-    const { slug } = await params;
-    const page = source.getPage(slug);
+    const [{ slug }, locale] = await Promise.all([params, getLocale()]);
+    const page = source.getPage(slug, locale);
     if (!page) notFound();
 
     const ogSegments = (page.slugs.length ? page.slugs : ["index"]).join("/");
-    const ogImage = `/docs-og/${ogSegments}.png`;
+    const ogLocale = locale === defaultLocale ? "" : `${locale}/`;
+    const ogImage = `/docs-og/${ogLocale}${ogSegments}.png`;
 
     return {
         title: page.data.title,

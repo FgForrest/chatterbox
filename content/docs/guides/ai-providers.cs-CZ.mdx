@@ -1,0 +1,301 @@
+---
+title: Poskytovatelé AI
+description: Nakonfigurujte poskytovatele přepisu a sumarizace kompatibilní s OpenAI.
+---
+
+Riffado využívá OpenAI SDK s konfigurovatelnou `baseURL`. Jakýkoliv poskytovatel,
+který nabízí OpenAI-kompatibilní API, funguje: samotné OpenAI, Groq,
+OpenRouter, Together, Azure OpenAI, LM Studio, Ollama a další řešení,
+která podporují stejný wire protokol.
+
+Tři přepisová backendy jsou integrovány nativně, protože jejich API
+nejsou kompatibilní s OpenAI: Google Gemini, ElevenLabs Scribe a
+Speechmatics.
+
+Lze nakonfigurovat více poskytovatelů a pro každou nahrávku zvolit,
+který bude zpracovávat přepis a který sumarizaci.
+
+<span id="adding-a-provider" />
+
+## Přidání poskytovatele
+
+**Nastavení → AI poskytovatelé → Přidat poskytovatele** otevře dialog s přednastaveným
+seznamem. Každá předvolba automaticky vyplní `baseURL`, výchozí model a
+nápovědu k tomu, který API endpoint by měl používat pracovník přepisu:
+
+- **Whisper-style** (`/v1/audio/transcriptions`, multipart upload) —
+  klasický rozhraní OpenAI Whisper. Používají ho OpenAI, Groq Whisper, Together
+  Whisper, LM Studio, Ollama.
+- **Chat-style** (`/v1/chat/completions` s částí obsahu `input_audio`) —
+  pro poskytovatele, kteří nabízejí LLM s audio vstupem místo dedikovaného API pro přepis.
+  Využívá OpenRouter směrující Gemini / GPT-audio / Voxtral.
+- **Gemini-style** (`generateContent` s inline audio daty) —
+  nativní Google Gemini API. Používá předvolba Google Gemini.
+- **Scribe-style** (`/v1/speech-to-text`, multipart upload, autentizace
+  přes `xi-api-key`) — nativní API ElevenLabs. Používá předvolba ElevenLabs.
+- **Speechmatics-style** (`POST /v2/jobs`, následně polling, stažení) —
+  Speechmatics Batch job API. Používá předvolba Speechmatics.
+
+Vyberte předvolbu, vložte svůj API klíč, zvolte výchozí model, uložte. Postup opakujte pro další poskytovatele.
+
+<span id="preset-reference" />
+
+## Referenční přehled předvoleb
+
+| Předvolba      | Základní URL                                     | Poznámky                                                            |
+| -------------- | -----------------------------------------------  | ------------------------------------------------------------------- |
+| OpenAI         | *(prázdné, defaultně api.openai.com)*            | Produkční kvalita; `whisper-1`, `gpt-4o-transcribe`             |
+| Groq           | `https://api.groq.com/openai/v1`             | Bezplatné Whisper API, velmi rychlé                                     |
+| OpenRouter     | `https://openrouter.ai/api/v1`               | Přepis ve stylu Chat; mnoho summarizačních modelů na jeden klíč   |
+| Together AI    | `https://api.together.xyz/v1`                | Úsporné, široký výběr modelů                                         |
+| Google Gemini  | *(prázdné, nativní Google API)*                   | Přepis ve stylu Gemini; pouze přepis                                 |
+| ElevenLabs     | *(prázdné, defaultně api.elevenlabs.io)*         | Přepis ve stylu Scribe, volitelné označení mluvčích; pouze přepis   |
+| Speechmatics   | *(prázdné, automatické směrování asr.api.speechmatics.com)* | Přepis typu batch job, volitelné označení mluvčích; pouze přepis    |
+| Azure          | `https://<resource>.openai.azure.com/...`    | Soulad s korporátními požadavky, URL vázaná na nasazení             |
+| LM Studio      | `http://localhost:1234/v1`                   | Lokální, 100% offline                                               |
+| Ollama         | `http://localhost:11434/v1`                  | Lokální, snadná správa modelů                                       |
+| Vlastní        | *(libovolné)*                                    | Jakýkoli další OpenAI-kompatibilní poskytovatel                     |
+
+Předvolby LM Studio a Ollama ve výchozím stavu používají `http://localhost`. Zevnitř
+kontejneru Docker je `localhost` samotný kontejner, ne hostitelský
+stroj — použijte `http://host.docker.internal:<port>` na Mac/Windows, nebo
+Docker bridge IP na Linuxu, abyste se dostali na AI server běžící na
+hostiteli. Pokud provozujete Ollamu ve stejné síti Docker jako Riffado, použijte
+název služby (`http://ollama:11434/v1`).
+
+<span id="choosing-models" />
+
+## Volba modelů
+
+Seznam předvoleb obsahuje předvybranou sadu známých ID přepisových
+modelů pro každý poskytovatel. Pokud API zpřístupňuje strukturovaná metadata
+o schopnostech (aktuálně pouze OpenRouter), dialog Přidat/Upravit umí načíst
+aktuální seznam modelů, které podporují audio. U ostatních poskytovatelů
+rozhoduje o možnostech nabídky předvybraný seznam, a možnost
+**Vlastní…** umožňuje zadat ID ručně pro nové modely, které ještě nejsou
+při vydání této dokumentace v oficiálním seznamu.
+
+Sumarizace je volnější — funguje libovolný chatovací model, který
+splňuje shape OpenAI `chat/completions`. Vyberte model rychlý a levný
+(např. `gpt-4o-mini`, `llama-3.1-70b-versatile`), pokud nemáte
+konkrétní důvod použít větší model.
+
+### ElevenLabs Scribe
+
+Předvolba nabízí `scribe_v2` (výchozí), `scribe_v2_medical` a
+legacy `scribe_v1`. Diarizace je volba při požadavku, nikoli samostatný model,
+takže v nabídce je možnost **scribe_v2 (speaker labels)**,
+uložená jako `scribe_v2+diarize`. Při aktivní volbě budou přepisy
+ve formě `speaker_0: …` řádků, což je stejná struktura, jakou Riffado ukládá
+u diarizovaného modelu OpenAI, a pracovní stanice zobrazí tyto přepisy
+jako dialog místo souvislého textu. Viz [Jak se přepisy a souhrny zobrazují](#how-transcripts-and-summaries-are-displayed).
+
+Pole **Base URL** nechte prázdné pro použití `api.elevenlabs.io`. Pokud chcete držet
+audio v určité oblasti, nastavte místo toho hostitele s požadovanou
+lokalitou, například `https://api.eu.residency.elevenlabs.io`. Koncová `/v1` je
+volitelná.
+
+Zvuk je nahráván přesně tak, jak je uložen. Mono Opus re-encode,
+který drží příliš velké nahrávky pod 25 MiB OpenAI limit, je u Scribe
+vynechán, protože Scribe akceptuje i vícagigabajtové nahrávky – takže
+dlouhá setkání jdou do modelu v plné kvalitě.
+
+Scribe v2 a v2 Medical dostávají seznam jmen ze [Almanachu](./almanac),
+max. 500 položek, které jsou zasílány jako keyterms. Viz také
+[Jména z Almanachu](./almanac#names-from-the-almanac). ElevenLabs
+účtuje keyterms jako doplněk k hodinové sazbě.
+
+ElevenLabs je pouze pro přepis. Nepodporuje `chat/completions` endpoint,
+takže mějte druhého poskytovatele pro výchozí sumarizaci.
+
+### Speechmatics
+
+Předvolba nabízí `enhanced` (výchozí, nejvyšší přesnost), `standard`
+(rychlejší a levnější), a `melia-1`, což je vícejazyčný model, který
+sám detekuje jazyk a přepíná mezi jazyky. Stejně jako u Scribe je diarizace
+nastavení v požadavku, ne samostatný model – každá předvolba má tedy
+i variantu **(speaker labels)** v rozbalovací nabídce, uloženou jako `enhanced+diarize`
+a další. Při výběru těchto variant jsou přepisy ve formátu `speaker_1: …`
+řádků a pracovní stanice je zobrazí jako dialog — viz
+[Jak se přepisy a souhrny zobrazují](#how-transcripts-and-summaries-are-displayed).
+Nativní označení `S1` od Speechmatics je při zpracování změněno na `speaker_1`,
+aby byly označení konzistentní s ostatními poskytovateli; jména vzniklá
+identifikací mluvčího jsou zachována.
+
+Stejná jména z Almanachu jsou do Speechmatics posílána jako vlastní
+slovník, a to včetně tvarů, pod kterými byla dříve špatně rozpoznána.
+
+Vaše **Výchozí jazyk pro přepis** je předáván jako jazykový kód. Pokud jej
+nemáte nastavený, Riffado požádá o `auto` a nechá Speechmatics
+jazyk rozpoznat. Výjimkou je `melia-1`: přijímá pouze `multi`,
+takže nastavení jazyka se při jejím výběru ignoruje.
+
+Pole **Base URL** ponechte prázdné pro použití `asr.api.speechmatics.com`, který směruje
+do nejbližší oblasti. Pokud chcete zajistit umístění dat v konkrétní oblasti,
+nastavte místo toho regionálního hostitele — `https://eu2.asr.api.speechmatics.com`,
+`https://us1.asr.api.speechmatics.com`, `https://au1.asr.api.speechmatics.com`
+atd. Koncová `/v2` je volitelná.
+
+Batch je asynchronní API: Riffado nahraje audio jako úlohu, poté se
+každé 3 sekundy dotazuje na stav, stáhne přepis při dosažení `done`
+a následně úlohu smaže, aby audio a přepis nezůstaly na serverech
+Speechmatics čekající na vypršení retenční lhůty. Celé čekání
+je omezeno na `WHISPER_REQUEST_TIMEOUT_MS` (výchozí 60 minut) — zvyšte limit,
+pokud přepisujete delší nahrávky.
+
+Audio je nahráno přesně tak, jak je uložené; mono Opus re-encode
+omezující velikost pod limit OpenAI 25 MiB je i zde vynechán, stejně jako u Scribe.
+
+Speechmatics je pouze pro přepis — nemá `chat/completions`
+endpoint, takže si ponechte zvláštního poskytovatele jako výchozí pro sumarizaci.
+
+<span id="what-gets-sent-to-the-provider" />
+
+## Co je předáváno poskytovateli
+
+Poskytovateli je zasílán zvukový záznam v otevřeném formátu (pro přepis)
+a text přepisu v otevřeném formátu (pro sumarizaci). ElevenLabs Scribe v2
+a Speechmatics obdrží s audiem až 500 jmen z vašeho Almanachu (viz
+[Jména z Almanachu](./almanac#names-from-the-almanac)).
+
+Požadavek na souhrn rovněž zahrnuje údaje, které vyžadují jeho akční
+položky: datum pořízení nahrávky (pro převod „do pátku“ na konkrétní
+datum), již přijaté úkoly na dané nahrávce (aby nebyly navrženy znovu)
+a až 30 otevřených úkolů jednotlivých mluvčích z jiných nahrávek, aby model
+zjistil návaznosti. Předávají se pouze úkoly, které může recenzent dané
+nahrávky uzavřít: u soukromé nahrávky vlastní úkoly majitele a sdílené,
+které mu byly přiřazeny; u sdílené nahrávky úkoly organizace. Jsou zasílány
+poskytovateli uživatele, který o souhrn požádal.
+
+Hraniční bod důvěry je právě vámi zvolený poskytovatel.
+Šifrování uložených dat u Riffada chrání databázi, nikoliv síťový přenos
+směrem k AI poskytovateli — viz
+[Šifrování uložených dat](../reference/encryption-at-rest) pro přesný
+seznam toho, na co se tato vrstva vztahuje a na co nikoliv.
+
+Pokud potřebujete toto důvěrné rozhraní minimalizovat, provozujte lokálního
+poskytovatele (LM Studio nebo Ollama) na stejném zařízení jako instanci s vlastním hostingem.
+Přepis i sumarizace pak zůstávají kompletně na vašem hardwaru.
+
+<span id="switching-the-active-provider" />
+
+## Přepínání aktivního poskytovatele
+
+U každé nahrávky pracovní stanice zobrazuje volbu poskytovatele přepisu
+i volbu poskytovatele souhrnu. Změny platí ihned; přepis lze spustit znovu
+s jiným poskytovatelem, pokud výsledek prvního nebyl dobrý.
+
+<span id="how-transcripts-and-summaries-are-displayed" />
+
+## Jak se přepisy a souhrny zobrazují
+
+**Souhrny jsou v Markdownu.** Model je požádán o JSON objekt a
+hodnota `summary` v něm je v Markdownu a jako taková je i vykreslena:
+nadpisy, odrážky, číslované seznamy, tučný text, odkazy a tabulky jsou
+podporovány. Pokyn k tomuto formátování je připojen ke každému promptu,
+včetně těch vlastních, takže ve svých proměnných nemusíte formát výslovně
+zmiňovat.
+
+JSON obálka zůstává prostý objekt bez jakýchkoli code bloků.
+Pokud model požadavek ignoruje a odpoví souvislým textem, odpověď se
+zobrazí, nevyřazuje se – a protože je interpretována jako Markdown,
+většinou se čte správně.
+
+Surový HTML kód v souhrnu je vypouštěn, nebude zobrazen.
+
+**Diarizované přepisy se zobrazují jako dialog.** Když přepis pochází
+z endpointu s rozpoznáním mluvčích, pracovní stanice zobrazí jeden blok
+na každé vystoupení s jménem mluvčího nad ním (barevně odlišené),
+seskupené podle mluvčího. Týká se to
+`gpt-4o-transcribe-diarize`, `scribe_v2+diarize`, modelů
+`+diarize` od Speechmatics a přepisů importovaných z Plaud.
+
+Každý jiný přepis se zobrazuje stejně jako dříve, tedy prostý text.
+Je to záměr, nikoliv omezení: Gemini a poskytovatelé typu chat mají pokyn
+neuvádět jména mluvčích, takže pokud se v přepisu vyskytne řádek typu `Note: send the deck`,
+nebude nikdy zaměněn s mluvčím "Note". Diarizovaný přepis, který nakonec
+žádné označení mluvčích neobsahuje — což se stane, pokud model najde jen
+jeden hlas — se také zobrazí jako prostý text místo dialogového zobrazení
+s jedním anonymem.
+
+Jména mluvčích se zobrazují přesně tak, jak je poskytovatel dodal: `speaker_0`
+je zobrazeno jako `Speaker 0`, ale nedochází k přečíslování ani přejmenování.
+Souhrny uvádějí tato označení přesně podle přepisu, takže zmíněný `speaker_0`
+v souhrnu skutečně odkazuje na entitu v přepisu.
+
+<span id="auto-summarize-after-transcription" />
+
+## Automatická sumarizace po přepisu
+
+**Nastavení → Souhrn → Automaticky generovat souhrn po přepisu**
+promění sumarizační proces na jednorázový tok. Při aktivaci této volby
+je po **každém úspěšném přepisu** ihned následně vygenerován souhrn —
+včetně ručního přepisu, automatizovaných přepisů po synchronizaci i
+opakovaných přepisů. Přepínač je nezávislý na „Auto-transcribe“; každá volba
+spouští svůj vlastní mechanismus.
+
+Automatika je výchozí vypnutá (opt-in) — přináší dodatečné volání AI
+poskytovatele na jednu nahrávku. Můžete zvolit samostatnou předvolbu pro
+automatický režim ("Předvolba pro auto-souhrn"), takže pracovní schůzky mohou
+výchozně používat "Meeting Notes", zatímco ruční tlačítko zachováte
+například pro "General".
+
+Automatický souhrn vyžaduje váš vlastní enhancement nebo přepisovací
+poskytovatel nakonfigurovaný v Nastavení → AI poskytovatelé. Hostované účty,
+které používají pouze vestavěný přepis Mynah (bez vlastního poskytovatele),
+automatické souhrny nevytvoří — Mynah podporuje pouze přepis. Pro možnost
+automatické sumarizace si přidejte vlastního poskytovatele.
+
+<span id="cost-guardrails" />
+
+### Cenové limity
+
+Automatický souhrn znamená jedno LLM volání na přepis. U chatovacích modelů
+na `$0.15-$5 / 1M input tokens` a typických přepisech o 1–2 tisíci tokenech, stojí
+jediný souhrn zlomek centu — ale hromadná synchronizace N nahrávek
+nebo přechod na dražší modely může vyústit ve vyšší náklady. Dva mantinely:
+
+- **Hodinový limit na uživatele.** Požadavky auto-souhrnu jsou omezeny
+  pomocí `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` (výchozí `60`). Po vyčerpání limitu je přepis
+  normálně uložen, nahrávka pokračuje bez souhrnu a je vyvolána `summary.failed`
+  událost s chybou `rate limit`, takže monitoring
+  událost zachytí. Ruční tlačítko „Vygenerovat souhrn“ **není** omezeno —
+  zůstáváte zcela pod kontrolou.
+- **Použijte levný model.** Endpoint znovu využívá enhancement
+  poskytovatele uživatele (nebo přepisovacího poskytovatele jako zálohu).
+  Pokud zadaný výchozí model obsahuje `whisper` (tj. uživatel nastavil
+  pouze přepisovacího poskytovatele), souhrnové volání použije
+  levný chat model odpovídající poskytovateli, takže se požadavek
+  nevzdá na audio endpoint:
+
+  | Zákl. URL poskytovatele obsahuje | Náhradní chat model                              |
+  | ------------------------------- | -----------------------------------------------   |
+  | `groq`                          | `llama-3.1-8b-instant`                         |
+  | `together`                      | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo`    |
+  | `openrouter`                    | `openai/gpt-4o-mini`                            |
+  | cokoli ostatní                   | `gpt-4o-mini`                                   |
+
+  Pokud chcete jiné parametry, přepište výchozí model v Nastavení → AI poskytovatelé.
+
+<span id="stale-summaries-on-re-transcribe" />
+
+### Neaktuální souhrny po opakovaném přepisu
+
+Pokud je nahrávka **znovu přepsána**, je předchozí souhrn navázán na starý text
+přepisu. Aby se zabránilo zobrazení nového přepisu společně se zastaralým
+souhrnem, Riffado v rámci téže transakce, která přepis přepisuje (pro přepis
+uživatele typu „riffado“), smaže i existující souhrn. Pokud je automatické
+souhrnování zapnuté, je souhrn vytvořen automaticky. Je-li vypnuté,
+nahrávka zobrazuje souhrn až po ručním kliknutí na „Vygenerovat souhrn“.
+
+<span id="failure-semantics" />
+
+### Selhání a jejich projevy
+
+Selhání je izolováno: pokud volání souhrnu selže, přepis je i tak uložen,
+událost `transcription.completed` je vyvolána, a událost `summary.failed` předá chybu
+vašemu webhook přijímači. Ruční tlačítko „Vygenerovat souhrn“ funguje stále.
+
+Vlastní prompty uložené v nastavení pro souhrny nejsou zatím v automatickém
+režimu dostupné; pro automatiku zvolte vestavěnou předvolbu (General,
+Meeting Notes, Key Points, Action Items).

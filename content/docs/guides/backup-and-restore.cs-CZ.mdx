@@ -1,0 +1,219 @@
+---
+title: Záloha a obnovení
+description: Exportujte své nahrávky, přepisy a audio, abyste mohli kdykoliv odejít.
+---
+
+Riffado má záměrně dvě oddělené cesty pro export. Slouží
+různým účelům:
+
+- **`/api/backup`** — kompletní JSON archiv každého řádku nahrávky
+  a přepisu, který Vám patří. Navržen pro úplné zotavení po havárii
+  a migraci mimo instanci.
+- **`/api/export`** — každý přepis nahrávky "zploštěný" do jednoho
+  souboru čitelného pro člověka (`txt`, `srt`, `vtt`) nebo `json` výpis. Navržený
+  pro předání přepisů jiným nástrojům, nikoliv pro zálohování.
+
+Samotné audio soubory jsou uloženy ve Vámi nastaveném úložišti
+(lokální svazek nebo S3 bucket) a zálohují se stejným způsobem jako jiné binární objekty.
+
+<span id="backup-the-full-archive" />
+
+## Záloha: kompletní archiv
+
+Pomocí **Nastavení → Export/Záloha → Vytvořit zálohu** (nebo `POST /api/backup`)
+zadáte úlohu, která sestaví **zip obsahující vše**: audio pro každou
+nahrávku, její přepisy a shrnutí, a `manifest.json`
+popisující, co bylo zahrnuto. Archiv vzniká na pozadí — požadavek
+je vyřízen okamžitě, místo aby čekal na vyčerpání audio dat ze
+úložiště — a panel průběžně hlásí stav.
+
+Nahrávka, u které nelze přečíst audio, nezpůsobí chybu celého archivu;
+je uvedena v manifestu a vynechána, takže všechny ostatní údaje
+zůstávají zachovány.
+
+**Úkoly** jsou zahrnuty zvlášť pro každou nahrávku: `tasks.json` obsahuje akceptované
+úkoly a návrhy čekající na posouzení (včetně jejich stavu),
+zatímco `task-updates.json` mapuje následné akce u dané nahrávky
+("označit jako splněné", "posunout termín splnění") pro úkoly
+ve stejném archivu. Osoby, kterým jsou úkoly přiřazeny, jsou uvedeny v `knowledge/people.json`. Úkol
+následuje svou nahrávku, nikoliv osobu: úkol, který Vám kolega přiřadil
+na své sdílené nahrávce, je v záloze organizace, ne ve Vaší.
+U nahrávky, kterou jste sdíleli, Vaše záloha neobsahuje úkoly,
+které organizace přidala ručně.
+
+Hotové archivy zůstávají ke stažení po **7 dní**, poté jsou při úklidu
+odstraněny.
+
+Obsah je **v otevřené čitelné podobě**. Riffado před zápisem do archivu
+dešifruje všechna pole chráněná šifrováním uložených dat, protože
+záloha je *Váš* export Vašich dat — od této chvíle je vlastníte Vy.
+K souboru se proto chovejte stejně jako k nezašifrovanému výpisu databáze:
+ukládejte jej šifrovaně, omezte přístup a neposílejte e-mailem.
+
+<span id="where-archives-are-written" />
+
+### Kam se archivy ukládají
+
+Standardně se archiv uloží do stejného úložiště jako nahrávky,
+což při lokální instalaci znamená, že zip se uloží do stejné složky
+jako příslušné audio soubory. Nastavte
+[`BACKUP_STORAGE_PATH`](../self-hosting/environment-variables) na cestu
+ve zvláštním úložišti a archivy se budou ukládat tam — doporučeno před
+aktivací rozvrhu záloh, protože jinak každý archiv zhruba zdvojnásobí
+velikost dané složky a sdílí disk s originály.
+
+<span id="on-a-schedule" />
+
+### Podle plánu
+
+**Frekvence zálohování** (denní, týdenní nebo měsíční) zálohuje automaticky.
+Plánovač zařadí úlohu, když uživatel vybral frekvenci, nic již
+nečeká nebo neběží, a v daném okně nebyla vytvořena žádná další
+úloha — takže každé okno vytvoří maximálně jeden archiv,
+a úloha, která trvale selže, se neopakuje při každém průchodu.
+
+V kombinaci s výše zmíněnou 7denní retencí to znamená, že při *měsíční*
+frekvenci archiv zmizí na tři týdny v každém měsíci. Pokud by záloha
+měla být stále k dispozici, použijte denní nebo týdenní frekvenci,
+nebo archiv po uložení rovnou zkopírujte jinam.
+
+> **Záloha není export.** Dvě různé věci se podobným názvem.
+> *Záloha* znamená tento asynchronní zip včetně audia.
+> *Export* (viz níže) je synchronní stažení textových přepisů
+> a shrnutí, bez audia. Export je pro text; záloha pro vše.
+
+<span id="backup-the-audio-files" />
+
+## Zálohování audio souborů
+
+- **Lokální úložiště.** Docker volume připojené na
+  `/app/audio` uvnitř kontejneru obsahuje všechny audio soubory. Zálohujte jej
+  stejně jako jiné svazky — `restic`, `rsync`,
+  ZFS snapshoty, dle volby.
+- **S3 úložiště.** Zvolený bucket již existuje mimo instanci.
+  Zapněte verzování, replikaci mezi regiony nebo cron kopírování přímo na úrovni bucketu.
+
+Struktura cest v bucketu/složce je
+`{userId}/{filename}.mp3`, při kolizích jsou přidávány přípony `(2)`, `(3)`,&nbsp;…
+
+<span id="bulk-transcript-export" />
+
+## Hromadný export přepisů
+
+`GET /api/export?format=<fmt>` spojí všechny Vaše nahrávky
+do jediného souboru:
+
+| Formát | Obsah                                                  |
+| ------ | ------------------------------------------------------ |
+| `json` | Jeden JSON dokument obsahující všechny nahrávky + přepisy      |
+| `txt`  | Prostý text, jeden blok na nahrávku (název souboru, čas, text)|
+| `srt`  | SubRip titulky, všechny nahrávky za sebou                |
+| `vtt`  | WebVTT titulky, všechny nahrávky za sebou                |
+
+Výchozí formát je ten, který nastavíte v **Nastavení → Export/Záloha
+→ Výchozí formát exportu**; pokud není, použije se `json`. Tlačítko **Exportovat vše**
+na stejném panelu volá tento endpoint.
+
+<span id="markdown-documents-alongside-the-audio" />
+
+## Markdown dokumenty vedle audia
+
+Přepisy a shrnutí jsou uloženy v Postgresu, šifrovaně, takže
+správce souborů vidí jen audio. **Nastavení → Export/Záloha → Dokumenty
+vedle audia** to mění: se zapnutou volbou **Exportovat přepisy** nebo **Exportovat shrnutí**
+zapíše každé dokončené zpracování také markdown soubor do úložiště,
+pojmenovaný podle audio souboru nahrávky.
+
+```
+{userId}/Board meeting.mp3
+{userId}/Board meeting.transcript.md
+{userId}/Board meeting.summary.md
+```
+
+Každý soubor obsahuje YAML frontmatter (název, čas nahrání,
+délka, jazyk, poskytovatel, model) a následuje samotný text. Shrnutí
+vykreslují samotné shrnutí, klíčové body a úkoly jako oddíly,
+nevyplněné sekce od poskytovatele jsou přeskočeny.
+
+Přepínače platí pro nové přepisy a shrnutí vytvořené od té chvíle.
+Funkce **Exportovat vše stávající** na stejném panelu zpětně
+doplní soubory k již existujícím nahrávkám; zapisuje přímo, takže
+u rozsáhlé knihovny požadavek zůstává otevřen delší dobu.
+
+Funguje to s jakýmkoli úložištěm. U lokálního úložiště znamená,
+že markdown soubor je ve stejném adresáři jako audio, což je užitečné,
+pokud je tato složka svázána s hostitelem. Na S3 vznikají soubory vedle
+audio klíčů.
+
+Chyby exportu Vás nikdy nepřipraví o data: chyba úložiště se zaloguje,
+ale přepis nebo shrnutí je i tak uchováno.
+
+<span id="retention-deleting-old-data-on-purpose" />
+
+## Retence: úmyslné mazání starých dat
+
+**Nastavení → Úložiště → Automaticky mazat stará data** Vám umožní
+mazat údaje z nahrávek, které přesáhly předem stanovenou retenční
+dobu (1-365 dní od pořízení nahrávky).
+
+Tři typy lze zvolit nezávisle:
+
+| Typ | Co se smaže | Lze obnovit? |
+|---|---|---|
+| Audio | Binární blob v úložišti | Ne. Znovunačtení souboru jej vrátí pouze, pokud Plaud změní verzi nahrávky. |
+| Přepis | Řádky `transcriptions` | Pouze novým přepisem, což vyžaduje audio. |
+| Shrnutí | Řádek `ai_enhancements` | Pouze opětovným vygenerováním, potřeba je přepis. |
+
+Audio zabírá téměř veškeré místo na disku, takže „smazat audio, ponechat text“
+uvolní většinu prostoru, avšak knihovna zůstává prohledávatelná.
+Ostatní kombinace jsou dostupné, protože někdy jsou žádoucí — například
+ponechat pouze shrnutí.
+
+Několik věcí, které byste měli před spuštěním vědět:
+
+- **Samotná nahrávka se nikdy nemaže.** Název, datum a délka trvání
+  zůstávají v seznamu, s označením co bylo odstraněno. U záznamu bez
+  audia je místo přehrávače jen upozornění a jeho audio endpointy vrací
+  `410 Gone` namísto chyby.
+- **Vše je ve výchozím stavu nezaškrtnuté**, včetně audia. Retenční mazání
+  neprovede nic, dokud nezvolíte alespoň jeden typ údajů, což zajistí,
+  že aktualizace instance s původním (neaktivním) automatickým mazáním
+  nezačne mazat bez Vašeho vědomí.
+- **V nastavení vidíte, na kolik nahrávek se politika vztahuje**, ještě než
+  ji uložíte.
+- **Markdown vedlejší soubory nejsou ovlivněny.** `<recording>.transcript.md` ve
+  Vaší složce úložiště je export, o který jste sami požádali, nikoli kopie
+  od Riffado; retence odstraní řádky v databázi a audio blob, ale nesmaže
+  soubory, které jste si uložili sami. Pokud je chcete smazat, udělejte to
+  ručně.
+- Retenční mazání běží jednou za hodinu, po dávkách, a loguje co bylo
+  u kterého uživatele odstraněno.
+
+<span id="restore" />
+
+## Obnovení
+
+Dnes zatím neexistuje endpoint `POST /api/backup/restore`. Záložní soubor
+je exportní polovina smlouvy — umožňuje Vám opustit instanci
+s kompletními daty, což znamená, že je splněna „exportní parita“.
+Pokud potřebujete importovat zálohu do nové instance, podporovaná cesta
+je obnovení na úrovni Postgresu (snapshot svazku databáze), nikoliv
+znovunačtení z JSON.
+
+Pokud potřebujete programový import — například pro migraci mezi
+vlastními instancemi — nahlaste Váš konkrétní případ jako issue.
+Jde o záměrnou mezeru, nikoliv opomenutí, a konkrétní postup bude záviset
+na použití.
+
+<span id="whats-encrypted-vs-whats-plaintext" />
+
+## Co je šifrované a co v otevřeném textu
+
+Připomínka, protože to mnoho uživatelů mate:
+
+- **V databázi** jsou citlivá pole šifrována uložením pomocí
+  AES-256-GCM (viz [Šifrování uložených dat](../reference/encryption-at-rest)).
+- **V zálohách vytvořených pomocí `/api/backup`** jsou tato pole
+  před serializací dešifrována. Od tohoto okamžiku je odpovědnost na Vás.
+- **Audio soubory v úložišti** nejsou šifrovány aplikační vrstvou
+  Riffada — pokud potřebujete šifrování, použijte SSE na úrovni bucketu.

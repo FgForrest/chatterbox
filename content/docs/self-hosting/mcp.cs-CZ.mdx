@@ -1,0 +1,339 @@
+---
+title: Externí MCP server
+description: Umožněte AI klientům a backendovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle rolí Keycloak.
+---
+
+Samoobslužný Riffado, který se přihlašuje přes [jednotné přihlášení](./sso),
+může také poskytovat endpoint MCP (Model Context Protocol). Lidé k němu
+připojí svého AI klienta a ptají se na své nahrávky; backendové služby
+čtou, co Organizace ví. Riffado zde funguje jako resource server:
+tokeny vydává realm a role klienta v realmu určují, do jakých oblastí
+se volající dostane.
+
+Server je pouze pro čtení, s výjimkou jedné věci: stav a zadání úkolu.
+
+<span id="what-it-exposes" />
+
+## Co server poskytuje
+
+Pět klientských rolí na resource klientovi (viz níže `riffado-mcp`) zpřístupňuje
+pět oblastí. Volající vidí pouze nástroje, které jeho role dovolují;
+jakýkoliv jiný nástroj odpoví "Unknown tool" – stejně jako neexistující
+název.
+
+| Role               | Nástroje                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `knowledge:read`   | `list_types`, `list_knowledge`, `find_knowledge`, `get_entity`, `get_facts`, `list_mishearings`    |
+| `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
+| `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
+| `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
+| `tasks:write`      | `update_task` (pouze stav a zadání)                                                            |
+
+`list_folders` a `list_recordings` jsou dostupné spolu s některou z
+`transcripts:read`, `summaries:read` nebo `tasks:read`.
+
+- **Almanach** (`knowledge:read`): lidé a věci, jejich typy,
+  popisy, další názvy (aliasy a tak jak je rozpoznala funkce přepisu),
+  fakta a špatně rozpoznaná slova (tvary zadané jako slyšené, slova
+  uživatelsky opravená v přepisech – s korekcí).
+- **Přepisy** (`transcripts:read`): přepis, jak jej lidé vidí v
+  Riffado, aplikované potvrzené opravy, jménem označení mluvčí tam, kde
+  byli potvrzeni, časované repliky.
+- **Shrnutí** (`summaries:read`): text shrnutí a klíčové body.
+- **Úkoly** (`tasks:read`): otevřené, dokončené a zrušené úkoly.
+  Návrhy čekající na kontrolu se nikdy nevypisují.
+
+Role se kombinují a některá pole vyžadují dvě role:
+
+- Důkaz faktu (až tři citace s nahrávkou a pozicí)
+  vyžaduje `transcripts:read` i `knowledge:read`.
+- Akční položky shrnutí v `get_summary` a v tom, co
+  `search_summaries` vyhledává, vyžadují `tasks:read`.
+- Filtr `entity` u nástrojů nad nahrávkami vyžaduje `knowledge:read`.
+- `tasks:write` se započítává jen společně se `tasks:read`.
+
+Role nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla Riffada
+vybírají řádky (viz [Co volající vidí](#what-callers-see)).
+
+<span id="turning-it-on" />
+
+## Zapnutí serveru
+
+```bash
+MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
+# MCP_ALLOWED_CLIENTS=claude-desktop,acme-reports
+# MCP_AUDIT_RETENTION_DAYS=90
+```
+
+- Server vyžaduje jednotné přihlášení (`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
+  `OIDC_CLIENT_SECRET`) a `APP_URL`. Bez nich se server nespustí a vypíše
+  "MCP_AUDIENCE needs single sign-on (OIDC_ISSUER_URL, OIDC_CLIENT_ID,
+  OIDC_CLIENT_SECRET)" nebo "MCP_AUDIENCE needs APP_URL".
+- Tokeny musí pocházet z realmů jednotného přihlášení. Samostatné
+  nastavení issueru není: druhý realm by mohl vydat token, jehož `sub`
+  se bude shodovat se skutečným uživatelem.
+- Při nezadané hodnotě `MCP_AUDIENCE` odpovídá `/api/mcp` a jeho metadata 404.
+- Hosted Riffado jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
+- `docker-compose.yml` předává všechny tři proměnné dál.
+
+Riffado načítá `issuer` realmu a podpisové klíče z
+`<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Hodnota `iss`
+tokenu musí být přesně stejně jako `issuer`. Když je `OIDC_ISSUER_URL`
+interní adresa (například služba v compose), opravte veřejný hostname v Keycloaku (`KC_HOSTNAME`), ať realm uvádí
+stejného issuer pro Riffado i klienty, kteří získávají tokeny.
+
+<span id="keycloak-setup" />
+
+## Nastavení Keycloak
+
+<details>
+<summary>Krok 1: resource klient</summary>
+
+1. **Clients → Create client**, typ **OpenID Connect**, client id
+   `riffado-mcp` (hodnota `MCP_AUDIENCE`).
+2. **Client authentication:** vypnuto. Vypněte veškeré autentizační toky:
+   do tohoto klienta se nikdo nepřihlašuje; nese pouze role.
+3. **Roles → Create role**, pětkrát: `knowledge:read`,
+   `transcripts:read`, `summaries:read`, `tasks:read`, `tasks:write`.
+4. Přiřaďte role uživatelům či skupinám, kteří mohou danou oblast využívat
+   (**Role mapping → Assign role → Filter by clients**).
+
+Není třeba žádný audience mapper. Výchozí scope klienta `roles` v realmu
+nese audience-resolve mapper, který přidává `riffado-mcp` do `aud`
+vždy, když některá jeho role je obsažena v tokenu, a ukládá role pod
+`resource_access.riffado-mcp.roles`, odkud je čte Riffado. Riffado ověřuje, že v
+`aud` je `MCP_AUDIENCE`.
+
+</details>
+
+<details>
+<summary>Krok 2: klienti pro uživatele (AI klienti)</summary>
+
+Jeden klient na aplikaci, aby bylo možné přístupy omezit a rozlišit v
+přístupovém logu.
+
+1. **Create client**, typ **OpenID Connect**. **Client authentication:**
+   vypnuto (public client). **Authentication flow:** pouze Standard flow.
+2. **Valid redirect URIs:** adresy, které dokumentuje aplikace.
+3. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
+   `S256`.
+4. **Client scopes → `<client>-dedicated` → Scope:** vypněte **Full scope
+   allowed**, poté **Assign role** a vyberte role `riffado-mcp`,
+   které aplikace smí mít.
+
+Token pak obsahuje role, které má uživatel **a zároveň** které povoluje účel klienta.
+Například poznámková aplikace, která má vyhledávat pouze v
+shrnutích, dostane pouze `summaries:read`, i když uživatel vlastní všech pět rolí.
+
+</details>
+
+<details>
+<summary>Krok 3: servisní účty (backendy)</summary>
+
+1. **Create client**, typ **OpenID Connect**. **Client authentication:**
+   zapnuto. **Authentication flow:** pouze Service accounts roles.
+2. **Service accounts roles → Assign role:** role `riffado-mcp`, které backend
+   potřebuje.
+3. Doporučeno: **Credentials → Client Authenticator:** Signed JWT
+   (`private_key_jwt`) místo sdíleného tajemství a
+   **Advanced → Access Token Lifespan** na 5 až 15 minut.
+
+Scope `service_account` v Keycloaku přidává claim `client_id`; podle toho Riffado
+pozná servisní účet. Servisní účet vystupuje jako účet Organizace, takže
+je potřeba mít povolenou [Organizaci](./organization)
+(`SELF_HOST_MODE=shared` a `ORG_ACCOUNT_EMAIL`). Jinak jsou volání odmítnuta.
+
+</details>
+
+<details>
+<summary>Krok 4: výměna tokenu</summary>
+
+Backend, který už drží token uživatele, jej může vyměnit za token pro
+Riffado pomocí **standard token exchange** v Keycloaku (V2,
+Keycloak 26.2 a vyšší): zapněte **Standard token exchange** u klienta
+backendu a požadujte `audience=riffado-mcp`. Token uživatele
+musí být vydán pro tento backend (klient v `aud`). Výsledkem je
+stále uživatel, s rolemi, které nový token nese.
+
+Keep refresh tokens out of exchanges (client **Advanced → Allow refresh
+token in Standard Token Exchange:** No), takže přístup backendu končí s
+tokenem, který dostane. Ověřte si nastavení pro svou verzi Keycloak.
+
+**Legacy token exchange (V1) s impersonací není podporováno** a musí
+zůstat vypnuto. Klient oprávněný k impersonaci může totiž vytvořit
+token pro libovolného uživatele (`requested_subject`) bez jeho tokenu, přihlášení,
+MFA nebo souhlasu. Riffado určuje volajícího podle `sub`, a takový
+token by četl soukromé nahrávky a znalosti uživatele, změny úkolů by
+byly zaznamenány jako jeho. Token nelze odlišit od skutečného
+přihlášení; odlišit ho lze pouze podle `azp` (klient) v
+přístupovém logu.
+
+- Nechte vypnutou preview funkcionalitu `token-exchange` (výchozí od
+  Keycloak 26.2); žádnému klientovi nepřidělujte oprávnění *impersonate*.
+- Omezte roli správce `impersonation`. Správci realmů se mohou vždy
+  přihlásit jako jakýkoliv uživatel; Riffado je považuje za plně důvěryhodné.
+- Nastavte `MCP_ALLOWED_CLIENTS` na klienty, které jste nakonfigurovali, jako
+  druhou obrannou linii proti špatně nastavenému realmu.
+
+</details>
+
+<span id="connecting-clients" />
+
+## Připojení klientů
+
+| Co                         | Kde                                                         |
+| -------------------------- | ----------------------------------------------------------- |
+| MCP endpoint               | `<APP_URL>/api/mcp`                                      |
+| Metadata o chráněném resource | `<APP_URL>/.well-known/oauth-protected-resource/api/mcp` |
+
+Endpoint používá bezstavové Streamable HTTP: pouze `POST`,
+odpovědi v JSON, žádné relace ani server-sent events, jedna JSON-RPC
+zpráva na jeden požadavek. Batch (JSON pole) je odmítnut s 400 a
+JSON-RPC chybou `-32600`, MCP 2025-06-18 zrušilo batching. Dotaz bez
+použitelného tokenu dostává 401
+s `WWW-Authenticate: Bearer resource_metadata="…"`, která odkazuje na
+metadata, kde je realm jako authorization server. Tato metadata jsou také dostupná na `<APP_URL>/.well-known/oauth-protected-resource`.
+
+Každé klientské aplikaci zadejte client id, které jste pro ni
+vytvořili v kroku 2. Dynamic Client Registration není k tomu potřeba.
+Otevřené anonymní registrace povolujte pouze pokud klient opravdu
+nemůže použít předregistrované id, a pak jen se zásadou **Trusted Hosts**
+omezující, kdo může registraci provést. `MCP_ALLOWED_CLIENTS` obsahuje pevné
+client ids, čímž současně nepustí dynamicky registrované klienty.
+
+Servisní účet ručně:
+
+```bash
+TOKEN=$(curl -s https://sso.example.com/realms/acme/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=acme-reports -d client_secret=... \
+  | jq -r .access_token)
+
+curl -s https://riffado.example.com/api/mcp \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+<span id="what-callers-see" />
+
+## Co volající vidí
+
+| Token                                                   | Volající                                                 |
+| ------------------------------------------------------- | -------------------------------------------------------- |
+| `sub` uživatele, který se přihlásil do Riffado přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
+| Chybí `sub`, ale je claim `client_id`                  | Servisní účet jako účet Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. |
+| Cokoli jiného                                           | Odmítnuto s 403 "Nejprve se přihlaste do Riffado."        |
+
+Účty nejsou nikdy vytvořeny z tokenu: člověk se musí nejdřív alespoň
+jednou přihlásit do Riffada, než jeho AI klient může server volat.
+Pozastavený účet, token bez některé z pěti rolí, klient mimo
+`MCP_ALLOWED_CLIENTS` a servisní účet bez zapnuté Organizace dostanou 403
+"Forbidden".
+
+**Úkoly** kopírují logiku stránky Úkoly:
+
+- Uživatel vidí úkoly u svých nahrávek a u nahrávek sdílených
+  Organizací ty, které jsou mu přiřazeny. Servisní účet vidí úkoly
+  všech sdílených nahrávek.
+- S `tasks:write` může `update_task` nastavit úkol jako hotový, znovu otevřený nebo
+  zrušený, či změnit jeho zadání. Dokončení a znovuotevření úkolu vyžaduje `can_close`
+  (majitel nahrávky, přiřazený uživatel u sdílené nahrávky nebo Organizace).
+  Zrušení, znovuotevření zrušeného úkolu a přeřazení vyžadují `can_edit`
+  (majitel privátní nahrávky, u sdílené pouze Organizace, tedy servisní účet).
+  U sdílené nahrávky lze úkol přiřadit pouze lidem z Organizace.
+- Každý úkol obsahuje `version`; `update_task` jej vyžaduje a úkol změněný
+  mezitím odpoví svým aktuálním stavem místo úpravy.
+- Návrhy úkolů nelze upravovat: kontrola zůstává v aplikaci. Text úkolu,
+  termín splnění i nové úkoly je možné zadávat pouze v aplikaci.
+- Změna je zaznamenána na uživatele či na účet Organizace (u servisních
+  účtů); přístupový log uvádí klienta.
+
+**Názvy fungují všude, kde id.** `entity`, `person`, `assignee` a
+`recording` přijímají id nebo text. Lidé a věci se hledají podle jména,
+aliasu, slyšeného tvaru nebo tvarů slov; nahrávky podle názvu, z
+nejnovějších 500, které volající vidí. Jasná shoda se použije a vrátí se
+jako `resolved`; nejasná odpoví až pěti kandidáty. Bez
+`knowledge:read` se rozpoznávají pouze lidé, které už volající zná
+(potvrzení mluvčí nahrávek, přiřazení úkolů), nikoli věci.
+
+**Vyhledávání má limity.** Názvy, přepisy, shrnutí a úkoly jsou při
+uložení šifrovány (encryption at rest), takže vyhledávání dešifruje za
+chodu vždy od nejnovějšího, s limitem:
+
+| Vyhledávání                        | Čte maximálně  | Vrací maximálně                  |
+| ---------------------------------- | -------------- | ------------------------------- |
+| `list_recordings` s `title`      | 500 nahrávek    | 50                               |
+| `search_transcripts`                | 200 nahrávek    | 50 nahrávek, 3 úryvky na každou  |
+| `search_summaries`                  | 500 shrnutí      | 50 nahrávek, 3 úryvky na každou  |
+| `search_tasks`                      | 2000 úkolů      | 50                               |
+
+Každé také končí nejpozději za 10 sekund. Odpověď uvádí `scanned`,
+`complete` a `continue_before`; pošlete zpět `continue_before` jako `before`
+(respektive jako `cursor` pro `list_recordings`), pokud chcete hledat hlouběji.
+Hledání ignoruje diakritiku a velikost, rozpoznává tvary slov v jazyce
+nahrávky. Výpisy mají stránkování po 50 položkách přes `next_cursor`
+(u `list_mishearings` 200); `get_transcript` stránkuje podle ~40 000 znaků,
+případnou delší repliku rozsekne do částí se zachováním mluvčího a času.
+
+Popisy nástrojů říkají modelu v klientovi, že vrácený text je to, co lidé
+skutečně řekli, tedy data, nikoliv instrukce.
+
+<span id="limits-and-audit" />
+
+## Limity a audit
+
+| Limit                                | Hodnota                                 |
+| ------------------------------------- | --------------------------------------- |
+| Požadavky na IP klienta, před ověřením tokenu | 120 za minutu                      |
+| Požadavky na volajícího (subjekt a klient), včetně odmítnutých | 60 za minutu  |
+| Hledání na volajícího                | 10 za minutu                            |
+| Velikost těla žádosti                | 256 KB (nad tím 413)                    |
+
+Hledání jsou nástroje `search_*`, `list_recordings` s `title`,
+`list_mishearings` (čte knihovny oprav) a všechny
+`recording` zadané jako název místo id. Po překročení limitu odpověď
+bude 429 s `Retry-After`; hledání nad svůj limit odpoví "Příliš mnoho hledání;
+zkuste za minutu znovu". Limit pro IP funguje pouze, je-li známá IP
+klienta, tedy při provozu za `RATE_LIMIT_TRUST_PROXY_HEADERS=true` a správně přepisovaných forwarding
+hlavičkách (viz [Proměnné prostředí](./environment-variables)).
+Pokud není dostupný discovery dokument realmu nebo podpisové klíče,
+endpoint odpovídá 503 místo 401, takže klient nezahodí dobrý token.
+
+Každý volání nástroje a každý validní token bez přiřazeného volajícího
+zapisuje jeden řádek do tabulky `mcp_access_log`:
+
+| Sloupec        | Obsah                                                           |
+| -------------- | --------------------------------------------------------------- |
+| `at`          | Kdy                                                          |
+| `caller_kind` | `user` nebo `service`; prázdné, pokud token neměl volajícího     |
+| `user_id`     | Uživatel v Riffadu (prázdné, pokud je účet smazán)               |
+| `subject`     | `sub` tokenu                                                |
+| `client_id`   | `azp` tokenu, jinak `client_id`                                |
+| `tool`        | Nástroj, který byl volán                                      |
+| `outcome`     | `ok`, `denied`, `conflict`, `not_found`, `invalid` nebo `error` |
+| `target_ids`  | ID nahrávek, úkolů nebo záznamů přečtených či změněných (max. 200)  |
+| `ip`          | IP klienta, pokud známá                                      |
+
+Argumenty a obsah se neukládají. Řádky starší než
+`MCP_AUDIT_RETENTION_DAYS` (výchozí 90) jsou mazány hodinovým
+údržbovým úkolem, i po vypnutí serveru. Obrazovka pro log zatím není;
+tabulku je nutné dotazovat přímo.
+
+`MCP_ALLOWED_CLIENTS` (čárkou oddělené client id) odmítá tokeny, jejichž
+`azp` není v seznamu, jak pro uživatele tak pro servisní účty.
+Pokud není nastaveno, může volat libovolný klient realmů s
+rolími `riffado-mcp` v tokenu.
+
+Tokeny se kontrolují na přesného issuer, `aud` obsahující
+`MCP_AUDIENCE`, expiraci (toleruje se 30 sekund rozdílu v čase),
+`RS256`, `PS256` nebo `ES256` podpis a hodnotu `typ`
+jako `Bearer` pokud ji mají: Keycloak access tokeny ji mají, ID token bude odmítnut.
+Riffado je nikdy neposílá dál.
+
+<span id="trying-it-locally" />
+
+## Vyzkoušení lokálně
+
+End-to-end Keycloak realm ze stránky [Jednotné přihlášení](./sso#trying-it-locally)
+zatím neobsahuje klienty MCP; je nutné je přidat ručně.

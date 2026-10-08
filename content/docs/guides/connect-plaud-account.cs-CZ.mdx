@@ -1,0 +1,63 @@
+---
+title: Připojení vašeho Plaud účtu
+description: Přihlášení do Plaud z Riffado, včetně postupu pro Google/Apple.
+---
+
+Riffado se přihlašuje přímo do Plaud — stejným způsobem jako oficiální aplikace Plaud. Žádný scraping obrazovky, žádný bezhlavý prohlížeč, žádný reverzně inženýrovaný provoz mobilní aplikace. Způsob přihlášení závisí na tom, jak jste si původně vytvořili svůj Plaud účet.
+
+<span id="email-and-code-default-path" />
+
+## Přihlášení pomocí e-mailu a kódu (výchozí cesta)
+
+Pokud jste si účet Plaud zaregistrovali pomocí e-mailové adresy a hesla, můžete se z Riffado přihlásit přímo:
+
+1. Zadejte e-mailovou adresu, kterou používáte na [plaud.ai](https://plaud.ai).
+2. Plaud vám e-mailem zašle 6místný ověřovací kód.
+3. Vložte jej do Riffado.
+
+Kód je předán serverům Plaud a **nikdy není uložen lokálně**. Po přihlášení je vrácený přístupový token šifrován pomocí AES-256-GCM, než se uloží do databáze — více viz
+[Šifrování uložených dat](../reference/encryption-at-rest)
+pro podrobnosti.
+
+Region účtu Plaud (Global, EU, Asia Pacific) je detekován automaticky: pokud globální endpoint odpoví `status: -302` a regionálním hostitelem API v `data.domains.api`, Riffado následuje přesměrování a uloží region účtu spolu s tokenem.
+
+<span id="signed-up-with-google-or-apple" />
+
+## Zaregistrováno pomocí Google nebo Apple?
+
+Pokud jste na Plaud původně zvolili **Pokračovat přes Google** nebo **Pokračovat přes Apple**, tok e-mailu a kódu *zdánlivě* uspěje, ale synchronizace nevrátí žádné nahrávky. Důvodem je, že identita e-mailu/hesla a identita Google/Apple jsou na straně Plaud dva různé účty, i pokud sdílí e-mailovou adresu
+([#65](https://github.com/riffado/riffado/issues/65)).
+
+Skutečné „Přihlášení pomocí Google/Apple“ přímo v Riffado je technicky zablokováno kvůli „authorized-origins“ politice Google na OAuth klientovi Plaud. Existují dvě možná řešení.
+
+<span id="easy-path-the-connector-extension" />
+
+### Jednodušší cesta: rozšíření „connector“
+
+Nainstalujte si [Riffado Connector](https://github.com/riffado/connector/releases/latest)
+prohlížečové rozšíření (AGPL-3.0) — stáhněte si aktuální verzi z GitHubu a načtěte ji jako rozbalené rozšíření. S nainstalovaným rozšířením se na přihlašovací obrazovce zobrazí tlačítko **Přihlásit se do Plaud**. Přihlásíte se do `web.plaud.ai` obvyklým způsobem; rozšíření předá výsledný přístupový token vaší instanci Riffado. Žádné kopírování a vkládání, žádné devtools.
+
+<span id="manual-fallback-paste-the-token" />
+
+### Manuální varianta: vložení tokenu
+
+Pokud rozšíření nemůžete nebo nechcete instalovat:
+
+1. Otevřete [web.plaud.ai](https://web.plaud.ai) v nové záložce a přihlaste se přes Google nebo Apple jako obvykle.
+2. Otevřete vývojářské nástroje prohlížeče (F12 / Cmd+Option+I) a přejděte na **Application → Local Storage → https://web.plaud.ai** (v některých prohlížečích **Storage**).
+3. Zkopírujte hodnotu `pld_tokenstr`. Jde o dlouhodobě platný uživatelský token. Nekopírujte hlavičku `Authorization` z požadavků `/device/list` ani `/file/simple/web`: ty používají krátkodobé tokeny pracovního prostoru.
+4. V Riffado přepněte na kartu **Vložit token**, vyberte region svého účtu Plaud (Global, EU nebo APAC) a vložte hodnotu.
+
+Vložený token je uložen a šifrován stejně jako token získaný běžným způsobem přes kód.
+
+<span id="what-about-refresh-tokens" />
+
+## A co refresh tokeny?
+
+API Plaud nevydává refresh tokeny. Odpověď na OTP přihlášení obsahuje pouze přístupový token, což je dlouhodobě platný JWT token (pozorovaná platnost cca 300 dní). Po vypršení platnosti se v dashboardu zobrazí banner s výzvou k opětovnému připojení a celý výše uvedený postup zopakujete. Žádné tiché obnovení tokenu na pozadí zde neprobíhá.
+
+<span id="switching-accounts" />
+
+## Přepínání účtů
+
+Kdykoli můžete odpojit nebo přepnout připojený účet Plaud v **Nastavení → Účet Plaud**. Zašifrovaný bearer token bude smazán; dříve synchronizované nahrávky zůstanou zachovány (tato data vlastníte na svém úložišti).

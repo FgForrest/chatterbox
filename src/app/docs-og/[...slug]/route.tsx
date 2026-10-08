@@ -1,5 +1,6 @@
 import { generateOGImage } from "fumadocs-ui/og";
 import { notFound } from "next/navigation";
+import { defaultLocale, isSupportedLocale, locales } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
 interface RouteContext {
@@ -13,12 +14,18 @@ export async function GET(_req: Request, { params }: RouteContext) {
     const last = slug[slug.length - 1];
     if (!last.endsWith(".png")) notFound();
 
-    const pageSlug = [...slug.slice(0, -1), last.replace(/\.png$/, "")];
+    const hasLocalePrefix = isSupportedLocale(slug[0]);
+    const locale = hasLocalePrefix ? slug[0] : defaultLocale;
+    const localizedSlug = hasLocalePrefix ? slug.slice(1) : slug;
+    const pageSlug = [
+        ...localizedSlug.slice(0, -1),
+        last.replace(/\.png$/, ""),
+    ];
     // `/docs` is keyed as `[]` in fumadocs; reversed from `index.png` here.
     const lookupSlug =
         pageSlug.length === 1 && pageSlug[0] === "index" ? [] : pageSlug;
 
-    const page = source.getPage(lookupSlug);
+    const page = source.getPage(lookupSlug, locale);
     if (!page) notFound();
 
     return generateOGImage({
@@ -33,13 +40,17 @@ export async function GET(_req: Request, { params }: RouteContext) {
 }
 
 export function generateStaticParams() {
-    return source.getPages().map((page) => ({
-        slug:
-            page.slugs.length === 0
-                ? ["index.png"]
-                : [
-                      ...page.slugs.slice(0, -1),
-                      `${page.slugs[page.slugs.length - 1]}.png`,
-                  ],
-    }));
+    return locales.flatMap((locale) =>
+        source.getPages(locale).map((page) => ({
+            slug: [
+                ...(locale === defaultLocale ? [] : [locale]),
+                ...(page.slugs.length === 0
+                    ? ["index.png"]
+                    : [
+                          ...page.slugs.slice(0, -1),
+                          `${page.slugs[page.slugs.length - 1]}.png`,
+                      ]),
+            ],
+        })),
+    );
 }

@@ -1,0 +1,61 @@
+---
+title: Dokumentace Riffado
+description: Otevřená aplikace pro přepis a shrnutí záznamů z hlasových rekordérů pomocí AI.
+---
+
+Riffado je open-source doprovodná aplikace pro AI hlasové rekordéry. Zaregistrujte se na [riffado.com](https://riffado.com) pro hostovanou instanci, nebo spusťte stejnou kódovou základnu na vlastní infrastruktuře pomocí Docker Compose. Přineste si libovolný API klíč kompatibilní s OpenAI, ponechte si své nahrávky a odejděte, kdykoli budete chtít.
+
+Aktuálně podporuje rodinu Plaud Note — Note, Note Pro a NotePin. Podpora dalších zařízení je na cestě.
+
+<span id="for-everyone" />
+
+## Pro všechny
+
+Tyto návody platí jak pro hostovanou instanci, tak pro vlastní hosting – popisují používání Riffado jako produktu.
+
+- **[Propojení vašeho Plaud účtu](/docs/guides/connect-plaud-account)** —
+  přihlášení e-mailem a kódem, plus řešení přes Google/Apple.
+- **[AI poskytovatelé](/docs/guides/ai-providers)** — napojení OpenAI, Groq,
+  OpenRouter, Ollama, LM Studio nebo jiného OpenAI-kompatibilního řešení.
+- **[Notifikace](/docs/guides/notifications)** — backendy Bark, prohlížečové
+  a e-mailové oznámení.
+- **[Automatizační API a webhooky](/docs/guides/automation-and-webhooks)** —
+  osobní API klíče a podepsané doručování webhooků.
+- **[Záloha a obnovení](/docs/guides/backup-and-restore)** — exportujte
+  každou nahrávku, přepis a zvukový soubor, abyste mohli kdykoli odejít.
+
+<span id="for-self-hosters" />
+
+## Pro ty, kdo provozují vlastní hosting
+
+Provozujete stack sami s `docker compose up`. Tyto stránky pokrývají instalaci, konfiguraci a pravidelný provoz.
+
+- **[Instalace](/docs/self-hosting/install)** — instalátor Docker Compose
+  na jeden řádek.
+- **[Proměnné prostředí](/docs/self-hosting/environment-variables)** —
+  všechny parametry, které Riffado čte při startu.
+- **[S3-kompatibilní úložiště](/docs/self-hosting/storage-s3)** — AWS,
+  R2, MinIO, B2 a další.
+- **[Nastavení e-mailu (SMTP)](/docs/self-hosting/email-smtp)** — napojení
+  odchozí pošty pro e-mailový backend notifikací.
+- **[Aktualizace](/docs/self-hosting/upgrading)** — image tagy,
+  příkaz k aktualizaci a tipy, co zálohovat jako první.
+
+## Reference
+
+Pojmy, rozhraní a veřejné API.
+
+- **[Veřejné API](/docs/reference/public-api)** — stabilní čtecí rozhraní
+  pro externí integrace.
+- **[Architektura](/docs/reference/architecture)** — jak do sebe jednotlivé
+  části zapadají.
+- **[Bezpečnostní model](/docs/reference/security-model)** — autentizace,
+  tokeny a hranice důvěry.
+- **[Šifrování uložených dat](/docs/reference/encryption-at-rest)** — co je
+  v databázi šifrováno, co není, a jak rotovat klíče.
+
+<span id="how-it-ships" />
+
+## Způsoby provozu
+
+Riffado je software pod licencí AGPL-3.0. Hostovaná instance na riffado.com je multi-tenant SaaS, kterou provozujeme; instalace na vlastním hostingu využívají stejný image pod vaší kontrolou. Oba režimy jsou plnohodnotné.

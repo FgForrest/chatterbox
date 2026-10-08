@@ -1,0 +1,53 @@
+---
+title: Oznámení
+description: Push oznámení Bark, oznámení v prohlížeči a e-mail — backendy a konfigurace.
+---
+
+Riffado Vás může upozornit, když nahrávka dokončí synchronizaci nebo když je dokončen přepis. V základu jsou tři backendy: Bark (iOS push), oznámení prohlížeče (Web Notifications API) a e-mail (SMTP). Každý backend funguje samostatně; můžete povolit libovolnou kombinaci.
+
+Oznámení nikdy neblokují synchronizační smyčku — každý backend má pevně nastavený časový limit (tři sekundy pro Bark, podobně pro e-mail) a případné chyby jsou zaznamenány do logu, ale neopakují se ve frontě.
+
+## Bark (iOS push)
+
+[Bark](https://github.com/Finb/Bark) je bezplatná, open-source iOS push
+služba s možností vlastního hostingu. Nainstalujte si aplikaci Bark, která Vám poskytne osobní push URL. Toto URL vložíte do Riffado.
+
+**Nastavení → Oznámení → Bark push URL.** Vložte URL, kterou Vám Bark poskytl (vypadá jako `https://api.day.app/<your-key>`). URL se ukládá pro každého uživatele zvlášť.
+
+Riffado posílá oznámení s `level: "timeSensitive"`, díky čemuž
+projdou přes režim Soustředění v iOS. Pokud oznámení selže, synchronizace běží dále bez přerušení — pokud očekávané oznámení nepřišlo, zkontrolujte serverové logy.
+
+<span id="browser-notifications" />
+
+## Oznámení v prohlížeči
+
+Oznámení v prohlížeči využívají standardní Web Notifications API a fungují okamžitě v prohlížečích Chrome, Firefox, Safari i Edge, jakmile udělíte oprávnění.
+
+**Nastavení → Oznámení → Oznámení v prohlížeči → Povolit.** Prohlížeč si vyžádá Vaše povolení; Riffado si zapamatuje tuto volbu v databázi pro každého uživatele zvlášť.
+
+Tato oznámení se zobrazují pouze tehdy, když je některá karta Riffado v prohlížeči otevřená. Pro doručení oznámení na pozadí použijte Bark nebo e-mail.
+
+<span id="email" />
+
+## E-mail
+
+Na hostované instanci na riffado.com je e-mail již nakonfigurován — stačí jej povolit. Pokud provozujete vlastní hosting, musí správce nejprve nastavit SMTP; viz
+[Nastavení e-mailu (SMTP)](../self-hosting/email-smtp).
+
+**Nastavení → Oznámení → E-mail → Povolit.** Riffado zašle zprávu na e-mail k Vašemu účtu, když je nahrávka synchronizována nebo dokončen přepis.
+
+Pokud si chcete ověřit, že vše funguje, aniž byste čekali na ostrou událost, klikněte na
+**Nastavení → Oznámení → E-mail → Odeslat testovací e-mail**. Pokud správce vlastního hostingu nenakonfiguroval SMTP, backend skončí elegantně a do serverového logu zapíše varování "SMTP není nakonfigurováno" — žádný e-mail neodejde a v uživatelském rozhraní se neobjeví žádná chyba.
+
+<span id="picking-a-backend" />
+
+## Výběr backendu
+
+| Potřeba                                | Použijte            |
+| -------------------------------------- | -------------------- |
+| Push na telefon, mimo pracovní stůl    | Bark                 |
+| Oznámení při otevřeném Riffado         | Oznámení v prohlížeči |
+| Auditní stopa dokončených akcí         | E-mail               |
+| Upozornění týmu s více uživateli       | E-mail               |
+
+Bark a oznámení v prohlížeči jsou vhodná pro osobní použití. E-mail je správnou volbou, pokud chcete trvalý záznam o každém výsledku synchronizace ve své e-mailové schránce.

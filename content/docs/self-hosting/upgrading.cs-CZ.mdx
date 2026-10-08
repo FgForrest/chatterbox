@@ -1,0 +1,94 @@
+---
+title: Aktualizace
+description: Stáhněte nový image, restartujte stack a vyberte správný tag podle vaší míry tolerance rizika.
+---
+
+Riffado je distribuován jako jeden Docker image na GitHub Container Registry.
+Aktualizace probíhá stažením image a restartem; migrace databáze se spouští
+automaticky při startu kontejneru.
+
+<span id="standard-upgrade" />
+
+## Standardní aktualizace
+
+Ve složce, která obsahuje vaše `docker-compose.yml` a `.env`:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Aplikační kontejner se spustí, provede všechny čekající migrace databáze
+v rámci stejného procesu, než otevře HTTP listener, a po připravenosti
+ohlásí stav healthy pomocí `/api/health`. Neexistuje žádný samostatný „migrační
+kontejner“ — pokud migrace selže, selže i start kontejneru, což je
+žádané chování.
+
+<span id="picking-a-tag" />
+
+## Výběr tagu
+
+`RIFFADO_VERSION` ve vašem `.env` určuje, který tag image Compose stáhne.
+
+| Tag             | Co získáte                                | Kdy použít                              |
+| --------------- | ----------------------------------------  | --------------------------------------- |
+| `latest`        | Nejnovější stabilní verze                 | Výchozí; většina uživatelů              |
+| `0.4.2`, `0.4`  | Konkrétní verze / minoritní linie           | Produkční prostředí; zamčení pro opakovatelnost |
+| `dev`           | Průběžné sestavení z `main`                | Nejnovější vývoj; přijměte občasné chyby |
+
+`main` je **průběžná integrační větev** a může být rozbitá v libovolném
+commitu. Stabilní nasazení vychází z vydaných tagovaných verzí. Nikdy
+nedeployujte pouhým klonováním repozitáře a sestavením z `main`;
+používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/riffado/riffado/blob/main/BRANCHING.md)
+v sekci o větvení.
+
+<span id="update-badge" />
+
+## Označení aktualizace
+
+V patičce se zobrazuje malé označení „Je dostupná aktualizace“, pokud je na
+GitHubu dostupná novější vydaná verze. Tento badge je pouze informativní —
+nic sám automaticky neaktualizuje.
+
+Kontrola se provádí pomocí volání `api.github.com` jednou za relaci. Pokud vaše
+instance nemá nikdy „volat domů“, nastavte `DISABLE_UPDATE_CHECK=true` ve vašem
+`.env` a badge bude vždy skryt.
+
+<span id="rolling-back" />
+
+## Vracení zpět (rollback)
+
+Pro vrácení se zpět nastavte `RIFFADO_VERSION` na předchozí tag a znovu spusťte
+příkaz pro aktualizaci:
+
+```bash
+# In .env
+RIFFADO_VERSION=0.4.1
+```
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Toto funguje, protože databázové migrace Riffado jsou
+**ve výchozím nastavení aditivní** — odstranění sloupců je považováno za záměrnou
+narušující změnu s poznámkou v migraci v CHANGELOG. Pokud se vracíte zpět přes
+verzi, ve které bylo explicitně odstraněno nějaké uložené stavové nastavení (vzácné,
+výrazně zmíněné v CHANGELOG), nejdříve si pozorně prostudujte poznámky k vydání.
+
+<span id="backing-up-before-an-upgrade" />
+
+## Zálohování před aktualizací
+
+Před aktualizací na hlavní (major) verzi nezapomeňte zálohovat dvě věci:
+
+1. Svazek Postgresu (cesta, na kterou váš compose soubor mapuje
+   `postgres:/var/lib/postgresql/data`).
+2. Svazek s audiem (`/app/audio` v aplikačním kontejneru) — nebo váš S3
+   bucket, pokud jste přešli na vzdálené úložiště.
+
+Můžete také vytvořit logický export přes **Nastavení → Export/Záloha
+→ Vytvořit zálohu**, což vytvoří JSON archiv nahrávek +
+přepisů.
+Tento export je záměrně v **prostém textu** (jsou to vaše data), proto jej
+ukládejte se stejnou pečlivostí jako nezašifrovanou databázi. Více viz
+[Záloha a obnovení](../guides/backup-and-restore).

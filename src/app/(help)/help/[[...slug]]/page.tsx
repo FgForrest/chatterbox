@@ -2,8 +2,10 @@ import { createRelativeLink } from "fumadocs-ui/mdx";
 import { DocsBody } from "fumadocs-ui/page";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { getLocale } from "next-intl/server";
 import type { ComponentProps } from "react";
 import { HelpChapterPicker } from "@/components/help/help-chapter-picker";
+import { defaultLocale } from "@/lib/i18n/config";
 import { helpSource, userGuideChapters } from "@/lib/source";
 import { getMDXComponents } from "@/mdx-components";
 
@@ -12,8 +14,8 @@ interface PageProps {
 }
 
 export default async function HelpPage({ params }: PageProps) {
-    const { slug } = await params;
-    const page = helpSource.getPage(slug);
+    const [{ slug }, locale] = await Promise.all([params, getLocale()]);
+    const page = helpSource.getPage(slug, locale);
     if (!page) notFound();
 
     const MDX = page.data.body;
@@ -30,7 +32,7 @@ export default async function HelpPage({ params }: PageProps) {
             />
         );
     };
-    const chapters = userGuideChapters();
+    const chapters = userGuideChapters(locale);
 
     return (
         <article
@@ -55,14 +57,16 @@ export default async function HelpPage({ params }: PageProps) {
 }
 
 export function generateStaticParams() {
-    return helpSource.generateParams();
+    return helpSource
+        .getPages(defaultLocale)
+        .map((page) => ({ slug: page.slugs }));
 }
 
 export async function generateMetadata({
     params,
 }: PageProps): Promise<Metadata> {
-    const { slug } = await params;
-    const page = helpSource.getPage(slug);
+    const [{ slug }, locale] = await Promise.all([params, getLocale()]);
+    const page = helpSource.getPage(slug, locale);
     if (!page) notFound();
     return {
         title: page.data.title,

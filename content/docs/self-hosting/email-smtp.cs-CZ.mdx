@@ -1,0 +1,53 @@
+---
+title: Nastavení e-mailu (SMTP)
+description: Nakonfigurujte SMTP server, aby Riffado mohl doručovat e-mailová upozornění.
+---
+
+E-mailová upozornění jsou odesílána prostřednictvím libovolného SMTP serveru, který nakonfigurujete –
+Postmark, Resend, SES, Mailgun, váš vlastní postfix, zkrátka vše, co podporuje
+SMTP. Toto je záležitost operátora: u hostovaných instalací se SMTP konfiguruje
+jednou pro všechny. Uživatelská část (zapnutí e-mailů, odeslání testovacího
+e-mailu) je popsána v [Upozornění](../guides/notifications).
+
+<span id="configuration" />
+
+## Konfigurace
+
+Nastavte tyto proměnné v prostředí, ve kterém běží Riffado:
+
+```bash
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587                  # 465 if SMTP_SECURE=true, else 587
+SMTP_SECURE=false              # true => implicit TLS on 465
+SMTP_USER=apikey-or-username
+SMTP_PASSWORD=secret
+SMTP_FROM="Riffado <noreply@example.com>"
+```
+
+`SMTP_FROM` přijímá buď samostatný e-mail (`noreply@example.com`)
+nebo podobu se zobrazovaným jménem (`Name <user@example.com>`). Loader
+prostředí zamítne cokoli jiného.
+
+Kompletní seznam ovlivnitelných SMTP proměnných a jejich výchozí
+hodnoty naleznete v [Proměnné prostředí](./environment-variables).
+
+<span id="when-smtp-is-unset" />
+
+## Když SMTP není nastaven
+
+Pokud `SMTP_HOST` není nastaveno, e-mailový backend se sám
+deaktivuje – volání do `sendEmail()` se ihned ukončí a
+zapíše se varování „SMTP není nakonfigurováno“. Nedochází k tichým
+selháním, polofunkčním stavům ani polykání výjimek. Uživatelé,
+kteří mají e-mail zapnutý v nastavení, neuvidí v rozhraní žádnou chybu,
+ale žádná pošta se neodešle.
+
+<span id="verifying-the-configuration" />
+
+## Ověření konfigurace
+
+Jakmile je SMTP nastaveno, kdokoliv jej může ověřit bez čekání na
+skutečnou událost: **Nastavení → Upozornění → E-mail →
+Odeslat testovací e-mail**. Toto tlačítko zavolá trasu
+`/api/settings/test-email`, která prověří celou cestu přes nodemailer
+a vykreslení šablony vůči vašemu nakonfigurovanému SMTP serveru.

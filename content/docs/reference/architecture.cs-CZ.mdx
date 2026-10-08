@@ -1,0 +1,132 @@
+---
+title: Architektura
+description: Jak jednotlivé části zapadají do sebe — Next.js aplikace, Postgres, synchronizační worker, rozšiřitelná úložiště a AI.
+---
+
+Riffado je jedna aplikace Next.js s podporou Postgres.
+Neexistuje žádná separátní API služba, žádný samostatný worker kontejner ani message broker.
+Vše běží v jednom procesu; horizontální škálování znamená spustit více kopií tohoto procesu za load balancerem.
+Úlohy, které musí přežít požadavek nebo proces, ve kterém byly spuštěny, jsou řazeny do fronty v Postgresu místo brokera — viz [Odolné úlohy](#durable-jobs).
+
+<span id="the-runtime" />
+
+## Prostředí za běhu
+
+- **Web + API + worker** — vše v jednom procesu Next.js. Synchronizační worker, worker na přepis, worker pro doručování webhooků a worker pro odolné úlohy jsou na pozadí uvnitř téhož procesu.
+- **Postgres** — jediná stavová závislost. Better Auth jej používá pro sessiony, Drizzle ORM pro vše ostatní.
+- **Úložiště** — lokální souborový systém nebo jakýkoliv S3-kompatibilní bucket. Pouze audio soubory; metadata jsou v Postgresu.
+- **AI poskytovatelé** — externí HTTPS volání na jakékoliv OpenAI-kompatibilní endpointy, které uživatel nakonfiguroval. Po uživateli, po poskytovateli.
+
+<span id="tech-stack" />
+
+## Technologický stack
+
+| Vrstva         | Volba                                                   |
+| -------------- | ------------------------------------------------------- |
+| Framework      | Next.js (App Router)                                    |
+| Jazyk          | TypeScript                                              |
+| Stylování      | Tailwind CSS                                            |
+| Autentizace    | Better Auth                                             |
+| DB             | Postgres                                                |
+| ORM            | Drizzle                                                 |
+| AI             | OpenAI SDK s konfigurovatelnou `baseURL`                |
+| Úložiště       | Lokální FS nebo jakékoliv S3-kompatibilní API           |
+| Audio          | Wavesurfer.js pro přehrávač                             |
+| Test runner    | Vitest (Bun také použit jako runtime pro skripty)       |
+| Dokumentace    | Fumadocs (čtete tento výstup)                           |
+
+<span id="sync-is-pull-based" />
+
+## Synchronizace je pull-based
+
+Plaud nemá push API. Synchronizační worker Riffado
+(`src/lib/sync/sync-recordings.ts`) je pull smyčka:
+
+1. Seznam nahrávek z připojeného Plaud účtu (stránkované).
+2. U každé porovnejte `plaudFileId` + `version_ms` s databází.
+   Nové řádky se vloží; aktualizované se obnoví; beze změny se přeskočí.
+3. Audio soubor stáhněte pouze jednou pro každou novou nahrávku, zakódujte storage klíč, předajte konfigurovanému poskytovateli úložiště.
+4. Vystavte `recording.synced` všem odběratelům webhook endpointů.
+5. Synchronizační smyčka je **idempotentní**. Přerušené běhy navážou při dalším ticku bez vzniku duplicit.
+
+Neexistuje žádná cesta pro ingestaci Plaud webhooku, protože Plaud jí nenabízí. Pokud ji někdy nabídne, smyčka se stane tenkou omotávkou.
+
+<span id="pluggable-storage" />
+
+## Rozšiřitelné úložiště
+
+`StorageProvider` (`src/lib/storage/types.ts`) je abstrakce:
+`uploadFile`, `downloadFile`, `getSignedUrl`, `deleteFile`, `testConnection`. Dnes jsou k dispozici dva adaptéry — `local-storage.ts` a `s3-storage.ts` — vybírané továrnou `createStorageProvider()` v `src/lib/storage/factory.ts`.
+
+Kód jednotlivých funkcionalit nikdy nerozlišuje typ úložiště. Toto dělá továrna jednou; všude jinde pracujete se `StorageProvider`. Přidání nového adaptéru znamená pět kroků; přesný seznam najdete v sekci README „Extension Points“.
+
+<span id="pluggable-ai" />
+
+## Rozšiřitelná AI
+
+Riffado nemá abstraktní třídu na úrovni poskytovatele. OpenAI SDK je nakonfigurován per uživatel s jeho `baseURL` a stejné SDK volání fungují proti OpenAI, Groq, OpenRouter, Ollama, LM Studio a jakémukoli dalšímu, co využívá OpenAI wire protokol.
+
+Existuje pět stylů přepisu:
+
+- **Whisper-style** — `POST /v1/audio/transcriptions` s multipart audio. Klasické OpenAI rozhraní.
+- **Chat-style** — `POST /v1/chat/completions` s obsahem `input_audio`. Používají poskytovatelé, kteří zpřístupňují audio-input LLM místo dedikovaného endpointu na přepis (dnes např. OpenRouter směrující Gemini, GPT-audio, Voxtral).
+- **Gemini-style** — `generateContent` s inline audio daty přes Google SDK (`src/lib/transcription/gemini-transcribe.ts`).
+- **Scribe-style** — `POST /v1/speech-to-text`, multipart upload s ověřením prostřednictvím `xi-api-key` (`src/lib/transcription/elevenlabs-transcribe.ts`).
+- **Speechmatics-style** — Batch *job* API: `POST /v2/jobs` nahraje audio, `GET /v2/jobs/{id}` se periodicky dotazuje, dokud job neopustí `running`, a přepis je třetí požadavek (`src/lib/transcription/speechmatics-transcribe.ts`). Adaptér abstrahuje všechny tři za jeden awaitnutý call, takže worker vidí stejnou strukturu, jakou má u synchronních poskytovatelů.
+
+Pole `transcriptionStyle` u každého přednastavení poskytovatele (`src/lib/ai/provider-presets.ts`) říká workeru, jaké rozhraní má použít. Poskytovatel, který není OpenAI-kompatibilní, získá svůj vlastní adapter modul v `src/lib/transcription/` a novou hodnotu stylu. Worker se větví podle stylu, **nikdy** podle názvu poskytovatele.
+
+<span id="transcription" />
+
+## Přepis
+
+Přepis probíhá na serveru přes jakéhokoliv OpenAI-kompatibilního poskytovatele, kterého si uživatel nakonfiguroval. Volba poskytovatele a modelu je per nahrávka a lze ji měnit z panelu pracoviště. Viz [AI poskytovatelé](../guides/ai-providers).
+
+<span id="routes" />
+
+## Trasy
+
+- `src/app/(app)/` — autentizované trasy (dashboard, nahrávky, nastavení, pracoviště).
+- `src/app/(auth)/` — přihlášení, registrace, OTP obrazovky.
+- `src/app/(docs)/` — tato dokumentace.
+- `src/app/api/` — interní trasy (session-autentizované).
+- `src/app/api/v1/` — veřejné, klíčově autentizované, stabilní read-only rozhraní. Viz [Veřejné API](./public-api).
+
+<span id="durable-jobs" />
+
+## Odolné úlohy
+
+Práce, která se nesmí ztratit při výpadku procesu, žije v `async_jobs`, kterou zpracovává obecný worker v `src/lib/jobs/worker.ts`. Prvním uživatelem je sumarizace; tabulka nemá tvar „sumarizace“, aby bylo možné přidávat dlouhodobé operace jako handlery s registrací místo přidávání další tabulky a workeru.
+
+Úloha nese `kind`, která vybírá handler z registru v `src/lib/jobs/registry.ts`, a `subject_id` — doménový objekt, na němž operuje, např. ID nahrávky pro sumarizaci. Částečný unikátní index nad `(kind, subject_id)` u živých řádků zajišťuje, že duplicitní kliknutí spustí jen jednu úlohu.
+
+**Obnova po restartu** je hlavním důvodem samotné existence této struktury. Přivlastněná úloha je opatřena náhodným `claim_token` a během běhu pravidelně heartbeatována; každý zápis od claimujícího workeru je vázán na daný token, takže úloha převzatá od zatuhlého procesu nemůže být zpětně poškozena jeho opožděným zápisem. Když je kontejner během úlohy zabit či upgradován, heartbeat ustane a kterýkoliv jiný instance po dvou minutách úlohu převezme a spustí ji znova. Po procesu v ukončení není nikdy požadována žádná akce — jediný design, který přežije `OOM` kill.
+
+Retrye jsou omezené (`max_attempts`, počítáno od prvního převzetí, takže úloha, která zabila svůj běžící proces, také časem vyčerpá pokusy) a rozptylovány exponenciálním backoffem s jitterem. Selhání, která nelze opakovat (například chybějící poskytovatel nebo přepis za hranicí kontextového okna modelu), jsou hned pohřbena a dále se nezkoušejí na trojnásobek ceny. Viz `src/lib/jobs/retryable.ts` pro rozlišení příčin.
+
+Řádka úlohy **není šifrována**, na rozdíl od `transcriptions.text` nebo `ai_enhancements.summary`. Její `payload`, `progress` a `result` tedy obsahují pouze identifikátory, počty a provenienci — handler, který generuje obsah, ho zapíše do šifrovaného místa konkrétní entity a vrátí popis zpracování.
+
+`GET /api/jobs/{id}` zpřístupňuje úlohu jejímu vlastníkovi — klient, kterému v průběhu sumarizace spadne spojení, zde zjistí výsledek práce místo pouhého hlášení přerušení.
+
+<span id="multi-process-safety" />
+
+## Bezpečnost více procesů
+
+Background workery je možné bezpečně spouštět ve více Riffado procesech nad stejnou databází, ale ne vždy ze stejného důvodu. Všechny v paměti držené `running` flagy mají pouze informativní charakter; zajištění bezpečnosti popisujeme níže. Výchozí Docker Compose deployment spouští jednu app kontejner proti jednomu Postgresu; na tom toto nezávisí.
+
+**Převzetí řádky.** Odolný job worker (`src/lib/jobs/worker.ts`) a exportní worker (`src/lib/export/worker.ts`) vybírají práci pomocí `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED)`, takže dva procesy spouštěné ve stejnou chvíli nemohou převzít stejný řádek. Oba pak váží každý další zápis na náhodné claim tokeny, což umožňuje bezpečné převzetí úlohy od zatuhlého workeru, i když nelze spolehlivě rozlišit mezi zatuhlostí a pouze pomalou činností.
+
+**Převzetí pomocí lease.** Worker doručující webhook (`src/lib/webhooks/worker.ts`) přepne řádku do stavu `processing` s expirací v `next_attempt_at`; claim, kterému již lease vypršelo, je opět k dispozici, což umožňuje přežít worker procesu zabitého uprostřed odesílání POST.
+
+**Idempotence.** Úklid expirovaných dat (`src/lib/retention/worker.ts`) nic nepřebírá. Dva procesy uklízející stejný uživatelský účet smažou stejné záznamy, a smazání, které nic nenajde, je již dokončeno — per-kind markery v `recordings` zajišťují, že další průchod je no-op, nikoliv závod.
+
+**Tolerantnost.** Synchronizační worker (`src/lib/sync/worker.ts`) také nic nepřebírá: vybírá uživatele, jejichž `last_sync` je zastaralá, a synchronizuje je, deduplikuje pouze v rámci svého procesu. Dva procesy aplikace tak mohou synchronizovat stejného uživatele současně.
+To způsobí vícenásobné Plaud API volání, ne však duplikace dat — importy se deduplikují podle Plaud id — a čtyřminutové „stárnutí“ synchronizace drží překryv malý. Pokud běžíte více aplikací a vadí vám nadbytečné volání, je to worker, kde hledat úsporu.
+
+<span id="where-to-look-next" />
+
+## Kam pokračovat dál
+
+- [Veřejné API](./public-api) — stabilní vnější rozhraní.
+- [Bezpečnostní model](./security-model) — šifrování, autentizační tokeny a kde je zajišťováno co.
+- [Proměnné prostředí](../self-hosting/environment-variables) — všechny volby, které instance na vlastním hostingu čte při spuštění.

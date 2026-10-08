@@ -1,0 +1,111 @@
+---
+title: Organizace
+description: Sdílejte nahrávky se všemi na své instanci prostřednictvím jedné stromové složky Organizace.
+---
+
+Vlastní hosting Riffado může svým uživatelům poskytnout sdílenou **Organizaci** vedle
+jejich soukromé knihovny. Vlastníci sdílí nahrávku tím, že ji zařadí do stromu
+Organizace; každý v instanci ji pak může otevřít, přehrát a generovat k ní přepisy
+a shrnutí. Nic se nekopíruje: nahrávka, její zvuk a soukromý přepis a shrnutí
+vlastníka zůstávají přesně tam, kde byly.
+
+<span id="turning-it-on" />
+
+## Zapnutí funkce
+
+Nastavte obě proměnné a restartujte. Při startu Riffado vytvoří (nebo aktualizuje)
+jeden **účet organizace** s těmito údaji.
+
+```bash
+SELF_HOST_MODE=shared             # the default
+ORG_ACCOUNT_EMAIL=organization@example.com
+ORG_ACCOUNT_PASSWORD=...          # 12+ characters, re-applied on every start
+ORG_ACCOUNT_NAME=Acme             # optional, defaults to "Organization"
+```
+
+E-mail nesmí patřit žádnému existujícímu uživateli; Riffado odmítne
+proměnit osobní účet na účet organizace a zapíše důvod do logu.
+
+Při použití [jednotného přihlášení](./sso) je `ORG_ACCOUNT_PASSWORD` volitelné:
+nikdo se nepřihlašuje jako účet organizace, který pouze vlastní strom Organizace.
+
+Odebrání těchto dvou proměnných učiní Organizaci **pouze pro čtení**: co bylo
+sdíleno, zůstává viditelné, nic se nemaže a nic nového nelze měnit,
+pouze vlastníci stále mohou své nahrávky stáhnout zpět. `SELF_HOST_MODE=local`
+skryje celou Organizaci.
+
+Šifrování uložených dat zůstává beze změny: jeden klíč instance (`ENCRYPTION_KEY`)
+pro všechna data. Organizace je přístupovým pravidlem nad tímto klíčem, ne
+samostatnou kryptografickou doménou.
+
+<span id="what-people-can-do" />
+
+## Co lidé mohou dělat
+
+| Akce                                                     | Vlastník | Ostatní uživatelé | Účet organizace |
+| -------------------------------------------------------- | :------: | :---------------: | :-------------: |
+| Sdílet nahrávku (zařadit ji do stromu Organizace)        |   ano    |         -         |        -        |
+| Stáhnout nahrávku z Organizace                          |   ano    |         -         |        -        |
+| Vytvářet, přejmenovat, přesouvat, mazat složky Organizace|   ano    |       ano         |      ano        |
+| Přesunout sdílenou nahrávku mezi složkami Organizace     |   ano    |       ano         |      ano        |
+| Otevřít, přehrát, stáhnout sdílenou nahrávku             |   ano    |       ano         |      ano        |
+| Přepisovat / sumarizovat zobrazení Organizace            |   ano    |       ano         |      ano        |
+| Pojmenovat mluvčí ve zobrazení Organizace                |   ano    |       ano         |      ano        |
+| Změnit, sloučit nebo vymazat lidi a věci Organizace      |    -     |         -         |      ano        |
+| Nastavit exporty souborového systému pro složky Organizace|    -     |         -         |      ano        |
+| Přejmenovat, smazat, vymazat samotnou nahrávku           |   ano    |         -         |        -        |
+
+Smazání složky Organizace nikdy nezpůsobí ztrátu sdílených nahrávek: ty se přesunou
+do kořene Organizace.
+
+<span id="two-views-of-one-recording" />
+
+## Dva pohledy na jednu nahrávku
+
+- **Soukromé zobrazení** (otevřené přes *Soukromé*): vlastní přepis a shrnutí
+  vlastníka, vytvořené podle jeho šablon. Měnit je může pouze vlastník.
+- **Zobrazení Organizace** (otevřené přes *Organizace*): vlastní přepis a shrnutí
+  Organizace. Dokud je někdo nevytvoří, zobrazují se vlastníkovy verze pouze pro
+  čtení. Spuštění v tomto zobrazení využívá poskytovatele AI, model a klíče podle
+  uživatele, který akci spouští — kdo klikne, ten platí — a šablony, prompty a
+  výchozí jazyk účtu organizace. Generování názvu, synchronizace názvu s Plaud,
+  webhooky a automatizace vlastníka se odtud nikdy nespouští.
+
+Stažení nebo smazání nahrávky odstraní její organizované zobrazení
+okamžitě pro všechny.
+
+<span id="people-and-things" />
+
+## Lidé a věci
+
+Mluvčí pojmenovaní ve sdílených nahrávkách se stávají **lidmi Organizace**: jedním
+záznamem pro všechny, kdo mluvčí pojmenovávají. Sdílení nahrávky povýší každou osobu
+potvrzenou v záznamu; nové jméno přidané v Organizaci je ihned osobou Organizace.
+Návrhy a soukromé poznámky se nikdy nesdílí — poznámky jsou viditelné pouze tomu,
+kdo je napsal.
+
+Každý má ve svém [Almanachu](../guides/almanac) své vlastní osoby a věci
+i osoby a věci Organizace. Pouze účet organizace může osoby a věci Organizace změnit,
+sloučit nebo vymazat a jeho úpravy platí pro každou nahrávku, kde se vyskytují, včetně
+soukromých. Kdokoli může sloučit soukromý duplikát s organizačním záznamem, vést si k němu
+soukromé poznámky nebo mu přidělit vlastní přezdívky. Věci a fakta přidané účtem organizace
+jsou vlastnictvím Organizace.
+
+<span id="retention" />
+
+## Uchovávání dat
+
+- Nastavení uchovávání každého vlastníka řídí jeho vlastní přepisy a shrnutí.
+- Nastavení účtu organizace řídí přepisy a shrnutí ve zobrazení Organizace.
+- Zvuk je sdílený, takže dokud je nahrávka sdílená, zůstává zachována, dokud **neuplynou obě**
+  doby uchování zvuku vlastníka i Organizace; pokud není nastavena doba Organizace, zvuk se
+  zachovává. Po stažení nahrávky opět platí doba uchování vlastníka po 7denní ochranné lhůtě.
+- Odstranění originálů z Plaud se vždy řídí pouze nastavením vlastníka.
+
+<span id="exports" />
+
+## Exporty
+
+Přihlaste se jako účet organizace, otevřete složku Organizace a přidejte export
+souborového systému obvyklým způsobem. Zapíše zobrazení Organizace u každé
+sdílené nahrávky v této větvi včetně zvuku načteného ze skladu daného vlastníka.

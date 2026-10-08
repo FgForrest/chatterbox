@@ -1,0 +1,43 @@
+---
+title: Instalace
+description: Nainstalujte Riffado na vlastní infrastrukturu pomocí Docker Compose.
+---
+
+<span id="prerequisites" />
+
+## Předpoklady
+
+- Docker a Docker Compose
+- Účet Plaud s alespoň jedním zařízením
+- API klíč kompatibilní s OpenAI (OpenAI, Groq, OpenRouter, Ollama, LM Studio,
+  nebo jakýkoli jiný kompatibilní endpoint). Volitelné — přepis v prohlížeči
+  přes Transformers.js funguje i bez API klíče.
+
+<span id="install" />
+
+## Instalace
+
+Jednořádkový instalátor stáhne publikovaný `docker-compose.yml`, vyžádá si potřebné
+hodnoty a spustí stack:
+
+```bash
+curl -fsSL https://riffado.com/install.sh | bash
+```
+
+Připnutí na konkrétní verzi:
+
+```bash
+curl -fsSL https://riffado.com/v0.4.2/install.sh | bash
+```
+
+Jakmile jsou kontejnery v pořádku, otevřete `http://localhost:3000` a vytvořte si účet.
+Budete postupně provedeni propojením s vaším Plaud účtem a výběrem poskytovatele přepisu.
+
+<span id="next" />
+
+## Dále
+
+- Viz **[Šifrování uložených dat](/docs/reference/encryption-at-rest)** ohledně toho,
+  jak jsou ukládána citlivá pole.
+- README v repozitáři nyní obsahuje podrobnější představení funkcí a referenci
+  ke konfiguraci, dokud tato dokumentace nebude kompletní.

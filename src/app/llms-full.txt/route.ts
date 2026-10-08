@@ -1,9 +1,10 @@
+import { defaultLocale } from "@/lib/i18n/config";
 import { source } from "@/lib/source";
 
 export function GET() {
     const lines: string[] = ["# Riffado docs", ""];
 
-    for (const page of source.getPages()) {
+    for (const page of source.getPages(defaultLocale)) {
         lines.push(`## ${page.data.title}`);
         lines.push(`URL: ${page.url}`);
         if (page.data.description) {

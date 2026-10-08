@@ -1,0 +1,295 @@
+---
+title: Veřejné API
+description: Veřejné rozhraní /api/v1/* pro čtení — ověřování, koncové body, chyby a limity.
+---
+
+Rozhraní `/api/v1/*` je veřejné a stabilní API služby Riffado, určené pouze ke čtení.
+Ověření probíhá pomocí osobních API klíčů; integrace jako Zapier, n8n,
+a vaše vlastní skripty jej mohou používat.
+
+Pro vytváření klíčů a konfiguraci webhooků viz
+[Automatizační API a webhooky](../guides/automation-and-webhooks).
+
+<span id="base-url" />
+
+## Základní URL
+
+`https://<your-riffado-host>/api/v1`
+
+To je hodnota, kterou nastavíte pro `APP_URL` ve vašem `.env`.
+
+<span id="authentication" />
+
+## Autentizace
+
+Odešlete svůj osobní API klíč jako Bearer token:
+
+```http
+Authorization: Bearer op_K7vR8x...
+```
+
+Klíče mají 27 znaků: `op_` + 24 náhodných znaků bezpečných pro URL. Klíče
+mají aktuálně pouze oprávnění pro čtení. Odvolané nebo expirované klíče jsou odmítnuty s odpovědí `401 UNAUTHORIZED`. Tokeny jsou v klidu uchovávány HMAC-hashované (šifrování uložených dat).
+
+<span id="rate-limits" />
+
+## Limity dotazů
+
+Každý dotaz na `/api/v1/*` je omezen dvěma oddělenými limity:
+
+- **Na IP adresu** — 1 200 dotazů za minutu. Chrání před neautorizovaným zahlcením.
+- **Na autentizovaného uživatele** — 600 dotazů za minutu.
+
+Odpovědi při překročení limitu mají JSON tělo s hlavičkou `Retry-After` a těmito
+RateLimit hlavičkami:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 17
+X-RateLimit-Limit: 600
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1700000017
+```
+
+```json
+{
+  "error": "Rate limit exceeded",
+  "code": "RATE_LIMITED",
+  "details": { "retryAfter": 17, "limit": 600, "remaining": 0, "resetAt": 1700000017 }
+}
+```
+
+<span id="error-envelope" />
+
+## Formát chybové odpovědi
+
+Každá chybová odpověď má stejný tvar:
+
+```json
+{
+  "error": "Human-readable message",
+  "code": "MACHINE_READABLE_CODE",
+  "details": { "field": "limit" }
+}
+```
+
+Běžné kódy, které byste měli zpracovat:
+
+| Kód                     | HTTP | Význam                                              |
+| ------------------------ | ---- | --------------------------------------------------- |
+| `UNAUTHORIZED`           | 401  | Chybějící, poškozený, odvolaný, nebo expirovaný klíč |
+| `FORBIDDEN`              | 403  | Autentizovaný uživatel, ale přístup zamítnut        |
+| `ACCOUNT_SUSPENDED`      | 403  | Uživatelský účet je pozastaven                         |
+| `INVALID_INPUT`          | 400  | Některý parametr nebo pole v těle neprošlo ověřením  |
+| `RECORDING_NOT_FOUND`    | 404  | Nahrávka s tímto id neexistuje (nebo není vaše)        |
+| `NOT_FOUND`              | 404  | Obecně — např. přepis ještě nebyl vytvořen           |
+| `RATE_LIMITED`           | 429  | Překročen jeden ze zmíněných limitů                  |
+
+Pole `error` je bezpečné pro zobrazení uživateli. Nikdy neparsujte `error`; rozhodujte se podle
+`code`.
+
+<span id="endpoints" />
+
+## Endpointy
+
+<span id="list-recordings" />
+
+### Výpis nahrávek
+
+```http
+GET /api/v1/recordings
+```
+
+Parametry dotazu (všechny nepovinné):
+
+| Parametr               | Typ           | Poznámky                                          |
+| -------------------    | --------------| ------------------------------------------------- |
+| `limit`             | int (1–100)   | Velikost stránky. Výchozí 50.                     |
+| `cursor`             | neprůhledný řetězec | Z předchozí odpovědi v poli `next_cursor`.    |
+| `created_since`             | ISO timestamp | Filtrovat na nahrávky vytvořené v tomto čase nebo později. |
+| `updated_since`             | ISO timestamp | Filtrovat na nahrávky upravené v tomto čase nebo později. |
+| `has_transcription`             | `true`/`false` | Filtrovat podle přítomnosti přepisu.        |
+
+```bash
+curl -H "Authorization: Bearer op_K7vR8x..." \
+  "https://your-host/api/v1/recordings?limit=20&has_transcription=true"
+```
+
+```js
+const res = await fetch(
+  "https://your-host/api/v1/recordings?limit=20",
+  { headers: { Authorization: `Bearer ${process.env.RIFFADO_KEY}` } },
+);
+const { data, next_cursor, has_more } = await res.json();
+```
+
+Odpověď:
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "title": "Team standup",
+      "created_at": "2026-05-13T12:00:00.000Z",
+      "updated_at": "2026-05-13T12:00:00.000Z",
+      "recorded_at": "2026-05-13T11:30:00.000Z",
+      "duration_ms": 1820000,
+      "filesize_bytes": 1234567,
+      "device": { "serial_number": "...", "name": "Plaud Note", "model": "..." },
+      "has_transcription": true,
+      "has_summary": false,
+      "audio_reaped": false,
+      "links": {
+        "self": "/api/v1/recordings/...",
+        "transcript": "/api/v1/recordings/.../transcript",
+        "audio": "/api/v1/recordings/.../audio"
+      }
+    }
+  ],
+  "next_cursor": "eyJ1cGRhdGVkQXQiOi...",
+  "has_more": true
+}
+```
+
+`audio_reaped` je `true` pokud byla zvuková stopa odstraněna dle retenční politiky
+vlastníka. Nahrávka i její metadata zůstávají; `links.audio` odpovídá
+`410 Gone`. Sledujte tento příznak místo toho, abyste považovali 410 za chybu.
+
+Stránkování je **kurzorové, sestupně dle `updated_at`**. Když
+`has_more` je `true`, předejte `next_cursor` v dalším dotazu.
+Pokud je `false`, jste na konci seznamu.
+
+<span id="get-a-recording" />
+
+### Získání nahrávky
+
+```http
+GET /api/v1/recordings/{id}
+```
+
+```bash
+curl -H "Authorization: Bearer op_..." \
+  https://your-host/api/v1/recordings/01J...
+```
+
+Vrací stejný tvar jako položka ve výpisu, navíc s vloženými poli `transcript` a `summary` pokud existují. Vrací `404 RECORDING_NOT_FOUND` pokud
+nahrávka neexistuje nebo není vaše.
+
+<span id="get-a-transcript" />
+
+### Získání přepisu
+
+```http
+GET /api/v1/recordings/{id}/transcript
+```
+
+```bash
+curl -H "Authorization: Bearer op_..." \
+  https://your-host/api/v1/recordings/01J.../transcript
+```
+
+```json
+{
+  "language": "en",
+  "text": "Full plaintext transcript...",
+  "provider": "groq",
+  "model": "whisper-large-v3",
+  "created_at": "2026-05-13T12:01:23.000Z",
+  "turns": [
+    {
+      "speaker": "speaker_1",
+      "start_ms": 18000,
+      "end_ms": 40000,
+      "text": "Thanks. I'm Jan from Tavesy."
+    }
+  ],
+  "corrections": [
+    {
+      "id": "c-1",
+      "turn_index": 3,
+      "char_start": 12,
+      "char_end": 18,
+      "heard": "Tavesy",
+      "kind": "correct",
+      "replacement": "Tavesi",
+      "meaning": "Tavesi"
+    }
+  ]
+}
+```
+
+`text` je přepis, jak byl slyšen; opravy jej zpětně nepřepisují.
+`corrections` obsahuje potvrzené opravy jako překryv: index do
+`turns` a UTF-16 offsety do textu daného tahu. `turns` je null
+pro přepis bez uložených tahů (ani pak nemá opravy); `speaker` daného tahu je
+označení poskytovatele, nikdy jméno. Oprava typu `correct` nahradí slova za
+`replacement`; `link` ponechá slova, jak byla vyslovena (přezdívka, slang) a
+`meaning` určí, na koho nebo co se vztahují. Oprava `fix` rovněž náhradou
+`replacement`: tuto automatickou opravu provedl systém a `meaning` je záznam, na který
+odkazuje, případně náhrada.
+
+Vrací `404 NOT_FOUND` pokud nahrávka existuje, ale přepis pro ni
+zatím nebyl vytvořen. Poslouchejte na webhooku `transcription.completed`,
+abyste věděli, kdy dotaz zopakovat.
+
+<span id="stream-audio" />
+
+### Streamování audia
+
+```http
+GET /api/v1/recordings/{id}/audio
+```
+
+```bash
+curl -L -H "Authorization: Bearer op_..." \
+  -o recording.mp3 \
+  https://your-host/api/v1/recordings/01J.../audio
+```
+
+Podporuje HTTP požadavky `Range` (RFC 7233):
+
+```bash
+curl -L -H "Authorization: Bearer op_..." \
+  -H "Range: bytes=0-65535" \
+  -o head.mp3 \
+  https://your-host/api/v1/recordings/01J.../audio
+```
+
+- Pro nahrávky v **lokálním úložišti** je odpověď přímý bitevý
+  výstup audia s typem `Content-Type` odvozeným podle přípony souboru a
+  `Cache-Control: private, max-age=300`. Range požadavky vrací `206`
+  s `Content-Range`.
+- Pro nahrávky v **S3 úložišti** je odpovědí přesměrování `302`
+  na předem podepsané URL platné 5 minut. Řiďte se přesměrováním (`curl -L`);
+  Váš HTTP klient následně stáhne audio přímo ze S3 – bez dalšího
+  přenášení přes Riffado.
+
+`416` s hlavičkou `Content-Range: bytes */<size>` je vrácen pouze
+pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné hodnoty
+`end` jsou zkráceny na `fileSize - 1` dle RFC 7233.
+
+<span id="what-about-writes" />
+
+## A co zápis?
+
+Nejsou k dispozici žádné veřejné endpointy pro zápis. Povrch `/api/v1/*` je
+záměrně pouze pro čtení. Pokud potřebujete data *zapsat*, spusťte
+uživatelské rozhraní Riffado nebo synchronizujte zdrojový účet Plaud
+pomocí nastaveného synchronizačního cyklu.
+
+<span id="stability" />
+
+## Stabilita
+
+Povrch `/api/v1/*` je verzovanou veřejnou smlouvou. Po vydání platí:
+
+- Stávající endpointy neprochází zpětně nekompatibilními změnami — pole se pouze přidávají,
+  nemění účel.
+- Hodnoty `code` v chybách jsou stabilní. Přidávají se nové kódy; staré nejsou
+  přejmenovávány.
+- Odstranění či nekompatibilní změny prochází deprekačním cyklem a jsou uvedeny v
+  CHANGELOGu.
+
+Pokud potřebujete nové pole, schopnost nebo endpoint, nahlaste požadavek. Tvar se
+nejprve diskutuje v daném vlákně před nasazením.
