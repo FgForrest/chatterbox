@@ -30,6 +30,7 @@ const SETTINGS_TOPICS: Record<SettingsSection, HelpTarget> = {
     playback: { page: "settings", anchor: "the-other-sections" },
     notifications: { page: "settings", anchor: "the-other-sections" },
     "api-keys": { page: "settings", anchor: "the-other-sections" },
+    recorder: { page: "settings", anchor: "the-other-sections" },
     webhooks: { page: "settings", anchor: "the-other-sections" },
     dev: { page: "settings", anchor: "the-other-sections" },
 };

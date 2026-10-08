@@ -1,0 +1,115 @@
+---
+title: Meeting Recorder
+description: Record meeting audio in your browser and send it to Riffado for transcription and summaries.
+---
+
+The Riffado Meeting Recorder is a Chromium extension that records a meeting's
+audio and uploads it to your Riffado instance, where it is transcribed and
+summarized like any other recording.
+
+It captures your **microphone** and the **system audio** your computer plays,
+so it works both for meetings in a browser tab and for native Zoom or Teams
+desktop apps. The two are recorded on separate channels — your voice on the
+left, everyone else on the right — which helps Riffado attribute who said what.
+
+Chromium browsers only: Chrome, Edge, Brave, Vivaldi. Firefox and Safari do not
+let extensions capture system audio.
+
+## Install
+
+The extension is not built into Riffado; it is a separate, load-unpackable
+folder under `extensions/recorder` in the repository, or a packaged zip.
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. **Load unpacked** and select the `extensions/recorder` folder (or unzip a
+   release and select that folder).
+3. Open the extension's **Options** and grant microphone access.
+
+## Connect it to Riffado
+
+Open **Settings → Meeting Recorder** in Riffado. The page detects the
+extension in your browser and tells you what to do:
+
+- **Set up recorder**: one click. Riffado creates a write-only key (it can
+  create recordings but cannot read your library) and hands it to the
+  extension. Nothing to copy.
+- **On a self-hosted Riffado, the first time only**: Chrome requires you to
+  allow the extension to reach your server once. Click the extension icon,
+  choose **Connect to your-server**, and the settings page updates by itself.
+  Then click Set up recorder.
+- **Manual setup** is always available at the bottom of the page if you prefer
+  to paste the key into the extension's Options yourself.
+
+Revoke a recorder key any time from the same page or under **API Keys**.
+
+## Automatic recording
+
+Off by default. In the extension's **Options → Automatic recording**, set a
+platform to **Auto** and confirm the recording policy once. From then on,
+when you open a meeting on that platform:
+
+1. The toolbar icon shows **REC?** (and, if enabled, a notification).
+2. One click on the icon, or the keyboard shortcut, starts recording
+   immediately: no popup, no picker, no checkbox.
+3. Recording stops by itself when you leave the meeting page, close the tab,
+   or the meeting goes quiet for a few minutes (3 by default).
+
+That single click is required by Chrome: an extension may only start
+capturing after you invoke it. Nothing can start a recording on its own, and
+not clicking is how you skip a meeting you do not want recorded.
+
+**Prompt** mode only notifies you and leaves recording to the manual flow.
+
+A self-hosted server can set defaults for everyone with
+`RECORDER_AUTO_RECORD_PLATFORMS` (for example `google-meet,zoom,teams` or
+`all`), plus `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT` and
+`RECORDER_LOCK_DEFAULTS`. Users can still change them in the extension unless
+locked. Supported platforms: Google Meet, Zoom (web), Microsoft Teams (web),
+Webex, Slack huddles, Whereby, Jitsi Meet. Native desktop apps have no tab to
+detect and keep the manual screen-picker flow.
+
+If the keyboard shortcut does nothing, Chrome may have left it unassigned;
+the Options page shows the current binding and links to Chrome's shortcut
+settings.
+
+## Record a meeting
+
+1. Click the extension icon and choose **Record meeting**.
+2. Confirm the participant notice.
+3. Talk. Stop from the extension popup, or with the keyboard shortcut
+   (`Ctrl+Shift+U` by default).
+
+There is nothing to configure. The recorder uses your system default
+microphone, and captures the meeting audio automatically:
+
+- **Meeting in a browser tab** (Google Meet, or Zoom/Teams web): the extension
+  records that tab's audio directly. No screen picker, no "share system audio"
+  step, and other apps' sounds are not captured.
+- **Native Zoom or Teams desktop app**: there is no tab to capture, so the
+  extension falls back to the screen picker. Choose **Entire screen** and turn
+  on **Share system audio**. On macOS, Chrome asks for the **Screen Recording**
+  permission the first time; grant it once.
+
+The microphone is always your system default input. An extension cannot read
+which device another tab chose, but the default is almost always the same mic
+your meeting app uses. If yours is on a non-default mic, set an override in the
+extension's Options.
+
+When you stop, the recording is assembled on the server and appears in your
+library shortly after, ready to transcribe and summarize. A local `.webm` copy
+is also saved to your Downloads unless you turned that off.
+
+## Reliability
+
+Audio is uploaded in short segments as it is captured and buffered in the
+browser's private storage, so a brief network drop or a closed tab loses at
+most a few seconds. If the browser closes mid-meeting, the extension offers to
+finish uploading what it captured the next time it starts.
+
+## A note on consent
+
+Recording other people can require their consent, and the rules differ by
+country and by meeting platform. The notice you confirm before each recording
+is a reminder and an accountability record, not consent in itself. You are
+responsible for informing participants and complying with the laws and platform
+terms that apply to you.

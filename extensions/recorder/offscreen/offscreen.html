@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Riffado Recorder capture</title>
+    </head>
+    <body>
+        <!--
+          Offscreen document: the only extension context allowed to use
+          getUserMedia and MediaRecorder under Manifest V3. It captures the
+          microphone and system audio, merges them into a stereo stream, and
+          streams encoded chunks into OPFS, notifying the service worker.
+        -->
+        <script type="module" src="offscreen.js"></script>
+    </body>
+</html>

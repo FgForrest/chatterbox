@@ -2,6 +2,7 @@
 
 import type { SettingsSection } from "@/types/settings";
 import { ApiKeysSection } from "./settings/api-keys-section";
+import { RecorderSection } from "./settings/recorder-section";
 import { WebhooksSection } from "./settings/webhooks-section";
 import { BillingSection } from "./settings-sections/billing-section";
 import { DevSection } from "./settings-sections/dev-section";
@@ -55,6 +56,8 @@ export function SettingsContent({
             );
         case "api-keys":
             return <ApiKeysSection />;
+        case "recorder":
+            return <RecorderSection />;
         case "webhooks":
             return <WebhooksSection />;
         case "transcription":

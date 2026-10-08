@@ -2663,6 +2663,8 @@ export const userSettings = pgTable("user_settings", {
 export const apiKeySourceEnum = pgEnum("api_key_source", [
     "manual",
     "device-flow",
+    // Issued by Settings -> Meeting Recorder for the browser extension.
+    "recorder",
 ]);
 
 export const apiKeys = pgTable(
@@ -3309,6 +3311,98 @@ export const asyncJobs = pgTable(
         activeUnique: uniqueIndex("async_jobs_active_unique")
             .on(table.kind, table.subjectId)
             .where(sql`${table.status} in ('pending', 'processing')`),
+    }),
+);
+
+export const recordingSessionStatusEnum = pgEnum("recording_session_status", [
+    "open",
+    "completing",
+    "completed",
+    "failed",
+    "aborted",
+]);
+
+/**
+ * A meeting recording being streamed in by the browser extension.
+ *
+ * The extension uploads the recording as it is captured, in small chunks,
+ * so a closed laptop or a dropped connection loses seconds rather than the
+ * whole meeting. This row is the bookkeeping for that stream: which chunks
+ * have arrived, whether the client has declared the recording finished,
+ * and which `recordings` row the finalize job produced from it.
+ *
+ * Chunks live in storage under `${userId}/recording-sessions/${id}/` until
+ * the finalize job assembles them into one audio file and deletes them.
+ * Sessions left `open` past their TTL are aborted by the sweeper.
+ *
+ * `metadata` holds only capture facts the extension declared -- channel
+ * layout, meeting platform hint, client version -- never audio or anything
+ * derived from it.
+ */
+export const recordingSessions = pgTable(
+    "recording_sessions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        status: recordingSessionStatusEnum("status").notNull().default("open"),
+        mimeType: varchar("mime_type", { length: 100 }).notNull(),
+        metadata: jsonb("metadata")
+            .$type<Record<string, unknown>>()
+            .notNull()
+            .default({}),
+        // When the client confirmed it had told participants about the
+        // recording. Stored for accountability, not as proof of consent.
+        noticeAcknowledgedAt: timestamp("notice_acknowledged_at"),
+        startedAt: timestamp("started_at").notNull(),
+        endedAt: timestamp("ended_at"),
+        stopReason: varchar("stop_reason", { length: 64 }),
+        // Declared by the client on complete; the finalize job verifies that
+        // chunks 0..expectedChunkCount-1 all exist before assembling.
+        expectedChunkCount: integer("expected_chunk_count"),
+        recordingId: text("recording_id").references(() => recordings.id, {
+            onDelete: "set null",
+        }),
+        jobId: text("job_id"),
+        // Mapped, user-safe message (same rule as `async_jobs.last_error`).
+        lastError: text("last_error"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userIdIdx: index("recording_sessions_user_id_idx").on(table.userId),
+        // Sweeper scan: stale rows by status.
+        statusUpdatedIdx: index("recording_sessions_status_updated_idx").on(
+            table.status,
+            table.updatedAt,
+        ),
+    }),
+);
+
+/**
+ * One uploaded chunk of a recording session.
+ *
+ * A child table rather than an array on the session so two chunks arriving
+ * concurrently cannot lose each other's write, and so a re-sent chunk is an
+ * idempotent upsert keyed by (session, index).
+ */
+export const recordingSessionChunks = pgTable(
+    "recording_session_chunks",
+    {
+        sessionId: text("session_id")
+            .notNull()
+            .references(() => recordingSessions.id, { onDelete: "cascade" }),
+        index: integer("index").notNull(),
+        size: integer("size").notNull(),
+        sha256: varchar("sha256", { length: 64 }).notNull(),
+        storageKey: text("storage_key").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.sessionId, table.index] }),
     }),
 );
 

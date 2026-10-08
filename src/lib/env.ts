@@ -973,6 +973,61 @@ const baseEnvSchema = z.object({
                 "BILLING_LAUNCH_DATE must be a real calendar date (YYYY-MM-DD)",
         })
         .optional(),
+
+    /**
+     * Meeting Recorder extension defaults pushed to paired extensions.
+     * All optional and inert when unset: the extension records nothing
+     * automatically unless a platform is listed here or the user opts in.
+     *
+     * Comma-separated platform ids (see `src/lib/recorder/platforms.ts`) or
+     * `all`. Unknown ids are rejected so a typo cannot silently disable the
+     * intended platform.
+     */
+    RECORDER_AUTO_RECORD_PLATFORMS: z
+        .string()
+        .optional()
+        .transform((val) => {
+            if (!val || val.trim() === "") return [] as string[];
+            return val
+                .split(",")
+                .map((part) => part.trim().toLowerCase())
+                .filter((part) => part.length > 0);
+        }),
+
+    /** Seconds of tab silence before an auto-mode recording stops itself. */
+    RECORDER_AUTO_STOP_QUIET_SECONDS: z
+        .string()
+        .regex(
+            /^\d+$/,
+            "RECORDER_AUTO_STOP_QUIET_SECONDS must be a positive integer",
+        )
+        .optional()
+        .transform((val) => (val ? Number(val) : 180))
+        .pipe(z.number().int().min(30).max(3600)),
+
+    /** Recording-policy text shown by the extension before auto mode is enabled. */
+    RECORDER_NOTICE_TEXT: z
+        .string()
+        .optional()
+        .transform((val) =>
+            val && val.trim() !== "" ? val.trim() : undefined,
+        ),
+
+    /** When true, users cannot turn a server-defaulted auto platform off. */
+    RECORDER_LOCK_DEFAULTS: optionalStrictBoolean,
+
+    /**
+     * Chrome extension id of the Meeting Recorder, used by the web app to
+     * detect and message the extension. Defaults to the published build's
+     * pinned id; self-hosters who build their own extension override it.
+     */
+    NEXT_PUBLIC_RECORDER_EXTENSION_ID: z
+        .string()
+        .regex(
+            /^[a-p]{32}$/,
+            "NEXT_PUBLIC_RECORDER_EXTENSION_ID must be a 32-character Chrome extension id",
+        )
+        .optional(),
 });
 
 export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
@@ -1230,6 +1285,14 @@ function validateEnv(): Env {
             BILLING_TRIAL_GRACE_DAYS: process.env.BILLING_TRIAL_GRACE_DAYS,
             BILLING_PAID_GRACE_DAYS: process.env.BILLING_PAID_GRACE_DAYS,
             BILLING_LAUNCH_DATE: process.env.BILLING_LAUNCH_DATE,
+            RECORDER_AUTO_RECORD_PLATFORMS:
+                process.env.RECORDER_AUTO_RECORD_PLATFORMS,
+            RECORDER_AUTO_STOP_QUIET_SECONDS:
+                process.env.RECORDER_AUTO_STOP_QUIET_SECONDS,
+            RECORDER_NOTICE_TEXT: process.env.RECORDER_NOTICE_TEXT,
+            RECORDER_LOCK_DEFAULTS: process.env.RECORDER_LOCK_DEFAULTS,
+            NEXT_PUBLIC_RECORDER_EXTENSION_ID:
+                process.env.NEXT_PUBLIC_RECORDER_EXTENSION_ID,
         });
 
         const isProductionBuildPhase =

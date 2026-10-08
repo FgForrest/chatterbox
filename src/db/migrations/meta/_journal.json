@@ -666,6 +666,13 @@
       "when": 1791397833756,
       "tag": "0094_condemned_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791461139780,
+      "tag": "0095_simple_captain_stacy",
+      "breakpoints": true
     }
   ]
 }
