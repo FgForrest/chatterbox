@@ -106,7 +106,7 @@ git pull --rebase && git push
 
 - Analyze PRs without pulling locally first.
 - If the user approves: create a feature branch, pull the PR, rebase on `main`, apply adjustments, commit, merge into `main`, push, close the PR, and leave a comment in the user's tone.
-- You never open PRs yourself. Work in feature branches until everything matches the user's requirements, then merge into `main` and push.
+- Open a PR when the user asks you to. A direct request is sufficient authorization; no separate confirmation is needed. Otherwise, work in feature branches until everything matches the user's requirements, then merge into `main` and push.
 
 ### Rebase conflicts
 
@@ -116,7 +116,7 @@ git pull --rebase && git push
 
 ### User override
 
-If user instructions conflict with these rules, ask for explicit confirmation before executing. Only then override.
+If user instructions conflict with these rules, ask for explicit confirmation before executing. Only then override. A direct request to open a PR follows the PR workflow above and needs no further confirmation.
 
 ## GitHub Issues and PRs
 
