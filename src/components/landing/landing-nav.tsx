@@ -1,23 +1,25 @@
 import Link from "next/link";
-import { useExtracted } from "next-intl";
-import { LogoWordmark } from "@/components/icons/logo";
+import { useExtracted, useLocale } from "next-intl";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { GitHubStarsPill } from "@/components/landing/github-stars-pill";
 import { LandingNavMenu } from "@/components/landing/landing-nav-menu";
 import { LandingNavMobile } from "@/components/landing/landing-nav-mobile";
 import { MetalButton } from "@/components/metal-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { productName } from "@/lib/brand";
 
 export function LandingNav() {
     const i18n = useExtracted();
+    const name = productName(useLocale());
     return (
         <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-md supports-[backdrop-filter]:bg-background/60">
             <div className="container relative mx-auto flex h-16 items-center justify-between px-4">
                 <Link
                     href="/"
                     className="flex items-center transition-opacity hover:opacity-80"
-                    aria-label={i18n("Riffado")}
+                    aria-label={name}
                 >
-                    <LogoWordmark className="h-8 w-auto" />
+                    <BrandWordmark className="h-8" />
                 </Link>
 
                 <div className="absolute left-1/2 -translate-x-1/2">

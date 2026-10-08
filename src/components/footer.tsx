@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { Suspense } from "react";
 import { Github } from "@/components/icons/icons";
-import { Logo } from "@/components/icons/logo";
+import { WaveformLogo } from "@/components/icons/waveform-logo";
 import { ReportBugButton } from "@/components/report-bug-dialog";
 import { UpdateBadge } from "@/components/update-badge";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import { APP_RELEASE_URL, APP_VERSION_TAG } from "@/lib/version";
 
@@ -29,6 +30,8 @@ import { APP_RELEASE_URL, APP_VERSION_TAG } from "@/lib/version";
  */
 export function Footer() {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const name = productName(locale);
     const currentYear = new Date().getFullYear();
 
     return (
@@ -36,9 +39,10 @@ export function Footer() {
             <div className="container mx-auto px-4 py-3 max-w-7xl">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-muted-foreground font-mono">
                     <div className="flex items-center gap-2">
-                        <Logo className="size-4" />
+                        <WaveformLogo className="size-4" />
                         <span>
-                            © {currentYear} {i18n("Riffado · Licensed under")}{" "}
+                            © {currentYear} {name} ·{" "}
+                            {locale === "cs-CZ" ? "Licence" : "Licensed under"}{" "}
                             <Link
                                 href="https://www.gnu.org/licenses/agpl-3.0.html"
                                 target="_blank"
@@ -66,8 +70,8 @@ export function Footer() {
                             rel="noopener noreferrer"
                             className="hover:text-foreground transition-colors"
                             aria-label={i18n(
-                                "Release notes for Riffado {version}",
-                                { version: APP_VERSION_TAG },
+                                "Release notes for {name} {version}",
+                                { name, version: APP_VERSION_TAG },
                             )}
                         >
                             {APP_VERSION_TAG}

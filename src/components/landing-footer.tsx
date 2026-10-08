@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { Github, X } from "@/components/icons/icons";
-import { LogoWordmark } from "@/components/icons/logo";
 import { NewsletterForm } from "@/components/marketing/newsletter-form";
+import { productName } from "@/lib/brand";
 
 /**
  * Marketing footer for hosted public surfaces. Currently mounted on:
@@ -55,6 +56,8 @@ function FooterLinkItem({ label, href, external }: FooterLink) {
 
 export function LandingFooter() {
     const i18n = useExtracted();
+    const locale = useLocale();
+    const name = productName(locale);
     const currentYear = new Date().getFullYear();
     const columns: FooterColumn[] = [
         {
@@ -123,9 +126,9 @@ export function LandingFooter() {
                         <Link
                             href="/"
                             className="flex items-center hover:opacity-80 transition-opacity w-fit"
-                            aria-label={i18n("Riffado")}
+                            aria-label={name}
                         >
-                            <LogoWordmark className="h-7 w-auto" />
+                            <BrandWordmark className="h-7" />
                         </Link>
                         {/*<p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
                             Open-source transcription for the voice recorder you
@@ -206,7 +209,8 @@ export function LandingFooter() {
                     </p>
                     <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                         <p className="text-xs text-muted-foreground font-mono">
-                            © {currentYear} {i18n("Riffado. Licensed under")}{" "}
+                            © {currentYear} {name}.{" "}
+                            {locale === "cs-CZ" ? "Licence" : "Licensed under"}{" "}
                             <Link
                                 href="https://www.gnu.org/licenses/agpl-3.0.html"
                                 target="_blank"

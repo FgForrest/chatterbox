@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { useExtracted } from "next-intl";
-import { getExtracted } from "next-intl/server";
+import { useExtracted, useLocale } from "next-intl";
+import { getExtracted, getLocale } from "next-intl/server";
 import { CopyableCommand } from "@/components/copyable-command";
 import { Footer } from "@/components/footer";
-import { LogoWordmark } from "@/components/icons/logo";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { LandingFooter } from "@/components/landing-footer";
+import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import { INSTALL_ONELINER, pinnedInstallCommand } from "@/lib/install-commands";
 import { marketingMetadata } from "@/lib/seo/marketing-metadata";
@@ -41,11 +42,13 @@ import { APP_VERSION_TAG } from "@/lib/version";
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
-    const i18n = await getExtracted();
+    const [i18n, locale] = await Promise.all([getExtracted(), getLocale()]);
+    const name = productName(locale);
     return marketingMetadata({
-        title: i18n("Install Riffado | Self-host in one command"),
+        title: i18n("Install {name} | Self-host in one command", { name }),
         description: i18n(
-            "Self-host Riffado with a single curl command. Docker + Compose v2 required. AGPL-3.0, no telemetry, no license server.",
+            "Self-host {name} with a single curl command. Docker + Compose v2 required. AGPL-3.0, no telemetry, no license server.",
+            { name },
         ),
         path: "/install",
     });
@@ -56,6 +59,7 @@ const PINNED_LINER = pinnedInstallCommand(APP_VERSION_TAG);
 
 export default function InstallPage() {
     const i18n = useExtracted();
+    const name = productName(useLocale());
     return (
         <div className="flex flex-col min-h-[100vh] bg-background text-foreground">
             <header className="border-b border-border/40">
@@ -63,9 +67,9 @@ export default function InstallPage() {
                     <Link
                         href="/"
                         className="flex items-center hover:opacity-80 transition-opacity"
-                        aria-label={i18n("Riffado")}
+                        aria-label={name}
                     >
-                        <LogoWordmark className="h-7 w-auto" />
+                        <BrandWordmark className="h-7" />
                     </Link>
                     {/* The marketing landing only exists on hosted
                         (`/` redirects to `/login` on self-host), so
@@ -91,7 +95,7 @@ export default function InstallPage() {
                             {i18n("Self-host")}
                         </div>
                         <h1 className="text-4xl md:text-5xl font-semibold tracking-tight mb-6">
-                            {i18n("Install Riffado")}
+                            {i18n("Install {name}", { name })}
                         </h1>
                         <p className="text-lg text-muted-foreground leading-relaxed">
                             {i18n(

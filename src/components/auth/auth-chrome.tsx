@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import type { ReactNode } from "react";
-import { LogoWordmark } from "@/components/icons/logo";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { Panel } from "@/components/panel";
+import { productName } from "@/lib/brand";
 
 interface AuthChromeProps {
     /** Headline above the form. e.g. "Sign in" / "Create account". */
@@ -29,6 +30,7 @@ export function HostedAuthChrome({
     children,
 }: AuthChromeProps) {
     const i18n = useExtracted();
+    const name = productName(useLocale());
     const bullets = [
         {
             label: i18n("Choose your AI"),
@@ -59,8 +61,8 @@ export function HostedAuthChrome({
                     className="pointer-events-none absolute inset-0 opacity-[0.06] [background-image:radial-gradient(circle_at_1px_1px,currentColor_1px,transparent_0)] [background-size:14px_14px]"
                 />
                 <div className="relative">
-                    <Link href="/" aria-label={i18n("Riffado")}>
-                        <LogoWordmark className="h-9 w-auto text-auth-brand-foreground" />
+                    <Link href="/" aria-label={name}>
+                        <BrandWordmark className="h-9 text-auth-brand-foreground" />
                     </Link>
                 </div>
                 <div className="relative space-y-8">
@@ -118,8 +120,8 @@ export function HostedAuthChrome({
                 />
                 <div className="relative z-10 w-full max-w-sm space-y-8">
                     <div className="lg:hidden">
-                        <Link href="/" aria-label={i18n("Riffado")}>
-                            <LogoWordmark className="h-8 w-auto text-foreground" />
+                        <Link href="/" aria-label={name}>
+                            <BrandWordmark className="h-8 text-foreground" />
                         </Link>
                     </div>
                     <div className="space-y-1.5">
@@ -182,13 +184,13 @@ export function SelfHostAuthChrome({
     subtitle,
     children,
 }: AuthChromeProps) {
-    const i18n = useExtracted();
+    const name = productName(useLocale());
     return (
         <div className="relative flex min-h-screen items-center justify-center px-4 py-12">
             <div className="relative z-10 w-full max-w-md space-y-6">
                 <div className="flex justify-center">
-                    <Link href="/" aria-label={i18n("Riffado")}>
-                        <LogoWordmark className="h-7 w-auto text-foreground" />
+                    <Link href="/" aria-label={name}>
+                        <BrandWordmark className="h-7 text-foreground" />
                     </Link>
                 </div>
                 <Panel className="space-y-6">

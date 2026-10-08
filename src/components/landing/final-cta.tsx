@@ -1,5 +1,5 @@
 import { useExtracted } from "next-intl";
-import { LogoWordmark } from "@/components/icons/logo";
+import { BrandWordmark } from "@/components/icons/brand-wordmark";
 import { FinalCtaActions } from "@/components/landing/final-cta-actions";
 
 /**
@@ -37,9 +37,9 @@ export function FinalCTA() {
                         so this is a visual sign-off, not a link. Marked
                         aria-hidden so screen readers don't announce a
                         second "Riffado" between the headline and the CTA. */}
-                    <LogoWordmark
+                    <BrandWordmark
                         aria-hidden
-                        className="mx-auto h-10 w-auto md:h-12 text-auth-brand-foreground"
+                        className="mx-auto h-10 md:h-12 text-auth-brand-foreground"
                     />
 
                     <h2 className="text-3xl md:text-5xl font-semibold tracking-tight text-balance">
