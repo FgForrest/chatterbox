@@ -16,7 +16,9 @@ import {
 import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
+    localizedSummaryPrompt,
     normalizeSummaryPromptConfig,
+    resolveAiOutputLanguage,
     SUMMARY_MARKDOWN_DIRECTIVE,
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
@@ -344,13 +346,16 @@ export async function generateSummaryForRecording(
     // the JSON-shape contract (English keys), the system message carries the
     // output language. Smaller models tend to honor this split more reliably
     // than a combined prompt where language and JSON-shape rules compete.
-    const languageDirective = getAiOutputLanguageDirective(
-        userSettingsRow?.aiOutputLanguage ?? null,
+    const outputLanguage = resolveAiOutputLanguage(
+        userSettingsRow?.aiOutputLanguage,
+        transcription.detectedLanguage ??
+            userSettingsRow?.defaultTranscriptionLanguage,
     );
+    const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     // The merge never sees the transcript, so under `auto` it has to take
     // the language from the passes instead.
     const mergeLanguageDirective = getAiOutputLanguageDirective(
-        userSettingsRow?.aiOutputLanguage ?? null,
+        outputLanguage,
         "extractions",
     );
 
@@ -361,8 +366,17 @@ export async function generateSummaryForRecording(
     // `String.prototype.replace` special patterns.
     // The task lists are data the user's recordings hold, so they go with
     // the user's message rather than the instructions.
+    const selectedTemplate = promptConfig.templates.find(
+        (template) => template.id === usedPromptId,
+    );
+    const localizedTemplate = localizedSummaryPrompt(
+        usedPromptId,
+        promptTemplate,
+        outputLanguage,
+        selectedTemplate?.prompt === null,
+    );
     const prompt = [
-        promptTemplate.replaceAll("{transcription}", () => transcriptText),
+        localizedTemplate.replaceAll("{transcription}", () => transcriptText),
         tasksContext.text,
     ]
         .filter(Boolean)

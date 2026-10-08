@@ -127,23 +127,34 @@ const REPLY = JSON.stringify({
 interface SummarySettings {
     summaryPrompt?: unknown;
     aiOutputLanguage?: string | null;
+    detectedLanguage?: string | null;
+    defaultTranscriptionLanguage?: string | null;
     summaryMultiPass?: boolean;
     summaryMultiPassRounds?: number;
 }
 
-async function summarize(settings: SummarySettings = {}) {
+async function summarize(settings: SummarySettings = {}, presetId?: string) {
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
-        [{ recordingId: "rec-1", userId: "user-1", text: "a transcript" }],
+        [
+            {
+                recordingId: "rec-1",
+                userId: "user-1",
+                text: "a transcript",
+                detectedLanguage: settings.detectedLanguage ?? null,
+            },
+        ],
     ]);
     selectResults.set(userSettings, [
         [
             {
                 summaryPrompt: settings.summaryPrompt ?? null,
                 aiOutputLanguage: settings.aiOutputLanguage ?? null,
+                defaultTranscriptionLanguage:
+                    settings.defaultTranscriptionLanguage ?? null,
                 summaryMultiPass: settings.summaryMultiPass ?? false,
                 summaryMultiPassRounds: settings.summaryMultiPassRounds ?? null,
                 summaryMergePrompt: null,
@@ -173,6 +184,7 @@ async function summarize(settings: SummarySettings = {}) {
     );
     return generateSummaryForRecording("user-1", "rec-1", {
         trigger: "manual",
+        presetId,
     });
 }
 
@@ -182,6 +194,15 @@ function systemMessages(): string[] {
         (call) =>
             (call[0] as { messages: { role: string; content: string }[] })
                 .messages[0].content,
+    );
+}
+
+function userMessages(): string[] {
+    return createMock.mock.calls.map(
+        (call) =>
+            (
+                call[0] as { messages: { role: string; content: string }[] }
+            ).messages.at(-1)?.content ?? "",
     );
 }
 
@@ -354,6 +375,69 @@ describe("output language under auto", () => {
             // belongs to auto only: a chosen language is the user's word.
             expect(system).not.toContain("Follow a different output language");
         }
+    });
+
+    it("adds Czech headings to the shared meeting prompt under auto", async () => {
+        await summarize({ detectedLanguage: "cs-CZ" }, "meeting-notes");
+        expect(systemMessages()[0]).toContain("output in Czech");
+        expect(userMessages()[0]).toContain(
+            "Účastníci, Účel, Diskuse, Otevřené otázky",
+        );
+        expect(userMessages()[0]).toContain("Summarize this meeting recording");
+        expect(userMessages()[0]).toContain(
+            "Name each heading in the output language",
+        );
+        expect(userMessages()[0]).not.toContain(
+            "Attendees, Purpose, Discussion, Open questions",
+        );
+    });
+
+    it("uses the transcription language setting when the provider returned none", async () => {
+        await summarize(
+            { defaultTranscriptionLanguage: "cs" },
+            "meeting-notes",
+        );
+        expect(userMessages()[0]).toContain("Účastníci, Účel, Diskuse");
+    });
+
+    it("recognizes a provider's language name", async () => {
+        await summarize({ detectedLanguage: "Czech" }, "meeting-notes");
+        expect(userMessages()[0]).toContain("Účastníci, Účel, Diskuse");
+    });
+
+    it("lets an explicit output language override the detected language", async () => {
+        await summarize(
+            { detectedLanguage: "cs", aiOutputLanguage: "en" },
+            "meeting-notes",
+        );
+        expect(systemMessages()[0]).toContain("output in English");
+        expect(userMessages()[0]).toContain(
+            "Name each heading in the output language",
+        );
+    });
+
+    it("preserves an edited meeting template", async () => {
+        await summarize(
+            {
+                detectedLanguage: "cs",
+                summaryPrompt: {
+                    selectedPrompt: "meeting-notes",
+                    templates: [
+                        {
+                            id: "meeting-notes",
+                            name: null,
+                            prompt: "My meeting template: {transcription}",
+                            createdAt: "2026-01-01T00:00:00.000Z",
+                        },
+                    ],
+                },
+            },
+            "meeting-notes",
+        );
+        expect(userMessages()[0]).toContain(
+            "My meeting template: a transcript",
+        );
+        expect(userMessages()[0]).not.toContain("Účastníci");
     });
 });
 
