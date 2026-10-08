@@ -1,17 +1,22 @@
 "use client";
 
 import {
+    AlertCircle,
+    CircleHelp,
     Keyboard,
     LogOut,
+    Menu,
     Monitor,
     Moon,
+    RefreshCw,
     Settings,
     Shield,
     Sun,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useExtracted } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import posthog from "posthog-js";
+import { useHelp } from "@/components/help/help-provider";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -30,6 +35,11 @@ interface UserMenuProps {
     userEmail: string | null;
     onOpenSettings: () => void;
     onOpenShortcuts: () => void;
+    lastSyncTime: Date | null;
+    nextSyncTime: Date | null;
+    isAutoSyncing: boolean;
+    lastSyncResult: { success: boolean; error?: string } | null;
+    onSync: () => void;
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -53,10 +63,18 @@ export function UserMenu({
     userEmail,
     onOpenSettings,
     onOpenShortcuts,
+    lastSyncTime,
+    nextSyncTime,
+    isAutoSyncing,
+    lastSyncResult,
+    onSync,
 }: UserMenuProps) {
     const i18n = useExtracted();
+    const locale = useLocale();
     const { push, refresh } = useRouter();
+    const { openHelp } = useHelp();
     const { theme, setTheme } = useTheme(initialTheme);
+    const syncFailed = !isAutoSyncing && lastSyncResult?.success === false;
 
     const themeOptions = [
         { value: "light" as const, label: i18n("Light"), icon: Sun },
@@ -71,9 +89,8 @@ export function UserMenu({
                     variant="outline"
                     size="icon"
                     aria-label={i18n("Account menu")}
-                    className="font-semibold"
                 >
-                    {emailInitial(userEmail)}
+                    <Menu className="size-5" aria-hidden="true" />
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72 p-0">
@@ -107,6 +124,50 @@ export function UserMenu({
                         </span>
                         <Kbd>?</Kbd>
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openHelp()}>
+                        <CircleHelp />
+                        <span>{i18n("Help")}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                        disabled={isAutoSyncing}
+                        onSelect={onSync}
+                        title={lastSyncResult?.error}
+                    >
+                        {syncFailed ? (
+                            <AlertCircle className="text-destructive" />
+                        ) : (
+                            <RefreshCw
+                                className={isAutoSyncing ? "animate-spin" : ""}
+                            />
+                        )}
+                        <span>
+                            {isAutoSyncing
+                                ? i18n("Syncing…")
+                                : syncFailed
+                                  ? i18n("Retry sync")
+                                  : i18n("Sync device")}
+                        </span>
+                    </DropdownMenuItem>
+                    {(lastSyncTime || nextSyncTime) && (
+                        <div className="px-2 pb-1 text-xs text-muted-foreground">
+                            {lastSyncTime && (
+                                <p>
+                                    {locale === "cs-CZ"
+                                        ? "Naposledy synchronizováno"
+                                        : "Last synced"}{" "}
+                                    {lastSyncTime.toLocaleString(locale)}
+                                </p>
+                            )}
+                            {nextSyncTime && (
+                                <p>
+                                    {locale === "cs-CZ"
+                                        ? "Další synchronizace"
+                                        : "Next sync"}{" "}
+                                    {nextSyncTime.toLocaleString(locale)}
+                                </p>
+                            )}
+                        </div>
+                    )}
                     {isAdmin && (
                         <DropdownMenuItem onSelect={() => push("/admin")}>
                             <Shield />

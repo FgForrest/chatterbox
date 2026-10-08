@@ -5,8 +5,6 @@ import { useExtracted } from "next-intl";
 import { AppHeader } from "@/components/app-header";
 import { AppNav } from "@/components/app-nav";
 import { UserMenu } from "@/components/dashboard/user-menu";
-import { HelpButton } from "@/components/help/help-button";
-import { SyncButton } from "@/components/sync-button";
 import { Button } from "@/components/ui/button";
 import {
     Tooltip,
@@ -45,11 +43,8 @@ interface Props {
  * fits in ~360px. `min-w-0` on the title block lets it truncate before
  * pushing buttons off-screen.
  *
- * Action order is intentional: search palette (most general), sync
- * (most frequent), upload (alternate ingest path), user menu (escape
- * hatch to settings + identity). The sync button is status-aware --
- * its label includes "Synced 2m ago" / "Retry sync" / "Syncing..."
- * so a separate status block isn't needed.
+ * Search, upload, and account actions stay visible. Manual sync and help
+ * are available from the account menu.
  */
 export function WorkstationHeader({
     isAdmin,
@@ -92,11 +87,13 @@ export function WorkstationHeader({
                             onClick={onOpenPalette}
                             variant="outline"
                             size="sm"
-                            className="hidden h-9 md:inline-flex"
+                            className="h-9"
                             aria-label={i18n("Open command palette")}
                         >
-                            <Command className="mr-2 size-4" />
-                            <span>{i18n("Search")}</span>
+                            <Command className="size-4 sm:mr-2" />
+                            <span className="hidden sm:inline">
+                                {i18n("Search")}
+                            </span>
                             <kbd className="ml-2 hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground lg:inline">
                                 {i18n("⌘K")}
                             </kbd>
@@ -106,13 +103,6 @@ export function WorkstationHeader({
                         {i18n("Search recordings, transcripts, and actions")}
                     </TooltipContent>
                 </Tooltip>
-                <SyncButton
-                    lastSyncTime={lastSyncTime}
-                    nextSyncTime={nextSyncTime}
-                    isAutoSyncing={isAutoSyncing}
-                    lastSyncResult={lastSyncResult}
-                    onSync={onSync}
-                />
                 <input
                     ref={uploadInputRef}
                     type="file"
@@ -146,13 +136,17 @@ export function WorkstationHeader({
                         )}
                     </TooltipContent>
                 </Tooltip>
-                <HelpButton />
                 <UserMenu
                     isAdmin={isAdmin}
                     initialTheme={initialTheme}
                     userEmail={userEmail}
                     onOpenSettings={onOpenSettings}
                     onOpenShortcuts={onOpenShortcuts}
+                    lastSyncTime={lastSyncTime}
+                    nextSyncTime={nextSyncTime}
+                    isAutoSyncing={isAutoSyncing}
+                    lastSyncResult={lastSyncResult}
+                    onSync={onSync}
                 />
             </div>
         </AppHeader>
