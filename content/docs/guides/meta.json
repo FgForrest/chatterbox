@@ -4,6 +4,7 @@
         "connect-plaud-account",
         "ai-providers",
         "almanac",
+        "meeting-recorder",
         "notifications",
         "automation-and-webhooks",
         "backup-and-restore"

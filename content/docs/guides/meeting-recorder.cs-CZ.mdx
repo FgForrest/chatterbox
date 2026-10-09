@@ -1,0 +1,88 @@
+---
+title: Nahrávání schůzek
+description: Nahrávejte zvuk schůzek v prohlížeči a posílejte ho do Riffada k přepisu a shrnutí.
+---
+
+Riffado Meeting Recorder je rozšíření pro prohlížeče na bázi Chromia, které
+nahraje zvuk schůzky a nahraje ho do vaší instance Riffada, kde se přepíše a
+shrne jako každá jiná nahrávka.
+
+Zachytává váš **mikrofon** a **systémový zvuk**, který počítač přehrává, takže
+funguje jak pro schůzky v záložce prohlížeče, tak pro nativní aplikace Zoom
+nebo Teams.
+
+Pouze prohlížeče na bázi Chromia: Chrome, Edge, Brave, Vivaldi. Firefox a
+Safari rozšířením zachytávání systémového zvuku neumožňují.
+
+## Instalace
+
+Rozšíření není součástí Riffada; je to samostatná složka `extensions/recorder`
+v repozitáři, případně zabalený zip.
+
+1. Otevřete `chrome://extensions` a zapněte **Režim pro vývojáře**.
+2. Zvolte **Načíst rozbalené** a vyberte složku `extensions/recorder` (nebo
+   rozbalený zip vydání).
+3. Otevřete **Možnosti** rozšíření a povolte přístup k mikrofonu.
+
+## Propojení s Riffadem
+
+V Riffadu otevřete **Nastavení → Nahrávání schůzek**. Stránka rozšíření ve
+vašem prohlížeči sama najde a řekne vám, co dál:
+
+- **Nastavit nahrávání**: jedno kliknutí. Riffado vytvoří klíč pouze pro zápis
+  (umí vytvářet nahrávky, ale nečte vaši knihovnu) a předá ho rozšíření. Nic
+  se nekopíruje.
+- **Na vlastní instanci, pouze poprvé**: Chrome vyžaduje, abyste rozšíření
+  jednou povolili přístup k vašemu serveru. Klikněte na ikonu rozšíření,
+  zvolte **Connect to váš-server** a stránka nastavení se sama aktualizuje.
+  Pak klikněte na Nastavit nahrávání.
+- **Ruční nastavení** je vždy k dispozici dole na stránce, pokud chcete klíč
+  vložit do Možností rozšíření sami.
+
+Klíč nahrávání kdykoli zrušíte na téže stránce nebo v **API klíčích**.
+
+## Automatické nahrávání
+
+Ve výchozím stavu vypnuto. V **Možnostech rozšíření → Automatické nahrávání**
+nastavte platformu na **Auto** a jednou potvrďte zásady nahrávání. Od té chvíle
+při otevření schůzky na této platformě:
+
+1. Ikona na liště ukáže **REC?** (a pokud je zapnuto, i oznámení).
+2. Jedno kliknutí na ikonu nebo klávesová zkratka okamžitě spustí nahrávání:
+   bez vyskakovacího okna, bez výběru obrazovky, bez zaškrtávátka.
+3. Nahrávání se samo ukončí, když stránku schůzky opustíte, zavřete záložku,
+   nebo je schůzka několik minut potichu (výchozí 3 minuty).
+
+To jedno kliknutí vyžaduje Chrome: rozšíření smí začít zachytávat až poté, co
+ho vyvoláte. Nic nemůže spustit nahrávání samo od sebe, a tím, že nekliknete,
+schůzku, kterou nahrávat nechcete, jednoduše přeskočíte.
+
+Režim **Prompt** pouze upozorní a nahrávání nechá na ručním postupu.
+
+Vlastní server může nastavit výchozí hodnoty pro všechny pomocí
+`RECORDER_AUTO_RECORD_PLATFORMS` (například `google-meet,zoom,teams` nebo
+`all`), dále `RECORDER_AUTO_STOP_QUIET_SECONDS`, `RECORDER_NOTICE_TEXT` a
+`RECORDER_LOCK_DEFAULTS`. Uživatelé je mohou v rozšíření změnit, pokud nejsou
+uzamčené. Podporované platformy: Google Meet, Zoom (web), Microsoft Teams
+(web), Webex, Slack huddles, Whereby, Jitsi Meet. Nativní desktopové aplikace
+nemají záložku, kterou by šlo rozpoznat, a zůstávají u ručního postupu s
+výběrem obrazovky.
+
+Pokud klávesová zkratka nic nedělá, Chrome ji mohl nechat nepřiřazenou;
+stránka Možností ukazuje aktuální přiřazení a odkazuje na nastavení zkratek
+v Chromu.
+
+## Spolehlivost
+
+Zvuk se nahrává po krátkých segmentech průběžně během záznamu a ukládá do
+soukromého úložiště prohlížeče, takže krátký výpadek sítě nebo zavřená záložka
+ztratí nanejvýš pár sekund. Pokud se prohlížeč zavře uprostřed schůzky,
+rozšíření při příštím spuštění nabídne dokončení nahrání toho, co zachytilo.
+
+## Poznámka k souhlasu
+
+Nahrávání jiných osob může vyžadovat jejich souhlas a pravidla se liší podle
+země i podle platformy schůzky. Upozornění, které před nahráváním potvrzujete,
+je připomínka a záznam pro odpovědnost, nikoli souhlas sám o sobě. Za
+informování účastníků a dodržení zákonů a podmínek platforem, které se na vás
+vztahují, odpovídáte vy.

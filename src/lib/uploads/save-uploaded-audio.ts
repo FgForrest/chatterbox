@@ -23,6 +23,12 @@ export interface SaveUploadedAudioInput {
     storage: StorageProvider;
     sourceExtension: string;
     convertedFromVideo: boolean;
+    /**
+     * When the audio was actually captured. Defaults to now, which is right
+     * for a file picked from disk but wrong for a meeting recording that
+     * started an hour ago and is only being assembled now.
+     */
+    recordedAt?: Date;
 }
 
 export interface SavedUploadedAudio {
@@ -55,6 +61,7 @@ export async function saveUploadedAudio(
 
     const md5 = createHash("md5").update(input.buffer).digest("hex");
     const now = new Date();
+    const startTime = input.recordedAt ?? now;
 
     const [waveformPeaks] = await Promise.all([
         generateIngestWaveform(input.buffer),
@@ -71,8 +78,8 @@ export async function saveUploadedAudio(
                 plaudFileId: input.fileId,
                 filename: encryptText(input.basename),
                 duration: durationMs,
-                startTime: now,
-                endTime: new Date(now.getTime() + durationMs),
+                startTime,
+                endTime: new Date(startTime.getTime() + durationMs),
                 filesize: input.buffer.length,
                 fileMd5: md5,
                 storageType: env.DEFAULT_STORAGE_TYPE,

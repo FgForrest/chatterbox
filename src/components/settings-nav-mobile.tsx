@@ -62,6 +62,8 @@ export function SettingsNavMobile({
                 return i18n("Export/Backup");
             case "api-keys":
                 return i18n("API Keys");
+            case "recorder":
+                return i18n("Meeting Recorder");
             case "webhooks":
                 return i18n("Webhooks");
             case "billing":

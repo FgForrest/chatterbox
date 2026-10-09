@@ -54,6 +54,10 @@ type KnowledgeEmbedModule = {
     startKnowledgeEmbedSeeder: () => void;
 };
 
+type RecordingSessionSweeperModule = {
+    startRecordingSessionSweeper: () => void;
+};
+
 type EnvModule = {
     env: {
         IS_HOSTED: boolean;
@@ -174,6 +178,12 @@ export async function register() {
     const { startAutoLearnSweeper } =
         require("./lib/learn/auto-learn") as AutoLearnModule;
     startAutoLearnSweeper();
+
+    // Sweeps recording-session chunks left behind by a tab that closed
+    // mid-recording, and expired chunks of sessions whose finalize failed.
+    const { startRecordingSessionSweeper } =
+        require("./lib/recording-sessions/sweeper") as RecordingSessionSweeperModule;
+    startRecordingSessionSweeper();
 
     // Catch anything that escapes a background worker's own try/catch (or
     // any other unexpected process-level throw) instead of only ever

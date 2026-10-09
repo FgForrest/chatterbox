@@ -22,8 +22,10 @@ optionally an expiry, and copy the key shown once. The key is shown
 exactly once — store it in your password manager or the secret manager
 of whatever tool will use it.
 
-Format: `op_<24 url-safe chars>` (e.g. `op_K7vR8x...`). Keys carry
-read-only scope today; writes are not part of the public surface.
+Format: `op_<24 url-safe chars>` (e.g. `op_K7vR8x...`). Keys carry the
+`read` scope by default. The Meeting Recorder extension uses keys with the
+`recordings:write` scope, which the Settings → Meeting Recorder page issues;
+those can create recordings but cannot read your library.
 
 You authenticate by sending the key as a Bearer token:
 
