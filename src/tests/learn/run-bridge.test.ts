@@ -84,6 +84,22 @@ describe("runBridgePass", () => {
         );
     });
 
+    it("assesses every label and treats external candidates as possibilities", async () => {
+        const { chat, requests } = fakeChat([JSON.stringify(empty)]);
+        await runBridgePass({
+            ...input(chat),
+            unnamedLabels: ["speaker_0", "speaker_1"],
+            speakerCandidates: [{ name: "Jan Novák", source: "calendar" }],
+        });
+        expect(requests[0]?.system).toContain(
+            "assess every unnamed label separately",
+        );
+        expect(requests[0]?.system).toContain("not proof that a person spoke");
+        expect(requests[0]?.user).toContain(
+            '"speakerCandidates":[{"name":"Jan Novák","source":"calendar"}]',
+        );
+    });
+
     it("anchors corrections where their words stand, whatever offsets the model gave", async () => {
         const { chat } = fakeChat([
             JSON.stringify({
