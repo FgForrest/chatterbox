@@ -102,12 +102,17 @@ registration and password reset are switched off. See
 
 Self-host only; off when `IS_HOSTED=true`. Needs [single sign-on](#single-sign-on-openid-connect)
 and `APP_URL`; tokens come from the same realm. See
-[External MCP server](./mcp).
+[External MCP server](./mcp), and [Claude and Claude Code](./claude) for
+the public entrance and connector variables.
 
 | Variable                   | Default | Effect                                                                                               |
 | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
 | `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `riffado-mcp`). Unset, `/api/mcp` answers 404. |
-| `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Unset, any client of the realm whose token carries the roles. |
+| `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Unset, any client of the realm whose token carries the roles (logged as a warning at start). |
+| `MCP_PUBLIC_INGRESS_HEADER`| —       | Header the public reverse proxy sets on what it forwards (e.g. `X-MCP-Ingress`); the internal route removes it. A request carrying it is served only for `MCP_PUBLIC_CLIENTS`. |
+| `MCP_PUBLIC_CLIENTS`       | —       | Comma-separated client ids served through the public entrance (e.g. `claude`). Needs `MCP_PUBLIC_INGRESS_HEADER`. |
+| `MCP_CONNECTOR_KEYS`       | —       | Comma-separated `client=key` pairs (keys of 32+ characters): a token of a listed client is served only with `X-API-Key: <key>`, a Claude connector's request header. Secret. |
+| `MCP_RESOURCE_AUDIENCE`    | `false` | When `true`, also accept tokens whose `aud` is `<APP_URL>/api/mcp` (Keycloak's resource indicators). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Days a row of the `mcp_access_log` table is kept (1 to 3650).                                         |
 
 ## Learn (knowledge from recordings)

@@ -10,10 +10,11 @@ Tato stránka nabízí kompletní pohled. Podrobnější rozbor šifrování dat
 
 ## Autentizace
 
-Riffado podporuje dva způsoby autentizace na HTTP rozhraní:
+Riffado podporuje tři způsoby autentizace na HTTP rozhraní:
 
-1. **Relace prohlížeče** (lepší autentizace). E-mail + heslo, přičemž relace je potvrzena cookie podepsanou pomocí `BETTER_AUTH_SECRET`. Používají ji všechny stránky pod `(app)`, dashboard a interní trasy `/api/*`.
+1. **Relace prohlížeče** (lepší autentizace). E-mail + heslo nebo jednotné přihlášení, přičemž relace je potvrzena cookie podepsanou pomocí `BETTER_AUTH_SECRET`. Používají ji všechny stránky pod `(app)`, dashboard a interní trasy `/api/*`.
 2. **Osobní API klíč** (`op_<24 chars>`). Určeno pro externí integrace na rozhraní `/api/v1/*`. Posílá se jako Bearer token. Má pouze práva pro čtení.
+3. **Access token realmu jednotného přihlášení**, pouze na `/api/mcp` (vlastní hosting se zapnutým [externím MCP serverem](../self-hosting/mcp)). Posílají ho jako Bearer token AI klienti jako Claude a servisní účty backendů. Viz [Externí MCP server](#external-mcp-server).
 
 Kbelíky pro omezení počtu požadavků jsou ve výchozím nastavení navázány na přímou IP adresu klienta. Pokud vaše instance běží za reverzní proxy přepisující
 `X-Forwarded-For`, nastavte `RATE_LIMIT_TRUST_PROXY_HEADERS=true`, aby se jako klíč kbelíku použila původní klientská IP adresa. Nestavte tento parametr bez skutečné proxy přepisující hlavičku – klienti ji mohou zfalšovat a vaše omezení počtu požadavků je pak pouze formální.
@@ -87,6 +88,19 @@ Každý databázový dotaz pracující s uživatelskými daty nese `where(eq(tab
 
 Trasy `/api/v1/*` získávají user id z osobního API klíče po ověření; interní trasy jej získávají ze session. Dotazy s userId tedy běží v obou případech stejně.
 
+<span id="external-mcp-server" />
+
+## Externí MCP server
+
+Riffado zde funguje jako resource server: Keycloak lidi přihlašuje a vydává tokeny, Riffado je jen ověřuje.
+
+- **Jaké tokeny.** Podpis realmu (`RS256`, `PS256` nebo `ES256`, klíče z jeho discovery dokumentu), přesný issuer, expirace, `sub` a `typ` rovný `Bearer`, pokud ho token má, takže ID token je odmítnut. `aud` musí obsahovat `MCP_AUDIENCE` (nebo URL endpointu při `MCP_RESOURCE_AUDIENCE=true`). Tokeny pocházejí jen z realmu jednotného přihlášení: druhý realm by mohl vydat `sub` shodné se skutečným uživatelem.
+- **Kdo.** `sub` propojené s účtem v Riffadu přes jednotné přihlášení je tento uživatel; servisní účet (claim `client_id`) vystupuje jako účet Organizace. Účty se z tokenu nikdy nevytvářejí.
+- **Co.** Pět klientských rolí otevírá oblasti; nikdy nerozšíří, co stejný uživatel vidí v aplikaci. Běží stejné dotazy omezené na uživatele.
+- **Odkud.** `MCP_ALLOWED_CLIENTS` vyjmenovává klienty (`azp`), kteří smějí volat. Požadavky přes veřejný vstup, které reverzní proxy označí hlavičkou `MCP_PUBLIC_INGRESS_HEADER`, se obslouží jen pro `MCP_PUBLIC_CLIENTS`, takže token veřejného klienta (Claude Code) nebo servisního účtu je z internetu odmítnut. Klient uvedený v `MCP_CONNECTOR_KEYS` musí navíc poslat svůj klíč v `X-API-Key`, který se porovnává v konstantním čase. Hostovaný Claude používá důvěrného klienta, takže přihlášení pro něj umí dokončit jen konektor, který zná jeho tajemství. Viz [Claude a Claude Code](../self-hosting/claude#why-it-is-built-this-way).
+- **Odebrání přístupu.** Tokeny se ověřují lokálně proti klíčům realmu. Vypnutý uživatel nebo odebraná role se projeví po vypršení access tokenu (10 až 15 minut u klientů Claude); každé obnovení načte role znovu.
+- **Limity a audit.** 60 požadavků za minutu na volajícího (subjekt a klient) a 10 dešifrujících hledání; žádný limit na IP adresu, ten patří na proxy. Každé volání nástroje a každé odmítnutí pravého tokenu zapíše řádek do `mcp_access_log`: volající, klient, nástroj, výsledek, dotčená ID a IP. Nikdy argumenty ani obsah.
+
 <span id="account-suspension" />
 
 ## Pozastavení účtu
@@ -107,6 +121,9 @@ Některá rizika spadají zcela mimo samotnou aplikaci, pojmenováváme je expli
 - **Váš AI poskytovatel.** Surová audio data i přepisy ve formátu prostého textu jsou přenášeny poskytovateli, kterého jste si nakonfigurovali. Ochrana těchto dat je závislá na politice a infrastruktuře vašeho poskytovatele. Pokud jim nedůvěřujete, provozujte lokálního poskytovatele (Ollama / LM Studio) na stejném stroji jako je vaše instance Riffado.
 - **Kompromitovaný aplikační server.** Server drží `ENCRYPTION_KEY` a dešifruje data na požádání. Šifrování uložených dat chrání před únikem databáze, ne před vzdáleným spuštěním kódu (RCE).
 - **Kompromitovaný `ENCRYPTION_KEY`.** S klíčem zacházejte jako s hlavním přístupovým údajem k databázi. Jeho ztráta znamená neobnovitelnost zašifrovaného obsahu.
+- **Dodavatel vašeho AI klienta.** AI klient připojený k MCP serveru dostává, co přečte, a hostovaný klient jako Claude ukládá tokeny lidí na straně svého dodavatele. Platí podmínky zpracování dat tohoto dodavatele.
+- **Váš poskytovatel identity.** Kdo může v realmu měnit role, klienty nebo hesla, rozhoduje, kdo čte přes MCP server, a administrátoři realmu se mohou přihlásit jako kdokoliv.
+- **Prompt injection.** Přepisy jsou to, co lidé řekli, a AI klient jednající sám může text v nich následovat. Riffado výsledky nástrojů označuje jako data a klientovi dovoluje změnit jen stav nebo přiřazení úkolu (`tasks:write`).
 
 <span id="compliance-claims" />
 

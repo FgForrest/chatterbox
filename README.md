@@ -63,6 +63,7 @@ This repository builds on Riffado with features for people who work with their r
 
 - **The Organization.** A shared folder tree next to each user's private one. Share a recording by filing it there; only recordings with every speaker named and every review finished can be shared. Speakers become shared people, curated by one organization account.
 - **Single sign-on** with any OpenID Connect provider, and registration that can stay closed.
+- **Ask Claude about your recordings.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, the Almanac and tasks. People sign in through your Keycloak, and their roles there decide what each one can reach.
 
 **Your data, your way**
 
@@ -132,6 +133,7 @@ The **[user guide](content/docs/user-guide/index.md)** in this repository covers
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
 - [The Organization](content/docs/self-hosting/organization.mdx)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
+- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Riffado in Claude](content/docs/user-guide/claude.md)
 - [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
 - [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
 - [Meeting recorder (meetrec)](cmd/meetrec/README.md)
@@ -143,7 +145,6 @@ Every instance also serves these pages at `/docs`. The upstream documentation li
 - [Upgrading](https://riffado.com/docs/self-hosting/upgrading)
 - [S3-compatible storage](https://riffado.com/docs/self-hosting/storage-s3)
 - [Email / SMTP](https://riffado.com/docs/self-hosting/email-smtp)
-- [External MCP server](https://riffado.com/docs/self-hosting/mcp)
 - [Connect your Plaud account](https://riffado.com/docs/guides/connect-plaud-account)
 - [AI providers](https://riffado.com/docs/guides/ai-providers)
 - [Backup & restore](https://riffado.com/docs/guides/backup-and-restore)

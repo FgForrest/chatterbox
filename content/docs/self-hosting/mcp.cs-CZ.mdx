@@ -61,8 +61,13 @@ vybírají řádky (viz [Co volající vidí](#what-callers-see)).
 
 ```bash
 MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
-# MCP_ALLOWED_CLIENTS=claude-desktop,acme-reports
+# MCP_ALLOWED_CLIENTS=claude,claude-code,acme-reports
 # MCP_AUDIT_RETENTION_DAYS=90
+# For Claude from the internet, see the Claude and Claude Code page:
+# MCP_PUBLIC_INGRESS_HEADER=X-MCP-Ingress
+# MCP_PUBLIC_CLIENTS=claude
+# MCP_CONNECTOR_KEYS=claude=<openssl rand -hex 32>
+# MCP_RESOURCE_AUDIENCE=false
 ```
 
 - Server vyžaduje jednotné přihlášení (`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
@@ -74,7 +79,9 @@ MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
   se bude shodovat se skutečným uživatelem.
 - Při nezadané hodnotě `MCP_AUDIENCE` odpovídá `/api/mcp` a jeho metadata 404.
 - Hosted Riffado jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
-- `docker-compose.yml` předává všechny tři proměnné dál.
+- `docker-compose.yml` předává všechny tyto proměnné dál.
+- Při prázdném `MCP_ALLOWED_CLIENTS` server při startu zapíše do logu
+  varování: volat smí kterýkoliv klient realmu, jehož token nese role.
 
 Riffado načítá `issuer` realmu a podpisové klíče z
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Hodnota `iss`
@@ -191,8 +198,16 @@ odpovědi v JSON, žádné relace ani server-sent events, jedna JSON-RPC
 zpráva na jeden požadavek. Batch (JSON pole) je odmítnut s 400 a
 JSON-RPC chybou `-32600`, MCP 2025-06-18 zrušilo batching. Dotaz bez
 použitelného tokenu dostává 401
-s `WWW-Authenticate: Bearer resource_metadata="…"`, která odkazuje na
-metadata, kde je realm jako authorization server. Tato metadata jsou také dostupná na `<APP_URL>/.well-known/oauth-protected-resource`.
+s `WWW-Authenticate: Bearer resource_metadata="…", scope="openid"`
+(a s `error="invalid_token"`, pokud byl token poslán). Hlavička odkazuje na
+metadata, kde je realm jako authorization server a `openid` jako scope,
+o který má klient žádat. Bez uvedeného scope by klient žádal o všechny
+scopes, které realm nabízí, a Keycloak by přihlášení odmítl s
+`invalid_scope`. Tato metadata jsou také dostupná na `<APP_URL>/.well-known/oauth-protected-resource`.
+
+Pravý token realmu, který nebyl vydán pro tento server (dostane ho
+například člověk bez kterékoliv z pěti rolí), odpoví 403, ne 401: 401
+by klienta poslala znovu přihlašovat, pro stejný token.
 
 Každé klientské aplikaci zadejte client id, které jste pro ni
 vytvořili v kroku 2. Dynamic Client Registration není k tomu potřeba.
@@ -215,6 +230,17 @@ curl -s https://riffado.example.com/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+<span id="claude-and-claude-code" />
+
+## Claude a Claude Code
+
+Claude (claude.ai, Claude Desktop, mobilní aplikace a Cowork) a Claude
+Code se připojují přes přihlášení realmu. Claude na server přistupuje z
+cloudu Anthropicu, takže potřebuje úzký veřejný vstup a důvěrného
+klienta v Keycloaku. Stránka [Claude a Claude Code](./claude) vás
+provede klienty v Keycloaku, nastavením Riffada, reverzní proxy,
+konektorem i kontrolami.
+
 <span id="what-callers-see" />
 
 ## Co volající vidí
@@ -227,9 +253,12 @@ curl -s https://riffado.example.com/api/mcp \
 
 Účty nejsou nikdy vytvořeny z tokenu: člověk se musí nejdřív alespoň
 jednou přihlásit do Riffada, než jeho AI klient může server volat.
-Pozastavený účet, token bez některé z pěti rolí, klient mimo
-`MCP_ALLOWED_CLIENTS` a servisní účet bez zapnuté Organizace dostanou 403
-"Forbidden".
+Token bez kterékoliv z pěti rolí dostane 403 "This token carries no
+Riffado MCP role". Pozastavený účet, klient mimo `MCP_ALLOWED_CLIENTS`,
+servisní účet bez zapnuté Organizace, klient, kterého veřejný vstup
+neobsluhuje, a klient bez svého klíče konektoru dostanou 403
+"Forbidden". Důvod uvádí log aplikace (viz
+[Když se Claude nepřipojí](./claude#when-claude-cannot-connect)).
 
 **Úkoly** kopírují logiku stránky Úkoly:
 
@@ -285,7 +314,6 @@ skutečně řekli, tedy data, nikoliv instrukce.
 
 | Limit                                | Hodnota                                 |
 | ------------------------------------- | --------------------------------------- |
-| Požadavky na IP klienta, před ověřením tokenu | 120 za minutu                      |
 | Požadavky na volajícího (subjekt a klient), včetně odmítnutých | 60 za minutu  |
 | Hledání na volajícího                | 10 za minutu                            |
 | Velikost těla žádosti                | 256 KB (nad tím 413)                    |
@@ -294,9 +322,11 @@ Hledání jsou nástroje `search_*`, `list_recordings` s `title`,
 `list_mishearings` (čte knihovny oprav) a všechny
 `recording` zadané jako název místo id. Po překročení limitu odpověď
 bude 429 s `Retry-After`; hledání nad svůj limit odpoví "Příliš mnoho hledání;
-zkuste za minutu znovu". Limit pro IP funguje pouze, je-li známá IP
-klienta, tedy při provozu za `RATE_LIMIT_TRUST_PROXY_HEADERS=true` a správně přepisovaných forwarding
-hlavičkách (viz [Proměnné prostředí](./environment-variables)).
+zkuste za minutu znovu". Limit na IP klienta není: všichni uživatelé
+Claude přicházejí z několika stejných adres Anthropicu. Objem omezte na
+reverzní proxy. Sloupec `ip` v přístupovém logu vyžaduje
+`RATE_LIMIT_TRUST_PROXY_HEADERS=true` za proxy, která forwarding
+hlavičky přepisuje (viz [Proměnné prostředí](./environment-variables)).
 Pokud není dostupný discovery dokument realmu nebo podpisové klíče,
 endpoint odpovídá 503 místo 401, takže klient nezahodí dobrý token.
 
@@ -326,7 +356,8 @@ Pokud není nastaveno, může volat libovolný klient realmů s
 rolími `riffado-mcp` v tokenu.
 
 Tokeny se kontrolují na přesného issuer, `aud` obsahující
-`MCP_AUDIENCE`, expiraci (toleruje se 30 sekund rozdílu v čase),
+`MCP_AUDIENCE` (nebo URL MCP endpointu při
+`MCP_RESOURCE_AUDIENCE=true`), expiraci (toleruje se 30 sekund rozdílu v čase),
 `RS256`, `PS256` nebo `ES256` podpis a hodnotu `typ`
 jako `Bearer` pokud ji mají: Keycloak access tokeny ji mají, ID token bude odmítnut.
 Riffado je nikdy neposílá dál.
@@ -336,4 +367,8 @@ Riffado je nikdy neposílá dál.
 ## Vyzkoušení lokálně
 
 End-to-end Keycloak realm ze stránky [Jednotné přihlášení](./sso#trying-it-locally)
-zatím neobsahuje klienty MCP; je nutné je přidat ručně.
+obsahuje klienty MCP: `riffado-mcp`, `riffado-mcp-tester`,
+`riffado-mcp-bot`, `claude` a `claude-code`. Volitelný test
+`src/tests/mcp/keycloak.integration.test.ts` se přes ně přihlašuje stejně
+jako Claude (jeho hlavička popisuje spuštění), s
+`docker-compose.e2e.sso-resource-indicators.yml` i bez něj.

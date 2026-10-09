@@ -57,8 +57,13 @@ choose the rows (see [What callers see](#what-callers-see)).
 
 ```bash
 MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
-# MCP_ALLOWED_CLIENTS=claude-desktop,acme-reports
+# MCP_ALLOWED_CLIENTS=claude,claude-code,acme-reports
 # MCP_AUDIT_RETENTION_DAYS=90
+# For Claude from the internet, see the Claude and Claude Code page:
+# MCP_PUBLIC_INGRESS_HEADER=X-MCP-Ingress
+# MCP_PUBLIC_CLIENTS=claude
+# MCP_CONNECTOR_KEYS=claude=<openssl rand -hex 32>
+# MCP_RESOURCE_AUDIENCE=false
 ```
 
 - The server needs single sign-on (`OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
@@ -70,7 +75,9 @@ MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
   real user's.
 - With `MCP_AUDIENCE` unset, `/api/mcp` and its metadata answer 404.
 - Hosted Riffado ignores single sign-on, so the server stays off there.
-- `docker-compose.yml` passes all three variables through.
+- `docker-compose.yml` passes all of them through.
+- With `MCP_ALLOWED_CLIENTS` empty, the server logs a warning at start:
+  any client of the realm whose token carries the roles may call.
 
 Riffado reads the realm's `issuer` and signing keys from
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. A token's `iss`
@@ -184,9 +191,17 @@ responses, no sessions or server-sent events, one JSON-RPC message per
 request. A batch (a JSON array) is refused with 400 and JSON-RPC error
 `-32600`, as MCP 2025-06-18 dropped batching. A request without a
 usable token gets 401 with
-`WWW-Authenticate: Bearer resource_metadata="…"`, pointing at the
-metadata, which names the realm as the authorization server. The same
-metadata is also served at `<APP_URL>/.well-known/oauth-protected-resource`.
+`WWW-Authenticate: Bearer resource_metadata="…", scope="openid"`
+(plus `error="invalid_token"` when a token was sent), pointing at the
+metadata, which names the realm as the authorization server and
+`openid` as the scope to ask for. Without a named scope, a client asks
+for every scope the realm lists and Keycloak refuses the sign-in with
+`invalid_scope`. The same metadata is also served at
+`<APP_URL>/.well-known/oauth-protected-resource`.
+
+A genuine token of the realm that was not issued for this server (a
+person without any of the five roles gets one) answers 403, not 401: a
+401 would send the client through sign-in again, for the same token.
 
 Give each client application the client id you created for it in step 2.
 Dynamic Client Registration is not needed for that. Open anonymous
@@ -209,6 +224,15 @@ curl -s https://riffado.example.com/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+## Claude and Claude Code
+
+Claude (claude.ai, Claude Desktop, the mobile apps and Cowork) and Claude
+Code connect through the realm's own sign-in. Claude reaches the server
+from Anthropic's cloud, so it needs a narrow public entrance and a
+confidential Keycloak client. [Claude and Claude Code](./claude) walks
+through the Keycloak clients, the settings, the reverse proxy, the
+connector and the checks.
+
 ## What callers see
 
 | Token                                                   | Caller                                                                 |
@@ -218,10 +242,13 @@ curl -s https://riffado.example.com/api/mcp \
 | Anything else                                           | Refused with 403 "Sign in to Riffado once first".                     |
 
 Accounts are never created from a token: a person must sign in to
-Riffado once before their AI client can call it. A suspended account, a
-token without any of the five roles, a client outside
-`MCP_ALLOWED_CLIENTS`, and a service account while the Organization is
-off get 403 "Forbidden".
+Riffado once before their AI client can call it. A token without any of
+the five roles gets 403 "This token carries no Riffado MCP role". A
+suspended account, a client outside `MCP_ALLOWED_CLIENTS`, a service
+account while the Organization is off, a client the public entrance does
+not serve, and a client without its connector key get 403 "Forbidden".
+The app log names the reason (see
+[When Claude cannot connect](./claude#when-claude-cannot-connect)).
 
 **Tasks** follow the Tasks page:
 
@@ -278,7 +305,6 @@ people said, data and not instructions.
 
 | Limit                                  | Value                                   |
 | -------------------------------------- | --------------------------------------- |
-| Requests per client IP, before the token is checked | 120 per minute                |
 | Requests per caller (subject and client), refused ones included | 60 per minute  |
 | Searches per caller                     | 10 per minute                           |
 | Request body                            | 256 KB (413 above)                      |
@@ -287,8 +313,9 @@ Searches are the `search_*` tools, `list_recordings` with `title`,
 `list_mishearings` (it reads the correction libraries), and any
 `recording` given as a title rather than an id. Over a limit, the answer
 is 429 with `Retry-After`; a search over its own limit answers "Too many
-searches; retry in a minute". The per-IP
-limit needs a known client IP, that is
+searches; retry in a minute". There is no limit per client IP: every
+hosted Claude user arrives from the same few Anthropic addresses. Limit
+volume at the reverse proxy instead. The `ip` of the access log needs
 `RATE_LIMIT_TRUST_PROXY_HEADERS=true` behind a proxy that overwrites the
 forwarding headers (see [Environment variables](./environment-variables)).
 While the realm's discovery document or signing keys cannot be reached,
@@ -320,7 +347,8 @@ table.
 client of the realm whose token carries `riffado-mcp` roles may call.
 
 Tokens are checked for the exact issuer, `aud` containing
-`MCP_AUDIENCE`, an expiry (30 seconds of clock skew allowed), an
+`MCP_AUDIENCE` (or the MCP endpoint's URL, with
+`MCP_RESOURCE_AUDIENCE=true`), an expiry (30 seconds of clock skew allowed), an
 `RS256`, `PS256` or `ES256` signature, and a `typ` of `Bearer` when they
 carry one: Keycloak access tokens do, so an ID token is refused. Riffado
 never forwards them.
@@ -328,5 +356,8 @@ never forwards them.
 ## Trying it locally
 
 The end-to-end Keycloak realm from [Single sign-on](./sso#trying-it-locally)
-has no MCP clients yet; they are added to it separately. Until then,
-create the clients above in that realm by hand.
+has the MCP clients: `riffado-mcp`, `riffado-mcp-tester`,
+`riffado-mcp-bot`, `claude` and `claude-code`. The opt-in test
+`src/tests/mcp/keycloak.integration.test.ts` signs in through them the
+way Claude does (its header says how to run it), with and without
+`docker-compose.e2e.sso-resource-indicators.yml`.
