@@ -110,6 +110,42 @@ export async function saveGoogleConnection(
     }
 }
 
+/** Adds Meet consent only while the same Google account and scopes remain connected. */
+export async function saveMeetGrant(
+    userId: string,
+    expectedSubject: string,
+    expectedScopes: string[],
+    claims: IdTokenClaims,
+    tokens: TokenResponse,
+): Promise<boolean> {
+    const [updated] = await db
+        .update(oauthConnections)
+        .set({
+            email: claims.email,
+            hostedDomain: claims.hostedDomain,
+            scopes: tokens.scopes.join(" "),
+            ...(tokens.refreshToken
+                ? { refreshToken: encryptText(tokens.refreshToken) }
+                : {}),
+            status: "active",
+            lastError: null,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(oauthConnections.userId, userId),
+                eq(oauthConnections.provider, "google"),
+                eq(oauthConnections.subject, expectedSubject),
+                eq(oauthConnections.status, "active"),
+                eq(oauthConnections.scopes, expectedScopes.join(" ")),
+            ),
+        )
+        .returning({ id: oauthConnections.id });
+    if (!updated) return false;
+    invalidateGoogleAccessToken(userId);
+    return true;
+}
+
 export async function markGoogleNeedsReconnect(
     userId: string,
     message: string,

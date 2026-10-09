@@ -5,7 +5,12 @@ import {
     getGoogleIntegrationConfig,
     getGoogleOAuthConfig,
 } from "./config";
-import { getGoogleConnectionStatus, saveGoogleConnection } from "./connection";
+import {
+    getGoogleConnectionStatus,
+    saveGoogleConnection,
+    saveMeetGrant,
+} from "./connection";
+import { GOOGLE_MEET_READ_SCOPE } from "./meet-consent";
 import { exchangeAuthorizationCode, readIdTokenClaims } from "./oauth";
 import { openGoogleOAuthState } from "./oauth-state";
 
@@ -17,6 +22,7 @@ export type GoogleConnectOutcome =
     | "email_not_verified"
     | "missing_scope"
     | "missing_calendar_scope"
+    | "missing_meet_scope"
     | "account_mismatch"
     | "missing_existing_scope"
     | "failed";
@@ -53,7 +59,7 @@ export async function completeGoogleConnect(input: {
     if (input.params.get("error")) return { outcome: "denied", returnTo };
     const code = input.params.get("code");
     const config =
-        sealed.purpose === "calendar"
+        sealed.purpose === "calendar" || sealed.purpose === "meet"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!code || !config) return { outcome: "failed", returnTo };
@@ -75,23 +81,36 @@ export async function completeGoogleConnect(input: {
             return { outcome: "domain_not_allowed", returnTo };
         }
         const requiredScope =
-            sealed.purpose === "calendar"
-                ? GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE
-                : GOOGLE_DRIVE_FILE_SCOPE;
+            sealed.purpose === "meet"
+                ? GOOGLE_MEET_READ_SCOPE
+                : sealed.purpose === "calendar"
+                  ? GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE
+                  : GOOGLE_DRIVE_FILE_SCOPE;
         if (!tokens.scopes.includes(requiredScope)) {
             return {
                 outcome:
-                    sealed.purpose === "calendar"
-                        ? "missing_calendar_scope"
-                        : "missing_scope",
+                    sealed.purpose === "meet"
+                        ? "missing_meet_scope"
+                        : sealed.purpose === "calendar"
+                          ? "missing_calendar_scope"
+                          : "missing_scope",
                 returnTo,
             };
         }
         const existing = await getGoogleConnectionStatus(input.userId);
         if (
-            sealed.purpose === "calendar" &&
+            (sealed.purpose === "calendar" || sealed.purpose === "meet") &&
             existing &&
             existing.subject !== claims.subject
+        ) {
+            return { outcome: "account_mismatch", returnTo };
+        }
+        if (
+            sealed.purpose === "meet" &&
+            (!existing ||
+                existing.status !== "active" ||
+                existing.subject !== sealed.expectedSubject ||
+                claims.subject !== sealed.expectedSubject)
         ) {
             return { outcome: "account_mismatch", returnTo };
         }
@@ -101,13 +120,24 @@ export async function completeGoogleConnect(input: {
         ) {
             return { outcome: "missing_existing_scope", returnTo };
         }
-        await saveGoogleConnection(input.userId, claims, tokens);
+        if (sealed.purpose === "meet") {
+            const updated = await saveMeetGrant(
+                input.userId,
+                sealed.expectedSubject ?? "",
+                existing?.scopes ?? [],
+                claims,
+                tokens,
+            );
+            if (!updated) return { outcome: "failed", returnTo };
+        } else {
+            await saveGoogleConnection(input.userId, claims, tokens);
+        }
     } catch (error) {
         console.error("[google] connecting an account failed:", error);
         return { outcome: "failed", returnTo };
     }
     // Exports paused by a lost connection pick up where they stopped.
-    if (sealed.purpose !== "calendar") {
+    if (sealed.purpose === "drive" || sealed.purpose === undefined) {
         await enqueueExportPlansForUser(input.userId).catch((error) => {
             console.error("[google] could not re-plan exports:", error);
         });

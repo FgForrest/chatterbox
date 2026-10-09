@@ -31,6 +31,7 @@ import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
+import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
@@ -673,11 +674,24 @@ async function runLearnJob({
         const selectedEvent = calendarEvents.find(
             (event) => event.id === payload.calendarEventId,
         );
-        const speakerCandidates =
+        const calendarSpeakerCandidates =
             selectedEvent?.attendees.map((attendee) => ({
                 name: attendee.name,
                 source: "calendar" as const,
             })) ?? [];
+        const meetSpeakerCandidates =
+            selectedEvent && recording
+                ? await getMeetSpeakerCandidates({
+                      userId: run.userId,
+                      event: selectedEvent,
+                      recordingStartedAt: recording.start,
+                      recordingEndedAt: recording.end,
+                  })
+                : [];
+        const speakerCandidates = [
+            ...calendarSpeakerCandidates,
+            ...meetSpeakerCandidates,
+        ];
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"

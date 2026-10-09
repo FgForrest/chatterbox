@@ -152,7 +152,7 @@ export interface LearnRecorder {
 /** Possible attendee supplied by an optional external context source. */
 export interface LearnSpeakerCandidate {
     name: string;
-    source: "calendar";
+    source: "calendar" | "meet";
 }
 
 /** What both paths are told about the person who made the recording. */
