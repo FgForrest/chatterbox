@@ -13,6 +13,10 @@ import {
 import { toast } from "sonner";
 import { HelpLink } from "@/components/help/help-button";
 import {
+    type CalendarChoice,
+    calendarChoiceFor,
+} from "@/components/learn/calendar-choice";
+import {
     type LearnMarks,
     learnMarksFrom,
 } from "@/components/learn/learn-marks";
@@ -164,6 +168,10 @@ export function LearnReview({
     // The last run's results, once it is over.
     const [resultsOpen, setResultsOpen] = useState(false);
     const [running, setRunning] = useState(false);
+    const [calendarChoices, setCalendarChoices] = useState<
+        CalendarChoice[] | null
+    >(null);
+    const [calendarForget, setCalendarForget] = useState(false);
     const [finishing, setFinishing] = useState(false);
     // The speaker item someone else is being picked for.
     const [picking, setPicking] = useState<ItemView | null>(null);
@@ -221,7 +229,30 @@ export function LearnReview({
     const failure = useLearnFailure();
 
     /** Start a run; `forget`: rejections on the recording go first. */
-    const learn = async (forget = false) => {
+    const learn = async (forget = false, calendarEventId?: string) => {
+        let selectedEventId = calendarEventId;
+        if (selectedEventId === undefined && (!view || view === "private")) {
+            try {
+                const result = await fetch(
+                    `/api/recordings/${recordingId}/calendar-events`,
+                );
+                if (result.ok) {
+                    const { events } = (await result.json()) as {
+                        events: CalendarChoice[];
+                    };
+                    const choice = calendarChoiceFor(events);
+                    if (choice.kind === "choose") {
+                        setCalendarChoices([...choice.events]);
+                        setCalendarForget(forget);
+                        return;
+                    }
+                    selectedEventId =
+                        choice.kind === "one" ? choice.eventId : undefined;
+                }
+            } catch {
+                selectedEventId = undefined;
+            }
+        }
         setResultsOpen(false);
         setRunning(true);
         try {
@@ -245,7 +276,7 @@ export function LearnReview({
             }
             const response = await fetch(
                 withRecordingView(
-                    `/api/recordings/${recordingId}/learn?source=${source}`,
+                    `/api/recordings/${recordingId}/learn?source=${source}${selectedEventId ? `&calendarEventId=${encodeURIComponent(selectedEventId)}` : ""}`,
                     view,
                 ),
                 { method: "POST" },
@@ -800,6 +831,54 @@ export function LearnReview({
 
     return (
         <>
+            <Dialog
+                open={calendarChoices !== null}
+                onOpenChange={(next) => {
+                    if (!next) setCalendarChoices(null);
+                }}
+            >
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {i18n("Choose a calendar event")}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {i18n(
+                                "Choose the meeting connected to this recording. Invited people are possible names, not confirmed speakers.",
+                            )}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        {(calendarChoices ?? []).map((event) => (
+                            <Button
+                                key={event.id}
+                                type="button"
+                                variant="outline"
+                                className="h-auto w-full justify-start whitespace-normal text-left"
+                                onClick={() => {
+                                    setCalendarChoices(null);
+                                    void learn(calendarForget, event.id);
+                                }}
+                            >
+                                {event.title} ·{" "}
+                                {new Date(event.start).toLocaleString()}
+                            </Button>
+                        ))}
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                                setCalendarChoices(null);
+                                void learn(calendarForget, "");
+                            }}
+                        >
+                            {i18n("Continue without calendar")}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
             {ready ? (
                 <Button
                     type="button"

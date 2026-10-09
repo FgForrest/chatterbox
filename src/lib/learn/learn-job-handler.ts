@@ -30,6 +30,7 @@ import {
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
@@ -644,6 +645,39 @@ async function runLearnJob({
             ![...frameBefore.answeredLabels.values()].includes(recorderId)
                 ? { personId: recorderId, name: recorderName }
                 : null;
+        const [recording] =
+            payload.calendarEventId &&
+            run.view === "private" &&
+            run.actorUserId === run.userId
+                ? await db
+                      .select({
+                          start: recordings.startTime,
+                          end: recordings.endTime,
+                      })
+                      .from(recordings)
+                      .where(
+                          and(
+                              eq(recordings.id, run.recordingId),
+                              eq(recordings.userId, run.userId),
+                          ),
+                      )
+                      .limit(1)
+                : [];
+        const calendarEvents = recording
+            ? await listCalendarEventsForRecording({
+                  userId: run.userId,
+                  start: recording.start,
+                  end: recording.end,
+              }).catch(() => [])
+            : [];
+        const selectedEvent = calendarEvents.find(
+            (event) => event.id === payload.calendarEventId,
+        );
+        const speakerCandidates =
+            selectedEvent?.attendees.map((attendee) => ({
+                name: attendee.name,
+                source: "calendar" as const,
+            })) ?? [];
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"
@@ -656,6 +690,9 @@ async function runLearnJob({
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      ...(speakerCandidates.length > 0
+                          ? { speakerCandidates }
+                          : {}),
                       signal,
                   })
                 : await runFallbackPass({
@@ -670,6 +707,9 @@ async function runLearnJob({
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      ...(speakerCandidates.length > 0
+                          ? { speakerCandidates }
+                          : {}),
                       signal,
                   });
         reportProgress({ phase: "checking" });

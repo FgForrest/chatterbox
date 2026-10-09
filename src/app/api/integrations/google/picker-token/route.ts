@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { getGoogleIntegrationConfig } from "@/lib/integrations/google/config";
-import { getGoogleAccessToken } from "@/lib/integrations/google/connection";
+import {
+    GOOGLE_DRIVE_FILE_SCOPE,
+    getGoogleIntegrationConfig,
+} from "@/lib/integrations/google/config";
+import {
+    getGoogleAccessToken,
+    getGoogleConnectionStatus,
+} from "@/lib/integrations/google/connection";
 import { GoogleConnectionUnavailableError } from "@/lib/integrations/google/errors";
 
 /**
@@ -18,6 +24,14 @@ export const GET = apiHandler(async (request) => {
             ErrorCode.INVALID_INPUT,
             "The Google integration is not configured",
             404,
+        );
+    }
+    const connection = await getGoogleConnectionStatus(session.user.id);
+    if (!connection?.scopes.includes(GOOGLE_DRIVE_FILE_SCOPE)) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Connect Google Drive first",
+            409,
         );
     }
     let accessToken: string;
