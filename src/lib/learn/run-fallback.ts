@@ -100,6 +100,8 @@ export interface FallbackInput {
     unnamedLabels: readonly string[];
     /** Who made the recording, when the knowledge base knows them. */
     recorder?: LearnRecorder | null;
+    /** Optional possible attendees; never direct speaker evidence. */
+    speakerCandidates?: readonly LearnSpeakerCandidate[];
     /** Rendered characters per window. */
     windowChars?: number;
     signal?: AbortSignal;
@@ -147,9 +149,19 @@ export interface LearnRecorder {
     name: string;
 }
 
+/** Possible attendee supplied by an optional external context source. */
+export interface LearnSpeakerCandidate {
+    name: string;
+    source: "calendar";
+}
+
 /** What both paths are told about the person who made the recording. */
 export const RECORDER_RULE =
-    "recorder (in the choices, or null): the person who made the recording, a known person. They nearly always speak in it, and are rarely called by name: most often they lead it (open it, wait for the others, hand them the floor by name, keep the agenda, close it). Name them (their personId) for the one unnamed label that plainly does this, even without their name being said; evidence is 1-3 times copied from the lines where that label leads. Never for more than one label, and null when no label plainly leads or another label is already named as them.";
+    "recorder (in the choices, or null): the person who made the recording, a known person. They may speak without being called by name. Name them (their personId) for the one unnamed label that plainly leads it (opens it, waits for others, hands them the floor by name, keeps the agenda or closes it), even without their name being said; evidence is 1-3 times copied from the lines where that label leads. Never for more than one label, and null when no label plainly leads or another label is already named as them. Assess every other unnamed label too.";
+
+/** The speaker evidence rule shared by both Learn model paths. */
+export const SPEAKER_RULE =
+    "speakers: assess every unnamed label separately. Look up names and nicknames used to address each speaker, including inflected forms, then consider every matching known person. Name one person only when direct transcript evidence links that label: they introduce themselves, answer in the next turn after being addressed by name, or confirm a name said about them. External speakerCandidates are possible attendees, not proof that a person spoke or that a label is theirs. Do not infer identity from topic, attendance, or elimination. When a first name or nickname matches multiple known people, leave the label unresolved unless additional direct transcript evidence distinguishes one. A name may also refer to someone unknown to the knowledge base. Give 1-3 evidence times from the name and response lines; propose no speaker when evidence is insufficient.";
 
 /** What both paths are told about proposing new people and things. */
 export const NEW_RECORDS_RULE =
@@ -158,6 +170,7 @@ export const NEW_RECORDS_RULE =
 const MENTIONS_SYSTEM = [
     "You read a meeting transcript and list the words that name people, organizations, teams, projects, products or systems, places, documents and specialist terms.",
     "Copy each exactly as it is written in the transcript, even where it looks misheard or misspelled, and give the index of the turn (T<n>) it is in.",
+    "Prioritize names and nicknames spoken to a person who answers in the next turn, for every speaker label. Include these before organizations or terms when the limit is reached.",
     `Where it differs, add forms: at most ${MAX_FORMS} other ways the knowledge base may write it: its base form (the nominative, spelled right where it sounds misheard: "Forestu" -> "Forest", "Honzou Šimákem" -> "Honza Šimák"), and for a nickname or short form the full name it stands for ("Honza" -> "Jan").`,
     DATA_RULE,
     `Answer with one raw JSON object and nothing else: {"mentions":[{"text":string,"turn":number,"forms":[string]}]}. At most ${MAX_MENTIONS} mentions; each distinct spelling once.`,
@@ -172,7 +185,7 @@ const ANSWER_SYSTEM = [
     "You get a transcript, the records the knowledge base already has for words in it (the only ids you may use), the words it found nothing for (notFound: they may name new records), the relation types and entity types you may use, and the speaker labels nobody has named yet.",
     DATA_RULE,
     "Propose only what the transcript itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
-    "speakers: for an unnamed label only. Name a known person (personId) only on direct evidence in the transcript: the speaker introduces themselves, or is addressed by name and answers in the next turn, or confirms a name said about them. Never from what they talk about, and never because another label is someone else. The meeting may include people the knowledge base does not know: a first name alone (or its inflected form, such as a vocative) fits a known person only when no other known person has that first name, and even then it may be someone else; when in doubt answer null. evidence is 1-3 times copied from the transcript lines where the name is said or answered; personId null when nobody known fits.",
+    SPEAKER_RULE,
     RECORDER_RULE,
     NEW_RECORDS_RULE,
     "corrections: only for a listed record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs, never put the record's base name into an inflected place). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
@@ -244,6 +257,36 @@ export function windowsOf(
 // Marks and joiners belong to the letter before them: "Cafe" is not a
 // whole word in "Cafe\u0301".
 const WORD_CHAR = /[\p{L}\p{N}\p{M}\u200c\u200d]/u;
+
+function directAddressNames(
+    turns: readonly TranscriptTurn[],
+    unnamedLabels: readonly string[],
+): Map<string, Set<string>> {
+    const names = new Map<string, Set<string>>();
+    const unresolved = new Set(unnamedLabels);
+    for (let offset = 0; offset + 1 < turns.length; offset++) {
+        const addressed = turns[offset + 1];
+        const previous = turns[offset];
+        if (
+            !addressed ||
+            !previous ||
+            addressed.speaker === previous.speaker ||
+            !unresolved.has(addressed.speaker)
+        ) {
+            continue;
+        }
+        for (const match of previous.text.matchAll(
+            /(?:^|[^\p{L}\p{M}])([\p{Lu}][\p{L}\p{M}'-]{2,})\s*[,?!]/gu,
+        )) {
+            const name = match[1];
+            if (!name) continue;
+            const labels = names.get(name) ?? new Set<string>();
+            labels.add(addressed.speaker);
+            names.set(name, labels);
+        }
+    }
+    return new Map([...names].slice(0, 8));
+}
 
 /** Where `heard` stands in `text` as a whole word (not inside another). */
 function wholeWordsAt(text: string, heard: string): number[] {
@@ -378,9 +421,9 @@ export async function runFallbackPass(
          */
         const lookUp = async (
             text: string,
-            byName = false,
+            mode: "any" | "name" | "person" = "any",
         ): Promise<FoundEntity[] | undefined> => {
-            const key = `${byName ? "name" : "any"}\u0000${text}`;
+            const key = `${mode}\u0000${text}`;
             const held = lookedUp.get(key);
             if (held) return held;
             // Spent: the rest is adjudicated with what was found.
@@ -388,7 +431,11 @@ export async function runFallbackPass(
             try {
                 const entities = (
                     await input.lookup.findEntities(
-                        byName ? { text, byName } : { text },
+                        mode === "person"
+                            ? { text, type: "person", byName: true }
+                            : mode === "name"
+                              ? { text, byName: true }
+                              : { text },
                     )
                 ).entities;
                 result.lookups++;
@@ -413,9 +460,31 @@ export async function runFallbackPass(
             if (entities === undefined) break;
             byText.set(text, entities);
         }
-        // Then the other forms of those no name was found for, as long as
-        // the windows still to come keep a lookup for each of theirs.
         const reserve = MAX_MENTIONS * (windows.length - windowIndex - 1);
+        const addressedLabels = new Map<string, Set<string>>();
+        for (const [text, labels] of directAddressNames(
+            window.turns,
+            input.unnamedLabels,
+        )) {
+            if ((input.lookupBudget ?? Infinity) - result.lookups <= reserve) {
+                break;
+            }
+            input.signal?.throwIfAborted();
+            const entities = await lookUp(text, "person");
+            if (entities === undefined) break;
+            const held = byText.get(text) ?? [];
+            for (const entity of entities) {
+                if (entity.kind !== "person") continue;
+                if (!held.some((person) => person.id === entity.id))
+                    held.push(entity);
+                const matchedLabels =
+                    addressedLabels.get(entity.id) ?? new Set<string>();
+                for (const label of labels) matchedLabels.add(label);
+                addressedLabels.set(entity.id, matchedLabels);
+            }
+            if (held.length > 0) byText.set(text, held);
+        }
+        // Other forms follow the spoken names, leaving lookups for later windows.
         retries: for (const text of texts) {
             const held = byText.get(text);
             if (held === undefined || named(held)) continue;
@@ -428,7 +497,7 @@ export async function runFallbackPass(
                 }
                 if (!formOf(form, text)) continue;
                 input.signal?.throwIfAborted();
-                const entities = await lookUp(form, true);
+                const entities = await lookUp(form, "name");
                 if (entities === undefined) break retries;
                 if (named(entities)) {
                     byText.set(text, [...held, ...entities]);
@@ -437,12 +506,16 @@ export async function runFallbackPass(
             }
         }
         const candidates = new Map<string, FoundEntity>();
+        const mentionedAs = new Map<string, Set<string>>();
         const notFound: string[] = [];
         for (const [text, entities] of byText) {
             if (!named(entities)) notFound.push(text);
             for (const entity of entities) {
                 candidates.set(entity.id, entity);
                 found.set(entity.id, entity);
+                const words = mentionedAs.get(entity.id) ?? new Set<string>();
+                words.add(text);
+                mentionedAs.set(entity.id, words);
             }
         }
 
@@ -455,6 +528,8 @@ export async function runFallbackPass(
                 type: entity.typeKey,
                 name: entity.name,
                 matched: entity.reasons,
+                mentionedAs: [...(mentionedAs.get(entity.id) ?? [])],
+                addressedLabels: [...(addressedLabels.get(entity.id) ?? [])],
             })),
             relations: input.relations.map((relation) => ({
                 key: relation.key,
@@ -468,6 +543,7 @@ export async function runFallbackPass(
             entityTypes: input.entityTypes ?? [],
             unnamedSpeakerLabels: input.unnamedLabels,
             recorder: input.recorder ?? null,
+            speakerCandidates: input.speakerCandidates ?? [],
         };
         const messages: LearnChatMessage[] = [
             { role: "system", content: ANSWER_SYSTEM },
