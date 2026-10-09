@@ -11,6 +11,7 @@ export interface GoogleOAuthState {
     userId: string;
     returnTo: string;
     expiresAt: number;
+    purpose?: "drive" | "calendar";
 }
 
 export function sealGoogleOAuthState(payload: GoogleOAuthState): string {
@@ -35,6 +36,9 @@ export function openGoogleOAuthState(
             typeof parsed.userId !== "string" ||
             typeof parsed.returnTo !== "string" ||
             typeof parsed.expiresAt !== "number" ||
+            (parsed.purpose !== undefined &&
+                parsed.purpose !== "drive" &&
+                parsed.purpose !== "calendar") ||
             parsed.expiresAt < now
         ) {
             return null;

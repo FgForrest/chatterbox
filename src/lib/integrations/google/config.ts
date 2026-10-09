@@ -2,6 +2,8 @@ import { env } from "@/lib/env";
 
 export const GOOGLE_DRIVE_FILE_SCOPE =
     "https://www.googleapis.com/auth/drive.file";
+export const GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE =
+    "https://www.googleapis.com/auth/calendar.events.readonly";
 
 /** Scopes asked for on connect. Later integrations add theirs incrementally. */
 export const GOOGLE_CONNECT_SCOPES = [
@@ -10,27 +12,23 @@ export const GOOGLE_CONNECT_SCOPES = [
     GOOGLE_DRIVE_FILE_SCOPE,
 ];
 
-export interface GoogleIntegrationConfig {
+export interface GoogleOAuthConfig {
     clientId: string;
     clientSecret: string;
-    pickerApiKey: string;
-    projectNumber: string;
     /** Lowercase Workspace domains allowed to connect; empty allows any. */
     workspaceDomains: string[];
     redirectUri: string;
 }
+export interface GoogleIntegrationConfig extends GoogleOAuthConfig {
+    pickerApiKey: string;
+    projectNumber: string;
+}
 
-/**
- * The Google integration's settings, or null where it is off: on hosted
- * deployments, and wherever any of the four required variables is unset.
- */
-export function getGoogleIntegrationConfig(): GoogleIntegrationConfig | null {
+export function getGoogleOAuthConfig(): GoogleOAuthConfig | null {
     if (
         env.IS_HOSTED ||
         !env.GOOGLE_CLIENT_ID ||
         !env.GOOGLE_CLIENT_SECRET ||
-        !env.GOOGLE_PICKER_API_KEY ||
-        !env.GOOGLE_CLOUD_PROJECT_NUMBER ||
         !env.APP_URL
     ) {
         return null;
@@ -38,13 +36,30 @@ export function getGoogleIntegrationConfig(): GoogleIntegrationConfig | null {
     return {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
-        pickerApiKey: env.GOOGLE_PICKER_API_KEY,
-        projectNumber: env.GOOGLE_CLOUD_PROJECT_NUMBER,
         workspaceDomains: env.GOOGLE_WORKSPACE_DOMAINS ?? [],
         redirectUri: new URL(
             "/api/integrations/google/callback",
             env.APP_URL,
         ).toString(),
+    };
+}
+
+/**
+ * The Google integration's settings, or null where it is off: on hosted
+ * deployments, and wherever any of the four required variables is unset.
+ */
+export function getGoogleIntegrationConfig(): GoogleIntegrationConfig | null {
+    const oauth = getGoogleOAuthConfig();
+    if (
+        !oauth ||
+        !env.GOOGLE_PICKER_API_KEY ||
+        !env.GOOGLE_CLOUD_PROJECT_NUMBER
+    )
+        return null;
+    return {
+        ...oauth,
+        pickerApiKey: env.GOOGLE_PICKER_API_KEY,
+        projectNumber: env.GOOGLE_CLOUD_PROJECT_NUMBER,
     };
 }
 

@@ -30,6 +30,7 @@ export type LearnSource = "plaud" | "riffado";
 
 export interface LearnJobPayload {
     runId: string;
+    calendarEventId?: string;
 }
 
 export function parseLearnJobPayload(
@@ -41,7 +42,22 @@ export function parseLearnJobPayload(
             "runId must be a non-empty string",
         );
     }
-    return { runId: raw.runId };
+    if (
+        raw.calendarEventId !== undefined &&
+        (typeof raw.calendarEventId !== "string" ||
+            raw.calendarEventId.length > 1024)
+    ) {
+        throw new InvalidJobPayloadError(
+            LEARN_JOB_KIND,
+            "calendarEventId must be a string up to 1024 characters",
+        );
+    }
+    return {
+        runId: raw.runId,
+        ...(raw.calendarEventId
+            ? { calendarEventId: raw.calendarEventId }
+            : {}),
+    };
 }
 
 export interface StartedLearnRun {
@@ -66,8 +82,28 @@ export async function startLearnRun(input: {
     actorUserId: string;
     source: LearnSource;
     trigger: "manual" | "auto";
+    calendarEventId?: string;
 }): Promise<StartedLearnRun> {
     const { access, actorUserId, source, trigger } = input;
+    if (input.calendarEventId && input.calendarEventId.length > 1024) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Calendar event ID is too long",
+            400,
+        );
+    }
+    if (
+        input.calendarEventId &&
+        (trigger !== "manual" ||
+            access.view !== "private" ||
+            actorUserId !== access.ownerUserId)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Calendar context is only available to the recording owner",
+            400,
+        );
+    }
     if (!(await isLearnAvailableFor(actorUserId))) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
@@ -192,7 +228,12 @@ export async function startLearnRun(input: {
                     ? LEARN_PRIORITY_MANUAL
                     : LEARN_PRIORITY_AUTO,
             maxAttempts: LEARN_MAX_ATTEMPTS,
-            payload: { runId },
+            payload: {
+                runId,
+                ...(input.calendarEventId
+                    ? { calendarEventId: input.calendarEventId }
+                    : {}),
+            },
         });
     const abandon = () => db.delete(learnRuns).where(eq(learnRuns.id, runId));
     let queued: Awaited<ReturnType<typeof enqueue>>;

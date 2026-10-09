@@ -3,8 +3,10 @@ import { requireApiSession } from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
+    GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
     GOOGLE_CONNECT_SCOPES,
     getGoogleIntegrationConfig,
+    getGoogleOAuthConfig,
 } from "@/lib/integrations/google/config";
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
 import {
@@ -23,7 +25,13 @@ import {
 /** Starts connecting a Google account: a redirect to Google's consent. */
 export const GET = apiHandler(async (request) => {
     const session = await requireApiSession(request);
-    const config = getGoogleIntegrationConfig();
+    const url = new URL(request.url);
+    const purpose =
+        url.searchParams.get("purpose") === "calendar" ? "calendar" : "drive";
+    const config =
+        purpose === "calendar"
+            ? getGoogleOAuthConfig()
+            : getGoogleIntegrationConfig();
     if (!config) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -31,14 +39,16 @@ export const GET = apiHandler(async (request) => {
             404,
         );
     }
-    const url = new URL(request.url);
     const state = createOAuthState();
     const pkce = createPkcePair();
     const existing = await getGoogleConnectionStatus(session.user.id);
     const response = NextResponse.redirect(
         buildAuthorizationUrl({
             config,
-            scopes: GOOGLE_CONNECT_SCOPES,
+            scopes:
+                purpose === "calendar"
+                    ? ["openid", "email", GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE]
+                    : GOOGLE_CONNECT_SCOPES,
             state,
             codeChallenge: pkce.challenge,
             loginHint: existing?.email,
@@ -56,6 +66,7 @@ export const GET = apiHandler(async (request) => {
                 env.APP_URL ?? url.origin,
             ),
             expiresAt: Date.now() + GOOGLE_OAUTH_STATE_TTL_SECONDS * 1000,
+            purpose,
         }),
         {
             httpOnly: true,

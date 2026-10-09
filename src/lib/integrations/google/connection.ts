@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { oauthConnections } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
-import { getGoogleIntegrationConfig } from "./config";
+import { getGoogleOAuthConfig } from "./config";
 import { GoogleApiError, GoogleConnectionUnavailableError } from "./errors";
 import {
     type IdTokenClaims,
@@ -23,6 +23,7 @@ interface CachedAccessToken {
     accessToken: string;
     subject: string;
     expiresAt: number;
+    scopes: string[];
 }
 
 const accessTokens = new Map<string, CachedAccessToken>();
@@ -97,6 +98,7 @@ export async function saveGoogleConnection(
         accessToken: tokens.accessToken,
         subject: claims.subject,
         expiresAt: Date.now() + tokens.expiresInSeconds * 1000,
+        scopes: tokens.scopes,
     });
     if (existing && existing.subject !== claims.subject) {
         await revokeToken(decryptText(existing.refreshToken)).catch((error) => {
@@ -140,9 +142,13 @@ export function invalidateGoogleAccessToken(userId: string): void {
  */
 export async function getGoogleAccessToken(
     userId: string,
-    options: { expectedSubject?: string; fetchImpl?: typeof fetch } = {},
+    options: {
+        expectedSubject?: string;
+        requiredScope?: string;
+        fetchImpl?: typeof fetch;
+    } = {},
 ): Promise<string> {
-    const config = getGoogleIntegrationConfig();
+    const config = getGoogleOAuthConfig();
     if (!config) throw new GoogleConnectionUnavailableError("not_configured");
     const row = await connectionRow(userId);
     if (!row) throw new GoogleConnectionUnavailableError("not_connected");
@@ -152,10 +158,19 @@ export async function getGoogleAccessToken(
     if (options.expectedSubject && row.subject !== options.expectedSubject) {
         throw new GoogleConnectionUnavailableError("account_mismatch");
     }
+    const grantedScopes = row.scopes.split(" ").filter(Boolean);
+    if (
+        options.requiredScope &&
+        !grantedScopes.includes(options.requiredScope)
+    ) {
+        throw new GoogleConnectionUnavailableError("missing_scope");
+    }
     const cached = accessTokens.get(userId);
     if (
         cached &&
         cached.subject === row.subject &&
+        (!options.requiredScope ||
+            cached.scopes.includes(options.requiredScope)) &&
         cached.expiresAt - EXPIRY_MARGIN_MS > Date.now()
     ) {
         return cached.accessToken;
@@ -178,10 +193,18 @@ export async function getGoogleAccessToken(
         }
         throw error;
     }
+    if (
+        options.requiredScope &&
+        tokens.scopes.length > 0 &&
+        !tokens.scopes.includes(options.requiredScope)
+    ) {
+        throw new GoogleConnectionUnavailableError("missing_scope");
+    }
     accessTokens.set(userId, {
         accessToken: tokens.accessToken,
         subject: row.subject,
         expiresAt: Date.now() + tokens.expiresInSeconds * 1000,
+        scopes: tokens.scopes.length > 0 ? tokens.scopes : grantedScopes,
     });
     if (tokens.refreshToken) {
         await db
@@ -190,7 +213,12 @@ export async function getGoogleAccessToken(
                 refreshToken: encryptText(tokens.refreshToken),
                 updatedAt: new Date(),
             })
-            .where(eq(oauthConnections.id, row.id));
+            .where(
+                and(
+                    eq(oauthConnections.id, row.id),
+                    eq(oauthConnections.userId, userId),
+                ),
+            );
     }
     return tokens.accessToken;
 }

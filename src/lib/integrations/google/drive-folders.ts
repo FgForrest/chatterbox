@@ -1,4 +1,5 @@
 import { AppError, ErrorCode } from "@/lib/errors";
+import { GOOGLE_DRIVE_FILE_SCOPE } from "./config";
 import {
     getGoogleAccessToken,
     getGoogleConnectionStatus,
@@ -39,6 +40,9 @@ export async function inspectDriveFolder(
     }
     const connection = await getGoogleConnectionStatus(userId);
     if (!connection) throw unavailable("Connect a Google account first");
+    if (!connection.scopes.includes(GOOGLE_DRIVE_FILE_SCOPE)) {
+        throw unavailable("Connect Google Drive first");
+    }
     try {
         await getGoogleAccessToken(userId, {
             expectedSubject: connection.subject,
