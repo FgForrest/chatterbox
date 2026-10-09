@@ -53,6 +53,19 @@ function isSecureOrInternalUrl(value: string): boolean {
     return protocol === "https:" || isInternalHost(hostname);
 }
 
+/** An HTTP header field name (RFC 9110 token). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const MIN_CONNECTOR_KEY_LENGTH = 32;
+
+/** A comma-separated list, trimmed, without empty entries. */
+function commaList(val: string | undefined): string[] {
+    return (val ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
 const baseEnvSchema = z.object({
     /** True for the Riffado-operated hosted instance; default false (self-host). */
     IS_HOSTED: z
@@ -181,15 +194,58 @@ const baseEnvSchema = z.object({
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
     /** Comma-separated `azp` allowlist; empty admits any client of the realm. */
-    MCP_ALLOWED_CLIENTS: z
+    MCP_ALLOWED_CLIENTS: z.string().optional().transform(commaList),
+    /**
+     * Header the public reverse proxy sets on every request it forwards to
+     * the MCP server (the internal route strips it). A request carrying it
+     * is served only for the clients in MCP_PUBLIC_CLIENTS.
+     */
+    MCP_PUBLIC_INGRESS_HEADER: z
         .string()
         .optional()
         .transform((val) =>
-            (val ?? "")
-                .split(",")
-                .map((client) => client.trim())
-                .filter(Boolean),
-        ),
+            val?.trim() ? val.trim().toLowerCase() : undefined,
+        )
+        .refine((val) => val === undefined || HEADER_NAME.test(val), {
+            message: "MCP_PUBLIC_INGRESS_HEADER must be an HTTP header name",
+        }),
+    /** Comma-separated `azp` served through the public entrance. */
+    MCP_PUBLIC_CLIENTS: z.string().optional().transform(commaList),
+    /**
+     * Comma-separated `client=key` pairs: a token issued to `client` is
+     * served only with an `X-API-Key: key` request header (a Claude
+     * connector's request header).
+     */
+    MCP_CONNECTOR_KEYS: z
+        .string()
+        .optional()
+        .transform((val, ctx) => {
+            const keys: { client: string; key: string }[] = [];
+            for (const entry of commaList(val)) {
+                const split = entry.indexOf("=");
+                const client = split > 0 ? entry.slice(0, split).trim() : "";
+                const key = split > 0 ? entry.slice(split + 1).trim() : "";
+                if (
+                    !client ||
+                    key.length < MIN_CONNECTOR_KEY_LENGTH ||
+                    keys.some((known) => known.client === client)
+                ) {
+                    ctx.addIssue({
+                        code: "custom",
+                        message: `MCP_CONNECTOR_KEYS must be client=key pairs, one per client, each key at least ${MIN_CONNECTOR_KEY_LENGTH} characters`,
+                    });
+                    return z.NEVER;
+                }
+                keys.push({ client, key });
+            }
+            return keys;
+        }),
+    /**
+     * Also accept tokens whose `aud` is the MCP resource URL
+     * (`<APP_URL>/api/mcp`), as Keycloak issues them with its
+     * resource-indicators feature on.
+     */
+    MCP_RESOURCE_AUDIENCE: optionalStrictBoolean,
     /** Days the MCP access log keeps a row. Default 90. */
     MCP_AUDIT_RETENTION_DAYS: z
         .string()
@@ -1062,6 +1118,16 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
             });
         }
     }
+    if (
+        parsed.MCP_PUBLIC_CLIENTS.length > 0 &&
+        !parsed.MCP_PUBLIC_INGRESS_HEADER
+    ) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["MCP_PUBLIC_CLIENTS"],
+            message: "MCP_PUBLIC_CLIENTS needs MCP_PUBLIC_INGRESS_HEADER",
+        });
+    }
 
     // With single sign-on nobody signs in with a password, the organization
     // account included, so its password is optional.
@@ -1127,6 +1193,10 @@ function validateEnv(): Env {
             OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
             MCP_AUDIENCE: process.env.MCP_AUDIENCE,
             MCP_ALLOWED_CLIENTS: process.env.MCP_ALLOWED_CLIENTS,
+            MCP_PUBLIC_INGRESS_HEADER: process.env.MCP_PUBLIC_INGRESS_HEADER,
+            MCP_PUBLIC_CLIENTS: process.env.MCP_PUBLIC_CLIENTS,
+            MCP_CONNECTOR_KEYS: process.env.MCP_CONNECTOR_KEYS,
+            MCP_RESOURCE_AUDIENCE: process.env.MCP_RESOURCE_AUDIENCE,
             MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,

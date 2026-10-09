@@ -17,6 +17,28 @@ export function isMcpEnabled(): boolean {
     return Boolean(env.MCP_AUDIENCE) && isSsoEnabled();
 }
 
+/** What an operator should hear about the MCP settings at startup. */
+export function mcpConfigWarnings(): string[] {
+    if (!isMcpEnabled()) return [];
+    const allowed = env.MCP_ALLOWED_CLIENTS;
+    if (allowed.length === 0) {
+        return [
+            "[mcp] MCP_ALLOWED_CLIENTS is empty: any client of the realm whose token carries the MCP roles may call /api/mcp. List the clients you configured.",
+        ];
+    }
+    const named = [
+        ...env.MCP_PUBLIC_CLIENTS,
+        ...env.MCP_CONNECTOR_KEYS.map((entry) => entry.client),
+    ];
+    const refused = [...new Set(named)].filter(
+        (client) => !allowed.includes(client),
+    );
+    if (refused.length === 0) return [];
+    return [
+        `[mcp] MCP_ALLOWED_CLIENTS does not list ${refused.join(", ")}: MCP_PUBLIC_CLIENTS or MCP_CONNECTOR_KEYS names them, but their tokens are refused.`,
+    ];
+}
+
 /** What Riffado needs from the realm's discovery document. */
 export interface IssuerMetadata {
     /** The realm's own issuer string, as it appears in `iss`. */

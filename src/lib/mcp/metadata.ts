@@ -3,6 +3,7 @@ import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
 
 const RESOURCE_PATH = "/api/mcp";
 const METADATA_PATH = `/.well-known/oauth-protected-resource${RESOURCE_PATH}`;
+const SCOPES = ["openid"];
 
 function appUrl(): string {
     return (env.APP_URL ?? "").replace(/\/+$/, "");
@@ -30,6 +31,7 @@ export async function protectedResourceMetadata(): Promise<Response> {
             {
                 resource: mcpResourceUrl(),
                 authorization_servers: [issuer],
+                scopes_supported: SCOPES,
                 bearer_methods_supported: ["header"],
                 resource_name: "Riffado",
             },
@@ -40,15 +42,22 @@ export async function protectedResourceMetadata(): Promise<Response> {
     }
 }
 
-/** 401 pointing the client at the resource metadata (MCP authorization). */
-export function unauthorized(): Response {
+/**
+ * 401 pointing the client at the resource metadata and naming the scope to
+ * request (MCP authorization); `invalidToken` for a token that was sent
+ * but not accepted.
+ */
+export function unauthorized(invalidToken = false): Response {
+    const params = [
+        ...(invalidToken ? ['error="invalid_token"'] : []),
+        `resource_metadata="${resourceMetadataUrl()}"`,
+        `scope="${SCOPES.join(" ")}"`,
+    ];
     return Response.json(
         { error: "Unauthorized" },
         {
             status: 401,
-            headers: {
-                "WWW-Authenticate": `Bearer resource_metadata="${resourceMetadataUrl()}"`,
-            },
+            headers: { "WWW-Authenticate": `Bearer ${params.join(", ")}` },
         },
     );
 }

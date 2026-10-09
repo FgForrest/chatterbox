@@ -10,8 +10,6 @@ import {
 const WINDOW_MS = 60_000;
 const UNKNOWN_IP = "unknown";
 
-/** Requests per minute from one client IP, before the token is checked. */
-export const MCP_IP_LIMIT = 120;
 /** Requests per minute for one caller (subject and client). */
 export const MCP_CALLER_LIMIT = 60;
 /** Decrypting searches per minute for one caller. */
@@ -39,21 +37,6 @@ function tooMany(result: RateLimitResult): Response {
 export function mcpClientIp(request: Request): string | null {
     const ip = getClientIp(request);
     return ip === UNKNOWN_IP ? null : ip;
-}
-
-/**
- * 429 when the client IP is over its budget, before any token work. Without
- * a known IP there is no per-IP budget: one shared bucket would let any
- * client lock every other one out.
- */
-export async function limitMcpIp(request: Request): Promise<Response | null> {
-    const ip = mcpClientIp(request);
-    if (!ip) return null;
-    const result = await consumeRateLimitBucket(`mcp:ip:${ip}`, {
-        limit: MCP_IP_LIMIT,
-        windowMs: WINDOW_MS,
-    });
-    return result.allowed ? null : tooMany(result);
 }
 
 /**

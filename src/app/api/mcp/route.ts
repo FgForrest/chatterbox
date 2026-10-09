@@ -3,13 +3,18 @@ import { env } from "@/lib/env";
 import { deniedOnAdminHost } from "@/lib/hosted/hostname-gate";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { recordMcpAccess } from "@/lib/mcp/audit";
-import { type CallerRefusal, resolveCaller } from "@/lib/mcp/caller";
+import {
+    type CallerRefusal,
+    type McpCaller,
+    resolveCaller,
+} from "@/lib/mcp/caller";
 import { isMcpEnabled, MCP_MAX_BODY_BYTES } from "@/lib/mcp/config";
+import { type IngressRefusal, ingressRefusal } from "@/lib/mcp/ingress";
 import { unauthorized } from "@/lib/mcp/metadata";
-import { limitMcpIp, limitMcpSubject, mcpClientIp } from "@/lib/mcp/rate-limit";
+import { limitMcpSubject, mcpClientIp } from "@/lib/mcp/rate-limit";
 import { buildMcpServer } from "@/lib/mcp/registry";
 import {
-    type McpTokenClaims,
+    type McpTokenCheck,
     tokenClient,
     verifyMcpToken,
 } from "@/lib/mcp/token";
@@ -19,6 +24,19 @@ export const dynamic = "force-dynamic";
 
 const BEARER = /^bearer\s+(\S+)\s*$/i;
 
+type Refusal = CallerRefusal | IngressRefusal;
+
+type Admission =
+    | { ok: true; caller: McpCaller }
+    | { ok: false; reason: Refusal };
+
+type GenuineToken = Exclude<McpTokenCheck, { kind: "invalid" }>;
+
+const REFUSAL_MESSAGES: Partial<Record<Refusal, string>> = {
+    "no-account": "Sign in to Riffado once first",
+    "no-roles": "This token carries no Riffado MCP role",
+};
+
 function notFound(): Response {
     return new Response(null, { status: 404 });
 }
@@ -27,10 +45,11 @@ function unavailable(request: Request): boolean {
     return !isMcpEnabled() || deniedOnAdminHost(request, env.ADMIN_HOSTNAME);
 }
 
-function forbidden(reason: CallerRefusal): Response {
-    const error =
-        reason === "no-account" ? "Sign in to Riffado once first" : "Forbidden";
-    return Response.json({ error }, { status: 403 });
+function forbidden(reason: Refusal): Response {
+    return Response.json(
+        { error: REFUSAL_MESSAGES[reason] ?? "Forbidden" },
+        { status: 403 },
+    );
 }
 
 function jsonRpcError(status: number, code: number, message: string): Response {
@@ -45,44 +64,61 @@ function bearerToken(request: Request): string {
     return BEARER.exec(header)?.[1] ?? "";
 }
 
+async function admit(
+    request: Request,
+    checked: GenuineToken,
+    clientId: string | null,
+): Promise<Admission> {
+    if (checked.kind === "other-audience") {
+        return { ok: false, reason: "no-roles" };
+    }
+    const refusal = ingressRefusal(request, clientId);
+    if (refusal) return { ok: false, reason: refusal };
+    return resolveCaller(checked.claims);
+}
+
 /**
  * Riffado's external MCP server: stateless Streamable HTTP with JSON
  * responses, for a Keycloak token issued to `MCP_AUDIENCE`. 404 while MCP is
  * off or on the admin host, 401 (pointing at the resource metadata) for a
- * missing or rejected token, 403 for a token that names no caller, 503
- * while the realm cannot be reached, 400 for a JSON-RPC batch.
+ * missing or rejected token, 403 for a genuine token that names no caller,
+ * carries no MCP role, or whose client the entrance refuses, 503 while the
+ * realm cannot be reached, 400 for a JSON-RPC batch.
  */
 export async function POST(request: Request): Promise<Response> {
     if (unavailable(request)) return notFound();
-    const limitedIp = await limitMcpIp(request);
-    if (limitedIp) return limitedIp;
 
     const token = bearerToken(request);
     if (!token) return unauthorized();
-    let claims: McpTokenClaims | null;
+    let checked: McpTokenCheck;
     try {
-        claims = await verifyMcpToken(token);
+        checked = await verifyMcpToken(token);
     } catch {
         return Response.json(
             { error: "Identity provider unavailable" },
             { status: 503 },
         );
     }
-    if (!claims) return unauthorized();
+    if (checked.kind === "invalid") return unauthorized(true);
+    const { claims } = checked;
     const limitedCaller = await limitMcpSubject(claims);
     if (limitedCaller) return limitedCaller;
 
     const ip = mcpClientIp(request);
-    const resolved = await resolveCaller(claims);
+    const clientId = tokenClient(claims);
+    const resolved = await admit(request, checked, clientId);
     if (!resolved.ok) {
         await recordMcpAccess({
             caller: null,
             subject: claims.sub,
-            clientId: tokenClient(claims),
+            clientId,
             tool: null,
             outcome: "denied",
             ip,
         });
+        console.warn(
+            `[mcp] refused (${resolved.reason}) a token of client ${clientId ?? "(none)"}`,
+        );
         return forbidden(resolved.reason);
     }
 

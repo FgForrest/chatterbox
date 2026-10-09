@@ -61,6 +61,8 @@ type EnvModule = {
     };
 };
 
+type McpConfigModule = { mcpConfigWarnings: () => string[] };
+
 type AutoLearnModule = { startAutoLearnSweeper: () => void };
 type PosthogServerModule = {
     captureServerException: (
@@ -99,6 +101,10 @@ export async function register() {
             "[rate-limit] RATE_LIMIT_TRUST_PROXY_HEADERS is not true: per-IP rate limiting on sign-in/sign-up/reset-password is INACTIVE. Set it to true behind a trusted reverse proxy to enable credential-stuffing protection.",
         );
     }
+
+    const { mcpConfigWarnings } =
+        require("./lib/mcp/config") as McpConfigModule;
+    for (const warning of mcpConfigWarnings()) console.warn(warning);
 
     const { startWebhookWorker } =
         require("./lib/webhooks/worker") as WebhookWorkerModule;
