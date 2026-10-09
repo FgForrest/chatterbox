@@ -20,7 +20,8 @@ Every screenshot shows the same invented team: **Alex Morgan**, a product lead a
 7. [The Organization](organization.md): sharing recordings with your colleagues.
 8. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
 9. [Settings](settings.md): AI providers and prices, transcription, topics, Learn, summaries, language and more.
-10. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
+10. [Riffado in Claude](claude.md): asking Claude or Claude Code about your recordings, people and tasks.
+11. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
 
 ## Where a feature comes from
 
@@ -30,6 +31,7 @@ Some features depend on how your instance is set up. When a chapter describes on
 - **The Organization** appears when the administrator has created the organization account.
 - **Folder exports** to disk or Google Drive appear when the administrator has configured them.
 - **Single sign-on** replaces the email and password form when the administrator has connected an identity provider.
+- **Riffado in Claude** works when the administrator has turned on the MCP server and set up the Claude connector.
 
 [For administrators](administrators.md) lists the switches.
 

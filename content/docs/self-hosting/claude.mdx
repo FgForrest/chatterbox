@@ -1,0 +1,369 @@
+---
+title: Claude and Claude Code
+description: Let people ask Claude (claude.ai, Desktop, Cowork) and Claude Code about their recordings, signed in through your Keycloak realm and limited by their roles.
+---
+
+The [external MCP server](./mcp) lets AI clients read what Riffado knows.
+This page connects Anthropic's two Claude products to it:
+
+- **Claude**: claude.ai, Claude Desktop, the mobile apps and Cowork. They
+  reach custom connectors from Anthropic's cloud, so `/api/mcp` must be
+  reachable from the internet, from Anthropic's addresses only.
+- **Claude Code**: runs on the person's computer and connects from there,
+  over your internal network.
+
+Nobody gets in without signing in on your realm's login page, and nobody
+sees more than their Keycloak roles and Riffado's own rules allow. For
+what people do once it is connected, send them to
+[Riffado in Claude](../user-guide/claude.md).
+
+## How it works
+
+1. Someone connects the connector in Claude (the URL `<APP_URL>/api/mcp`).
+2. Claude calls `/api/mcp` without a token and gets 401. The answer points
+   at the protected-resource metadata, which names your realm as the
+   authorization server and `openid` as the scope to ask for.
+3. Claude sends the person to your realm's login page. After the sign-in,
+   Keycloak gives Claude a one-time code, and Claude redeems it at the
+   realm's token endpoint with the `claude` client's secret. It gets an
+   access token (15 minutes) and an offline refresh token (valid while
+   it is used at least once in 30 days).
+4. Every call to `/api/mcp` carries the access token. Riffado checks it
+   against the realm's signing keys, finds the person (`sub`) and their
+   roles, and lists only the tools those roles open.
+5. Claude refreshes the token in the background. Each refresh reads the
+   person's roles in Keycloak again.
+
+Riffado never sees a password. Keycloak never sees what Claude asks.
+
+## Before you start
+
+- The [external MCP server](./mcp) works on your internal network:
+  `MCP_AUDIENCE` set, the `riffado-mcp` resource client with its five
+  roles in place, and people holding the roles they should have.
+- Keycloak 26.6 or later is recommended; Riffado's tests run against
+  26.6.4. The realm's discovery document and token endpoint must be
+  reachable from Anthropic's cloud, and its login page from the browsers
+  of the people who connect.
+- A public DNS name for the `APP_URL` host and a reverse proxy you control
+  (Step 3).
+- For the whole organization: a Claude Team or Enterprise plan, whose
+  Owner adds the connector once. People with a personal plan (Free, Pro,
+  Max) add it themselves, each with a client of their own (Step 1).
+- Everyone who connects has signed in to Riffado once. Accounts are
+  never created from a token.
+
+## Step 1: Keycloak clients
+
+### `claude`, for the hosted apps
+
+In the realm's admin console, **Clients → Create client**:
+
+1. **Client type:** OpenID Connect. **Client ID:** `claude`.
+2. **Client authentication:** on. **Authentication flow:** Standard flow
+   only. Direct access grants, implicit flow, service account roles and
+   the device grant stay off.
+3. **Valid redirect URIs:** `https://claude.ai/api/mcp/auth_callback`.
+4. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
+   `S256`. **Advanced → Access Token Lifespan:** 15 minutes (10 to 15).
+5. **Client scopes:** keep only `basic` and `roles` as **Default** and
+   `offline_access` as **Optional**. Remove the other default scopes that
+   carry role mappings: each adds its roles, and the applications behind
+   them as audiences, to every token Claude holds.
+6. **Client scopes → `claude-dedicated` → Scope:** turn **Full scope
+   allowed** off, then **Assign role** and pick the `riffado-mcp` roles
+   Claude may carry. All five let each person's own roles decide; leave
+   out `tasks:write` if Claude should never change a task.
+7. **Credentials:** copy the **Client secret** for the Claude Owner.
+8. Optional: **Settings → Login settings → Consent required** on. The
+   realm then asks each person once whether to let Claude in. It is a
+   courtesy, not a control: Keycloak does not ask again and does not show
+   which Claude account receives the access.
+
+### `claude-code`, for Claude Code
+
+The same as `claude`, except:
+
+- **Client authentication:** off (a laptop cannot keep a secret).
+- **Valid redirect URIs:** `http://localhost/callback` and
+  `http://127.0.0.1/callback`. Keycloak accepts any port on a loopback
+  address when the registered URI has none, which is how Claude Code's
+  local callback works.
+- No consent screen needed.
+
+Riffado serves `claude-code` tokens on the internal network only (Step 3):
+the same token arriving from Anthropic's cloud would have been taken from
+someone's computer.
+
+### One client per personal plan
+
+A person who connects from a personal Claude plan gets a confidential
+client of their own, set up exactly like `claude` and named after them
+(for example `claude-jdoe`). Hand its secret to that person only. List
+it next to `claude` in Step 2; to end that person's access, disable or
+delete the client.
+
+### The realm
+
+- **Realm settings → User registration → Default roles** include
+  `offline_access` (in `default-roles-<realm>`). Without it Keycloak
+  refuses the sign-in with "Offline tokens not allowed for the user or
+  client".
+- **Realm settings → Sessions → Offline Session Idle:** 30 days (the
+  default). That is how long Claude stays connected without being used.
+- **Realm settings → Tokens → Revoke Refresh Token:** leave it off. It
+  is realm-wide, and for Claude it gains nothing: the client is
+  confidential.
+- **Clients → Client registration:** anonymous registration refused (a
+  **Trusted Hosts** policy with no hosts). Claude must not register
+  clients of its own; it uses `claude`.
+- Legacy token exchange (V1) off and nobody holding the *impersonate*
+  permission, as on the [external MCP server](./mcp) page.
+- **Clients → `claude` → Client scopes → Evaluate**, for a test user who
+  holds some of the roles: the access token's `aud` is exactly
+  `riffado-mcp`, `sub` is there, and `resource_access.riffado-mcp.roles`
+  lists that user's roles. There is no `preferred_username` with only
+  `basic` and `roles`; Riffado does not need it.
+
+## Step 2: Riffado
+
+```bash
+MCP_AUDIENCE=riffado-mcp
+MCP_ALLOWED_CLIENTS=claude,claude-jdoe,claude-code,acme-reports
+MCP_PUBLIC_INGRESS_HEADER=X-MCP-Ingress
+MCP_PUBLIC_CLIENTS=claude,claude-jdoe
+MCP_CONNECTOR_KEYS=claude=<64 hex characters>
+```
+
+| Variable | What it does |
+| --- | --- |
+| `MCP_ALLOWED_CLIENTS` | Every client that may call: the Claude clients, `claude-code`, and any service accounts you already use. |
+| `MCP_PUBLIC_INGRESS_HEADER` | The header your public proxy sets (Step 3). A request carrying it came from the internet. |
+| `MCP_PUBLIC_CLIENTS` | The clients served through the public entrance: `claude` and the personal ones. Never `claude-code` or a service account. |
+| `MCP_CONNECTOR_KEYS` | `client=key` pairs. A listed client's token is served only with its key in `X-API-Key`. Generate each key with `openssl rand -hex 32`. |
+
+Restart the app. It refuses to start with a malformed value. At start it
+warns when `MCP_ALLOWED_CLIENTS` is empty, or when it leaves out a client
+that `MCP_PUBLIC_CLIENTS` or `MCP_CONNECTOR_KEYS` names.
+
+The connector key is a second lock on the organization's connector: a
+request with a `claude` token must also carry the key that only your
+Owner entered in Claude. List a personal client only if that person's
+Claude offers request headers (see Step 4). Keep the keys with your
+other secrets.
+
+## Step 3: the public entrance
+
+Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
+
+- A public DNS record for the `APP_URL` host. People inside keep reaching
+  Riffado over the internal network (split-horizon DNS).
+- A publicly trusted certificate on port 443. Behind an allowlist, use the
+  DNS-01 challenge. No redirect to another host.
+- From `160.79.104.0/21` only, two exact paths:
+  `/api/mcp` and `/.well-known/oauth-protected-resource/api/mcp`.
+  Not a prefix: `/api/mcp/learn` must stay internal. Pass `GET` and
+  `DELETE` on `/api/mcp` through as well (Riffado answers 405, which is
+  what Claude expects).
+- The public proxy sets the header named in `MCP_PUBLIC_INGRESS_HEADER`
+  on every request it forwards, overwriting whatever came in. The
+  internal route removes it.
+- Limit the volume of requests at the proxy. Riffado counts requests per
+  person and client, not per IP address: every Claude user arrives from
+  the same few Anthropic addresses.
+
+With nginx:
+
+```nginx
+# public server block (internet)
+location = /api/mcp {
+    allow 160.79.104.0/21;
+    deny all;
+    client_max_body_size 256k;
+    proxy_set_header X-MCP-Ingress public;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://riffado:3000;
+}
+location = /.well-known/oauth-protected-resource/api/mcp {
+    allow 160.79.104.0/21;
+    deny all;
+    proxy_set_header X-MCP-Ingress public;
+    proxy_pass http://riffado:3000;
+}
+location / {
+    return 404;
+}
+
+# internal server block (office network, VPN)
+proxy_set_header X-MCP-Ingress "";
+```
+
+Riffado records the client IP in its access log when
+`RATE_LIMIT_TRUST_PROXY_HEADERS=true` and the proxy overwrites
+`X-Real-IP` (see [Environment variables](./environment-variables)).
+
+## Step 4: Claude
+
+**Team or Enterprise.** An Owner adds the connector once:
+
+1. **Organization settings → Connectors → Add → Custom** (type **Web**
+   if asked).
+2. **Name:** Riffado. **MCP server URL:** `<APP_URL>/api/mcp`, exactly.
+3. **Authentication:** Sign in now. **OAuth client:** Use your own OAuth
+   client, with client ID `claude` and the secret from Step 1 (under
+   **Advanced settings** if the dialog is a single screen).
+4. When `MCP_CONNECTOR_KEYS` names `claude`: **Request headers →**
+   `x-api-key`, the key as its value, **Required**. Request headers are
+   in beta and not every organization has them yet. Without that section,
+   leave `claude` out of `MCP_CONNECTOR_KEYS`.
+5. **Add.**
+
+Members then open **Customize → Connectors**, find Riffado with the
+**Custom** label, click **Connect** and sign in on your realm's page.
+
+**Personal plans.** The person opens **Customize → Connectors → Add
+custom connector**, enters the same URL, and their own client ID and
+secret under **Advanced settings**. **Add**, then **Connect**.
+
+**Claude Code**, on the internal network or VPN:
+
+```bash
+claude mcp add --transport http --client-id claude-code riffado <APP_URL>/api/mcp
+```
+
+Then `/mcp` in Claude Code, pick `riffado` and sign in in the browser
+that opens.
+
+Claude does not let anyone change a connector's client, secret or
+request headers. To rotate one, remove the connector and add it again;
+members then connect again.
+
+## Step 5: check it
+
+From inside the network:
+
+```bash
+curl -s <APP_URL>/.well-known/oauth-protected-resource/api/mcp
+# {"resource":"<APP_URL>/api/mcp","authorization_servers":["<issuer>"],
+#  "scopes_supported":["openid"],...}
+
+curl -si -X POST <APP_URL>/api/mcp | grep -i www-authenticate
+# WWW-Authenticate: Bearer resource_metadata="...", scope="openid"
+```
+
+From a machine outside Anthropic's range, the public entrance must answer
+403 from the proxy, and any other path 404.
+
+In Claude, connect and ask "Which Riffado tools can you use?". The answer
+should list the tools of your roles. Then look at the access log:
+
+```sql
+SELECT at, client_id, tool, outcome, ip
+FROM mcp_access_log
+ORDER BY at DESC
+LIMIT 20;
+```
+
+Rows with `client_id` `claude` and outcome `ok` mean it works.
+
+## When Claude cannot connect
+
+Claude does not show the message of a 403. The app log names the reason
+of every refusal: `[mcp] refused (<reason>) a token of client <client>`,
+and `mcp_access_log` has a `denied` row with the person's `sub`.
+
+| Reason | Meaning | Fix |
+| --- | --- | --- |
+| `no-account` | The person has never signed in to Riffado. | They sign in to Riffado once, then connect again. |
+| `no-roles` | The token carries none of the five roles. | Give the person a role on `riffado-mcp`, and the client its scope mapping. |
+| `client-not-allowed` | The client is not in `MCP_ALLOWED_CLIENTS`. | Add it. |
+| `client-not-public` | A client outside `MCP_PUBLIC_CLIENTS` came through the public entrance. | Expected for `claude-code` from outside; add a personal client you forgot. |
+| `connector-key` | `X-API-Key` is missing or wrong. | Check the connector's request header; re-add the connector. |
+| `suspended` | The Riffado account is suspended. | |
+| `no-organization` | A service account while the Organization is off. | |
+
+Errors on the realm's side end the sign-in before Riffado sees a token:
+
+| Keycloak says | Fix |
+| --- | --- |
+| `invalid_scope` | Keep `offline_access` an optional scope of the client. Claude asks for `openid` and, because the realm offers it, `offline_access`. |
+| Offline tokens not allowed for the user or client | Give the person the realm role `offline_access` (default roles). |
+| `unauthorized_client` | The connector's client secret is wrong: re-add the connector. |
+| Invalid parameter: redirect_uri | Check the client's redirect URIs (Step 1). |
+| `invalid_target` | With resource indicators on: `resource_url` on `riffado-mcp` must equal `<APP_URL>/api/mcp`. |
+
+A tool that does not show up after a role was added appears once the
+person refreshes the connector in Claude or connects again: Claude keeps
+the tool list it got when connecting. A tool whose role was taken away
+answers "Unknown tool" until then.
+
+## Day to day
+
+- **Granting or taking away an area:** change the person's roles in
+  Keycloak. Taking one away applies at the next token refresh, within
+  15 minutes; a new one after the person refreshes the connector.
+- **Cutting someone off at once:** disable the user in Keycloak, or sign
+  out their sessions (**Users → the person → Sessions**, offline ones
+  included). The access token they already hold works until it expires,
+  15 minutes at most: Riffado checks tokens locally and does not ask
+  Keycloak on every call.
+- **A personal client:** disable or delete it in Keycloak and take it
+  out of the three lists.
+- **Rotating the `claude` secret or a connector key:** regenerate it
+  (**Credentials → Regenerate**, or a new `openssl rand -hex 32` and a
+  restart), then the Owner removes the connector and adds it again, and
+  everyone connects again.
+- **What was read:** `mcp_access_log` keeps who called which tool and
+  which records it touched, never what was asked or answered, for
+  `MCP_AUDIT_RETENTION_DAYS` days.
+
+## Optional: resource indicators
+
+Keycloak 26.6 and later can bind a token to the URL it was requested for
+(RFC 8707). It is an experimental feature:
+
+1. Start Keycloak with `--features=resource-indicators`.
+2. Set the attribute `resource_url` of the `riffado-mcp` client to
+   `<APP_URL>/api/mcp`.
+3. Set `MCP_RESOURCE_AUDIENCE=true` in Riffado and restart.
+
+A token Claude asks for this server then carries `<APP_URL>/api/mcp` as
+its audience, and a sign-in for another server's URL is refused with
+`invalid_target`. Refreshed tokens and requests without `resource` (the
+realm's other applications, service accounts) keep `riffado-mcp`, which
+Riffado still accepts. Requests without `resource` are not affected.
+Known on Keycloak 26.6.4: a person without any of the five roles gets a
+Keycloak server error when connecting, instead of Riffado's 403. Try it
+on a test realm first; the end-to-end stack has an override for it (see
+[Trying it locally](./mcp#trying-it-locally)).
+
+## Why it is built this way
+
+- **A confidential client for Claude.** A public client id is only a
+  name. Without resource indicators, Keycloak gives a token for `claude`
+  the `riffado-mcp` audience whatever server Claude was connecting to.
+  Anyone could add a connector of their own that names your realm and
+  the client id `claude`; your people would sign in on the real page,
+  and Claude would hand that connector real tokens, which it could replay
+  to Riffado from the same Anthropic addresses. With a secret, only the
+  connector that holds it can redeem a sign-in, so `azp: claude` means
+  your organization's connector.
+- **Claude Code inside only.** Its client cannot keep a secret, so a
+  `claude-code` token from the internet is treated as stolen.
+- **The connector key.** It ties each request to the connector your Owner
+  set up, on top of the secret that ties the sign-in to it.
+- **No limit per IP address.** All of Claude shares a few addresses; a
+  per-address limit would let one busy person block everyone. Riffado
+  counts 60 requests a minute per person and client, and 10 searches.
+- **What stays with you to judge.** Transcripts are what people said, and
+  Cowork acts on its own. Riffado tells the model that tool results are
+  data, not instructions, and the only thing Claude can change is a
+  task's status or assignee (`tasks:write`). People can block single
+  tools in Claude (**Customize → Connectors →** the connector), and you
+  can leave `tasks:write` out of the `claude` client's scope.
+- **Anthropic holds the tokens.** Claude stores each person's tokens on
+  Anthropic's side. They are good only for Riffado, the access token for
+  15 minutes, and the refresh token works only with the client's secret,
+  which Anthropic also holds. The answers Claude gets from Riffado reach
+  Anthropic like anything else in a conversation, under your Claude
+  plan's data terms.

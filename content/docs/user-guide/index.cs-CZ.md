@@ -22,7 +22,8 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 7. [Organizace](organization.md): sdílení nahrávek s kolegy.
 8. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
 9. [Nastavení](settings.md): poskytovatelé AI a ceny, přepis, témata, Učení, shrnutí, jazyk a další.
-10. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
+10. [Riffado v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
+11. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
 
 <span id="where-a-feature-comes-from" />
 
@@ -34,6 +35,7 @@ Některé funkce závisí na tom, jak je Vaše instance nastavena. Pokud kapitol
 - **Organizace** se objeví, pokud správce vytvořil organizační účet.
 - **Export složek** na disk nebo Google Drive je dostupný, pokud je správce povolil.
 - **Jednotné přihlašování (Single sign-on)** nahrazuje přihlašování e-mailem a heslem, pokud správce napojil poskytovatele identity.
+- **Riffado v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
 
 [Pro administrátory](administrators.md) uvádí všechna nastavení.
 

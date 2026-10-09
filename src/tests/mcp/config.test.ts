@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockEnv = vi.hoisted(() => ({
     IS_HOSTED: false,
     MCP_AUDIENCE: undefined as string | undefined,
+    MCP_ALLOWED_CLIENTS: [] as string[],
+    MCP_PUBLIC_CLIENTS: [] as string[],
+    MCP_CONNECTOR_KEYS: [] as { client: string; key: string }[],
     OIDC_ISSUER_URL: undefined as string | undefined,
     OIDC_CLIENT_ID: undefined as string | undefined,
     OIDC_CLIENT_SECRET: undefined as string | undefined,
@@ -10,7 +13,11 @@ const mockEnv = vi.hoisted(() => ({
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
-import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
+import {
+    isMcpEnabled,
+    issuerMetadata,
+    mcpConfigWarnings,
+} from "@/lib/mcp/config";
 
 let issuerCounter = 0;
 
@@ -29,6 +36,9 @@ function configureSso(issuer = "https://id.example.com/realms/acme"): void {
 function resetEnv(): void {
     mockEnv.IS_HOSTED = false;
     mockEnv.MCP_AUDIENCE = undefined;
+    mockEnv.MCP_ALLOWED_CLIENTS = [];
+    mockEnv.MCP_PUBLIC_CLIENTS = [];
+    mockEnv.MCP_CONNECTOR_KEYS = [];
     mockEnv.OIDC_ISSUER_URL = undefined;
     mockEnv.OIDC_CLIENT_ID = undefined;
     mockEnv.OIDC_CLIENT_SECRET = undefined;
@@ -64,6 +74,44 @@ describe("isMcpEnabled", () => {
         mockEnv.MCP_AUDIENCE = "riffado-mcp";
         configureSso();
         expect(isMcpEnabled()).toBe(false);
+    });
+});
+
+describe("mcpConfigWarnings", () => {
+    beforeEach(() => {
+        resetEnv();
+        mockEnv.MCP_AUDIENCE = "riffado-mcp";
+        configureSso();
+    });
+
+    it("says nothing while the server is off", () => {
+        mockEnv.MCP_AUDIENCE = undefined;
+        expect(mcpConfigWarnings()).toEqual([]);
+    });
+
+    it("warns that an empty allowlist admits every client", () => {
+        expect(mcpConfigWarnings()).toEqual([
+            expect.stringContaining("MCP_ALLOWED_CLIENTS is empty"),
+        ]);
+    });
+
+    it("names public or keyed clients the allowlist refuses anyway", () => {
+        mockEnv.MCP_ALLOWED_CLIENTS = ["claude", "claude-code"];
+        mockEnv.MCP_PUBLIC_CLIENTS = ["claude", "claude-jdoe"];
+        mockEnv.MCP_CONNECTOR_KEYS = [
+            { client: "claude", key: "k".repeat(32) },
+            { client: "claude-jdoe", key: "j".repeat(32) },
+        ];
+        const warnings = mcpConfigWarnings();
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("does not list claude-jdoe:");
+        expect(warnings[0]).not.toContain("k".repeat(32));
+    });
+
+    it("is quiet when the allowlist covers them", () => {
+        mockEnv.MCP_ALLOWED_CLIENTS = ["claude"];
+        mockEnv.MCP_PUBLIC_CLIENTS = ["claude"];
+        expect(mcpConfigWarnings()).toEqual([]);
     });
 });
 

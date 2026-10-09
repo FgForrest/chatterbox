@@ -10,6 +10,7 @@
         "organization",
         "exports-backups-retention",
         "settings",
+        "claude",
         "administrators"
     ]
 }

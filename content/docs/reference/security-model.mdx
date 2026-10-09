@@ -10,14 +10,19 @@ column-level details.
 
 ## Authentication
 
-Two ways to authenticate to Riffado's HTTP surface:
+Three ways to authenticate to Riffado's HTTP surface:
 
-1. **Browser session** (Better Auth). Email + password, with the
-   session cookie signed by `BETTER_AUTH_SECRET`. Used by every page
-   under `(app)`, the dashboard, and the internal `/api/*` routes.
+1. **Browser session** (Better Auth). Email + password, or single
+   sign-on, with the session cookie signed by `BETTER_AUTH_SECRET`.
+   Used by every page under `(app)`, the dashboard, and the internal
+   `/api/*` routes.
 2. **Personal API key** (`op_<24 chars>`). Used by external
    integrations against the `/api/v1/*` surface. Sent as a Bearer
    token. Read-only scope.
+3. **Access token of the single sign-on realm**, on `/api/mcp` only
+   (self-host, when the [external MCP server](../self-hosting/mcp) is
+   on). Sent as a Bearer token by AI clients such as Claude and by
+   backend service accounts. See [External MCP server](#external-mcp-server).
 
 Rate limit buckets default to the request's direct client IP. If your
 instance sits behind a reverse proxy that overwrites
@@ -117,6 +122,41 @@ on every PR.
 authentication; internal routes get it from the session. Either way,
 the same userId-scoped queries run.
 
+## External MCP server
+
+Riffado is a resource server here: Keycloak signs people in and issues
+the tokens, Riffado only checks them.
+
+- **Which tokens.** The realm's signature (`RS256`, `PS256` or `ES256`,
+  keys from its discovery document), the exact issuer, an expiry, a
+  `sub`, and a `typ` of `Bearer` when present, so an ID token is
+  refused. `aud` must contain `MCP_AUDIENCE` (or the endpoint's URL with
+  `MCP_RESOURCE_AUDIENCE=true`). Tokens come from the single sign-on
+  realm only: a second realm could issue a `sub` equal to a real user's.
+- **Who.** A `sub` linked to a Riffado account through single sign-on is
+  that user; a service account (`client_id` claim) acts as the
+  Organization account. Accounts are never created from a token.
+- **What.** The five client roles open areas; they never widen what the
+  same user sees in the app. The same user-scoped queries run.
+- **Where from.** `MCP_ALLOWED_CLIENTS` lists the clients (`azp`) that
+  may call. Requests through the public entrance, marked by the reverse
+  proxy with `MCP_PUBLIC_INGRESS_HEADER`, are served only for
+  `MCP_PUBLIC_CLIENTS`, so a public client's token (Claude Code's) or a
+  service account's is refused from the internet. A client in
+  `MCP_CONNECTOR_KEYS` must also send its key in `X-API-Key`, compared in
+  constant time. Hosted Claude uses a confidential client, so only the
+  connector holding its secret can redeem a sign-in for it. See
+  [Claude and Claude Code](../self-hosting/claude#why-it-is-built-this-way).
+- **Revocation.** Tokens are checked locally against the realm's keys. A
+  disabled user or a removed role takes effect when the access token
+  expires (10 to 15 minutes on the Claude clients); each refresh reads
+  the roles again.
+- **Limits and audit.** 60 requests a minute per caller (subject and
+  client) and 10 decrypting searches; no limit per IP address, which
+  belongs at the proxy. Every tool call and every refusal of a genuine
+  token writes a row to `mcp_access_log`: caller, client, tool, outcome,
+  the ids touched and the IP. Never arguments or content.
+
 ## Account suspension
 
 Suspended users (`users.suspendedAt` is non-null) are rejected
@@ -146,6 +186,16 @@ pretending we cover them:
 - **A compromised `ENCRYPTION_KEY`.** Treat the key like a database
   master credential. Lose it and encrypted content becomes
   unrecoverable.
+- **Your AI client's vendor.** An AI client connected to the MCP server
+  receives what it reads, and a hosted one such as Claude stores the
+  person's tokens on its vendor's side. Its vendor's data terms apply.
+- **Your identity provider.** Whoever can change roles, clients or
+  passwords in the realm decides who reads through the MCP server, and
+  realm administrators can sign in as anyone.
+- **Prompt injection.** Transcripts are what people said, and an AI
+  client acting on its own may follow text in them. Riffado labels tool
+  results as data and lets a client change only a task's status or
+  assignee (`tasks:write`).
 
 ## Compliance claims
 

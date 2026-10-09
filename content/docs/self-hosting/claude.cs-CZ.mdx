@@ -1,0 +1,398 @@
+---
+title: Claude a Claude Code
+description: Umožněte lidem ptát se Claude (claude.ai, Desktop, Cowork) a Claude Code na své nahrávky, s přihlášením přes váš realm v Keycloaku a v mezích jejich rolí.
+---
+
+[Externí MCP server](./mcp) umožňuje AI klientům číst, co Riffado ví.
+Tato stránka k němu připojí oba produkty Claude od Anthropicu:
+
+- **Claude**: claude.ai, Claude Desktop, mobilní aplikace a Cowork. Ke
+  custom konektorům přistupují z cloudu Anthropicu, takže `/api/mcp` musí
+  být dostupné z internetu, a to jen z adres Anthropicu.
+- **Claude Code**: běží na počítači daného člověka a připojuje se odtud,
+  přes vaši vnitřní síť.
+
+Bez přihlášení na přihlašovací stránce vašeho realmu se nikdo nedostane
+dovnitř a nikdo neuvidí víc, než dovolí jeho role v Keycloaku a vlastní
+pravidla Riffada. Co lidé dělají po připojení, popisuje kapitola
+[Riffado v Claude](../user-guide/claude.md).
+
+<span id="how-it-works" />
+
+## Jak to funguje
+
+1. Někdo v Claude připojí konektor (URL `<APP_URL>/api/mcp`).
+2. Claude zavolá `/api/mcp` bez tokenu a dostane 401. Odpověď odkazuje na
+   metadata chráněného resource, která uvádějí váš realm jako
+   authorization server a `openid` jako scope, o který má žádat.
+3. Claude pošle člověka na přihlašovací stránku realmu. Po přihlášení
+   dá Keycloak Claude jednorázový kód a Claude ho na token endpointu
+   realmu vymění s tajemstvím klienta `claude`. Dostane access token
+   (15 minut) a offline refresh token (platí, dokud se použije aspoň
+   jednou za 30 dní).
+4. Každé volání `/api/mcp` nese access token. Riffado ho ověří proti
+   podpisovým klíčům realmu, najde člověka (`sub`) a jeho role a nabídne
+   jen nástroje, které tyto role otevírají.
+5. Claude token na pozadí obnovuje. Každé obnovení znovu načte role
+   člověka v Keycloaku.
+
+Riffado nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
+
+<span id="before-you-start" />
+
+## Než začnete
+
+- [Externí MCP server](./mcp) funguje ve vnitřní síti: `MCP_AUDIENCE` je
+  nastaveno, resource klient `riffado-mcp` má svých pět rolí a lidé mají
+  role, které mít mají.
+- Doporučujeme Keycloak 26.6 nebo novější; testy Riffada běží proti
+  26.6.4. Discovery dokument a token endpoint realmu musí být dostupné z
+  cloudu Anthropicu a jeho přihlašovací stránka z prohlížečů lidí, kteří
+  se připojují.
+- Veřejný DNS název pro host z `APP_URL` a reverzní proxy, kterou
+  spravujete (krok 3).
+- Pro celou organizaci: tarif Claude Team nebo Enterprise, jehož Owner
+  konektor jednou přidá. Lidé s osobním tarifem (Free, Pro, Max) si ho
+  přidávají sami, každý s vlastním klientem (krok 1).
+- Každý, kdo se připojuje, se už jednou přihlásil do Riffada. Účty se z
+  tokenu nikdy nevytvářejí.
+
+<span id="step-1-keycloak-clients" />
+
+## Krok 1: klienti v Keycloaku
+
+<span id="claude-for-the-hosted-apps" />
+
+### `claude` pro hostované aplikace
+
+V administraci realmu **Clients → Create client**:
+
+1. **Client type:** OpenID Connect. **Client ID:** `claude`.
+2. **Client authentication:** zapnuto. **Authentication flow:** pouze
+   Standard flow. Direct access grants, implicit flow, service account
+   roles i device grant zůstávají vypnuté.
+3. **Valid redirect URIs:** `https://claude.ai/api/mcp/auth_callback`.
+4. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
+   `S256`. **Advanced → Access Token Lifespan:** 15 minut (10 až 15).
+5. **Client scopes:** jako **Default** ponechte jen `basic` a `roles`,
+   `offline_access` jako **Optional**. Ostatní výchozí scopes s mapováním
+   rolí odeberte: každý přidává své role a aplikace za nimi jako audience
+   do každého tokenu, který Claude drží.
+6. **Client scopes → `claude-dedicated` → Scope:** vypněte **Full scope
+   allowed**, pak **Assign role** a vyberte role `riffado-mcp`, které smí
+   Claude nést. Všech pět nechá rozhodovat role každého člověka;
+   `tasks:write` vynechte, pokud Claude nemá úkoly nikdy měnit.
+7. **Credentials:** zkopírujte **Client secret** pro Ownera v Claude.
+8. Volitelně: **Settings → Login settings → Consent required** zapnuto.
+   Realm se pak každého člověka jednou zeptá, zda Claude pustit dovnitř.
+   Je to zdvořilost, ne kontrola: Keycloak se už znovu nezeptá a
+   neukazuje, který účet Claude přístup dostane.
+
+<span id="claude-code-for-claude-code" />
+
+### `claude-code` pro Claude Code
+
+Stejně jako `claude`, kromě:
+
+- **Client authentication:** vypnuto (notebook tajemství neudrží).
+- **Valid redirect URIs:** `http://localhost/callback` a
+  `http://127.0.0.1/callback`. Keycloak přijme libovolný port na
+  loopback adrese, když registrovaná URI port nemá, a tak funguje lokální
+  callback Claude Code.
+- Consent screen není potřeba.
+
+Riffado obsluhuje tokeny `claude-code` jen z vnitřní sítě (krok 3):
+stejný token přicházející z cloudu Anthropicu by musel být odcizen z
+něčího počítače.
+
+<span id="one-client-per-personal-plan" />
+
+### Jeden klient na osobní tarif
+
+Člověk, který se připojuje z osobního tarifu Claude, dostane vlastního
+důvěrného klienta, nastaveného přesně jako `claude` a pojmenovaného po
+něm (například `claude-jdoe`). Jeho tajemství předejte jen tomuto
+člověku. Uveďte ho v kroku 2 vedle `claude`; přístup ukončíte vypnutím
+nebo smazáním klienta.
+
+<span id="the-realm" />
+
+### Realm
+
+- **Realm settings → User registration → Default roles** obsahují
+  `offline_access` (v `default-roles-<realm>`). Bez toho Keycloak
+  přihlášení odmítne s „Offline tokens not allowed for the user or
+  client“.
+- **Realm settings → Sessions → Offline Session Idle:** 30 dní (výchozí).
+  Tak dlouho zůstane Claude připojený, i když se nepoužívá.
+- **Realm settings → Tokens → Revoke Refresh Token:** nechte vypnuté.
+  Platí pro celý realm a pro Claude nic nepřinese: klient je důvěrný.
+- **Clients → Client registration:** anonymní registrace odmítnutá
+  (zásada **Trusted Hosts** bez hostů). Claude si nesmí registrovat
+  vlastní klienty; používá `claude`.
+- Legacy token exchange (V1) vypnutý a nikdo s oprávněním *impersonate*,
+  jako na stránce [Externí MCP server](./mcp).
+- **Clients → `claude` → Client scopes → Evaluate** pro testovacího
+  uživatele s některými rolemi: `aud` access tokenu je přesně
+  `riffado-mcp`, `sub` je přítomné a `resource_access.riffado-mcp.roles`
+  vypisuje role tohoto uživatele. S pouhými `basic` a `roles` token
+  nenese `preferred_username`; Riffado ho nepotřebuje.
+
+<span id="step-2-riffado" />
+
+## Krok 2: Riffado
+
+```bash
+MCP_AUDIENCE=riffado-mcp
+MCP_ALLOWED_CLIENTS=claude,claude-jdoe,claude-code,acme-reports
+MCP_PUBLIC_INGRESS_HEADER=X-MCP-Ingress
+MCP_PUBLIC_CLIENTS=claude,claude-jdoe
+MCP_CONNECTOR_KEYS=claude=<64 hex znaků>
+```
+
+| Proměnná | Co dělá |
+| --- | --- |
+| `MCP_ALLOWED_CLIENTS` | Všichni klienti, kteří smějí volat: klienti Claude, `claude-code` a servisní účty, které už používáte. |
+| `MCP_PUBLIC_INGRESS_HEADER` | Hlavička, kterou nastavuje vaše veřejná proxy (krok 3). Požadavek s ní přišel z internetu. |
+| `MCP_PUBLIC_CLIENTS` | Klienti obsluhovaní veřejným vstupem: `claude` a osobní klienti. Nikdy `claude-code` ani servisní účet. |
+| `MCP_CONNECTOR_KEYS` | Dvojice `client=klíč`. Token uvedeného klienta se obslouží jen s jeho klíčem v `X-API-Key`. Každý klíč vygenerujte pomocí `openssl rand -hex 32`. |
+
+Restartujte aplikaci. S chybnou hodnotou se nespustí. Při startu varuje,
+když je `MCP_ALLOWED_CLIENTS` prázdné nebo když vynechává klienta, kterého
+uvádí `MCP_PUBLIC_CLIENTS` či `MCP_CONNECTOR_KEYS`.
+
+Klíč konektoru je druhý zámek na konektoru organizace: požadavek s
+tokenem `claude` musí nést i klíč, který do Claude zadal jen váš Owner.
+Osobního klienta uveďte jen tehdy, když Claude toho člověka nabízí
+request headers (viz krok 4). Klíče uchovávejte s ostatními tajemstvími.
+
+<span id="step-3-the-public-entrance" />
+
+## Krok 3: veřejný vstup
+
+Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
+
+- Veřejný DNS záznam pro host z `APP_URL`. Lidé uvnitř dál chodí do
+  Riffada přes vnitřní síť (split-horizon DNS).
+- Veřejně důvěryhodný certifikát na portu 443. Za allowlistem použijte
+  DNS-01 challenge. Žádné přesměrování na jiný host.
+- Jen z `160.79.104.0/21` a jen dvě přesné cesty: `/api/mcp` a
+  `/.well-known/oauth-protected-resource/api/mcp`. Ne prefix:
+  `/api/mcp/learn` musí zůstat interní. `GET` a `DELETE` na `/api/mcp`
+  také propusťte (Riffado odpoví 405, což Claude očekává).
+- Veřejná proxy nastaví na každý přeposlaný požadavek hlavičku
+  pojmenovanou v `MCP_PUBLIC_INGRESS_HEADER` a přepíše, co přišlo
+  zvenku. Vnitřní cesta ji odebere.
+- Objem požadavků omezte na proxy. Riffado počítá požadavky na člověka a
+  klienta, ne na IP adresu: všichni uživatelé Claude přicházejí z
+  několika stejných adres Anthropicu.
+
+S nginx:
+
+```nginx
+# public server block (internet)
+location = /api/mcp {
+    allow 160.79.104.0/21;
+    deny all;
+    client_max_body_size 256k;
+    proxy_set_header X-MCP-Ingress public;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://riffado:3000;
+}
+location = /.well-known/oauth-protected-resource/api/mcp {
+    allow 160.79.104.0/21;
+    deny all;
+    proxy_set_header X-MCP-Ingress public;
+    proxy_pass http://riffado:3000;
+}
+location / {
+    return 404;
+}
+
+# internal server block (office network, VPN)
+proxy_set_header X-MCP-Ingress "";
+```
+
+Riffado zapisuje IP klienta do přístupového logu, když je
+`RATE_LIMIT_TRUST_PROXY_HEADERS=true` a proxy přepisuje `X-Real-IP`
+(viz [Proměnné prostředí](./environment-variables)).
+
+<span id="step-4-claude" />
+
+## Krok 4: Claude
+
+**Team nebo Enterprise.** Owner konektor jednou přidá:
+
+1. **Organization settings → Connectors → Add → Custom** (na dotaz typ
+   **Web**).
+2. **Name:** Riffado. **MCP server URL:** přesně `<APP_URL>/api/mcp`.
+3. **Authentication:** Sign in now. **OAuth client:** Use your own OAuth
+   client, s client ID `claude` a tajemstvím z kroku 1 (v **Advanced
+   settings**, pokud je dialog na jedné obrazovce).
+4. Pokud `MCP_CONNECTOR_KEYS` uvádí `claude`: **Request headers →**
+   `x-api-key`, jako hodnota klíč, **Required**. Request headers jsou v
+   betě a ještě je nemá každá organizace. Bez této sekce nechte `claude`
+   mimo `MCP_CONNECTOR_KEYS`.
+5. **Add.**
+
+Členové pak otevřou **Customize → Connectors**, najdou Riffado se
+štítkem **Custom**, kliknou na **Connect** a přihlásí se na stránce
+realmu.
+
+**Osobní tarify.** Člověk otevře **Customize → Connectors → Add custom
+connector**, zadá stejnou URL a v **Advanced settings** své client ID a
+tajemství. **Add**, pak **Connect**.
+
+**Claude Code**, ve vnitřní síti nebo přes VPN:
+
+```bash
+claude mcp add --transport http --client-id claude-code riffado <APP_URL>/api/mcp
+```
+
+Pak v Claude Code `/mcp`, vyberte `riffado` a přihlaste se v
+prohlížeči, který se otevře.
+
+Claude nedovolí změnit klienta, tajemství ani request headers
+existujícího konektoru. Pro výměnu konektor odeberte a přidejte znovu;
+členové se pak připojí znovu.
+
+<span id="step-5-check-it" />
+
+## Krok 5: kontrola
+
+Z vnitřní sítě:
+
+```bash
+curl -s <APP_URL>/.well-known/oauth-protected-resource/api/mcp
+# {"resource":"<APP_URL>/api/mcp","authorization_servers":["<issuer>"],
+#  "scopes_supported":["openid"],...}
+
+curl -si -X POST <APP_URL>/api/mcp | grep -i www-authenticate
+# WWW-Authenticate: Bearer resource_metadata="...", scope="openid"
+```
+
+Ze stroje mimo rozsah Anthropicu musí veřejný vstup odpovědět 403 od
+proxy a jakákoliv jiná cesta 404.
+
+V Claude se připojte a zeptejte se „Které nástroje Riffada můžeš
+používat?“. Odpověď má vyjmenovat nástroje vašich rolí. Pak se podívejte
+do přístupového logu:
+
+```sql
+SELECT at, client_id, tool, outcome, ip
+FROM mcp_access_log
+ORDER BY at DESC
+LIMIT 20;
+```
+
+Řádky s `client_id` `claude` a výsledkem `ok` znamenají, že vše funguje.
+
+<span id="when-claude-cannot-connect" />
+
+## Když se Claude nepřipojí
+
+Claude zprávu z 403 nezobrazí. Log aplikace uvádí důvod každého
+odmítnutí: `[mcp] refused (<reason>) a token of client <client>`, a
+`mcp_access_log` má řádek `denied` se `sub` daného člověka.
+
+| Důvod | Význam | Řešení |
+| --- | --- | --- |
+| `no-account` | Člověk se do Riffada nikdy nepřihlásil. | Jednou se přihlásí do Riffada a pak se připojí znovu. |
+| `no-roles` | Token nenese žádnou z pěti rolí. | Dejte člověku roli na `riffado-mcp` a klientovi její mapování ve scope. |
+| `client-not-allowed` | Klient není v `MCP_ALLOWED_CLIENTS`. | Přidejte ho. |
+| `client-not-public` | Veřejným vstupem přišel klient mimo `MCP_PUBLIC_CLIENTS`. | U `claude-code` zvenku očekávané; jinak přidejte zapomenutého osobního klienta. |
+| `connector-key` | `X-API-Key` chybí nebo nesouhlasí. | Zkontrolujte request header konektoru; konektor přidejte znovu. |
+| `suspended` | Účet v Riffadu je pozastavený. | |
+| `no-organization` | Servisní účet při vypnuté Organizaci. | |
+
+Chyby na straně realmu ukončí přihlášení dřív, než Riffado token uvidí:
+
+| Keycloak hlásí | Řešení |
+| --- | --- |
+| `invalid_scope` | Ponechte `offline_access` jako volitelný scope klienta. Claude žádá o `openid` a, protože ho realm nabízí, o `offline_access`. |
+| Offline tokens not allowed for the user or client | Dejte člověku roli realmu `offline_access` (výchozí role). |
+| `unauthorized_client` | Tajemství klienta v konektoru nesouhlasí: přidejte konektor znovu. |
+| Invalid parameter: redirect_uri | Zkontrolujte redirect URI klienta (krok 1). |
+| `invalid_target` | Se zapnutými resource indicators: `resource_url` na `riffado-mcp` musí být `<APP_URL>/api/mcp`. |
+
+Nástroj, který se po přidání role neobjeví, se ukáže, jakmile člověk v
+Claude konektor obnoví nebo se připojí znovu: Claude si drží seznam
+nástrojů z doby připojení. Nástroj, jehož role byla odebrána, do té doby
+odpovídá „Unknown tool“.
+
+<span id="day-to-day" />
+
+## Běžný provoz
+
+- **Přidání nebo odebrání oblasti:** změňte role člověka v Keycloaku.
+  Odebrání platí při příštím obnovení tokenu, do 15 minut; nová role po
+  obnovení konektoru.
+- **Okamžité odpojení:** vypněte uživatele v Keycloaku nebo odhlaste
+  jeho relace (**Users → daný člověk → Sessions**, včetně offline).
+  Access token, který už drží, funguje do vypršení, nejvýš 15 minut:
+  Riffado ověřuje tokeny lokálně a neptá se Keycloaku při každém volání.
+- **Osobní klient:** vypněte nebo smažte ho v Keycloaku a odeberte ho
+  ze všech tří seznamů.
+- **Výměna tajemství `claude` nebo klíče konektoru:** vygenerujte nové
+  (**Credentials → Regenerate**, nebo nové `openssl rand -hex 32` a
+  restart), Owner pak konektor odebere a přidá znovu a všichni se
+  připojí znovu.
+- **Co bylo čteno:** `mcp_access_log` uchovává, kdo volal jaký nástroj
+  a kterých záznamů se týkal, nikdy co se ptal ani co dostal, po dobu
+  `MCP_AUDIT_RETENTION_DAYS` dní.
+
+<span id="optional-resource-indicators" />
+
+## Volitelně: resource indicators
+
+Keycloak 26.6 a novější umí svázat token s URL, pro kterou byl vyžádán
+(RFC 8707). Jde o experimentální funkci:
+
+1. Spusťte Keycloak s `--features=resource-indicators`.
+2. Nastavte klientovi `riffado-mcp` atribut `resource_url` na
+   `<APP_URL>/api/mcp`.
+3. Nastavte v Riffadu `MCP_RESOURCE_AUDIENCE=true` a restartujte.
+
+Token, o který Claude pro tento server požádá, pak nese jako audience
+`<APP_URL>/api/mcp` a přihlášení pro URL jiného serveru je odmítnuto s
+`invalid_target`. Obnovené tokeny a požadavky bez `resource` (ostatní
+aplikace realmu, servisní účty) si ponechají `riffado-mcp`, které
+Riffado dál přijímá. Požadavků bez `resource` se funkce netýká. Známé na
+Keycloaku 26.6.4: člověk bez kterékoliv z pěti rolí dostane při
+připojení chybu serveru Keycloaku místo 403 od Riffada. Vyzkoušejte to
+nejdřív na testovacím realmu; end-to-end stack na to má override (viz
+[Vyzkoušení lokálně](./mcp#trying-it-locally)).
+
+<span id="why-it-is-built-this-way" />
+
+## Proč je to postavené takto
+
+- **Důvěrný klient pro Claude.** Veřejné client id je jen jméno. Bez
+  resource indicators dá Keycloak tokenu pro `claude` audience
+  `riffado-mcp`, ať se Claude připojoval k jakémukoliv serveru. Kdokoliv
+  by si mohl přidat vlastní konektor s vaším realmem a client id
+  `claude`; vaši lidé by se přihlásili na skutečné stránce a Claude by
+  tomu konektoru předal skutečné tokeny, které by mohl posílat do
+  Riffada ze stejných adres Anthropicu. S tajemstvím umí přihlášení
+  dokončit jen konektor, který ho zná, takže `azp: claude` znamená
+  konektor vaší organizace.
+- **Claude Code jen uvnitř.** Jeho klient tajemství neudrží, takže token
+  `claude-code` z internetu se považuje za odcizený.
+- **Klíč konektoru.** Váže každý požadavek ke konektoru, který nastavil
+  váš Owner, navíc k tajemství, které k němu váže přihlášení.
+- **Žádný limit na IP adresu.** Celý Claude sdílí několik adres; limit na
+  adresu by jednomu vytíženému člověku dovolil zablokovat všechny.
+  Riffado počítá 60 požadavků za minutu na člověka a klienta a 10
+  hledání.
+- **Co zůstává na vašem úsudku.** Přepisy jsou to, co lidé řekli, a
+  Cowork jedná sám. Riffado modelu říká, že výsledky nástrojů jsou data,
+  ne instrukce, a jediné, co Claude může změnit, je stav nebo přiřazení
+  úkolu (`tasks:write`). Lidé mohou v Claude zablokovat jednotlivé
+  nástroje (**Customize → Connectors →** konektor) a vy můžete
+  `tasks:write` vynechat ze scope klienta `claude`.
+- **Tokeny drží Anthropic.** Claude ukládá tokeny každého člověka na
+  straně Anthropicu. Platí jen pro Riffado, access token 15 minut, a
+  refresh token funguje jen s tajemstvím klienta, které drží také
+  Anthropic. Odpovědi, které Claude od Riffada dostane, se k Anthropicu
+  dostanou jako cokoliv jiného v konverzaci, podle podmínek vašeho
+  tarifu Claude.

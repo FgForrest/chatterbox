@@ -94,4 +94,4 @@ Zobrazuje se tam, kde je [Learn](learn.md) dostupné.
 - **API klíče** a **Webhooks**: propojení Riffado s dalšími nástroji.
 - **Google účet**: propojení Google účtu používaného pro [exporty na Google Drive](exports-backups-retention.md#to-google-drive).
 
-Dále: [Pro administrátory](administrators.md)
+Dále: [Riffado v Claude](claude.md)

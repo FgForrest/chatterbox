@@ -112,12 +112,17 @@ e-mailem/heslem, registrace a obnovení hesla jsou vypnuty. Viz
 
 Pouze vlastní hosting; vypnuto při `IS_HOSTED=true`. Vyžaduje [jednotné přihlášení](#single-sign-on-openid-connect)
 a `APP_URL`; tokeny jsou ze stejné oblasti. Viz
-[Externí MCP server](./mcp).
+[Externí MCP server](./mcp) a pro proměnné veřejného vstupu a konektoru
+[Claude a Claude Code](./claude).
 
 | Proměnná                   | Výchozí | Efekt                                                                                                  |
 | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
 | `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `riffado-mcp`). Pokud není, `/api/mcp` vrací 404. |
-| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Pokud není, může každý klient z realm s požadovanou rolí. |
+| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Pokud není, může každý klient z realm s požadovanou rolí (při startu se zapíše varování). |
+| `MCP_PUBLIC_INGRESS_HEADER`| —       | Hlavička, kterou veřejná reverzní proxy nastaví na přeposlané požadavky (např. `X-MCP-Ingress`); vnitřní cesta ji odebere. Požadavek s ní se obslouží jen pro `MCP_PUBLIC_CLIENTS`. |
+| `MCP_PUBLIC_CLIENTS`       | —       | Čárkou oddělená client id obsluhovaná veřejným vstupem (např. `claude`). Vyžaduje `MCP_PUBLIC_INGRESS_HEADER`. |
+| `MCP_CONNECTOR_KEYS`       | —       | Čárkou oddělené dvojice `client=klíč` (klíče od 32 znaků): token uvedeného klienta se obslouží jen s `X-API-Key: <klíč>`, request headerem konektoru Claude. Tajné. |
+| `MCP_RESOURCE_AUDIENCE`    | `false` | Při `true` přijímá i tokeny, jejichž `aud` je `<APP_URL>/api/mcp` (resource indicators v Keycloaku). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Počet dní po které se záznam v tabulce `mcp_access_log` uchovává (1 až 3650).                              |
 
 <span id="learn-knowledge-from-recordings" />

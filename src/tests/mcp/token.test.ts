@@ -11,7 +11,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockEnv = vi.hoisted(() => ({
     IS_HOSTED: false,
+    APP_URL: "https://riffado.example.com",
     MCP_AUDIENCE: undefined as string | undefined,
+    MCP_RESOURCE_AUDIENCE: undefined as boolean | undefined,
     OIDC_ISSUER_URL: undefined as string | undefined,
     OIDC_CLIENT_ID: "riffado",
     OIDC_CLIENT_SECRET: "secret",
@@ -19,10 +21,11 @@ const mockEnv = vi.hoisted(() => ({
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
-import { verifyMcpToken } from "@/lib/mcp/token";
+import { type McpTokenCheck, verifyMcpToken } from "@/lib/mcp/token";
 
 const ISSUER = "https://id.example.com/realms/acme";
 const AUDIENCE = "riffado-mcp";
+const RESOURCE_URL = "https://riffado.example.com/api/mcp";
 
 let privateKey: CryptoKey;
 let otherKey: CryptoKey;
@@ -44,7 +47,7 @@ beforeAll(async () => {
 
 interface TokenOptions {
     issuer?: string;
-    audience?: string | string[];
+    audience?: string | string[] | null;
     exp?: string;
     kid?: string;
     sub?: string | null;
@@ -58,15 +61,23 @@ function token(
     const jwt = new SignJWT(claims)
         .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "k1" })
         .setIssuer(options.issuer ?? ISSUER)
-        .setAudience(options.audience ?? AUDIENCE)
         .setIssuedAt()
         .setExpirationTime(options.exp ?? "5m");
+    if (options.audience !== null)
+        jwt.setAudience(options.audience ?? AUDIENCE);
     if (options.sub !== null) jwt.setSubject(options.sub ?? "user-sub");
     return jwt.sign(options.key ?? privateKey);
 }
 
-function verify(jwt: string, audience = AUDIENCE) {
-    return verifyMcpToken(jwt, { issuer: ISSUER, audience, keys });
+function check(
+    jwt: string,
+    audiences: string[] = [AUDIENCE],
+): Promise<McpTokenCheck> {
+    return verifyMcpToken(jwt, { issuer: ISSUER, audiences, keys });
+}
+
+async function kindOf(jwt: string, audiences?: string[]): Promise<string> {
+    return (await check(jwt, audiences)).kind;
 }
 
 function base64url(value: unknown): string {
@@ -75,50 +86,67 @@ function base64url(value: unknown): string {
 
 describe("verifyMcpToken", () => {
     it("accepts a good token and returns its claims", async () => {
-        const claims = await verify(
+        const checked = await check(
             await token({
                 azp: "claude",
                 resource_access: { [AUDIENCE]: { roles: ["tasks:read"] } },
             }),
         );
-        expect(claims?.sub).toBe("user-sub");
-        expect(claims?.azp).toBe("claude");
+        expect(checked).toMatchObject({
+            kind: "valid",
+            claims: { sub: "user-sub", azp: "claude" },
+        });
     });
 
     it("accepts a token whose audience list includes the server", async () => {
-        const claims = await verify(
-            await token({}, { audience: ["account", AUDIENCE] }),
-        );
-        expect(claims?.sub).toBe("user-sub");
+        expect(
+            await kindOf(await token({}, { audience: ["account", AUDIENCE] })),
+        ).toBe("valid");
     });
 
-    it("rejects a wrong audience", async () => {
-        expect(await verify(await token(), "other")).toBeNull();
-        expect(
-            await verify(await token({}, { audience: "account" })),
-        ).toBeNull();
+    it("accepts a token for any of the audiences it is given", async () => {
+        const jwt = await token({}, { audience: RESOURCE_URL });
+        expect(await kindOf(jwt)).toBe("other-audience");
+        expect(await kindOf(jwt, [AUDIENCE, RESOURCE_URL])).toBe("valid");
+    });
+
+    it("tells a genuine token for another audience from a bad one", async () => {
+        const checked = await check(
+            await token({ azp: "claude" }, { audience: "account" }),
+        );
+        expect(checked).toMatchObject({
+            kind: "other-audience",
+            claims: { sub: "user-sub", azp: "claude" },
+        });
+        expect(await kindOf(await token(), ["other"])).toBe("other-audience");
+        expect(await kindOf(await token({}, { audience: null }))).toBe(
+            "other-audience",
+        );
     });
 
     it("rejects a wrong issuer", async () => {
         expect(
-            await verify(
+            await kindOf(
                 await token(
                     {},
                     { issuer: "https://evil.example.com/realms/acme" },
                 ),
             ),
-        ).toBeNull();
-        expect(
-            await verify(await token({}, { issuer: `${ISSUER}/` })),
-        ).toBeNull();
+        ).toBe("invalid");
+        expect(await kindOf(await token({}, { issuer: `${ISSUER}/` }))).toBe(
+            "invalid",
+        );
     });
 
     it("rejects an expired token beyond the clock tolerance", async () => {
-        expect(await verify(await token({}, { exp: "-2m" }))).toBeNull();
+        expect(await kindOf(await token({}, { exp: "-2m" }))).toBe("invalid");
+        expect(
+            await kindOf(await token({}, { exp: "-2m", audience: "account" })),
+        ).toBe("invalid");
     });
 
     it("tolerates a little clock skew", async () => {
-        expect(await verify(await token({}, { exp: "-10s" }))).not.toBeNull();
+        expect(await kindOf(await token({}, { exp: "-10s" }))).toBe("valid");
     });
 
     it("rejects a token without exp", async () => {
@@ -128,31 +156,33 @@ describe("verifyMcpToken", () => {
             .setAudience(AUDIENCE)
             .setSubject("user-sub")
             .sign(privateKey);
-        expect(await verify(jwt)).toBeNull();
+        expect(await kindOf(jwt)).toBe("invalid");
     });
 
     it("rejects a token without sub", async () => {
-        expect(await verify(await token({}, { sub: null }))).toBeNull();
+        expect(await kindOf(await token({}, { sub: null }))).toBe("invalid");
     });
 
     it("rejects a token signed by another key", async () => {
-        expect(await verify(await token({}, { key: otherKey }))).toBeNull();
+        expect(await kindOf(await token({}, { key: otherKey }))).toBe(
+            "invalid",
+        );
     });
 
     it("rejects a token naming an unknown key", async () => {
-        expect(await verify(await token({}, { kid: "k2" }))).toBeNull();
+        expect(await kindOf(await token({}, { kid: "k2" }))).toBe("invalid");
     });
 
     it("rejects garbage and an empty token", async () => {
-        expect(await verify("not-a-jwt")).toBeNull();
-        expect(await verify("")).toBeNull();
+        expect(await kindOf("not-a-jwt")).toBe("invalid");
+        expect(await kindOf("")).toBe("invalid");
         for (const garbage of ["a.b.c", "é.é.é", "eyJ.eyJ.x", "..", "a.b"]) {
-            expect(await verify(garbage)).toBeNull();
+            expect(await kindOf(garbage)).toBe("invalid");
         }
         const header = base64url({ alg: "RS256", kid: "k1" });
         for (const payload of ["null", "[]", "1", "é"]) {
             const body = Buffer.from(payload).toString("base64url");
-            expect(await verify(`${header}.${body}.c2ln`)).toBeNull();
+            expect(await kindOf(`${header}.${body}.c2ln`)).toBe("invalid");
         }
     });
 
@@ -164,7 +194,7 @@ describe("verifyMcpToken", () => {
             sub: "x",
             exp,
         })}.`;
-        expect(await verify(none)).toBeNull();
+        expect(await kindOf(none)).toBe("invalid");
     });
 
     it("rejects an algorithm outside the allowlist even with a matching key", async () => {
@@ -181,16 +211,19 @@ describe("verifyMcpToken", () => {
         expect(
             await verifyMcpToken(jwt, {
                 issuer: ISSUER,
-                audience: AUDIENCE,
+                audiences: [AUDIENCE],
                 keys: rs512Keys,
             }),
-        ).toBeNull();
+        ).toEqual({ kind: "invalid" });
     });
 
     it("accepts an access token and rejects an ID token", async () => {
-        expect(await verify(await token({ typ: "Bearer" }))).not.toBeNull();
-        expect(await verify(await token({ typ: "ID" }))).toBeNull();
-        expect(await verify(await token({ typ: "Refresh" }))).toBeNull();
+        expect(await kindOf(await token({ typ: "Bearer" }))).toBe("valid");
+        expect(await kindOf(await token({ typ: "ID" }))).toBe("invalid");
+        expect(await kindOf(await token({ typ: "Refresh" }))).toBe("invalid");
+        expect(
+            await kindOf(await token({ typ: "ID" }, { audience: "claude" })),
+        ).toBe("invalid");
     });
 
     it("throws when the key set cannot be fetched, not calling the token bad", async () => {
@@ -211,7 +244,7 @@ describe("verifyMcpToken", () => {
             await expect(
                 verifyMcpToken(jwt, {
                     issuer: ISSUER,
-                    audience: AUDIENCE,
+                    audiences: [AUDIENCE],
                     keys: unreachable(error),
                 }),
             ).rejects.toBe(error);
@@ -226,10 +259,10 @@ describe("verifyMcpToken", () => {
         expect(
             await verifyMcpToken(jwt, {
                 issuer: ISSUER,
-                audience: AUDIENCE,
+                audiences: [AUDIENCE],
                 keys: keyless,
             }),
-        ).toBeNull();
+        ).toEqual({ kind: "invalid" });
     });
 
     it("rejects a symmetric (HS256) signature", async () => {
@@ -240,7 +273,7 @@ describe("verifyMcpToken", () => {
             .setSubject("user-sub")
             .setExpirationTime("5m")
             .sign(new TextEncoder().encode("x".repeat(32)));
-        expect(await verify(jwt)).toBeNull();
+        expect(await kindOf(jwt)).toBe("invalid");
     });
 });
 
@@ -267,31 +300,56 @@ describe("verifyMcpToken with the configured realm", () => {
 
     beforeEach(() => {
         mockEnv.IS_HOSTED = false;
+        mockEnv.MCP_RESOURCE_AUDIENCE = undefined;
     });
 
-    it("returns null while the server is off", async () => {
+    it("finds every token invalid while the server is off", async () => {
         mockEnv.MCP_AUDIENCE = undefined;
         mockEnv.OIDC_ISSUER_URL = INTERNAL;
-        expect(await verifyMcpToken(await token())).toBeNull();
+        expect(await verifyMcpToken(await token())).toEqual({
+            kind: "invalid",
+        });
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 
-    it("returns null on hosted, which ignores single sign-on", async () => {
+    it("finds every token invalid on hosted, which ignores single sign-on", async () => {
         mockEnv.IS_HOSTED = true;
         mockEnv.MCP_AUDIENCE = AUDIENCE;
         mockEnv.OIDC_ISSUER_URL = INTERNAL;
-        expect(await verifyMcpToken(await token())).toBeNull();
+        expect(await verifyMcpToken(await token())).toEqual({
+            kind: "invalid",
+        });
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     it("reaches the SSO realm at its internal URL and checks the frontend issuer", async () => {
         mockEnv.MCP_AUDIENCE = AUDIENCE;
         mockEnv.OIDC_ISSUER_URL = INTERNAL;
-        const claims = await verifyMcpToken(await token());
-        expect(claims?.sub).toBe("user-sub");
+        expect(await verifyMcpToken(await token())).toMatchObject({
+            kind: "valid",
+            claims: { sub: "user-sub" },
+        });
         expect(
             await verifyMcpToken(await token({}, { issuer: INTERNAL })),
-        ).toBeNull();
+        ).toEqual({ kind: "invalid" });
+    });
+
+    it("takes the resource URL as audience only when told to", async () => {
+        mockEnv.MCP_AUDIENCE = AUDIENCE;
+        mockEnv.OIDC_ISSUER_URL = INTERNAL;
+        const forUrl = await token({}, { audience: RESOURCE_URL });
+        expect((await verifyMcpToken(forUrl)).kind).toBe("other-audience");
+
+        mockEnv.MCP_RESOURCE_AUDIENCE = true;
+        expect((await verifyMcpToken(forUrl)).kind).toBe("valid");
+        expect((await verifyMcpToken(await token())).kind).toBe("valid");
+        expect(
+            (
+                await verifyMcpToken(
+                    await token({}, { audience: `${RESOURCE_URL}/` }),
+                )
+            ).kind,
+        ).toBe("other-audience");
     });
 
     it("throws when the realm's keys cannot be fetched", async () => {
