@@ -15,6 +15,7 @@ export function GoogleAccountSection() {
     const { state, refresh } = useGoogleConnection();
     useGoogleConnectOutcome(refresh);
     const calendarGranted = state?.connection?.calendarGranted === true;
+    const meetGranted = state?.connection?.meetGranted === true;
 
     return (
         <div className="space-y-4">
@@ -52,6 +53,36 @@ export function GoogleAccountSection() {
                             {calendarGranted
                                 ? i18n("Reconnect Calendar")
                                 : i18n("Connect Calendar")}
+                        </Button>
+                    </div>
+                </SettingsCard>
+            )}
+            {state?.meetAvailable && (
+                <SettingsCard>
+                    <div className="space-y-3">
+                        <p className="text-sm font-medium">
+                            {i18n("Google Meet for Learn")}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            {i18n(
+                                "Allow Riffado to read who attended a selected Google Meet call. Attendees are possible speaker names, not confirmed voice identities. This uses your connected Google account.",
+                            )}
+                        </p>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={state.connection?.status !== "active"}
+                            onClick={() => {
+                                const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                                window.location.assign(
+                                    `/api/integrations/google/connect?purpose=meet&returnTo=${encodeURIComponent(returnTo)}`,
+                                );
+                            }}
+                        >
+                            {meetGranted
+                                ? i18n("Reconnect Meet")
+                                : i18n("Connect Meet")}
                         </Button>
                     </div>
                 </SettingsCard>

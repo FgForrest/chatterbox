@@ -9,6 +9,7 @@ import {
     getGoogleOAuthConfig,
 } from "@/lib/integrations/google/config";
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
+import { meetConsentScopes } from "@/lib/integrations/google/meet-consent";
 import {
     buildAuthorizationUrl,
     createOAuthState,
@@ -26,10 +27,13 @@ import {
 export const GET = apiHandler(async (request) => {
     const session = await requireApiSession(request);
     const url = new URL(request.url);
+    const requestedPurpose = url.searchParams.get("purpose");
     const purpose =
-        url.searchParams.get("purpose") === "calendar" ? "calendar" : "drive";
+        requestedPurpose === "calendar" || requestedPurpose === "meet"
+            ? requestedPurpose
+            : "drive";
     const config =
-        purpose === "calendar"
+        purpose === "calendar" || purpose === "meet"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!config) {
@@ -42,13 +46,26 @@ export const GET = apiHandler(async (request) => {
     const state = createOAuthState();
     const pkce = createPkcePair();
     const existing = await getGoogleConnectionStatus(session.user.id);
+    if (purpose === "meet" && (!existing || existing.status !== "active")) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Connect a Google account before enabling Meet",
+            409,
+        );
+    }
     const response = NextResponse.redirect(
         buildAuthorizationUrl({
             config,
             scopes:
-                purpose === "calendar"
-                    ? ["openid", "email", GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE]
-                    : GOOGLE_CONNECT_SCOPES,
+                purpose === "meet" && existing
+                    ? meetConsentScopes(existing.scopes)
+                    : purpose === "calendar"
+                      ? [
+                            "openid",
+                            "email",
+                            GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+                        ]
+                      : GOOGLE_CONNECT_SCOPES,
             state,
             codeChallenge: pkce.challenge,
             loginHint: existing?.email,
@@ -67,6 +84,7 @@ export const GET = apiHandler(async (request) => {
             ),
             expiresAt: Date.now() + GOOGLE_OAUTH_STATE_TTL_SECONDS * 1000,
             purpose,
+            expectedSubject: purpose === "meet" ? existing?.subject : undefined,
         }),
         {
             httpOnly: true,

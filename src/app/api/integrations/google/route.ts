@@ -11,6 +11,7 @@ import {
     disconnectGoogle,
     getGoogleConnectionStatus,
 } from "@/lib/integrations/google/connection";
+import { GOOGLE_MEET_READ_SCOPE } from "@/lib/integrations/google/meet-consent";
 
 export const GET = apiHandler(async (request) => {
     const session = await requireApiSession(request);
@@ -23,6 +24,7 @@ export const GET = apiHandler(async (request) => {
     return NextResponse.json({
         available,
         calendarAvailable,
+        meetAvailable: calendarAvailable,
         connection: connection
             ? {
                   email: connection.email,
@@ -30,6 +32,9 @@ export const GET = apiHandler(async (request) => {
                   status: connection.status,
                   calendarGranted: connection.scopes.includes(
                       GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+                  ),
+                  meetGranted: connection.scopes.includes(
+                      GOOGLE_MEET_READ_SCOPE,
                   ),
                   driveGranted: connection.scopes.includes(
                       GOOGLE_DRIVE_FILE_SCOPE,
