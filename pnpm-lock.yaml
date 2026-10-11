@@ -5667,8 +5667,8 @@ packages:
   tldts-core@7.4.11:
     resolution: {integrity: sha512-CW3WN2rIIE/Of21mulhgnGOwoDyEFNygyIBOONSdyAuSATgMMUCpLeUlB+E8sAwA5xRV9hYPl+kyZ9citHCaKg==}
 
-  tldts-core@7.4.18:
-    resolution: {integrity: sha512-KI2PKvCmvQI/xD6ypPqkU0i7oxNXR/O58RLRaHR4svsgVUQ2JE/XC8BtMbG6PSehD27I8sZJRcC1ASnCy6lp3g==}
+  tldts-core@7.4.16:
+    resolution: {integrity: sha512-MDolfaSJtlSK5Y0A1xl3277ekubZwobpBjugknDizI9O5Rm60a1m8k4ICK+MRsCDzPygT81mp3BBf5RKDlFRfA==}
 
   tldts@7.4.11:
     resolution: {integrity: sha512-aBiNayCfTQxuIJBm06M+xR14cYaYlDlSXZbgsnKzKNxDKUVq7KFwTjwBSsb7m9Y5xO8WfPnBc63WaYFMTGlvqw==}
@@ -11607,7 +11607,7 @@ snapshots:
 
   tldts-core@7.4.11: {}
 
-  tldts-core@7.4.18: {}
+  tldts-core@7.4.16: {}
 
   tldts@7.4.11:
     dependencies:
@@ -11615,7 +11615,7 @@ snapshots:
 
   tldts@7.4.15:
     dependencies:
-      tldts-core: 7.4.18
+      tldts-core: 7.4.16
 
   toidentifier@1.0.1: {}
 
