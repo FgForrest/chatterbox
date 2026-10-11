@@ -172,7 +172,7 @@ export const emailStyles = {
      * unreliable in desktop Outlook (Word rendering engine) -- a
      * wrapped second line can fall back to the left margin there and
      * read like a new, unrelated paragraph. A small table (`Row`/
-     * `Column` from @react-email/components) is the standard bulletproof
+     * `Column` from ../email-components) is the standard bulletproof
      * pattern instead: the glyph gets its own narrow column, so wrapped
      * text in the text column stays aligned under itself in every
      * client, including Outlook. Pair with a local `<Bullet>` wrapper

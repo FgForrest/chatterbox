@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
     Button,
     Column,
@@ -6,8 +7,7 @@ import {
     Row,
     Section,
     Text,
-} from "@react-email/components";
-import type { ReactNode } from "react";
+} from "../email-components";
 import { getEmailLocale, getEmailTranslator } from "../email-template-i18n";
 import { EmailLayout } from "./_layout";
 import { formatEmailDate } from "./format-date";
