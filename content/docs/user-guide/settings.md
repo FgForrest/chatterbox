@@ -80,4 +80,4 @@ Shown where [Learn](learn.md) is available.
 - **API Keys** and **Webhooks**: connect Riffado to other tools.
 - **Google Account**: connect the Google account used for [Google Drive exports](exports-backups-retention.md#to-google-drive).
 
-Next: [For administrators](administrators.md)
+Next: [Riffado in Claude](claude.md)

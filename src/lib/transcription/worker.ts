@@ -1,32 +1,33 @@
 /// <reference lib="webworker" />
 
-import { type PipelineType, pipeline } from "@xenova/transformers";
+import {
+    type AutomaticSpeechRecognitionPipeline,
+    pipeline,
+} from "@huggingface/transformers";
 
-type Pipe = Awaited<ReturnType<typeof pipeline>>;
+const pipelines = new Map<string, AutomaticSpeechRecognitionPipeline>();
 
-const pipelines = new Map<string, Pipe>();
-
-async function getTranscriber(model: string): Promise<Pipe> {
+async function getTranscriber(
+    model: string,
+): Promise<AutomaticSpeechRecognitionPipeline> {
     const cached = pipelines.get(model);
     if (cached) {
         return cached;
     }
 
-    const pipe = await pipeline(
-        "automatic-speech-recognition" as PipelineType,
-        model,
-        {
-            revision: "main",
-            progress_callback: (data: { status?: string }) => {
-                if (data?.status === "progress") {
-                    self.postMessage({
-                        type: "progress",
-                        status: "loading-model",
-                    });
-                }
-            },
+    const pipe = await pipeline("automatic-speech-recognition", model, {
+        revision: "main",
+        device: "wasm",
+        dtype: "q8",
+        progress_callback: (data) => {
+            if (data.status === "progress") {
+                self.postMessage({
+                    type: "progress",
+                    status: "loading-model",
+                });
+            }
         },
-    );
+    });
     pipelines.set(model, pipe);
     return pipe;
 }
@@ -43,21 +44,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
         self.postMessage({ type: "progress", status: "transcribing" });
 
-        type TranscriberResult = {
-            text: string;
-            chunks?: { language?: string }[];
-        };
-
-        type Transcriber = (
-            input: Float32Array,
-            options: {
-                return_timestamps: boolean;
-                chunk_length_s: number;
-                stride_length_s: number;
-            },
-        ) => Promise<TranscriberResult>;
-
-        const result = await (pipe as Transcriber)(samples as Float32Array, {
+        const result = await pipe(samples as Float32Array, {
             return_timestamps: false,
             chunk_length_s: 30,
             stride_length_s: 5,
@@ -66,7 +53,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         self.postMessage({
             type: "complete",
             text: result.text,
-            detectedLanguage: result.chunks?.[0]?.language ?? null,
+            detectedLanguage: null,
         });
     } catch (error) {
         self.postMessage({

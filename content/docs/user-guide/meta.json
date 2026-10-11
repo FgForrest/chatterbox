@@ -11,6 +11,7 @@
         "mail",
         "exports-backups-retention",
         "settings",
+        "claude",
         "administrators"
     ]
 }
