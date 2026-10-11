@@ -13,6 +13,7 @@ allowBuilds:
 overrides:
   '@protobufjs/utf8': 1.1.1
   defu: 6.1.5
+  drizzle-kit>@esbuild-kit/esm-loader: '-'
   js-yaml: 4.3.2
   postcss: 8.5.23
   rollup: 4.59.0
