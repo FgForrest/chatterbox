@@ -65,3 +65,15 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+BProgress and NProgress
+-----------------------
+
+src/components/app-progress.tsx reimplements the navigation progress bar
+of BProgress (https://github.com/imskyleen/bprogress), itself a port of
+NProgress (https://github.com/rstacruz/nprogress): their trickle steps and
+the bar's styling. Both are licensed under the MIT License, whose text is
+given above for react-email:
+
+Copyright (c) 2025 Elliot Sutton
+Copyright (c) 2013-2014 Rico Sta. Cruz
