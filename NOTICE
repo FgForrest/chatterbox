@@ -34,8 +34,10 @@ The Polish and Romanian rules come from the Snowball project
 (https://snowballstem.org), copyright (c) Dr Martin Porter and Richard
 Boulton and others, licensed under the BSD 3-Clause License.
 
-Other languages are stemmed by the snowball-stemmers package (ISC License),
-a JavaScript port of the Snowball stemmers, used as a dependency.
+The stemmers in src/lib/knowledge/stemming/snowball are the JavaScript the
+Snowball 3.1.1 release generates (scripts/snowball-stemmers.sh rebuilds and
+checks them), under the same license; its text is in
+src/lib/knowledge/stemming/snowball/COPYING.
 
 react-email
 -----------

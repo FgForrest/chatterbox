@@ -151,9 +151,6 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      snowball-stemmers:
-        specifier: 0.6.0
-        version: 0.6.0
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
@@ -4572,9 +4569,6 @@ packages:
 
   simple-swizzle@0.2.4:
     resolution: {integrity: sha512-nAu1WFPQSMNr2Zn9PGSZK9AGn4t/y97lEm+MXTtUDwfP0ksAIX4nO+6ruD9Jwut4C49SB1Ws+fbXsm/yScWOHw==}
-
-  snowball-stemmers@0.6.0:
-    resolution: {integrity: sha512-47VTJvsZzEme3VxhbUFc9wR0CX8fYKNMgL7AiBdJcHUrwbmN7htFroeX+8ESIAaoNgwEgwI2wnv1HIcqQqAdcA==}
 
   sonner@2.0.7:
     resolution: {integrity: sha512-W6ZN4p58k8aDKA4XPcx2hpIQXBRAgyiWVkYhT7CvK6D3iAu7xjvVyhQHg2/iaKJZ1XVJ4r7XuwGL+WGEK37i9w==}
@@ -9489,8 +9483,6 @@ snapshots:
   simple-swizzle@0.2.4:
     dependencies:
       is-arrayish: 0.3.4
-
-  snowball-stemmers@0.6.0: {}
 
   sonner@2.0.7(react-dom@19.2.0(react@19.2.0))(react@19.2.0):
     dependencies:
