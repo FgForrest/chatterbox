@@ -15,8 +15,8 @@ updates:
     # costs us nothing and removes the "first adopter" position.
     #
     # This is the same idea pnpm applies to the npm tree at install time
-    # (`minimumReleaseAge`, 1440 minutes by default since pnpm 11 -- see
-    # the `minimumReleaseAgeExclude` list in `pnpm-workspace.yaml`), but
+    # (`minimumReleaseAge`, set to 10080 minutes -- seven days -- in
+    # `pnpm-workspace.yaml`, with its `minimumReleaseAgeExclude` list), but
     # it acts earlier: the PR is never opened, rather than opened and
     # failing to install. Actions have no equivalent install-time guard,
     # which is why they need this one.
