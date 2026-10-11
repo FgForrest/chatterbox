@@ -142,9 +142,10 @@ MCP_CONNECTOR_KEYS=claude=<64 hex characters>
 | `MCP_PUBLIC_CLIENTS` | The clients served through the public entrance: `claude` and the personal ones. Never `claude-code` or a service account. |
 | `MCP_CONNECTOR_KEYS` | `client=key` pairs. A listed client's token is served only with its key in `X-API-Key`. Generate each key with `openssl rand -hex 32`. |
 
-Restart the app. It refuses to start with a malformed value. At start it
-warns when `MCP_ALLOWED_CLIENTS` is empty, or when it leaves out a client
-that `MCP_PUBLIC_CLIENTS` or `MCP_CONNECTOR_KEYS` names.
+Restart the app. It refuses to start with a malformed value or with
+`MCP_PUBLIC_CLIENTS` set and `MCP_ALLOWED_CLIENTS` empty. At start it
+warns when the allowlist leaves out a client that `MCP_PUBLIC_CLIENTS`
+or `MCP_CONNECTOR_KEYS` names.
 
 The connector key is a second lock on the organization's connector: a
 request with a `claude` token must also carry the key that only your
@@ -158,6 +159,11 @@ Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 
 - A public DNS record for the `APP_URL` host. People inside keep reaching
   Riffado over the internal network (split-horizon DNS).
+- Block direct internet access to the app and database ports. The bundled
+  `docker-compose.yml` publishes ports 3000 and 5432 on all host interfaces;
+  use a cloud firewall or Docker-aware host firewall to restrict them to
+  the proxy and internal network. A direct connection to port 3000 bypasses
+  the proxy's path, IP, marker-header, and rate-limit rules.
 - A publicly trusted certificate on port 443. Behind an allowlist, use the
   DNS-01 challenge. No redirect to another host.
 - From `160.79.104.0/21` only, two exact paths:
@@ -168,18 +174,24 @@ Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 - The public proxy sets the header named in `MCP_PUBLIC_INGRESS_HEADER`
   on every request it forwards, overwriting whatever came in. The
   internal route removes it.
-- Limit the volume of requests at the proxy. Riffado counts requests per
-  person and client, not per IP address: every Claude user arrives from
-  the same few Anthropic addresses.
+- Limit the volume of requests at the proxy before token verification.
+  Riffado counts authenticated requests per person and client; every
+  Claude user arrives from the same few Anthropic addresses. Use a coarse
+  aggregate cap sized for your instance, rather than a small per-IP cap.
 
 With nginx:
 
 ```nginx
+# http context: one coarse budget for this public server, before JWT verification
+limit_req_zone $server_name zone=mcp_public:10m rate=100r/s;
+
 # public server block (internet)
 location = /api/mcp {
     allow 160.79.104.0/21;
     deny all;
     client_max_body_size 256k;
+    limit_req zone=mcp_public burst=200 nodelay;
+    limit_req_status 429;
     proxy_set_header X-MCP-Ingress public;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_pass http://riffado:3000;
@@ -252,7 +264,9 @@ curl -si -X POST <APP_URL>/api/mcp | grep -i www-authenticate
 ```
 
 From a machine outside Anthropic's range, the public entrance must answer
-403 from the proxy, and any other path 404.
+403 from the proxy, and any other path 404. Also verify that TCP connections
+to the host's public IP on ports 3000 and 5432 fail. An HTTP response from
+port 3000 means the proxy can be bypassed.
 
 In Claude, connect and ask "Which Riffado tools can you use?". The answer
 should list the tools of your roles. Then look at the access log:

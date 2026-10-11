@@ -1128,6 +1128,17 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
             message: "MCP_PUBLIC_CLIENTS needs MCP_PUBLIC_INGRESS_HEADER",
         });
     }
+    if (
+        parsed.MCP_PUBLIC_CLIENTS.length > 0 &&
+        parsed.MCP_ALLOWED_CLIENTS.length === 0
+    ) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["MCP_ALLOWED_CLIENTS"],
+            message:
+                "MCP_ALLOWED_CLIENTS must be set when MCP_PUBLIC_CLIENTS is set",
+        });
+    }
 
     // With single sign-on nobody signs in with a password, the organization
     // account included, so its password is optional.

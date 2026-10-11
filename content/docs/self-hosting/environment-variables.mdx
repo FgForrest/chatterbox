@@ -108,7 +108,7 @@ the public entrance and connector variables.
 | Variable                   | Default | Effect                                                                                               |
 | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
 | `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `riffado-mcp`). Unset, `/api/mcp` answers 404. |
-| `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Unset, any client of the realm whose token carries the roles (logged as a warning at start). |
+| `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Required when `MCP_PUBLIC_CLIENTS` is set; otherwise, unset admits any client of the realm whose token carries the roles (logged as a warning at start). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Header the public reverse proxy sets on what it forwards (e.g. `X-MCP-Ingress`); the internal route removes it. A request carrying it is served only for `MCP_PUBLIC_CLIENTS`. |
 | `MCP_PUBLIC_CLIENTS`       | —       | Comma-separated client ids served through the public entrance (e.g. `claude`). Needs `MCP_PUBLIC_INGRESS_HEADER`. |
 | `MCP_CONNECTOR_KEYS`       | —       | Comma-separated `client=key` pairs (keys of 32+ characters): a token of a listed client is served only with `X-API-Key: <key>`, a Claude connector's request header. Secret. |

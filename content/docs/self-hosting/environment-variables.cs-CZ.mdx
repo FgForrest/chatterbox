@@ -118,7 +118,7 @@ a `APP_URL`; tokeny jsou ze stejné oblasti. Viz
 | Proměnná                   | Výchozí | Efekt                                                                                                  |
 | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
 | `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `riffado-mcp`). Pokud není, `/api/mcp` vrací 404. |
-| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Pokud není, může každý klient z realm s požadovanou rolí (při startu se zapíše varování). |
+| `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Povinné při nastavení `MCP_PUBLIC_CLIENTS`; jinak bez něj může volat každý klient realmu s požadovanou rolí (při startu se zapíše varování). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Hlavička, kterou veřejná reverzní proxy nastaví na přeposlané požadavky (např. `X-MCP-Ingress`); vnitřní cesta ji odebere. Požadavek s ní se obslouží jen pro `MCP_PUBLIC_CLIENTS`. |
 | `MCP_PUBLIC_CLIENTS`       | —       | Čárkou oddělená client id obsluhovaná veřejným vstupem (např. `claude`). Vyžaduje `MCP_PUBLIC_INGRESS_HEADER`. |
 | `MCP_CONNECTOR_KEYS`       | —       | Čárkou oddělené dvojice `client=klíč` (klíče od 32 znaků): token uvedeného klienta se obslouží jen s `X-API-Key: <klíč>`, request headerem konektoru Claude. Tajné. |

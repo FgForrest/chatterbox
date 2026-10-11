@@ -111,6 +111,7 @@ describe("MCP environment", () => {
     it("reads the public entrance: a header name and its clients", () => {
         const parsed = envSchema.parse({
             ...base,
+            MCP_ALLOWED_CLIENTS: "claude,claude-jdoe",
             MCP_PUBLIC_INGRESS_HEADER: " X-MCP-Ingress ",
             MCP_PUBLIC_CLIENTS: "claude, claude-jdoe",
         });
@@ -122,8 +123,24 @@ describe("MCP environment", () => {
     });
 
     it("needs the ingress header for public clients", () => {
-        expect(issuesOf({ ...base, MCP_PUBLIC_CLIENTS: "claude" })).toEqual([
-            "MCP_PUBLIC_CLIENTS needs MCP_PUBLIC_INGRESS_HEADER",
+        expect(
+            issuesOf({
+                ...base,
+                MCP_ALLOWED_CLIENTS: "claude",
+                MCP_PUBLIC_CLIENTS: "claude",
+            }),
+        ).toEqual(["MCP_PUBLIC_CLIENTS needs MCP_PUBLIC_INGRESS_HEADER"]);
+    });
+
+    it("requires an explicit client allowlist for public MCP access", () => {
+        expect(
+            issuesOf({
+                ...base,
+                MCP_PUBLIC_INGRESS_HEADER: "X-MCP-Ingress",
+                MCP_PUBLIC_CLIENTS: "claude",
+            }),
+        ).toEqual([
+            "MCP_ALLOWED_CLIENTS must be set when MCP_PUBLIC_CLIENTS is set",
         ]);
     });
 

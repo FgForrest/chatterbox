@@ -157,9 +157,10 @@ MCP_CONNECTOR_KEYS=claude=<64 hex znaků>
 | `MCP_PUBLIC_CLIENTS` | Klienti obsluhovaní veřejným vstupem: `claude` a osobní klienti. Nikdy `claude-code` ani servisní účet. |
 | `MCP_CONNECTOR_KEYS` | Dvojice `client=klíč`. Token uvedeného klienta se obslouží jen s jeho klíčem v `X-API-Key`. Každý klíč vygenerujte pomocí `openssl rand -hex 32`. |
 
-Restartujte aplikaci. S chybnou hodnotou se nespustí. Při startu varuje,
-když je `MCP_ALLOWED_CLIENTS` prázdné nebo když vynechává klienta, kterého
-uvádí `MCP_PUBLIC_CLIENTS` či `MCP_CONNECTOR_KEYS`.
+Restartujte aplikaci. S chybnou hodnotou nebo s nastaveným
+`MCP_PUBLIC_CLIENTS` a prázdným `MCP_ALLOWED_CLIENTS` se nespustí. Při
+startu varuje, když seznam povolených klientů vynechává klienta uvedeného
+v `MCP_PUBLIC_CLIENTS` či `MCP_CONNECTOR_KEYS`.
 
 Klíč konektoru je druhý zámek na konektoru organizace: požadavek s
 tokenem `claude` musí nést i klíč, který do Claude zadal jen váš Owner.
@@ -174,6 +175,12 @@ Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
 
 - Veřejný DNS záznam pro host z `APP_URL`. Lidé uvnitř dál chodí do
   Riffada přes vnitřní síť (split-horizon DNS).
+- Zablokujte přímý přístup z internetu na porty aplikace a databáze.
+  Přibalený `docker-compose.yml` zveřejňuje porty 3000 a 5432 na všech
+  rozhraních hostitele; cloudovým firewallem nebo pravidly firewallu pro
+  Docker je omezte na proxy a vnitřní síť. Přímé spojení na port 3000
+  obchází pravidla proxy pro cesty, IP adresy, označovací hlavičku i
+  omezení počtu požadavků.
 - Veřejně důvěryhodný certifikát na portu 443. Za allowlistem použijte
   DNS-01 challenge. Žádné přesměrování na jiný host.
 - Jen z `160.79.104.0/21` a jen dvě přesné cesty: `/api/mcp` a
@@ -183,18 +190,24 @@ Zveřejněte MCP endpoint, a nic jiného, pro adresy Anthropicu:
 - Veřejná proxy nastaví na každý přeposlaný požadavek hlavičku
   pojmenovanou v `MCP_PUBLIC_INGRESS_HEADER` a přepíše, co přišlo
   zvenku. Vnitřní cesta ji odebere.
-- Objem požadavků omezte na proxy. Riffado počítá požadavky na člověka a
-  klienta, ne na IP adresu: všichni uživatelé Claude přicházejí z
-  několika stejných adres Anthropicu.
+- Objem požadavků omezte na proxy ještě před ověřením tokenu. Riffado
+  počítá ověřené požadavky na člověka a klienta; všichni uživatelé Claude
+  přicházejí z několika stejných adres Anthropicu. Použijte hrubý společný
+  limit podle kapacity instance, ne nízký limit na IP adresu.
 
 S nginx:
 
 ```nginx
+# kontext http: jeden společný limit pro veřejný server před ověřením JWT
+limit_req_zone $server_name zone=mcp_public:10m rate=100r/s;
+
 # public server block (internet)
 location = /api/mcp {
     allow 160.79.104.0/21;
     deny all;
     client_max_body_size 256k;
+    limit_req zone=mcp_public burst=200 nodelay;
+    limit_req_status 429;
     proxy_set_header X-MCP-Ingress public;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_pass http://riffado:3000;
@@ -272,7 +285,9 @@ curl -si -X POST <APP_URL>/api/mcp | grep -i www-authenticate
 ```
 
 Ze stroje mimo rozsah Anthropicu musí veřejný vstup odpovědět 403 od
-proxy a jakákoliv jiná cesta 404.
+proxy a jakákoliv jiná cesta 404. Ověřte také, že TCP spojení na veřejnou
+IP adresu hostitele na portech 3000 a 5432 selžou. HTTP odpověď z portu
+3000 znamená, že lze proxy obejít.
 
 V Claude se připojte a zeptejte se „Které nástroje Riffada můžeš
 používat?“. Odpověď má vyjmenovat nástroje vašich rolí. Pak se podívejte
