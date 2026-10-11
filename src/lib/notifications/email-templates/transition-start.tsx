@@ -26,12 +26,9 @@ function Bullet({
     children: ReactNode;
     margin?: string;
 }) {
-    const i18n = getEmailTranslator();
     return (
         <Row style={{ margin }}>
-            <Column style={emailStyles.bulletGlyphColumn}>
-                {i18n("&bull;")}
-            </Column>
+            <Column style={emailStyles.bulletGlyphColumn}>•</Column>
             <Column style={emailStyles.bulletTextColumn}>{children}</Column>
         </Row>
     );

@@ -57,6 +57,15 @@ describe("TransitionStartEmail", () => {
         expect(text).not.toContain("first 100 paid monthly members");
     });
 
+    it("draws its bullets as bullets, not as the text of their entity", async () => {
+        const text = await renderTransition({
+            ...baseProps,
+            foundingOfferAvailable: true,
+        });
+        expect(text).not.toContain("&bull;");
+        expect(text).toMatch(/•\s*You keep full free access until/);
+    });
+
     it("explains why hosted is now paid, not just what changed", async () => {
         const text = await renderTransition({
             ...baseProps,
