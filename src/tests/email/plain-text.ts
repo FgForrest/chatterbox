@@ -1,45 +1,29 @@
-const ENTITIES: Record<string, string> = {
-    amp: "&",
-    lt: "<",
-    gt: ">",
-    quot: '"',
-    nbsp: " ",
-};
-
-function decodeEntities(text: string): string {
-    return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, name) => {
-        if (name.startsWith("#x") || name.startsWith("#X")) {
-            return String.fromCodePoint(Number.parseInt(name.slice(2), 16));
-        }
-        if (name.startsWith("#")) {
-            return String.fromCodePoint(Number(name.slice(1)));
-        }
-        return ENTITIES[name.toLowerCase()] ?? whole;
-    });
-}
+const BLOCKS = "p, h1, h2, h3, h4, h5, h6, div, tr, table, li, br";
 
 /**
  * A rendered email's text as a reader skims it: blocks on their own
  * lines, a rule as `---`, a link as its text and `[url]`, the hidden
- * preview line left out.
+ * preview line left out. Needs a DOM (the jsdom test environment).
  */
 export function plainTextOf(html: string): string {
-    return decodeEntities(
-        html
-            .replace(/<head[\s\S]*?<\/head>/gi, "")
-            .replace(
-                /<div[^>]*data-skip-in-text="true"[\s\S]*?<\/div><\/div>/i,
-                "",
-            )
-            .replace(/<!--[\s\S]*?-->/g, "")
-            .replace(
-                /<a\b[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
-                (_whole, href: string, inner: string) => `${inner} [${href}]`,
-            )
-            .replace(/<hr\b[^>]*>/gi, "\n---\n")
-            .replace(/<\/?(p|h[1-6]|div|tr|table|li|br)\b[^>]*>/gi, "\n")
-            .replace(/<[^>]+>/g, ""),
-    )
+    const document = new DOMParser().parseFromString(html, "text/html");
+    document.head.remove();
+    for (const hidden of document.querySelectorAll(
+        '[data-skip-in-text="true"]',
+    )) {
+        hidden.remove();
+    }
+    for (const rule of document.querySelectorAll("hr")) {
+        rule.replaceWith("\n---\n");
+    }
+    for (const link of document.querySelectorAll("a[href]")) {
+        link.append(` [${link.getAttribute("href")}]`);
+    }
+    for (const block of document.querySelectorAll(BLOCKS)) {
+        block.before("\n");
+        block.after("\n");
+    }
+    return (document.body.textContent ?? "")
         .replace(/[ \t ]+/g, " ")
         .replace(/\s*\n\s*/g, "\n")
         .trim();
