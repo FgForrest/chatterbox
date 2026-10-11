@@ -72,7 +72,7 @@
         "lucide-react": "^0.554.0",
         "mailauth": "6.0.0",
         "mailparser": "3.9.28",
-        "music-metadata": "^11.12.3",
+        "music-metadata": "^11.16.1",
         "nanoid": "^5.1.16",
         "next": "16.3.8",
         "next-intl": "^4.14.5",
