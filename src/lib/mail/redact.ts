@@ -51,25 +51,64 @@ export async function secretAddressMasker(
         );
 }
 
-/** `@` and the local part's `+` and `.` as a URL or markup may write them. */
-const ENCODED_ADDRESS_CHARACTERS: readonly [RegExp, string][] = [
-    [/%40|&#0*64;|&#x0*40;|&commat;/gi, "@"],
-    [/%2b|&#0*43;|&#x0*2b;|&plus;/gi, "+"],
-    [/%2e|&#0*46;|&#x0*2e;|&period;/gi, "."],
-];
+/** A numeric character reference, with or without its semicolon. */
+const CHARACTER_REFERENCE = /&#(?:x([0-9a-f]+)|([0-9]+));?/gi;
+
+/** Named references to the characters an address is written with. */
+const NAMED_ADDRESS_REFERENCES: Readonly<Record<string, string>> = {
+    "&commat;": "@",
+    "&period;": ".",
+    "&plus;": "+",
+    "&hyphen;": "-",
+};
 
 /**
- * `secretAddressMasker` for a mail's HTML, which may write an address
- * URL- or entity-encoded (a link's query, a tracking pixel): finds those
- * too, and hides each secret token wherever it appears, as long as it was.
+ * `html` with each character reference to a letter, digit, `@`, `.`, `+`
+ * or `-` written as that character, which means the same in markup.
+ */
+function withAddressCharactersPlain(html: string): string {
+    return html
+        .replace(
+            CHARACTER_REFERENCE,
+            (whole, hex?: string, decimal?: string) => {
+                const code = hex ? Number.parseInt(hex, 16) : Number(decimal);
+                if (!Number.isInteger(code) || code > 0x7f) return whole;
+                const character = String.fromCharCode(code);
+                return /[a-z0-9@.+-]/i.test(character) ? character : whole;
+            },
+        )
+        .replace(
+            /&(?:commat|period|plus|hyphen);/gi,
+            (name) => NAMED_ADDRESS_REFERENCES[name.toLowerCase()] ?? name,
+        );
+}
+
+/** `text` percent-decoded as often as it was encoded (`%2540` is `@`). */
+function percentDecoded(text: string): string {
+    let current = text;
+    for (let round = 0; round < 4; round++) {
+        const next = current.replace(
+            /%([0-9a-f]{2})/gi,
+            (_whole, hex: string) =>
+                String.fromCharCode(Number.parseInt(hex, 16)),
+        );
+        if (next === current) break;
+        current = next;
+    }
+    return current;
+}
+
+/**
+ * `secretAddressMasker` for a mail's HTML, which may write an address with
+ * character references or percent-encoded (a link's query, a tracking
+ * pixel): finds those too, and hides each secret token wherever it
+ * appears. The HTML it returns has those references written plainly;
+ * other encodings (base64, say) stay hidden from it.
  */
 export async function secretAddressMaskerForHtml(
     html: string,
 ): Promise<(text: string) => string> {
-    let decoded = html;
-    for (const [pattern, character] of ENCODED_ADDRESS_CHARACTERS) {
-        decoded = decoded.replace(pattern, character);
-    }
+    const decoded = percentDecoded(withAddressCharactersPlain(html));
     const localParts = new Set<string>();
     for (const match of decoded.matchAll(addressPattern())) {
         if (match[1]) localParts.add(match[1].toLowerCase());
@@ -82,7 +121,10 @@ export async function secretAddressMaskerForHtml(
     }
     if (tokens.size === 0) return (text) => text;
     const pattern = new RegExp([...tokens].map(escapeRegExp).join("|"), "gi");
-    return (text) => text.replace(pattern, (token) => "•".repeat(token.length));
+    return (text) =>
+        withAddressCharactersPlain(text).replace(pattern, (token) =>
+            "•".repeat(token.length),
+        );
 }
 
 /**

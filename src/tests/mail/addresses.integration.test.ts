@@ -333,9 +333,20 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
         ].join("");
         const masked = (await secretAddressMaskerForHtml(html))(html);
         expect(masked).not.toContain(token);
-        expect(masked).toHaveLength(html.length);
         expect(masked).toContain("jan@klepna.example stays");
         expect(masked).toContain(`?to=jan%2E${"•".repeat(token.length)}%40`);
+
+        const spelled = `${token.slice(0, 3)}&#${token.charCodeAt(3)}${token.slice(4)}`;
+        const tricky = [
+            `<p>jan.${token}&#64klepna.example</p>`,
+            `<p>jan.${spelled}@klepna.example</p>`,
+            `<a href="https://x.example/?to=jan.${token}%2540klepna.example">open</a>`,
+        ];
+        for (const piece of tricky) {
+            const out = (await secretAddressMaskerForHtml(piece))(piece);
+            expect(out).not.toContain(token);
+            expect(out).not.toContain(spelled);
+        }
         const plain = "<p>nothing secret here</p>";
         expect((await secretAddressMaskerForHtml(plain))(plain)).toBe(plain);
     });
