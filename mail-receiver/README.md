@@ -51,12 +51,19 @@ Receiver: `MAIL_HOSTNAME` (the MX name, also the TLS certificate's name),
 `MAIL_TLS_DIR` (holding `fullchain.pem` and `privkey.pem`), optionally
 `MAIL_ALLOWED_SOURCES`. Start with `docker compose --profile mail up -d`.
 
+The image: the `Mail receiver image` workflow publishes it next to the app
+image as `ghcr.io/<owner>/<repository>-mail-receiver`, with the app's tags
+(`dev` from `main`, `latest` and `X.Y.Z` from releases). Without an override
+compose builds it from the checkout as `chatterbox-mail-receiver:local`.
+
 The base compose file binds the receiver to `127.0.0.1:2525`. Publish port
-25 in the deployment's override:
+25, and on a host without the source pull the published image, in the
+deployment's override:
 
 ```yaml
 services:
   mail-receiver:
+    image: ghcr.io/<owner>/<repository>-mail-receiver:dev
     ports: !override
       - "25:2525"
 ```

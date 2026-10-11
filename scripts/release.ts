@@ -34,7 +34,7 @@
  *   5. Create the tag pointing at that commit, push it.
  *   6. Delete the release/vX.Y.Z branch (local + remote).
  *
- * The tag push triggers docker.yml and release.yml. Per AGENTS.md,
+ * The tag push triggers docker.yml, mail-receiver.yml and release.yml. Per AGENTS.md,
  * agents do not invoke this — it's a maintainer action.
  *
  * Staged files in phase 1 are an explicit allowlist (package.json,
@@ -251,7 +251,7 @@ function phase1(target: string): void {
 		"```",
 		"",
 		"That will create and push the `v" + version + "` tag, which triggers",
-		"`docker.yml` and `release.yml`.",
+		"`docker.yml`, `mail-receiver.yml` and `release.yml`.",
 	].join("\n");
 
 	// Write the PR body to a temp file rather than passing it inline — long
@@ -354,7 +354,7 @@ function phase2Finalize(): void {
 
 	console.log(`\n=== Released v${version} ===`);
 	console.log("Next steps:");
-	console.log("  1. Wait for docker.yml + release.yml workflows.");
+	console.log("  1. Wait for docker.yml + mail-receiver.yml + release.yml workflows.");
 	console.log("  2. Review and publish the draft GitHub Release.");
 }
 
