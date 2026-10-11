@@ -43,7 +43,7 @@ Riffado nikdy nevidí heslo. Keycloak nikdy nevidí, na co se Claude ptá.
 ## Než začnete
 
 - [Externí MCP server](./mcp) funguje ve vnitřní síti: `MCP_AUDIENCE` je
-  nastaveno, resource klient `riffado-mcp` má svých pět rolí a lidé mají
+  nastaveno, resource klient `riffado-mcp` má svých šest rolí a lidé mají
   role, které mít mají.
 - Doporučujeme Keycloak 26.6 nebo novější; testy Riffada běží proti
   26.6.4. Discovery dokument a token endpoint realmu musí být dostupné z
@@ -80,7 +80,7 @@ V administraci realmu **Clients → Create client**:
    do každého tokenu, který Claude drží.
 6. **Client scopes → `claude-dedicated` → Scope:** vypněte **Full scope
    allowed**, pak **Assign role** a vyberte role `riffado-mcp`, které smí
-   Claude nést. Všech pět nechá rozhodovat role každého člověka;
+   Claude nést. Všech šest nechá rozhodovat role každého člověka;
    `tasks:write` vynechte, pokud Claude nemá úkoly nikdy měnit.
 7. **Credentials:** zkopírujte **Client secret** pro Ownera v Claude.
 8. Volitelně: **Settings → Login settings → Consent required** zapnuto.
@@ -313,7 +313,7 @@ odmítnutí: `[mcp] refused (<reason>) a token of client <client>`, a
 | Důvod | Význam | Řešení |
 | --- | --- | --- |
 | `no-account` | Člověk se do Riffada nikdy nepřihlásil. | Jednou se přihlásí do Riffada a pak se připojí znovu. |
-| `no-roles` | Token nenese žádnou z pěti rolí. | Dejte člověku roli na `riffado-mcp` a klientovi její mapování ve scope. |
+| `no-roles` | Token nenese žádnou ze šesti rolí. | Dejte člověku roli na `riffado-mcp` a klientovi její mapování ve scope. |
 | `client-not-allowed` | Klient není v `MCP_ALLOWED_CLIENTS`. | Přidejte ho. |
 | `client-not-public` | Veřejným vstupem přišel klient mimo `MCP_PUBLIC_CLIENTS`. | U `claude-code` zvenku očekávané; jinak přidejte zapomenutého osobního klienta. |
 | `connector-key` | `X-API-Key` chybí nebo nesouhlasí. | Zkontrolujte request header konektoru; konektor přidejte znovu. |
@@ -373,7 +373,7 @@ Token, o který Claude pro tento server požádá, pak nese jako audience
 `invalid_target`. Obnovené tokeny a požadavky bez `resource` (ostatní
 aplikace realmu, servisní účty) si ponechají `riffado-mcp`, které
 Riffado dál přijímá. Požadavků bez `resource` se funkce netýká. Známé na
-Keycloaku 26.6.4: člověk bez kterékoliv z pěti rolí dostane při
+Keycloaku 26.6.4: člověk bez kterékoliv ze šesti rolí dostane při
 připojení chybu serveru Keycloaku místo 403 od Riffada. Vyzkoušejte to
 nejdřív na testovacím realmu; end-to-end stack na to má override (viz
 [Vyzkoušení lokálně](./mcp#trying-it-locally)).

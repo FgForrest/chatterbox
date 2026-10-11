@@ -1,6 +1,6 @@
 ---
 title: External MCP server
-description: Let AI clients and backend services read the Almanac, transcripts, summaries and tasks over the Model Context Protocol, with access decided by Keycloak roles.
+description: Let AI clients and backend services read the Almanac, transcripts, summaries, tasks and mail over the Model Context Protocol, with access decided by Keycloak roles.
 ---
 
 A self-hosted Riffado that signs in through [single sign-on](./sso) can
@@ -15,7 +15,7 @@ assignee.
 
 ## What it exposes
 
-Five client roles on the resource client (`riffado-mcp` below) open five
+Six client roles on the resource client (`riffado-mcp` below) open six
 areas. A caller sees only the tools its roles allow; any other tool
 answers "Unknown tool", the same as a name that does not exist.
 
@@ -26,6 +26,7 @@ answers "Unknown tool", the same as a name that does not exist.
 | `summaries:read`   | `get_summary`, `search_summaries`                                                                  |
 | `tasks:read`       | `list_tasks`, `search_tasks`                                                                       |
 | `tasks:write`      | `update_task` (status and assignee only)                                                           |
+| `mail:read`        | `list_mail`, `get_mail`                                                                            |
 
 `list_folders` and `list_recordings` come with any of `transcripts:read`,
 `summaries:read` or `tasks:read`.
@@ -40,11 +41,23 @@ answers "Unknown tool", the same as a name that does not exist.
 - **Summaries** (`summaries:read`): the summary text and key points.
 - **Tasks** (`tasks:read`): open, done and dropped tasks. Proposals
   waiting for review are never listed.
+- **Mail** (`mail:read`, where the instance [receives mail](../user-guide/mail)):
+  the mail in the pile, its participants, its text part by part (quoted
+  messages with their claimed author), attachments by name and size, and
+  with `summaries:read` its summary. Every mail result carries
+  `untrusted: true`: mail is written by people outside. Secret addresses
+  are masked, for their owner too.
 
 Roles combine, and some fields need two of them:
 
 - A fact's evidence (up to three quotes, with recording and position)
-  needs `transcripts:read` as well as `knowledge:read`.
+  needs `transcripts:read` as well as `knowledge:read`; evidence in mail
+  needs `mail:read` instead.
+- Tasks and facts learned from mail are listed under `tasks:read` and
+  `knowledge:read` alone, marked `kind: "mail"` (tasks) or
+  `origin: "mail"` (facts). Their quote, due phrase and mail (title and
+  link) come only with `mail:read`, and without it a search never matches
+  a mail's words.
 - A summary's action items, in `get_summary` and in what
   `search_summaries` searches, need `tasks:read`.
 - The `entity` filter of the recording tools needs `knowledge:read`.
@@ -95,8 +108,9 @@ clients that fetch tokens.
    `riffado-mcp` (the value of `MCP_AUDIENCE`).
 2. **Client authentication:** off. Turn off every authentication flow:
    nobody signs in to this client, it only holds the roles.
-3. **Roles → Create role**, five times: `knowledge:read`,
-   `transcripts:read`, `summaries:read`, `tasks:read`, `tasks:write`.
+3. **Roles → Create role**, six times: `knowledge:read`,
+   `transcripts:read`, `summaries:read`, `tasks:read`, `tasks:write`,
+   `mail:read`.
 4. Assign the roles to the users or groups that may use each area
    (**Role mapping → Assign role → Filter by clients**).
 
@@ -125,7 +139,7 @@ the access log.
 
 A token then holds the roles the user has **and** the client's scope
 allows. A notes app that should only search summaries gets
-`summaries:read` alone, even for a user who holds all five.
+`summaries:read` alone, even for a user who holds all six.
 
 </details>
 
@@ -200,7 +214,7 @@ for every scope the realm lists and Keycloak refuses the sign-in with
 `<APP_URL>/.well-known/oauth-protected-resource`.
 
 A genuine token of the realm that was not issued for this server (a
-person without any of the five roles gets one) answers 403, not 401: a
+person without any of the six roles gets one) answers 403, not 401: a
 401 would send the client through sign-in again, for the same token.
 
 Give each client application the client id you created for it in step 2.
@@ -243,7 +257,7 @@ connector and the checks.
 
 Accounts are never created from a token: a person must sign in to
 Riffado once before their AI client can call it. A token without any of
-the five roles gets 403 "This token carries no Riffado MCP role". A
+the six roles gets 403 "This token carries no Riffado MCP role". A
 suspended account, a client outside `MCP_ALLOWED_CLIENTS`, a service
 account while the Organization is off, a client the public entrance does
 not serve, and a client without its connector key get 403 "Forbidden".
@@ -252,9 +266,9 @@ The app log names the reason (see
 
 **Tasks** follow the Tasks page:
 
-- A user sees the tasks on their own recordings, and on
-  Organization-shared recordings those assigned to them. A service
-  account sees the tasks of every shared recording.
+- A user sees the tasks on their own recordings and mail, and on
+  Organization-shared ones those assigned to them. A service account
+  sees the tasks of every shared recording and mail.
 - With `tasks:write`, `update_task` marks a task done, open again or
   dropped, or changes its assignee. Done and open again need `can_close`
   (the recording's owner, the assignee on a shared recording, or the

@@ -24,6 +24,9 @@
                 },
                 {
                     "name": "tasks:write"
+                },
+                {
+                    "name": "mail:read"
                 }
             ]
         }
@@ -160,7 +163,8 @@
                     "transcripts:read",
                     "summaries:read",
                     "tasks:read",
-                    "tasks:write"
+                    "tasks:write",
+                    "mail:read"
                 ]
             },
             {
@@ -170,7 +174,8 @@
                     "transcripts:read",
                     "summaries:read",
                     "tasks:read",
-                    "tasks:write"
+                    "tasks:write",
+                    "mail:read"
                 ]
             }
         ]

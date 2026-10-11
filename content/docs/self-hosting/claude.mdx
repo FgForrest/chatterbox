@@ -39,7 +39,7 @@ Riffado never sees a password. Keycloak never sees what Claude asks.
 ## Before you start
 
 - The [external MCP server](./mcp) works on your internal network:
-  `MCP_AUDIENCE` set, the `riffado-mcp` resource client with its five
+  `MCP_AUDIENCE` set, the `riffado-mcp` resource client with its six
   roles in place, and people holding the roles they should have.
 - Keycloak 26.6 or later is recommended; Riffado's tests run against
   26.6.4. The realm's discovery document and token endpoint must be
@@ -72,7 +72,7 @@ In the realm's admin console, **Clients → Create client**:
    them as audiences, to every token Claude holds.
 6. **Client scopes → `claude-dedicated` → Scope:** turn **Full scope
    allowed** off, then **Assign role** and pick the `riffado-mcp` roles
-   Claude may carry. All five let each person's own roles decide; leave
+   Claude may carry. All six let each person's own roles decide; leave
    out `tasks:write` if Claude should never change a task.
 7. **Credentials:** copy the **Client secret** for the Claude Owner.
 8. Optional: **Settings → Login settings → Consent required** on. The
@@ -289,7 +289,7 @@ and `mcp_access_log` has a `denied` row with the person's `sub`.
 | Reason | Meaning | Fix |
 | --- | --- | --- |
 | `no-account` | The person has never signed in to Riffado. | They sign in to Riffado once, then connect again. |
-| `no-roles` | The token carries none of the five roles. | Give the person a role on `riffado-mcp`, and the client its scope mapping. |
+| `no-roles` | The token carries none of the six roles. | Give the person a role on `riffado-mcp`, and the client its scope mapping. |
 | `client-not-allowed` | The client is not in `MCP_ALLOWED_CLIENTS`. | Add it. |
 | `client-not-public` | A client outside `MCP_PUBLIC_CLIENTS` came through the public entrance. | Expected for `claude-code` from outside; add a personal client you forgot. |
 | `connector-key` | `X-API-Key` is missing or wrong. | Check the connector's request header; re-add the connector. |
@@ -346,7 +346,7 @@ its audience, and a sign-in for another server's URL is refused with
 `invalid_target`. Refreshed tokens and requests without `resource` (the
 realm's other applications, service accounts) keep `riffado-mcp`, which
 Riffado still accepts. Requests without `resource` are not affected.
-Known on Keycloak 26.6.4: a person without any of the five roles gets a
+Known on Keycloak 26.6.4: a person without any of the six roles gets a
 Keycloak server error when connecting, instead of Riffado's 403. Try it
 on a test realm first; the end-to-end stack has an override for it (see
 [Trying it locally](./mcp#trying-it-locally)).
