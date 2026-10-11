@@ -191,8 +191,11 @@ services:
   # `--profile mail`. It holds no database credentials and no encryption
   # key. Port 25 is the deployment's to publish (an override mapping
   # "25:2525"); the base file binds the container to loopback only.
+  # Built from this checkout unless an override sets the published image,
+  # ghcr.io/<owner>/<repository>-mail-receiver (same tags as the app).
   mail-receiver:
     profiles: ["mail"]
+    image: chatterbox-mail-receiver:local
     build:
       context: .
       dockerfile: mail-receiver/Dockerfile
