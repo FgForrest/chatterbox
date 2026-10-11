@@ -69,7 +69,7 @@
         "fumadocs-ui": "^16.8.10",
         "jose": "^6.2.3",
         "lucide-react": "^0.554.0",
-        "mailauth": "5.0.3",
+        "mailauth": "6.0.0",
         "mailparser": "3.9.28",
         "music-metadata": "^11.12.3",
         "nanoid": "^5.1.16",
