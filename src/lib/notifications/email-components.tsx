@@ -210,7 +210,10 @@ export function Column({
     );
 }
 
-/** An `<h1>`. */
+/**
+ * An `<h1>`. React-email's `as` (another heading level) and margin
+ * shorthands (`m`, `mx`, ...) are not ported, so their props do not type.
+ */
 export function Heading({
     children,
     style,
