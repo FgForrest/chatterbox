@@ -6,6 +6,7 @@ allowBuilds:
   '@swc/core': true
   core-js: true
   esbuild: true
+  onnxruntime-node: false
   protobufjs: true
   sharp: true
 
@@ -28,5 +29,4 @@ minimumReleaseAgeExclude:
   - nodemailer@10.0.15
 
 trustPolicyExclude:
-  - protobufjs@6.11.6
   - undici-types@6.21.0

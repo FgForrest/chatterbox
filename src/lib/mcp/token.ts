@@ -7,6 +7,7 @@ import {
 } from "jose";
 import { env } from "@/lib/env";
 import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
+import { mcpResourceUrl } from "@/lib/mcp/metadata";
 
 const ALGORITHMS = ["RS256", "PS256", "ES256"];
 const CLOCK_TOLERANCE_SECONDS = 30;
@@ -21,11 +22,23 @@ export interface McpTokenClaims extends JWTPayload {
 export interface McpTokenVerifyOptions {
     /** Exact `iss` the token must carry. */
     issuer: string;
-    /** Value `aud` must contain. */
-    audience: string;
+    /** Values of which `aud` must contain one. */
+    audiences: readonly string[];
     /** The realm's signing keys. */
     keys: JWTVerifyGetKey;
 }
+
+/**
+ * What {@link verifyMcpToken} found: an access token the realm issued for
+ * this server, a genuine access token of the realm issued for another
+ * audience (a user without any MCP role gets one), or anything else.
+ */
+export type McpTokenCheck =
+    | { kind: "valid"; claims: McpTokenClaims }
+    | { kind: "other-audience"; claims: McpTokenClaims }
+    | { kind: "invalid" };
+
+const INVALID: McpTokenCheck = { kind: "invalid" };
 
 let remote: { uri: string; keys: JWTVerifyGetKey } | null = null;
 
@@ -39,7 +52,13 @@ async function configuredOptions(): Promise<McpTokenVerifyOptions | null> {
             keys: createRemoteJWKSet(new URL(metadata.jwksUri)),
         };
     }
-    return { issuer: metadata.issuer, audience, keys: remote.keys };
+    return {
+        issuer: metadata.issuer,
+        audiences: env.MCP_RESOURCE_AUDIENCE
+            ? [audience, mcpResourceUrl()]
+            : [audience],
+        keys: remote.keys,
+    };
 }
 
 /** The client a token was issued to: `azp`, else `client_id`. */
@@ -60,33 +79,36 @@ function realmUnavailable(error: unknown): boolean {
 }
 
 /**
- * The verified claims of an access token the realm issued for this server,
- * or null for any token that is not (an ID token included). Throws when
- * the realm cannot be asked: its discovery document (without `options`) or
- * its signing keys out of reach.
+ * Check an access token against the realm: signature, exact issuer, expiry,
+ * `sub`, a `typ` of `Bearer` when it has one (an ID token is invalid), then
+ * the audience. Throws when the realm cannot be asked: its discovery
+ * document (without `options`) or its signing keys out of reach.
  */
 export async function verifyMcpToken(
     token: string,
     options?: McpTokenVerifyOptions,
-): Promise<McpTokenClaims | null> {
+): Promise<McpTokenCheck> {
     const resolved = options ?? (await configuredOptions());
-    if (!resolved || !token) return null;
+    if (!resolved || !token) return INVALID;
+    let payload: JWTPayload;
     try {
-        const { payload } = await jwtVerify(token, resolved.keys, {
+        ({ payload } = await jwtVerify(token, resolved.keys, {
             issuer: resolved.issuer,
-            audience: resolved.audience,
             algorithms: ALGORITHMS,
             clockTolerance: CLOCK_TOLERANCE_SECONDS,
             requiredClaims: ["exp", "sub"],
-        });
-        if (payload.typ !== undefined && payload.typ !== ACCESS_TOKEN_TYPE) {
-            return null;
-        }
-        return typeof payload.sub === "string" && payload.sub
-            ? (payload as McpTokenClaims)
-            : null;
+        }));
     } catch (error) {
         if (realmUnavailable(error)) throw error;
-        return null;
+        return INVALID;
     }
+    if (payload.typ !== undefined && payload.typ !== ACCESS_TOKEN_TYPE) {
+        return INVALID;
+    }
+    if (typeof payload.sub !== "string" || !payload.sub) return INVALID;
+    const claims = payload as McpTokenClaims;
+    const audience = [payload.aud ?? []].flat();
+    return resolved.audiences.some((value) => audience.includes(value))
+        ? { kind: "valid", claims }
+        : { kind: "other-audience", claims };
 }
