@@ -74,6 +74,47 @@ jobs:
       - name: Run type check
         run: pnpm type-check
 
+  # Lists the known advisories against production dependencies on every run
+  # without failing it: an advisory published today should not block
+  # unrelated work, and the npm advisory feed lists them before Dependabot
+  # alerts do. Reads the lockfile only; nothing is installed or run.
+  audit:
+    name: Audit (report only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.7.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.20.0'
+
+      - name: Audit production dependencies
+        continue-on-error: true
+        run: |
+          set +e
+          pnpm audit --prod > audit.txt 2>&1
+          status=$?
+          cat audit.txt
+          {
+            echo '### pnpm audit --prod'
+            echo
+            echo '```'
+            cat audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
   test:
     name: Test
     runs-on: ubuntu-latest

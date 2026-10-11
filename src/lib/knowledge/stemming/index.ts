@@ -6,20 +6,38 @@
  * Czech, Slovak, Polish and Romanian are written with accents that are
  * often left out (by people, and by transcription): their stemmers read a
  * word without accents and return every stem it could have had (ported
- * from evitaDB). Other languages Snowball knows stem the word as written,
- * then drop its accents. English is left alone: its names take no case
- * endings, and stemming would make Hughes Hugh and Williams William. Every
+ * from evitaDB). Other languages Snowball knows (its own stemmers, see
+ * ./snowball) stem the word as written, then drop its accents. English is
+ * left alone: its names take no case endings, and stemming would make
+ * Hughes Hugh and Williams William. Every
  * result is a word as `normalizeName` writes it, the word itself among
  * them; a language with no stemmer gives the word alone.
  */
 
-// Named, not default: bundled, the package has no default export.
-import { newStemmer } from "snowball-stemmers";
 import { normalizeName } from "@/lib/knowledge/name-match";
 import { czechVariants } from "@/lib/knowledge/stemming/czech";
 import { polishVariants } from "@/lib/knowledge/stemming/polish";
 import { romanianVariants } from "@/lib/knowledge/stemming/romanian";
 import { slovakVariants } from "@/lib/knowledge/stemming/slovak";
+import ArabicStemmer from "@/lib/knowledge/stemming/snowball/arabic-stemmer";
+import ArmenianStemmer from "@/lib/knowledge/stemming/snowball/armenian-stemmer";
+import BasqueStemmer from "@/lib/knowledge/stemming/snowball/basque-stemmer";
+import CatalanStemmer from "@/lib/knowledge/stemming/snowball/catalan-stemmer";
+import DanishStemmer from "@/lib/knowledge/stemming/snowball/danish-stemmer";
+import DutchStemmer from "@/lib/knowledge/stemming/snowball/dutch-stemmer";
+import FinnishStemmer from "@/lib/knowledge/stemming/snowball/finnish-stemmer";
+import FrenchStemmer from "@/lib/knowledge/stemming/snowball/french-stemmer";
+import GermanStemmer from "@/lib/knowledge/stemming/snowball/german-stemmer";
+import HungarianStemmer from "@/lib/knowledge/stemming/snowball/hungarian-stemmer";
+import IrishStemmer from "@/lib/knowledge/stemming/snowball/irish-stemmer";
+import ItalianStemmer from "@/lib/knowledge/stemming/snowball/italian-stemmer";
+import NorwegianStemmer from "@/lib/knowledge/stemming/snowball/norwegian-stemmer";
+import PortugueseStemmer from "@/lib/knowledge/stemming/snowball/portuguese-stemmer";
+import RussianStemmer from "@/lib/knowledge/stemming/snowball/russian-stemmer";
+import SpanishStemmer from "@/lib/knowledge/stemming/snowball/spanish-stemmer";
+import SwedishStemmer from "@/lib/knowledge/stemming/snowball/swedish-stemmer";
+import TamilStemmer from "@/lib/knowledge/stemming/snowball/tamil-stemmer";
+import TurkishStemmer from "@/lib/knowledge/stemming/snowball/turkish-stemmer";
 
 /** Stemmers that read a word without accents, by language. */
 const VARIANTS: Record<string, (word: string) => string[]> = {
@@ -29,28 +47,30 @@ const VARIANTS: Record<string, (word: string) => string[]> = {
     ro: romanianVariants,
 };
 
-/** Snowball's algorithm for a language, by its ISO 639-1 code. */
-const SNOWBALL: Record<string, string> = {
-    ar: "arabic",
-    ca: "catalan",
-    da: "danish",
-    de: "german",
-    es: "spanish",
-    eu: "basque",
-    fi: "finnish",
-    fr: "french",
-    ga: "irish",
-    hu: "hungarian",
-    hy: "armenian",
-    it: "italian",
-    nl: "dutch",
-    no: "norwegian",
-    pt: "portuguese",
-    ru: "russian",
-    sl: "slovene",
-    sv: "swedish",
-    ta: "tamil",
-    tr: "turkish",
+/** A Snowball stemmer: lowercase NFC in, its stem out. */
+type SnowballStemmer = { stemWord(word: string): string };
+
+/** Snowball's stemmer for a language, by its ISO 639-1 code. */
+const SNOWBALL: Record<string, new () => SnowballStemmer> = {
+    ar: ArabicStemmer,
+    ca: CatalanStemmer,
+    da: DanishStemmer,
+    de: GermanStemmer,
+    es: SpanishStemmer,
+    eu: BasqueStemmer,
+    fi: FinnishStemmer,
+    fr: FrenchStemmer,
+    ga: IrishStemmer,
+    hu: HungarianStemmer,
+    hy: ArmenianStemmer,
+    it: ItalianStemmer,
+    nl: DutchStemmer,
+    no: NorwegianStemmer,
+    pt: PortugueseStemmer,
+    ru: RussianStemmer,
+    sv: SwedishStemmer,
+    ta: TamilStemmer,
+    tr: TurkishStemmer,
 };
 
 /**
@@ -111,9 +131,6 @@ const ALIASES: Record<string, string> = {
     portuguese: "pt",
     rus: "ru",
     russian: "ru",
-    slv: "sl",
-    slovene: "sl",
-    slovenian: "sl",
     swe: "sv",
     swedish: "sv",
     tam: "ta",
@@ -139,17 +156,19 @@ export function stemmingLanguage(
     return null;
 }
 
-const stemmers = new Map<string, { stem(word: string): string }>();
+const stemmers = new Map<string, SnowballStemmer>();
 
 /** Snowball's stem of a word, or the word when the stemmer fails. */
 function snowballStem(language: string, word: string): string {
+    const Stemmer = SNOWBALL[language];
+    if (!Stemmer) return word;
     try {
         let stemmer = stemmers.get(language);
         if (!stemmer) {
-            stemmer = newStemmer(SNOWBALL[language] ?? "");
+            stemmer = new Stemmer();
             stemmers.set(language, stemmer);
         }
-        return stemmer.stem(word);
+        return stemmer.stemWord(word);
     } catch {
         return word;
     }
@@ -194,7 +213,9 @@ function stemsOf(word: string, key: string | null): readonly string[] {
     const variants = key ? VARIANTS[key] : undefined;
     if (variants) return variants(folded);
     if (key && key in SNOWBALL) {
-        const stem = normalizeName(snowballStem(key, word.toLowerCase()));
+        const stem = normalizeName(
+            snowballStem(key, word.normalize("NFC").toLowerCase()),
+        );
         return stem && stem !== folded ? [folded, stem] : [folded];
     }
     return [folded];

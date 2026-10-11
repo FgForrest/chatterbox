@@ -32,6 +32,30 @@ describe("stemming by language", () => {
         expect(stemVariants("Москвой", "ru")).toContain("moskv");
     });
 
+    it.each([
+        ["ar", "المكتبات", "مكتب"],
+        ["ca", "ciutats", "ciut"],
+        ["da", "byerne", "byern"],
+        ["de", "Häusern", "haus"],
+        ["es", "ciudades", "ciudad"],
+        ["eu", "etxeetan", "etxe"],
+        ["fi", "Helsingissä", "helsing"],
+        ["fr", "maisons", "maison"],
+        ["ga", "bhfear", "fear"],
+        ["hu", "házakban", "haz"],
+        ["hy", "քաղաքներում", "քաղ"],
+        ["it", "città", "citt"],
+        ["nl", "huizen", "huis"],
+        ["no", "byene", "byen"],
+        ["pt", "cidades", "cidad"],
+        ["ru", "Москвой", "moskv"],
+        ["sv", "städerna", "stad"],
+        ["ta", "நகரங்களில்", "நகரம"],
+        ["tr", "evlerde", "ev"],
+    ])("stems %s with Snowball: %s is %s", (language, word, stem) => {
+        expect(stemVariants(word, language)).toContain(stem);
+    });
+
     it("keeps the word as it is, and alone where no stemmer knows the language", () => {
         expect(stemVariants("Šimákem", "cs")).toContain("simakem");
         expect(stemVariants("Šimákem", "xx")).toEqual(["simakem"]);
