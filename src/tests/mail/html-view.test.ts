@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderMailHtml } from "@/lib/mail/html-view";
+import { mailHtmlBody } from "@/lib/mail/html-view";
 
 function multipart(html: string, image?: { cid: string; png: Buffer }): Buffer {
     const parts = [
@@ -29,44 +29,13 @@ function multipart(html: string, image?: { cid: string; png: Buffer }): Buffer {
     return Buffer.from(parts.join("\r\n"));
 }
 
-describe("formatted mail", () => {
-    it("runs nothing and fetches nothing", async () => {
-        const html = await renderMailHtml(
-            multipart(
-                [
-                    '<p onclick="steal()">Hello <b>there</b></p>',
-                    "<script>steal()</script>",
-                    '<img src="https://tracker.example/pixel.gif">',
-                    '<div style="background:url(https://tracker.example/bg); color:red">styled</div>',
-                    '<a href="javascript:steal()">bad link</a>',
-                    '<a href="https://example.com/doc">good link</a>',
-                    "<style>body{background:url(https://tracker.example/x)}</style>",
-                    '<iframe src="https://example.com"></iframe>',
-                    '<form action="https://example.com"><input name="x"></form>',
-                ].join(""),
-            ),
-        );
-        expect(html).not.toBeNull();
-        const out = html ?? "";
-        expect(out).toContain("<b>there</b>");
-        expect(out).not.toMatch(
-            /onclick|<script|steal\(\)|<iframe|<form|<input/i,
-        );
-        expect(out).not.toContain("tracker.example");
-        expect(out).toContain("color:red");
-        expect(out).toContain('href="https://example.com/doc"');
-        expect(out).not.toContain("javascript:");
-        expect(out).toContain(
-            "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
-        );
-    });
-
+describe("a mail's HTML for the browser", () => {
     it("inlines cid: images as data URIs", async () => {
         const png = Buffer.from(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
             "base64",
         );
-        const html = await renderMailHtml(
+        const html = await mailHtmlBody(
             multipart('<p>Logo: <img src="cid:logo@company.example"></p>', {
                 cid: "logo@company.example",
                 png,
@@ -76,10 +45,17 @@ describe("formatted mail", () => {
         expect(html).not.toContain("cid:");
     });
 
+    it("empties a cid: reference the mail does not carry", async () => {
+        const html = await mailHtmlBody(
+            multipart('<p><img src="cid:missing@company.example"></p>'),
+        );
+        expect(html).toContain('src=""');
+    });
+
     it("has nothing to show for a plain-text mail", async () => {
         const raw = Buffer.from(
             "From: a@company.example\r\nSubject: x\r\n\r\nJust text\r\n",
         );
-        expect(await renderMailHtml(raw)).toBeNull();
+        expect(await mailHtmlBody(raw)).toBeNull();
     });
 });

@@ -51,6 +51,40 @@ export async function secretAddressMasker(
         );
 }
 
+/** `@` and the local part's `+` and `.` as a URL or markup may write them. */
+const ENCODED_ADDRESS_CHARACTERS: readonly [RegExp, string][] = [
+    [/%40|&#0*64;|&#x0*40;|&commat;/gi, "@"],
+    [/%2b|&#0*43;|&#x0*2b;|&plus;/gi, "+"],
+    [/%2e|&#0*46;|&#x0*2e;|&period;/gi, "."],
+];
+
+/**
+ * `secretAddressMasker` for a mail's HTML, which may write an address
+ * URL- or entity-encoded (a link's query, a tracking pixel): finds those
+ * too, and hides each secret token wherever it appears, as long as it was.
+ */
+export async function secretAddressMaskerForHtml(
+    html: string,
+): Promise<(text: string) => string> {
+    let decoded = html;
+    for (const [pattern, character] of ENCODED_ADDRESS_CHARACTERS) {
+        decoded = decoded.replace(pattern, character);
+    }
+    const localParts = new Set<string>();
+    for (const match of decoded.matchAll(addressPattern())) {
+        if (match[1]) localParts.add(match[1].toLowerCase());
+    }
+    const tokens = new Set<string>();
+    for (const localPart of localParts) {
+        if ((await resolveLocalPart(localPart))?.kind === "secret") {
+            tokens.add(localPart.slice(localPart.lastIndexOf(".") + 1));
+        }
+    }
+    if (tokens.size === 0) return (text) => text;
+    const pattern = new RegExp([...tokens].map(escapeRegExp).join("|"), "gi");
+    return (text) => text.replace(pattern, (token) => "•".repeat(token.length));
+}
+
 /**
  * A mail's content with every secret address masked, for a model to read:
  * a token a summary repeated would reach whoever reads the summary. Same

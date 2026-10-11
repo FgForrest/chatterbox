@@ -94,6 +94,7 @@ import {
     removeFolderAlias,
     setFolderAlias,
 } from "@/lib/mail/folder-addresses";
+import { secretAddressMaskerForHtml } from "@/lib/mail/redact";
 import { loadMailSettings } from "@/lib/mail/views";
 import { ensureOrgAccount } from "@/lib/org/account";
 
@@ -312,6 +313,31 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
         await expect(
             removeAddress({ userId: "u-jan", addressId: mailbox.id }),
         ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("hides a secret token in HTML however the address is encoded", async () => {
+        const mailbox = await resolveLocalPart("jan");
+        if (!mailbox) throw new Error("no mailbox");
+        const secret = await createSecretAddress({
+            userId: "u-jan",
+            baseAddressId: mailbox.id,
+            label: null,
+        });
+        const token = secret.localPart.slice("jan.".length);
+        const encoded = secret.localPart.replace(".", "%2E");
+        const html = [
+            `<a href="https://lists.example/u?to=${encoded}%40klepna.example">unsubscribe</a>`,
+            `<img src="https://t.example/o?e=${secret.localPart}&#64;klepna.example">`,
+            `<!-- sent to ${secret.localPart}@klepna.example -->`,
+            "<p>jan@klepna.example stays</p>",
+        ].join("");
+        const masked = (await secretAddressMaskerForHtml(html))(html);
+        expect(masked).not.toContain(token);
+        expect(masked).toHaveLength(html.length);
+        expect(masked).toContain("jan@klepna.example stays");
+        expect(masked).toContain(`?to=jan%2E${"•".repeat(token.length)}%40`);
+        const plain = "<p>nothing secret here</p>";
+        expect((await secretAddressMaskerForHtml(plain))(plain)).toBe(plain);
     });
 
     it("rotates a secret address: a new token, the label kept, the old one gone", async () => {

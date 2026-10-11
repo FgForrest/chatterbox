@@ -23,6 +23,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
+import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -140,7 +141,14 @@ export function MailDetailPane({
                 toast.error(i18n("This mail has no formatted version."));
                 return;
             }
-            setFormatted(body.html);
+            const framed = mailHtmlDocument(body.html);
+            if (framed === null) {
+                toast.error(
+                    i18n("This browser cannot show the mail formatted."),
+                );
+                return;
+            }
+            setFormatted(framed);
         }
         setShowFormatted(true);
     }, [formatted, i18n, mail.id, showFormatted]);
