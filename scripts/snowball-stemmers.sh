@@ -44,6 +44,7 @@ cc -O2 -o "$work/snowball" "$source_dir"/compiler/*.c
 curl --proto '=https' --tlsv1.2 -fsSL -o "$out/base-stemmer.js" \
     "https://raw.githubusercontent.com/snowballstem/snowball/$COMMIT/javascript/base-stemmer.js"
 cp "$source_dir/COPYING" "$out/COPYING"
+printf '{ "type": "module" }\n' >"$out/package.json"
 for language in "${LANGUAGES[@]}"; do
     "$work/snowball" "$source_dir/algorithms/$language.sbl" -js \
         -o "$out/$language-stemmer.js"
@@ -58,14 +59,13 @@ done
 
 case "$mode" in
 --write)
-    rm -rf "$target"
     mkdir -p "$target"
-    cp "$out"/*.js "$out/COPYING" "$target/"
-    printf '{ "type": "module" }\n' >"$target/package.json"
+    rm -f "$target"/*.js
+    cp "$out"/*.js "$out/COPYING" "$out/package.json" "$target/"
     echo "Wrote Snowball $VERSION stemmers to $target"
     ;;
 --check)
-    diff -r --exclude=README.md --exclude=package.json "$out" "$target" && \
+    diff -r --exclude=README.md "$out" "$target" && \
         echo "The committed stemmers are Snowball $VERSION's"
     ;;
 *)
