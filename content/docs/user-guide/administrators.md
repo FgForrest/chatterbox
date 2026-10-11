@@ -15,6 +15,8 @@ Most of Riffado works as soon as it runs. A few features need the instance set u
 | Where backups are written | `BACKUP_STORAGE_PATH` | [Backup and restore](../guides/backup-and-restore.mdx) |
 | Larger video uploads | `VIDEO_UPLOAD_MAX_BYTES` (default 4 GiB) | |
 | Claude Code and Codex providers | the `agent-bridge` profile and `BRIDGE_TOKEN` | [below](#claude-code-and-codex-subscriptions) |
+| MCP server for AI clients and services | `MCP_AUDIENCE` with single sign-on, optionally `MCP_ALLOWED_CLIENTS` | [External MCP server](../self-hosting/mcp.mdx) |
+| [Riffado in Claude](claude.md) and Claude Code | Keycloak clients, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS`, `MCP_CONNECTOR_KEYS`, a public entrance for `/api/mcp` | [below](#claude-and-claude-code) |
 | [Learn](learn.md) search by meaning | the `learn` profile and `EMBEDDING_BASE_URL` | [below](#learn) |
 | Limit on automatic summaries, topics and Learn | `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | |
 
@@ -40,6 +42,17 @@ docker compose --profile agent-bridge up -d --build agent-bridge
 ```
 
 Sign the bridge in to Claude or Codex once (see `agent-bridge/README.md` in the repository), then in Riffado add a **Claude Code** or **Codex** provider with the bridge token as its API key. The bridge has no prebuilt image and publishes no port. It runs one request at a time by default; raise `BRIDGE_MAX_CONCURRENCY` to the number of passes if you use multi-pass summaries. Keep an API-key provider as a fallback.
+
+## Claude and Claude Code
+
+With the [external MCP server](../self-hosting/mcp.mdx) on, people can ask Claude (claude.ai, the desktop and mobile apps, Cowork) and Claude Code about their recordings, signed in through your Keycloak realm and limited by their roles there. Claude reaches Riffado from Anthropic's cloud, so this needs:
+
+1. In Keycloak, a confidential client `claude` for the organization's connector, a public client `claude-code`, and one confidential client for each person who connects from a personal Claude plan.
+2. A public DNS name and a reverse proxy that lets Anthropic's addresses (`160.79.104.0/21`) reach `/api/mcp` and its metadata, and nothing else, and marks those requests with a header.
+3. In `.env`: `MCP_ALLOWED_CLIENTS`, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS` and, for the connector's `X-API-Key`, `MCP_CONNECTOR_KEYS`.
+4. In Claude, an Owner adds the connector once with the `claude` client's ID and secret; members then connect it.
+
+[Claude and Claude Code](../self-hosting/claude.mdx) has every step, the checks and what to do when a connection is refused. Send people to [Riffado in Claude](claude.md).
 
 ## Learn
 

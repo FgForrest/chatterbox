@@ -61,7 +61,53 @@
             "standardFlowEnabled": false,
             "implicitFlowEnabled": false,
             "directAccessGrantsEnabled": false,
-            "serviceAccountsEnabled": false
+            "serviceAccountsEnabled": false,
+            "attributes": {
+                "resource_url": "https://riffado.example.com/api/mcp"
+            }
+        },
+        {
+            "clientId": "claude",
+            "name": "Claude (hosted apps)",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": false,
+            "clientAuthenticatorType": "client-secret",
+            "secret": "claude-e2e-client-secret",
+            "standardFlowEnabled": true,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false,
+            "redirectUris": ["https://claude.ai/api/mcp/auth_callback"],
+            "attributes": {
+                "pkce.code.challenge.method": "S256",
+                "access.token.lifespan": "900"
+            },
+            "defaultClientScopes": ["basic", "roles"],
+            "optionalClientScopes": ["offline_access"]
+        },
+        {
+            "clientId": "claude-code",
+            "name": "Claude Code",
+            "enabled": true,
+            "protocol": "openid-connect",
+            "publicClient": true,
+            "standardFlowEnabled": true,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false,
+            "redirectUris": [
+                "http://localhost/callback",
+                "http://127.0.0.1/callback"
+            ],
+            "attributes": {
+                "pkce.code.challenge.method": "S256",
+                "access.token.lifespan": "900"
+            },
+            "defaultClientScopes": ["basic", "roles"],
+            "optionalClientScopes": ["offline_access"]
         },
         {
             "clientId": "riffado-mcp-tester",
@@ -106,12 +152,33 @@
                     "knowledge:read",
                     "transcripts:read"
                 ]
+            },
+            {
+                "client": "claude",
+                "roles": [
+                    "knowledge:read",
+                    "transcripts:read",
+                    "summaries:read",
+                    "tasks:read",
+                    "tasks:write"
+                ]
+            },
+            {
+                "client": "claude-code",
+                "roles": [
+                    "knowledge:read",
+                    "transcripts:read",
+                    "summaries:read",
+                    "tasks:read",
+                    "tasks:write"
+                ]
             }
         ]
     },
     "users": [
         {
             "username": "alice",
+            "realmRoles": ["default-roles-riffado-e2e"],
             "email": "alice@example.com",
             "emailVerified": true,
             "firstName": "Alice",
@@ -135,6 +202,7 @@
         },
         {
             "username": "bob",
+            "realmRoles": ["default-roles-riffado-e2e"],
             "email": "bob@example.com",
             "emailVerified": false,
             "firstName": "Bob",
@@ -150,6 +218,7 @@
         },
         {
             "username": "carol",
+            "realmRoles": ["default-roles-riffado-e2e"],
             "email": "carol@example.com",
             "emailVerified": true,
             "firstName": "Carol",
@@ -165,6 +234,7 @@
         },
         {
             "username": "dave",
+            "realmRoles": ["default-roles-riffado-e2e"],
             "email": "dave@example.com",
             "emailVerified": false,
             "firstName": "Dave",
