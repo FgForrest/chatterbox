@@ -324,7 +324,7 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
             label: null,
         });
         const token = secret.localPart.slice("jan.".length);
-        const encoded = secret.localPart.replace(".", "%2E");
+        const encoded = `jan%2E${token}`;
         const html = [
             `<a href="https://lists.example/u?to=${encoded}%40klepna.example">unsubscribe</a>`,
             `<img src="https://t.example/o?e=${secret.localPart}&#64;klepna.example">`,
@@ -336,7 +336,7 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
         expect(masked).toContain("jan@klepna.example stays");
         expect(masked).toContain(`?to=jan%2E${"•".repeat(token.length)}%40`);
 
-        const spelled = `${token.slice(0, 3)}&#${token.charCodeAt(3)}${token.slice(4)}`;
+        const spelled = `${token.slice(0, 3)}&#${token.charCodeAt(3)};${token.slice(4)}`;
         const tricky = [
             `<p>jan.${token}&#64klepna.example</p>`,
             `<p>jan.${spelled}@klepna.example</p>`,
