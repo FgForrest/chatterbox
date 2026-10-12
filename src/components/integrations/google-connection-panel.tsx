@@ -61,6 +61,7 @@ export function GoogleConnectionPanel({
         );
     }
     if (!state.available) {
+        if (state.calendarAvailable) return null;
         return (
             <p className="text-sm text-muted-foreground">
                 {i18n(
@@ -98,10 +99,25 @@ export function GoogleConnectionPanel({
                     })}
                 </p>
             )}
+            {!connection.driveGranted && (
+                <p className="text-sm text-muted-foreground">
+                    {i18n("Google Drive access has not been granted.")}
+                </p>
+            )}
             <div className="flex flex-wrap gap-2">
                 {connection.status === "needs_reconnect" && (
                     <Button type="button" size="sm" onClick={connect}>
                         {i18n("Reconnect")}
+                    </Button>
+                )}
+                {connection.status === "active" && !connection.driveGranted && (
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={connect}
+                    >
+                        {i18n("Connect Google Drive")}
                     </Button>
                 )}
                 {confirming ? (

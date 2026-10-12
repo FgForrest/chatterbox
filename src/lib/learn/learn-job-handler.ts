@@ -14,6 +14,7 @@
 
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { recordingItemJoin } from "@/db/items";
 import {
     chatterItems,
     knowledgeAliases,
@@ -35,6 +36,8 @@ import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
+import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
 import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
@@ -693,6 +696,53 @@ async function runLearnJob({
             ![...frameBefore.answeredLabels.values()].includes(recorderId)
                 ? { personId: recorderId, name: recorderName }
                 : null;
+        const [recording] =
+            payload.calendarEventId &&
+            run.view === "private" &&
+            run.actorUserId === run.userId
+                ? await db
+                      .select({
+                          start: chatterItems.occurredAt,
+                          end: recordings.endTime,
+                      })
+                      .from(recordings)
+                      .innerJoin(chatterItems, recordingItemJoin)
+                      .where(
+                          and(
+                              eq(recordings.id, run.itemId),
+                              eq(recordings.userId, run.userId),
+                          ),
+                      )
+                      .limit(1)
+                : [];
+        const calendarEvents = recording
+            ? await listCalendarEventsForRecording({
+                  userId: run.userId,
+                  start: recording.start,
+                  end: recording.end,
+              }).catch(() => [])
+            : [];
+        const selectedEvent = calendarEvents.find(
+            (event) => event.id === payload.calendarEventId,
+        );
+        const calendarSpeakerCandidates =
+            selectedEvent?.attendees.map((attendee) => ({
+                name: attendee.name,
+                source: "calendar" as const,
+            })) ?? [];
+        const meetSpeakerCandidates =
+            selectedEvent && recording
+                ? await getMeetSpeakerCandidates({
+                      userId: run.userId,
+                      event: selectedEvent,
+                      recordingStartedAt: recording.start,
+                      recordingEndedAt: recording.end,
+                  })
+                : [];
+        const speakerCandidates = [
+            ...calendarSpeakerCandidates,
+            ...meetSpeakerCandidates,
+        ];
         reportProgress({ phase: "reading" });
         const pass =
             path === "bridge"
@@ -705,6 +755,9 @@ async function runLearnJob({
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      ...(speakerCandidates.length > 0
+                          ? { speakerCandidates }
+                          : {}),
                       signal,
                   })
                 : await runFallbackPass({
@@ -719,6 +772,9 @@ async function runLearnJob({
                       entityTypes,
                       unnamedLabels,
                       recorder,
+                      ...(speakerCandidates.length > 0
+                          ? { speakerCandidates }
+                          : {}),
                       signal,
                   });
         reportProgress({ phase: "checking" });

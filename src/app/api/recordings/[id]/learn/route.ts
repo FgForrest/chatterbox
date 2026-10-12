@@ -29,6 +29,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         actorUserId,
         source: requestedSource(request),
         trigger: "manual",
+        calendarEventId:
+            new URL(request.url).searchParams.get("calendarEventId") ??
+            undefined,
     });
     return NextResponse.json(started, { status: 202 });
 });
