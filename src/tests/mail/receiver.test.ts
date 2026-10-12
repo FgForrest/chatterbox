@@ -1,12 +1,21 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import nodemailer from "nodemailer";
 import type { SMTPServer } from "smtp-server";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    describe,
+    expect,
+    it,
+    vi,
+} from "vitest";
+import { parseTrustedProxies } from "@/lib/mail/receiver/proxy";
 import { createReceiver } from "@/lib/mail/receiver/receiver";
 import { AllowedSources, spfRanges } from "@/lib/mail/receiver/sources";
 import {
@@ -37,6 +46,7 @@ describe("the mail receiver over real SMTP sessions", () => {
     let receiver: SMTPServer | null = null;
     let port = 0;
     const logs: Record<string, unknown>[] = [];
+    const sockets: Socket[] = [];
 
     beforeAll(async () => {
         spool = mkdtempSync(join(tmpdir(), "riffado-spool-"));
@@ -71,6 +81,7 @@ describe("the mail receiver over real SMTP sessions", () => {
     afterEach(async () => {
         calls.length = 0;
         logs.length = 0;
+        for (const socket of sockets.splice(0)) socket.destroy();
         if (receiver) {
             const closing = receiver;
             receiver = null;
@@ -81,7 +92,12 @@ describe("the mail receiver over real SMTP sessions", () => {
     });
 
     async function start(
-        options: { sources?: string; maxBytes?: number } = {},
+        options: {
+            sources?: string;
+            maxBytes?: number;
+            trustedProxies?: string;
+            maxConnectionsPerIp?: number;
+        } = {},
     ) {
         const sources = new AllowedSources(
             options.sources ?? "127.0.0.1/32,::1/128",
@@ -94,6 +110,8 @@ describe("the mail receiver over real SMTP sessions", () => {
             ingestSecret: SECRET,
             maxMessageBytes: options.maxBytes ?? 1024 * 1024,
             sources,
+            trustedProxies: parseTrustedProxies(options.trustedProxies),
+            maxConnectionsPerIp: options.maxConnectionsPerIp,
             spoolDir: spool,
             resolver: testResolver([company]),
             appTimeoutMs: 5_000,
@@ -135,6 +153,60 @@ describe("the mail receiver over real SMTP sessions", () => {
         return client().sendMail({
             envelope: { from: "jan@company.example", to },
             raw,
+        });
+    }
+
+    /** A client whose connection starts with `header`, as a proxy's does. */
+    function proxiedClient(header: string) {
+        return nodemailer.createTransport({
+            host: "127.0.0.1",
+            port,
+            secure: false,
+            ignoreTLS: true,
+            getSocket: (_options, callback) => {
+                const socket = connect(port, "127.0.0.1", () => {
+                    socket.write(header);
+                    callback(null, { connection: socket });
+                });
+                sockets.push(socket);
+            },
+        });
+    }
+
+    function rawConnection(header: string): Socket {
+        const socket = connect(port, "127.0.0.1", () => {
+            if (header) socket.write(header);
+        });
+        socket.setEncoding("utf8");
+        sockets.push(socket);
+        return socket;
+    }
+
+    /** Opens a raw connection, sends `header`, and reads the first reply line. */
+    function open(header = ""): Promise<{ socket: Socket; reply: string }> {
+        const socket = rawConnection(header);
+        return new Promise((resolve, reject) => {
+            let text = "";
+            socket.on("error", reject);
+            socket.on("data", (chunk: string) => {
+                text += chunk;
+                const end = text.indexOf("\r\n");
+                if (end >= 0) resolve({ socket, reply: text.slice(0, end) });
+            });
+            socket.on("close", () => resolve({ socket, reply: text }));
+        });
+    }
+
+    /** Everything the receiver says on a raw connection until it closes it. */
+    function transcript(header = ""): Promise<string> {
+        const socket = rawConnection(header);
+        return new Promise((resolve, reject) => {
+            let text = "";
+            socket.on("error", reject);
+            socket.on("data", (chunk: string) => {
+                text += chunk;
+            });
+            socket.on("close", () => resolve(text));
         });
     }
 
@@ -244,6 +316,138 @@ describe("the mail receiver over real SMTP sessions", () => {
             event: "connect",
             verdict: "source_refused",
         });
+    });
+
+    it("frees a per-address slot only for a connection it counted", async () => {
+        await start({ maxConnectionsPerIp: 1 });
+        const first = await open();
+        expect(first.reply).toMatch(/^220 /);
+        expect((await open()).reply).toMatch(/^421 /);
+        expect((await open()).reply).toMatch(/^421 /);
+        first.socket.destroy();
+        await vi.waitFor(async () => {
+            expect((await open()).reply).toMatch(/^220 /);
+        });
+    });
+
+    describe("behind a proxy sending the PROXY protocol", () => {
+        const header = (source: string, sourcePort = 40000) =>
+            `PROXY TCP4 ${source} 127.0.0.1 ${sourcePort} 25\r\n`;
+
+        it("checks the client the header names and delivers as for a direct one", async () => {
+            answer = (call) =>
+                call.path.endsWith("/precheck")
+                    ? {
+                          status: 200,
+                          body: { accepted: ["jan@klepna.example"] },
+                      }
+                    : { status: 200, body: { outcomes: [], overQuota: false } };
+            await start({
+                sources: "192.0.2.0/24",
+                trustedProxies: "127.0.0.1",
+            });
+            const info = await proxiedClient(header("192.0.2.10")).sendMail({
+                envelope: {
+                    from: "jan@company.example",
+                    to: ["jan@klepna.example"],
+                },
+                raw: await signed(),
+            });
+            expect(info.accepted).toEqual(["jan@klepna.example"]);
+            expect(calls.map((call) => call.path)).toEqual([
+                "/api/internal/mail/precheck",
+                "/api/internal/mail/ingest",
+            ]);
+        });
+
+        it.each([
+            ["2001:db8::/32", "2001:db8::10"],
+            ["192.0.2.0/24", "::ffff:192.0.2.10"],
+        ])("checks a TCP6 header's client against %s", async (sources, client) => {
+            await start({ sources, trustedProxies: "127.0.0.1" });
+            const { reply } = await open(
+                `PROXY TCP6 ${client} 2001:db8::1 40000 25\r\n`,
+            );
+            expect(reply).toMatch(/^220 /);
+        });
+
+        it("refuses a client outside the allowed sources though the proxy is inside them", async () => {
+            await start({ trustedProxies: "127.0.0.1" });
+            expect(await transcript(header("198.51.100.7"))).toMatch(/^554 /);
+            expect(calls).toEqual([]);
+            expect(logs).toContainEqual({
+                event: "connect",
+                verdict: "source_refused",
+            });
+        });
+
+        it("closes a connection from the proxy that starts without the header, unanswered", async () => {
+            await start({ trustedProxies: "127.0.0.1" });
+            const said = await transcript("EHLO mail.example\r\n");
+            expect(said).not.toMatch(/^\d{3}/m);
+            expect(calls).toEqual([]);
+        });
+
+        it("expects no header from a peer that is not a trusted proxy", async () => {
+            answer = () => ({ status: 200, body: { accepted: [] } });
+            await start({ trustedProxies: "203.0.113.1" });
+            const info = await send(await signed(), ["jan@klepna.example"]);
+            expect(info.accepted).toEqual(["jan@klepna.example"]);
+            expect(calls.map((call) => call.path)).toEqual([
+                "/api/internal/mail/precheck",
+            ]);
+        });
+
+        it("counts connections per client, not per proxy", async () => {
+            await start({
+                sources: "192.0.2.0/24",
+                trustedProxies: "127.0.0.1",
+                maxConnectionsPerIp: 1,
+            });
+            const first = await open(header("192.0.2.10", 40001));
+            const other = await open(header("192.0.2.11", 40002));
+            expect(first.reply).toMatch(/^220 /);
+            expect(other.reply).toMatch(/^220 /);
+            expect((await open(header("192.0.2.10", 40003))).reply).toMatch(
+                /^421 /,
+            );
+        });
+    });
+});
+
+describe("trusted proxies", () => {
+    it("takes plain IP addresses, an IPv4 one also in its mapped IPv6 form", () => {
+        expect(
+            parseTrustedProxies(" 203.0.113.10 , ,2001:DB8:0:0::1,"),
+        ).toEqual(["203.0.113.10", "::ffff:203.0.113.10", "2001:db8::1"]);
+    });
+
+    it("reads a mapped IPv6 entry as the IPv4 address it maps, once", () => {
+        expect(
+            parseTrustedProxies(
+                "::FFFF:cb00:710a,203.0.113.10,::ffff:203.0.113.10",
+            ),
+        ).toEqual(["203.0.113.10", "::ffff:203.0.113.10"]);
+    });
+
+    it("trusts nobody when unset or empty", () => {
+        expect(parseTrustedProxies(undefined)).toEqual([]);
+        expect(parseTrustedProxies(" , ")).toEqual([]);
+    });
+
+    it.each([
+        "*",
+        "203.0.113.0/24",
+        "2001:db8::/32",
+        "proxy.example",
+        "203.0.113",
+        "010.0.0.1",
+        "fe80::1%eth0",
+        "PROXY TCP4",
+    ])("refuses %s", (entry) => {
+        expect(() => parseTrustedProxies(`203.0.113.10,${entry}`)).toThrow(
+            `not a plain IP address: ${entry}`,
+        );
     });
 });
 
