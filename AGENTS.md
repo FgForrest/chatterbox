@@ -176,12 +176,11 @@ Riffado ships in **two production modes from the same codebase**:
 1. **Self-host** (`IS_HOSTED` unset/false) — AGPL, `docker compose up`, single-tenant in practice, owned by the user.
 2. **Hosted** (`IS_HOSTED=true`) — multi-tenant SaaS we operate. Live, paying users, profit-bearing.
 
-Both surfaces are user contracts. The **deploy surface** — DB schema, env vars, `docker-compose.yml` structure, install flow — is a contract for self-host. The **hosted surface** — the external API at `/api/v1/*` (introduced by issue #79 / PR #80; not yet on `main`), webhook payloads, token format, and API behavior under load — will be a contract for hosted customers once those surfaces land. Internal code is not a contract for either.
+Both surfaces are user contracts. The **deploy surface** — DB schema, env vars, `docker-compose.yml` structure, the release assets (`docker-compose.yml`, `env.example`) — is a contract for self-host. The **hosted surface** — the external API at `/api/v1/*` (introduced by issue #79 / PR #80; not yet on `main`), webhook payloads, token format, and API behavior under load — will be a contract for hosted customers once those surfaces land. Internal code is not a contract for either.
 
 - **Schema changes are additive by default.** Dropping columns or tables requires a user-impact assessment and a migration plan. See the **Database Migrations** block below.
 - **Env var renames need deprecation.** Keep the old name working for at least one release cycle, log a deprecation warning, document both in the PR description (see Release notes).
 - **`docker-compose.yml` is a user contract.** Breaking structural changes need a migration note in the PR description.
-- **The one-line installer is part of the deploy surface.** `scripts/install.sh`, the `riffado.com/install.sh` route, and the version-pinned `riffado.com/vX.Y.Z/install.sh` route are a single contract — the script is served from the repo file via `src/app/install.sh/route.ts` and `src/app/[version]/install.sh/route.ts`. Breaking changes (renaming, removing prompts, changing the URL shape) need a deprecation cycle and a CHANGELOG note. Self-hosters paste these URLs into their own runbooks; don't break them silently.
 - **Test sync against a real Plaud account** before shipping anything touching `src/lib/sync/` or `src/lib/plaud/`. Sync regressions destroy user trust fastest.
 - **Breaking changes ship with loud logging + Sentry context + a migration note in the release.** Never silently.
 - **Never gate features behind `IS_HOSTED` in a way that breaks self-host.** Hosted-only branches must degrade cleanly to the self-host path, not crash or silently disable functionality self-hosters expect.

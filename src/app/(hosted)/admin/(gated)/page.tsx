@@ -1,5 +1,4 @@
 import { fleetOverview } from "@/db/queries/admin";
-import { InstallHitsTile } from "./_components/install-hits-tile";
 import {
     formatBytes,
     formatHours,
@@ -250,15 +249,6 @@ export default async function AdminOverviewPage() {
                             };
                         })()}
                     />
-                </div>
-            </section>
-
-            <section>
-                <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground mb-2">
-                    Self-host reach
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <InstallHitsTile days={30} />
                 </div>
             </section>
         </div>

@@ -124,8 +124,8 @@ export function HeroReveal() {
                     className={cn(reveal(180).className, "flex justify-center")}
                 >
                     <Link
-                        href="/install"
-                        aria-label={i18n("Self-host Riffado in one command")}
+                        href="/docs/self-hosting/install"
+                        aria-label={i18n("Self-host Riffado with Docker")}
                         onClick={() =>
                             track("hero_cta_self_host_click", {
                                 location: "hero",
@@ -133,7 +133,7 @@ export function HeroReveal() {
                         }
                         className="group inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
                     >
-                        <span>{i18n("or self-host in one command")}</span>
+                        <span>{i18n("or self-host with Docker")}</span>
                         <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                     </Link>
                 </div>

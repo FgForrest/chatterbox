@@ -38,6 +38,11 @@ export interface ReceiverConfig {
     ingestSecret: string;
     maxMessageBytes: number;
     sources: AllowedSources;
+    /**
+     * Peers whose PROXY protocol header names the client, as
+     * `parseTrustedProxies` returns them. Empty or unset: none.
+     */
+    trustedProxies?: string[];
     /** PEM. Without them no STARTTLS is offered (tests only). */
     tlsKey?: Buffer;
     tlsCert?: Buffer;
@@ -50,6 +55,12 @@ export interface ReceiverConfig {
     resolver?: DNSResolver;
     log?: (entry: Record<string, unknown>) => void;
 }
+
+// smtp-server also takes a list of trusted peers for useProxy; its typings
+// know only a boolean.
+type ServerOptions = Omit<SMTPServerOptions, "useProxy"> & {
+    useProxy?: string[];
+};
 
 /** An SMTP error with its reply code. */
 function smtpError(code: number, message: string): Error {
@@ -90,6 +101,7 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
     const ingests = new Semaphore(config.maxConcurrentIngests ?? 4);
     const appTimeoutMs = config.appTimeoutMs ?? 60_000;
     const connections = new Map<string, number>();
+    const counted = new WeakSet<SMTPServerSession>();
     const log = config.log ?? ((entry) => console.log(JSON.stringify(entry)));
 
     const callApp = async (
@@ -154,7 +166,7 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
             : { code: 250, verdict: "delivered" };
     };
 
-    const options: SMTPServerOptions = {
+    const options: ServerOptions = {
         name: config.hostname,
         banner: "Klepna mail receiver",
         secure: false,
@@ -179,9 +191,11 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
                 return callback(smtpError(421, "4.7.0 Too many connections"));
             }
             connections.set(address, open + 1);
+            counted.add(session);
             return callback();
         },
         onClose(session) {
+            if (!counted.delete(session)) return;
             const address = session.remoteAddress;
             const open = (connections.get(address) ?? 1) - 1;
             if (open <= 0) connections.delete(address);
@@ -270,5 +284,6 @@ export function createReceiver(config: ReceiverConfig): SMTPServer {
             })();
         },
     };
-    return new SMTPServer(options);
+    if (config.trustedProxies?.length) options.useProxy = config.trustedProxies;
+    return new SMTPServer(options as SMTPServerOptions);
 }

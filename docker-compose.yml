@@ -8,8 +8,8 @@ services:
     environment:
       POSTGRES_USER: postgres
       # Default preserved for backward compat with existing self-host
-      # deploys. The one-line installer (scripts/install.sh) generates a
-      # random POSTGRES_PASSWORD and writes it to .env. Existing operators
+      # deploys. New installs set a random POSTGRES_PASSWORD in .env
+      # before the first start (`openssl rand -hex 24`). Existing operators
       # can rotate by setting POSTGRES_PASSWORD in .env, recreating the
       # `db` volume, and restoring from a backup.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -214,6 +214,9 @@ services:
       MAIL_MAX_MESSAGE_MB: ${MAIL_MAX_MESSAGE_MB:-36}
       # `google` (Google's published sending ranges), CIDRs, or both.
       MAIL_ALLOWED_SOURCES: ${MAIL_ALLOWED_SOURCES:-google}
+      # Behind a TCP proxy: the proxies' IP addresses whose PROXY protocol
+      # v1 header names the client (see mail-receiver/README.md).
+      MAIL_PROXY_PROTOCOL_FROM: ${MAIL_PROXY_PROTOCOL_FROM:-}
       MAIL_TLS_CERT_FILE: /tls/fullchain.pem
       MAIL_TLS_KEY_FILE: /tls/privkey.pem
     volumes:

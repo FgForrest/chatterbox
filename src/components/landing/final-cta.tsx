@@ -10,7 +10,7 @@ import { FinalCtaActions } from "@/components/landing/final-cta-actions";
  *
  * Wordmark → headline (with `text-primary` accent on the tail, mirroring
  * the hero) → tightened ownership-led subhead → CTA pair (same two paths
- * the hero opens with: hosted `/register` + self-host `/install`) →
+ * the hero opens with: hosted `/register` + the self-host install docs) →
  * reassurance strip condensing the slice-1 + slice-2 promise.
  */
 export function FinalCTA() {
