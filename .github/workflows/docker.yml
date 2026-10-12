@@ -1,22 +1,29 @@
 name: Docker
 
+# The app image on ghcr.io/<owner>/<repository>. A push to `dev` publishes
+# `:dev`; the release workflow (release.yml) calls this with a version and
+# publishes `:<version>` and `:latest`.
 on:
   push:
     branches:
-      - main
-    tags:
-      - 'v*'
+      - dev
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (YYYY.N)
+        required: true
+        type: string
 
 concurrency:
-  group: docker-${{ github.ref }}
-  cancel-in-progress: true
+  group: docker-${{ github.ref }}-${{ inputs.version || 'dev' }}
+  cancel-in-progress: ${{ !inputs.version }}
 
 jobs:
   # Builds each platform on its own native runner, in parallel, instead of
   # one job emulating arm64 under QEMU on an amd64 runner. Each job pushes
-  # its own arch-suffixed tags (e.g. `0.6.3-amd64`) the moment it finishes,
-  # so hosted prod (amd64-only) can deploy right away without waiting on
-  # the slower arm64 build or the merged multi-arch manifest below.
+  # its own arch-suffixed tags (e.g. `2026.3-amd64`) the moment it finishes,
+  # so an amd64-only host can deploy right away without waiting on the
+  # slower arm64 build or the merged multi-arch manifest below.
   build:
     strategy:
       fail-fast: false
@@ -42,6 +49,20 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE: ${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            echo "app=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=dev-${SHA:0:7}" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -57,17 +78,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          # Canonical tag semantics (applied to the merged multi-arch
-          # manifest by the `merge` job below):
-          #   - `latest`       → newest stable release (v* tag push)
-          #   - `X.Y.Z` / `X.Y` → specific release versions
-          #   - `dev`          → rolling build from `main` (unstable, opt-in)
-          # `main` is a rolling integration branch, so it MUST NOT overwrite `latest`.
+          # Canonical tags (applied to the merged multi-arch manifest by the
+          # `merge` job below):
+          #   - `<version>`, `latest` -> a release (push to `main`)
+          #   - `dev`                 -> rolling build from `dev` (unstable)
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.version.outputs.app }},enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=dev,enable=${{ steps.version.outputs.release != 'true' }}
 
       - name: Compute arch-suffixed tags
         id: arch_tags
@@ -98,13 +116,13 @@ jobs:
             POSTHOG_CLI_API_KEY=${{ secrets.POSTHOG_CLI_API_KEY }}
             POSTHOG_CLI_PROJECT_ID=${{ secrets.POSTHOG_CLI_PROJECT_ID }}
             DOCS_REPOSITORY=${{ github.repository }}
+            APP_VERSION=${{ steps.version.outputs.app }}
 
   # Combines the amd64 + arm64 images built above into a single
-  # multi-arch manifest list under the canonical tags (`latest`,
-  # `X.Y.Z`, `X.Y`, `dev`). This is what self-host `docker-compose.yml`
-  # pulls, and it necessarily waits on both platforms -- the
-  # arch-suffixed tags above are the fast path for anyone who only
-  # needs one architecture.
+  # multi-arch manifest list under the canonical tags. This is what
+  # `docker-compose.yml` pulls, and it necessarily waits on both
+  # platforms -- the arch-suffixed tags above are the fast path for anyone
+  # who only needs one architecture.
   merge:
     needs: build
     runs-on: ubuntu-latest
@@ -115,6 +133,19 @@ jobs:
       packages: write
 
     steps:
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            echo "app=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=dev" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -131,10 +162,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.version.outputs.app }},enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=dev,enable=${{ steps.version.outputs.release != 'true' }}
 
       - name: Create and push multi-arch manifest
         run: |

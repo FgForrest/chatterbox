@@ -4,13 +4,13 @@ import {
     INSTALL_SCRIPT_HEADERS,
     renderInstallScript,
 } from "@/lib/install-script";
-import { APP_VERSION_TAG } from "@/lib/version";
+import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
-    const tag = (await fetchLatestReleaseTag()) ?? APP_VERSION_TAG;
+    const tag = (await fetchLatestReleaseTag()) ?? APP_VERSION;
     const script = await renderInstallScript(tag);
     // Aggregate counter; no-op on self-host, swallows errors internally.
     // Awaited (not fire-and-forget) because serverless runtimes kill

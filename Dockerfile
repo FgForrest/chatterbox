@@ -46,6 +46,13 @@ ENV POSTHOG_CLI_HOST=$POSTHOG_CLI_HOST
 ARG DOCS_REPOSITORY=riffado/riffado
 ENV DOCS_REPOSITORY=$DOCS_REPOSITORY
 
+# The version shown in the footer and /api/health (`YYYY.N` for a release,
+# `dev-<sha>` for a dev build) and the repository its release notes, update
+# check and bug reports point at. Inlined by `next build`.
+ARG APP_VERSION=dev
+ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
+ENV NEXT_PUBLIC_APP_REPOSITORY=$DOCS_REPOSITORY
+
 # `fumadocs-mdx`'s `lastModified` plugin shells out to `git log` for every
 # MDX page (see source.config.ts). `curl` installs `posthog-cli` for the
 # guarded source-map step below. The pinned `oven/bun:1.4.0` image is
@@ -96,6 +103,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# The standalone server listens on HOSTNAME, which Docker sets to the
+# container id: the server would then answer on the container address only,
+# and the compose healthcheck (localhost:3000) would never pass.
+ENV HOSTNAME=0.0.0.0
 
 # The same repository at run time, for any docs view rendered on request.
 ARG DOCS_REPOSITORY=riffado/riffado

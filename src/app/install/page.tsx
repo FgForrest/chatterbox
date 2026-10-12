@@ -10,7 +10,7 @@ import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
 import { INSTALL_ONELINER, pinnedInstallCommand } from "@/lib/install-commands";
 import { marketingMetadata } from "@/lib/seo/marketing-metadata";
-import { APP_VERSION_TAG } from "@/lib/version";
+import { APP_VERSION } from "@/lib/version";
 
 /**
  * Public "how do I self-host this?" page. Linked from the landing
@@ -27,7 +27,7 @@ import { APP_VERSION_TAG } from "@/lib/version";
  *
  * Deliberately a server component -- the only interactive bit is the
  * Copy button inside `<CopyableCommand>` (a small client island).
- * Reads `APP_VERSION_TAG` at build time so the version-pinned form
+ * Reads `APP_VERSION` at build time so the version-pinned form
  * below always matches the running build.
  */
 
@@ -55,7 +55,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 const ONE_LINER = INSTALL_ONELINER;
-const PINNED_LINER = pinnedInstallCommand(APP_VERSION_TAG);
+const PINNED_LINER = pinnedInstallCommand(APP_VERSION);
 
 export default function InstallPage() {
     const i18n = useExtracted();
@@ -150,7 +150,7 @@ export default function InstallPage() {
                         />
                         <p className="text-xs text-muted-foreground">
                             {i18n("Replace")}{" "}
-                            <code className="font-mono">{APP_VERSION_TAG}</code>{" "}
+                            <code className="font-mono">{APP_VERSION}</code>{" "}
                             {i18n("with any released tag from")}{" "}
                             <Link
                                 href="https://github.com/riffado/riffado/releases"

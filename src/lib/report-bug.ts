@@ -1,8 +1,8 @@
-import { APP_VERSION_TAG } from "@/lib/version";
+import { APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 
 export const SUPPORT_EMAIL = "support@riffado.com";
 
-const GITHUB_NEW_ISSUE_URL = "https://github.com/riffado/riffado/issues/new";
+const GITHUB_NEW_ISSUE_URL = `https://github.com/${APP_REPOSITORY}/issues/new`;
 const BUG_REPORT_TEMPLATE = "bug_report.yml";
 
 export interface ReportBugOptions {
@@ -15,7 +15,7 @@ export interface ReportBugOptions {
 export function buildReportBugUrl(opts: ReportBugOptions): string {
     const params = new URLSearchParams({
         template: BUG_REPORT_TEMPLATE,
-        version: APP_VERSION_TAG,
+        version: APP_VERSION,
     });
 
     const description = buildDescription(opts);
@@ -74,7 +74,7 @@ function buildAdditional(opts: ReportBugOptions): string {
     if (opts.page) {
         lines.push(`Page: \`${opts.page}\``);
     }
-    lines.push(`Version: ${APP_VERSION_TAG}`);
+    lines.push(`Version: ${APP_VERSION}`);
     if (opts.isHosted !== undefined) {
         lines.push(
             `Mode: ${opts.isHosted ? "Hosted (riffado.com)" : "Self-hosted"}`,

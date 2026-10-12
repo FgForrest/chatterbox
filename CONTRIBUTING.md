@@ -53,9 +53,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
    pnpm build
    ```
    All four must pass.
-5. Open the PR against `main`, link the related issue, and explain **why** the change is needed (not just what it does).
+5. Open the PR against `dev`, link the related issue, and explain **why** the change is needed (not just what it does). The PR title becomes a line of the release notes: write it for someone reading the release.
 
-Do **not** edit `CHANGELOG.md` — maintainers curate it at release time. See [BRANCHING.md](BRANCHING.md).
+Do **not** edit `CHANGELOG.md`: release notes are generated from PR titles. See [BRANCHING.md](BRANCHING.md).
 
 ## Database migrations
 

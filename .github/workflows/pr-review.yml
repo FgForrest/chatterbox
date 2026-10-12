@@ -1,0 +1,141 @@
+name: PR Review
+
+# AI code review of pull requests into `dev`, by Claude Code with the
+# persona in `.claude/agents/pr-reviewer.md`. Build, tests and lint run in
+# ci.yml; this job only reviews.
+on:
+  pull_request:
+    # ready_for_review matters: a draft PR that gets marked ready fires ONLY
+    # that event, so without it a PR opened as a draft is never reviewed.
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [dev]
+    paths-ignore:
+      - "content/**"
+      - "docs/**"
+      - "**/*.md"
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    env:
+      # Subagents run in the background by default, and a background agent
+      # is killed when the headless session ends: the review would finish
+      # green with nothing posted. This removes `run_in_background` from the
+      # Agent tool, so every delegated agent runs in the foreground and
+      # returns before the session can end. Several foreground agents
+      # dispatched in one turn still run at once. It must be job-level: env
+      # on the `uses:` step is not visible inside a composite action.
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The "did it post anything" check at the end compares against this
+      # instant, so a comment from an earlier round never counts for this one.
+      - name: Mark review start
+        id: start
+        run: echo "at=$(date -u +%FT%TZ)" >> "$GITHUB_OUTPUT"
+
+      # The reviewer diffs against the base branch; fetching it here saves it
+      # turns and avoids network calls its tool allow-list would deny.
+      - name: Pre-fetch the base ref
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          git rev-parse --verify "refs/remotes/origin/${BASE_REF}"
+
+      - uses: anthropics/claude-code-action@756cc22e19660d20e8cc9496b4f242475a7f7790 # v1.0.235
+        with:
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY }}
+          show_full_output: true
+          # The turn-by-turn report goes to the job's Step Summary. Both this
+          # and show_full_output surface model and tool output, which is fine
+          # here: the job needs a repository secret and `pull-requests: write`,
+          # neither of which a pull request from a fork gets.
+          display_report: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+            BASE: origin/${{ github.event.pull_request.base.ref }}
+
+            You are reviewing a pull request for Chatterbox, a self-hosted
+            Next.js + TypeScript + Postgres app for voice recordings,
+            transcripts, mail and an organization knowledge base.
+
+            First read `.claude/agents/pr-reviewer.md`: it holds your review
+            persona, procedure and checklist. Follow it precisely. Then read
+            `AGENTS.md`, the project's rules, which the checklist refers to.
+
+            The PR branch is checked out in the working directory, and the base
+            branch is already fetched as `origin/${{ github.event.pull_request.base.ref }}`.
+            You never need to fetch anything yourself.
+
+            Start from `gh pr diff ${{ github.event.pull_request.number }} --name-only`
+            and read the changed files one at a time with
+            `git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- <path>`.
+            Do NOT open the whole diff in one call: a large tool result is
+            truncated without telling you.
+
+            Run ONE command per Bash call. Anything joined by `;`, `&&` or `|`,
+            or using a redirect, falls outside the tool allow-list and is
+            rejected as a whole.
+
+            You must produce and post the review yourself, in this session. The
+            session ends the moment you stop responding. Sub-agents are allowed
+            for independent areas of a large diff; they run in the foreground,
+            so dispatch independent ones together in one turn and synthesize
+            their results yourself. Never end your turn while delegated work is
+            pending. If a delegated agent fails or returns nothing, review that
+            area yourself.
+
+            This PR may have been reviewed before (it is re-reviewed on every
+            push). Before posting, read the review history as Step 2 of the
+            persona describes, and do not re-raise what was already addressed.
+
+            Use inline comments for file-specific findings. Your final action
+            must be one summary comment posted with `gh pr comment`; if you found
+            nothing worth raising, say so in it. Silence is not a valid outcome.
+          # One value per line on purpose: the action tokenizes claude_args with
+          # shell-quote and an accumulating flag consumes every following
+          # non-flag value. Everything is read-only except the two comment tools.
+          claude_args: |
+            --allowedTools "Read,Glob,Grep"
+              "mcp__github_inline_comment__create_inline_comment"
+              "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh api:*)"
+              "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+              "Bash(git blame:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git merge-base:*)"
+
+      # The action succeeds when the session ends, whether or not it posted a
+      # review. This makes "no review" red instead of green. Not `always()`:
+      # a run cancelled by a newer push owes nobody a review.
+      - name: Verify a review was actually posted
+        if: success() || failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SINCE: ${{ steps.start.outputs.at }}
+        run: |
+          posted=$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments?since=${SINCE}&per_page=100" \
+            --jq '[.[] | select(.user.login == "claude[bot]") | select(.created_at >= env.SINCE)] | length')
+          echo "Summary comments posted by claude[bot] during this run: ${posted}"
+          if [ "${posted}" -eq 0 ]; then
+            echo "::error::The review session ended without posting a summary comment. See the Step Summary for where it stopped."
+            exit 1
+          fi

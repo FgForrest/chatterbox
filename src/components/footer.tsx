@@ -7,7 +7,7 @@ import { ReportBugButton } from "@/components/report-bug-dialog";
 import { UpdateBadge } from "@/components/update-badge";
 import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
-import { APP_RELEASE_URL, APP_VERSION_TAG } from "@/lib/version";
+import { APP_RELEASE_URL, APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 
 /**
  * In-app footer rendered on every signed-in screen via
@@ -71,10 +71,10 @@ export function Footer() {
                             className="hover:text-foreground transition-colors"
                             aria-label={i18n(
                                 "Release notes for {name} {version}",
-                                { name, version: APP_VERSION_TAG },
+                                { name, version: APP_VERSION },
                             )}
                         >
-                            {APP_VERSION_TAG}
+                            {APP_VERSION}
                         </Link>
                         {/* Hosted-only "What's new" link to the public,
                             plain-language changelog. Self-host already
@@ -108,7 +108,7 @@ export function Footer() {
                             className="hover:text-foreground transition-colors"
                         />
                         <Link
-                            href="https://github.com/riffado/riffado"
+                            href={`https://github.com/${APP_REPOSITORY}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="hover:text-foreground transition-colors"
