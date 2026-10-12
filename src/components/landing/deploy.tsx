@@ -2,13 +2,12 @@ import { Check, Terminal } from "lucide-react";
 import Link from "next/link";
 import { useExtracted } from "next-intl";
 import { CopyableCommand } from "@/components/copyable-command";
-import { INSTALL_ONELINER } from "@/lib/install-commands";
 
 /**
  * Self-host section that follows `Pricing`. Argues the self-host tier
  * one more time, in detail, for readers who skipped past the pricing
- * card -- and gives them a real way to act on it (copyable install
- * one-liner + Deploy CTA + source link).
+ * card -- and gives them a real way to act on it (the documented Docker
+ * Compose steps + a link to the install docs).
  *
  * Design rules (read before editing):
  *
@@ -25,19 +24,17 @@ import { INSTALL_ONELINER } from "@/lib/install-commands";
  *
  * - No primary button in this section. The Self-host pricing tier
  *   card directly above already has a `Deploy with Docker` button to
- *   `/install`; repeating it here was a redundant CTA at the same
- *   visual weight, ~200px apart. Per the landing CTA ladder, only
+ *   the install docs; repeating it here was a redundant CTA at the
+ *   same visual weight, ~200px apart. Per the landing CTA ladder, only
  *   Hero / Pricing / FinalCTA carry primary asks. Deploy's job here
- *   is proof, not a second ask -- the only inline link points to
- *   `/install` as a quiet anchor for readers who scrolled past
+ *   is proof, not a second ask -- the only inline link points to the
+ *   install docs as a quiet anchor for readers who scrolled past
  *   Pricing.
  *
- * - The terminal shows the REAL documented install path
- *   (`INSTALL_ONELINER` from `src/lib/install-commands.ts`), copyable
- *   via `CopyableCommand`. Do not replace it with a fake
- *   `git clone / cd / docker compose up` script -- that's not the
- *   documented self-host flow. See `/install` page and
- *   `scripts/install.sh` for the canonical contract.
+ * - The steps card shows the REAL documented install path from
+ *   `content/docs/self-hosting/install.mdx` (release assets, `.env`,
+ *   `docker compose up -d`). Do not replace it with a fake
+ *   `git clone` script -- that's not the documented self-host flow.
  *
  * - Proof points only claim what the code delivers today: AGPL on
  *   GitHub, no telemetry / no license server, pluggable storage
@@ -46,8 +43,8 @@ import { INSTALL_ONELINER } from "@/lib/install-commands";
  *   claims we don't own. Mirrors the Self-host tier features in
  *   `pricing.tsx` 1:1 so the two surfaces stay consistent.
  *
- * - `id="deploy"` is referenced by `/install` "← Back to landing"
- *   (`/#deploy`). Keep the id.
+ * - `id="deploy"` is the target of the landing footer's "Self-host"
+ *   link (`/#deploy`). Keep the id.
  */
 
 export function Deploy() {
@@ -59,6 +56,14 @@ export function Deploy() {
         i18n(
             "Bring OpenAI or Groq for cloud transcription, or run Whisper and Ollama locally",
         ),
+    ];
+    const steps = [
+        i18n(
+            "Download docker-compose.yml and env.example from the latest release",
+        ),
+        i18n("Save env.example as .env and generate the secrets"),
+        i18n("Start the stack with docker compose up -d"),
+        i18n("Open the app"),
     ];
     return (
         <section
@@ -98,7 +103,7 @@ export function Deploy() {
 
                         <p className="pt-2 text-sm">
                             <Link
-                                href="/install"
+                                href="/docs/self-hosting/install"
                                 className="font-mono text-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:decoration-foreground transition-colors"
                             >
                                 {i18n("Deploy with Docker →")}
@@ -108,48 +113,32 @@ export function Deploy() {
 
                     <div className="w-full space-y-4">
                         <CopyableCommand
-                            command={INSTALL_ONELINER}
-                            ariaLabel={i18n("Copy install command")}
+                            command="docker compose up -d"
+                            ariaLabel={i18n("Copy start command")}
                         />
 
                         <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
                             <div className="px-4 py-2.5 border-b border-border bg-background/40">
                                 <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
-                                    {i18n("Installer output")}
+                                    {i18n("Self-host in four steps")}
                                 </div>
                             </div>
-                            <div className="p-5 md:p-6 font-mono text-xs md:text-sm leading-relaxed text-muted-foreground space-y-1.5">
-                                <div>
-                                    <span className="text-green-600 dark:text-green-500">
-                                        ✓
-                                    </span>{" "}
-                                    {i18n("Verified Docker + Compose v2")}
-                                </div>
-                                <div>
-                                    <span className="text-green-600 dark:text-green-500">
-                                        ✓
-                                    </span>{" "}
-                                    {i18n("Wrote .env (secrets generated)")}
-                                </div>
-                                <div>
-                                    <span className="text-green-600 dark:text-green-500">
-                                        ✓
-                                    </span>{" "}
-                                    {i18n("Pulled riffado-web, riffado-db")}
-                                </div>
-                                <div>
-                                    <span className="text-green-600 dark:text-green-500">
-                                        ✓
-                                    </span>{" "}
-                                    {i18n("Health check passed on /api/health")}
-                                </div>
-                                <div className="pt-1.5 text-foreground">
+                            <ol className="p-5 md:p-6 font-mono text-xs md:text-sm leading-relaxed text-muted-foreground space-y-1.5">
+                                {steps.map((step, index) => (
+                                    <li key={step}>
+                                        <span className="text-green-600 dark:text-green-500">
+                                            {index + 1}.
+                                        </span>{" "}
+                                        {step}
+                                    </li>
+                                ))}
+                                <li className="pt-1.5 text-foreground">
                                     →{" "}
                                     <span className="font-medium">
                                         {i18n("http://localhost:3000")}
                                     </span>
-                                </div>
-                            </div>
+                                </li>
+                            </ol>
                         </div>
                     </div>
                 </div>

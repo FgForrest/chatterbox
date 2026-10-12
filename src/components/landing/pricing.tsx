@@ -165,7 +165,10 @@ export function Pricing({
                 ),
                 i18n("Every feature, no gates"),
             ],
-            cta: { label: i18n("Deploy with Docker"), href: "/install" },
+            cta: {
+                label: i18n("Deploy with Docker"),
+                href: "/docs/self-hosting/install",
+            },
             emphasis: false,
             note: i18n(
                 "Want Riffado free? This is how. Bring your own server, AGPL source, no strings.",
