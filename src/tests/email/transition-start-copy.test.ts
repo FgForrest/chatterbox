@@ -1,11 +1,12 @@
-import { render } from "@react-email/render";
+// @vitest-environment jsdom
+
 import React from "react";
 import { describe, expect, it } from "vitest";
 import { defaultLocale } from "@/lib/i18n/config";
-import { runWithEmailLocale } from "@/lib/notifications/email-template-i18n";
 import { TestEmail } from "@/lib/notifications/email-templates/test-email";
 import { TransitionStartEmail } from "@/lib/notifications/email-templates/transition-start";
 import { renderEmailHtml } from "@/lib/notifications/render-email";
+import { plainTextOf } from "@/tests/email/plain-text";
 
 const baseProps = {
     transitionEndsAt: new Date("2026-08-27T23:59:59Z"),
@@ -17,13 +18,14 @@ const baseProps = {
     selfHostUrl: "https://github.com/riffado/riffado#quick-start",
 };
 
-function renderTransition(
+async function renderTransition(
     props: React.ComponentProps<typeof TransitionStartEmail>,
 ) {
-    return runWithEmailLocale(defaultLocale, () =>
-        render(React.createElement(TransitionStartEmail, props), {
-            plainText: true,
-        }),
+    return plainTextOf(
+        await renderEmailHtml(
+            React.createElement(TransitionStartEmail, props),
+            defaultLocale,
+        ),
     );
 }
 
@@ -53,6 +55,15 @@ describe("TransitionStartEmail", () => {
         expect(text).toContain("Monthly Hosted Pro is available for $9");
         expect(text).toContain("Choose a plan");
         expect(text).not.toContain("first 100 paid monthly members");
+    });
+
+    it("draws its bullets as bullets, not as the text of their entity", async () => {
+        const text = await renderTransition({
+            ...baseProps,
+            foundingOfferAvailable: true,
+        });
+        expect(text).not.toContain("&bull;");
+        expect(text).toMatch(/•\s*You keep full free access until/);
     });
 
     it("explains why hosted is now paid, not just what changed", async () => {

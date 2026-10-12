@@ -13,9 +13,10 @@ Riffado uses a **rolling-trunk + tagged-release** model. Self-hosters consume re
 
 ## Releases
 
-Stable versions are cut as **git tags** (`v0.1.0`, `v0.2.0`, …) from `main` when the tree is in a known-good state. Tagging triggers two workflows:
+Stable versions are cut as **git tags** (`v0.1.0`, `v0.2.0`, …) from `main` when the tree is in a known-good state. Tagging triggers three workflows:
 
-- **`docker.yml`** — builds multi-arch images on `ghcr.io/riffado/riffado` and tags them `:X.Y.Z`, `:X.Y`, and `:latest`.
+- **`docker.yml`** — builds multi-arch app images on `ghcr.io/<owner>/<repository>` and tags them `:X.Y.Z`, `:X.Y`, and `:latest`.
+- **`mail-receiver.yml`** — the same for the inbound mail server, on `ghcr.io/<owner>/<repository>-mail-receiver`.
 - **`release.yml`** — drafts a GitHub Release with generated notes and attaches `docker-compose.yml` + `.env.example` as install artifacts.
 
 Every push to `main` additionally publishes `:dev` — opt-in rolling image for users who explicitly want the bleeding edge. `:latest` deliberately does **not** track `main`.
@@ -46,11 +47,11 @@ Then:
 bun scripts/release.ts finalize
 ```
 
-This fetches `origin/main`, reads the merged version from `package.json`, finds the release commit by message, creates and pushes the `vX.Y.Z` tag, and deletes the `release/vX.Y.Z` branch. The tag push triggers `docker.yml` and `release.yml`.
+This fetches `origin/main`, reads the merged version from `package.json`, finds the release commit by message, creates and pushes the `vX.Y.Z` tag, and deletes the `release/vX.Y.Z` branch. The tag push triggers `docker.yml`, `mail-receiver.yml` and `release.yml`.
 
 ### After both phases
 
-1. Wait for `docker.yml` and `release.yml` to finish.
+1. Wait for `docker.yml`, `mail-receiver.yml` and `release.yml` to finish.
 2. Review the draft release on GitHub, edit notes if needed, publish.
 
 ## Hotfixes (when needed)

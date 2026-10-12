@@ -15,10 +15,8 @@ vi.mock("@/lib/rate-limit", () => ({
 import type { McpCaller } from "@/lib/mcp/caller";
 import {
     allowMcpScan,
-    limitMcpIp,
     limitMcpSubject,
     MCP_CALLER_LIMIT,
-    MCP_IP_LIMIT,
     MCP_SCAN_LIMIT,
     mcpClientIp,
 } from "@/lib/mcp/rate-limit";
@@ -64,35 +62,10 @@ describe("MCP rate limits", () => {
         clientIp.mockReset();
     });
 
-    it("lets a client IP under its budget through", async () => {
-        consume.mockResolvedValue(allowed());
-        await expect(limitMcpIp(request())).resolves.toBeNull();
-        expect(consume).toHaveBeenCalledWith("mcp:ip:203.0.113.7", {
-            limit: MCP_IP_LIMIT,
-            windowMs: 60_000,
-        });
-    });
-
-    it("answers 429 with Retry-After for a client IP over its budget", async () => {
-        consume.mockResolvedValue(refused(12_400));
-        const response = await limitMcpIp(request());
-        expect(response?.status).toBe(429);
-        expect(response?.headers.get("Retry-After")).toBe("13");
-        await expect(response?.json()).resolves.toEqual({
-            error: "Rate limit exceeded",
-            code: "RATE_LIMITED",
-        });
-    });
-
-    it("never counts every unidentified client in one bucket", async () => {
-        clientIp.mockReturnValue("unknown");
-        await expect(limitMcpIp(request())).resolves.toBeNull();
-        expect(consume).not.toHaveBeenCalled();
-        expect(mcpClientIp(request())).toBeNull();
-    });
-
-    it("reports the client IP for the audit log", () => {
+    it("reports the client IP for the audit log, none when unknown", () => {
         expect(mcpClientIp(request())).toBe("203.0.113.7");
+        clientIp.mockReturnValue("unknown");
+        expect(mcpClientIp(request())).toBeNull();
     });
 
     it("keys the caller budget by the token's subject and client", async () => {
@@ -120,7 +93,18 @@ describe("MCP rate limits", () => {
         ]);
     });
 
-    it("answers 429 for a caller over its budget, never under a second", async () => {
+    it("answers 429 with Retry-After for a caller over its budget", async () => {
+        consume.mockResolvedValue(refused(12_400));
+        const response = await limitMcpSubject({ sub: "alice-sub" });
+        expect(response?.status).toBe(429);
+        expect(response?.headers.get("Retry-After")).toBe("13");
+        await expect(response?.json()).resolves.toEqual({
+            error: "Rate limit exceeded",
+            code: "RATE_LIMITED",
+        });
+    });
+
+    it("never asks to retry in under a second", async () => {
         consume.mockResolvedValue(refused(-5_000));
         const response = await limitMcpSubject({ sub: "alice-sub" });
         expect(response?.status).toBe(429);

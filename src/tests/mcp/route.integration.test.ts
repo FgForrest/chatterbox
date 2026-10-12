@@ -10,6 +10,7 @@
 import { asc } from "drizzle-orm";
 import {
     afterAll,
+    afterEach,
     beforeAll,
     beforeEach,
     describe,
@@ -25,7 +26,7 @@ import {
     users,
 } from "@/db/schema";
 import type { McpToolDef } from "@/lib/mcp/registry";
-import type { McpTokenClaims } from "@/lib/mcp/token";
+import type { McpTokenCheck, McpTokenClaims } from "@/lib/mcp/token";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -69,13 +70,16 @@ const { dbProxy, dbRef, mockEnv, baseEnv, verify, fakeTools } = vi.hoisted(
             OIDC_CLIENT_SECRET: "secret",
             MCP_AUDIENCE: "riffado-mcp" as string | undefined,
             MCP_ALLOWED_CLIENTS: [] as string[],
+            MCP_PUBLIC_INGRESS_HEADER: undefined as string | undefined,
+            MCP_PUBLIC_CLIENTS: [] as string[],
+            MCP_CONNECTOR_KEYS: [] as { client: string; key: string }[],
         };
         return {
             dbProxy: proxy,
             dbRef: ref,
             baseEnv: base,
             mockEnv: { ...base } as Record<string, unknown>,
-            verify: vi.fn<(token: string) => Promise<McpTokenClaims | null>>(),
+            verify: vi.fn<(token: string) => Promise<McpTokenCheck>>(),
             fakeTools: [] as McpToolDef[],
         };
     },
@@ -104,6 +108,10 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const ALICE = "user-alice";
 const IP = "203.0.113.7";
+const CONNECTOR_KEY = "0123456789abcdef0123456789abcdef";
+const PUBLIC = { "x-mcp-ingress": "public" };
+const CHALLENGE =
+    'resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp", scope="openid"';
 const SECRET = "decrypted transcript text";
 
 fakeTools.push(
@@ -166,7 +174,25 @@ const TOKENS: Record<string, McpTokenClaims> = {
         client_id: "intranet-bot",
         resource_access: { "riffado-mcp": { roles: ["tasks:read"] } },
     },
+    "alice-code": {
+        sub: "alice-sub",
+        azp: "claude-code",
+        resource_access: { "riffado-mcp": { roles: ["knowledge:read"] } },
+    },
 };
+
+/** Genuine tokens of the realm issued for another audience. */
+const FOREIGN: Record<string, McpTokenClaims> = {
+    "alice-elsewhere": { sub: "alice-sub", azp: "claude" },
+};
+
+async function checkToken(token: string): Promise<McpTokenCheck> {
+    const valid = TOKENS[token];
+    if (valid) return { kind: "valid", claims: valid };
+    const foreign = FOREIGN[token];
+    if (foreign) return { kind: "other-audience", claims: foreign };
+    return { kind: "invalid" };
+}
 
 function post(
     body: unknown,
@@ -231,10 +257,13 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
 
     beforeEach(async () => {
         for (const key of Object.keys(mockEnv)) delete mockEnv[key];
-        Object.assign(mockEnv, baseEnv, { MCP_ALLOWED_CLIENTS: [] });
-        verify
-            .mockReset()
-            .mockImplementation(async (token) => TOKENS[token] ?? null);
+        Object.assign(mockEnv, baseEnv, {
+            MCP_ALLOWED_CLIENTS: [],
+            MCP_PUBLIC_CLIENTS: [],
+            MCP_CONNECTOR_KEYS: [],
+        });
+        verify.mockReset().mockImplementation(checkToken);
+        vi.spyOn(console, "warn").mockImplementation(() => {});
         await db().delete(mcpAccessLog);
         await db().delete(apiRateLimitBuckets);
         await db().delete(users);
@@ -247,6 +276,10 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
             accountId: "alice-sub",
         });
         await ensureOrgAccount();
+    });
+
+    afterEach(() => {
+        vi.mocked(console.warn).mockRestore();
     });
 
     it("is not there while MCP is off", async () => {
@@ -282,24 +315,50 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         expect(elsewhere.status).toBe(200);
     });
 
-    it("answers 401 with the metadata pointer without a token", async () => {
+    it("answers 401 with the metadata pointer and scope without a token", async () => {
         const response = await POST(post({}, { token: null }));
         expect(response.status).toBe(401);
         expect(response.headers.get("WWW-Authenticate")).toBe(
-            'Bearer resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp"',
+            `Bearer ${CHALLENGE}`,
         );
         expect(verify).not.toHaveBeenCalled();
     });
 
-    it("answers 401 with the metadata pointer for a token it does not accept", async () => {
+    it("answers 401 invalid_token for a token it does not accept", async () => {
         const response = await POST(post({}, { token: "forged" }));
         expect(response.status).toBe(401);
-        expect(response.headers.get("WWW-Authenticate")).toContain(
-            "resource_metadata=",
+        expect(response.headers.get("WWW-Authenticate")).toBe(
+            `Bearer error="invalid_token", ${CHALLENGE}`,
         );
         await expect(response.json()).resolves.toEqual({
             error: "Unauthorized",
         });
+        expect(await auditRows()).toEqual([]);
+    });
+
+    it("answers 403, not 401, for a genuine token issued for another audience", async () => {
+        const response = await POST(
+            post(
+                { jsonrpc: "2.0", id: 1, method: "tools/list" },
+                {
+                    token: "alice-elsewhere",
+                },
+            ),
+        );
+        expect(response.status).toBe(403);
+        expect(response.headers.get("WWW-Authenticate")).toBeNull();
+        await expect(response.json()).resolves.toEqual({
+            error: "This token carries no Riffado MCP role",
+        });
+        expect(await auditRows()).toEqual([
+            expect.objectContaining({
+                callerKind: null,
+                subject: "alice-sub",
+                clientId: "claude",
+                tool: null,
+                outcome: "denied",
+            }),
+        ]);
     });
 
     it("takes the bearer scheme in any case", async () => {
@@ -353,10 +412,12 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         ]);
     });
 
-    it("says only Forbidden for any other refusal", async () => {
+    it("names a missing role, and says only Forbidden for any other refusal", async () => {
         const noRoles = await POST(post({}, { token: "alice-no-roles" }));
         expect(noRoles.status).toBe(403);
-        await expect(noRoles.json()).resolves.toEqual({ error: "Forbidden" });
+        await expect(noRoles.json()).resolves.toEqual({
+            error: "This token carries no Riffado MCP role",
+        });
 
         mockEnv.MCP_ALLOWED_CLIENTS = ["intranet-bot"];
         const notAllowed = await POST(post({}, { token: "alice" }));
@@ -392,7 +453,120 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         );
         expect(response.status).toBe(200);
         const buckets = await db().select().from(apiRateLimitBuckets);
-        expect(buckets.map((bucket) => bucket.count)).toEqual([1, 1]);
+        expect(buckets.map((bucket) => bucket.count)).toEqual([1]);
+    });
+
+    it("keeps no per-IP budget: one address carries many callers", async () => {
+        const list = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+        for (const token of ["alice", "bot"]) {
+            for (let n = 0; n < MCP_CALLER_LIMIT; n++) {
+                expect((await POST(post(list, { token }))).status).toBe(200);
+            }
+        }
+        const third = await POST(post(list, { token: "alice-code" }));
+        expect(third.status).toBe(200);
+    });
+
+    describe("through the public entrance", () => {
+        beforeEach(() => {
+            mockEnv.MCP_PUBLIC_INGRESS_HEADER = "x-mcp-ingress";
+            mockEnv.MCP_PUBLIC_CLIENTS = ["claude"];
+        });
+
+        const list = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+
+        it("serves a public client", async () => {
+            const response = await POST(post(list, { headers: PUBLIC }));
+            expect(response.status).toBe(200);
+        });
+
+        it("refuses Claude Code's and a service account's tokens, and logs it", async () => {
+            for (const token of ["alice-code", "bot"]) {
+                const response = await POST(
+                    post(list, { token, headers: PUBLIC }),
+                );
+                expect(response.status).toBe(403);
+                await expect(response.json()).resolves.toEqual({
+                    error: "Forbidden",
+                });
+            }
+            const rows = await auditRows();
+            expect(
+                rows.map((row) => [row.clientId, row.outcome, row.tool]),
+            ).toEqual([
+                ["claude-code", "denied", null],
+                ["intranet-bot", "denied", null],
+            ]);
+            expect(console.warn).toHaveBeenCalledWith(
+                "[mcp] refused (client-not-public) a token of client claude-code",
+            );
+        });
+
+        it("serves Claude Code inside", async () => {
+            const response = await POST(post(list, { token: "alice-code" }));
+            expect(response.status).toBe(200);
+        });
+
+        it("still challenges a request without a token", async () => {
+            const response = await POST(
+                post({}, { token: null, headers: PUBLIC }),
+            );
+            expect(response.status).toBe(401);
+            expect(response.headers.get("WWW-Authenticate")).toBe(
+                `Bearer ${CHALLENGE}`,
+            );
+        });
+    });
+
+    describe("with a connector key", () => {
+        beforeEach(() => {
+            mockEnv.MCP_CONNECTOR_KEYS = [
+                { client: "claude", key: CONNECTOR_KEY },
+            ];
+        });
+
+        const list = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+
+        it("serves the keyed client with its key", async () => {
+            const response = await POST(
+                post(list, { headers: { "x-api-key": CONNECTOR_KEY } }),
+            );
+            expect(response.status).toBe(200);
+        });
+
+        it("refuses the keyed client without its key, and logs it", async () => {
+            const attempts: Record<string, string>[] = [
+                {},
+                { "x-api-key": "wrong" },
+            ];
+            for (const headers of attempts) {
+                const response = await POST(post(list, { headers }));
+                expect(response.status).toBe(403);
+                await expect(response.json()).resolves.toEqual({
+                    error: "Forbidden",
+                });
+            }
+            expect(await auditRows()).toEqual([
+                expect.objectContaining({
+                    clientId: "claude",
+                    outcome: "denied",
+                }),
+                expect.objectContaining({
+                    clientId: "claude",
+                    outcome: "denied",
+                }),
+            ]);
+        });
+
+        it("still challenges a request without a token", async () => {
+            const response = await POST(post({}, { token: null }));
+            expect(response.status).toBe(401);
+        });
+
+        it("leaves other clients alone", async () => {
+            const response = await POST(post(list, { token: "alice-code" }));
+            expect(response.status).toBe(200);
+        });
     });
 
     it("initializes with a complete JSON response", async () => {

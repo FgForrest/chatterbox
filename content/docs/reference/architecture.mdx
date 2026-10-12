@@ -84,8 +84,9 @@ Five transcription "styles" coexist:
   content part. Used by providers that expose audio-input LLMs
   instead of a dedicated transcription endpoint (today: OpenRouter
   routing Gemini, GPT-audio, Voxtral).
-- **Gemini-style** — `generateContent` with inline audio data, through
-  the Google SDK (`src/lib/transcription/gemini-transcribe.ts`).
+- **Gemini-style** — Google's REST `models/{model}:generateContent`
+  with inline audio data, authenticated with `x-goog-api-key`
+  (`src/lib/transcription/gemini-transcribe.ts`).
 - **Scribe-style** — `POST /v1/speech-to-text`, multipart upload
   authenticated with `xi-api-key`
   (`src/lib/transcription/elevenlabs-transcribe.ts`).

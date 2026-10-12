@@ -15,6 +15,8 @@ Většina funkcí Riffado funguje ihned po spuštění. Některé funkce však v
 | Kam se zapisují zálohy | `BACKUP_STORAGE_PATH` | [Záloha a obnovení](../guides/backup-and-restore.mdx) |
 | Větší nahrávání videí | `VIDEO_UPLOAD_MAX_BYTES` (výchozí 4 GiB) | |
 | Poskytovatelé Claude Code a Codex | profil `agent-bridge` a `BRIDGE_TOKEN` | [níže](#claude-code-and-codex-subscriptions) |
+| MCP server pro AI klienty a služby | `MCP_AUDIENCE` s jednotným přihlašováním, volitelně `MCP_ALLOWED_CLIENTS` | [Externí MCP server](../self-hosting/mcp.mdx) |
+| [Riffado v Claude](claude.md) a Claude Code | klienti v Keycloaku, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS`, `MCP_CONNECTOR_KEYS`, veřejný vstup pro `/api/mcp` | [níže](#claude-and-claude-code) |
 | [Hledání podle významu v Learn](learn.md) | profil `learn` a `EMBEDDING_BASE_URL` | [níže](#learn) |
 | Limit pro automatické souhrny, témata a Learn | `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | |
 
@@ -46,6 +48,19 @@ docker compose --profile agent-bridge up -d --build agent-bridge
 ```
 
 Přihlaste bridge jednou ke službě Claude nebo Codex (viz `agent-bridge/README.md` v repozitáři). Poté v Riffado přidejte poskytovatele **Claude Code** nebo **Codex** a jako API klíč vložte token z bridge. Bridge nemá připravený image a neotevírá žádný port. Ve výchozím stavu zpracovává vždy jen jeden požadavek; pokud využíváte vícekolečkové (multi-pass) souhrny, zvyšte `BRIDGE_MAX_CONCURRENCY` na potřebný počet kol. Doporučujeme ponechat poskytovatele s API klíčem jako zálohu.
+
+<span id="claude-and-claude-code" />
+
+## Claude a Claude Code
+
+Se zapnutým [externím MCP serverem](../self-hosting/mcp.mdx) se lidé mohou na své nahrávky ptát Claude (claude.ai, desktopová a mobilní aplikace, Cowork) a Claude Code, s přihlášením přes Váš realm v Keycloaku a v mezích svých rolí v něm. Claude přistupuje k Riffadu z cloudu Anthropicu, takže je potřeba:
+
+1. V Keycloaku důvěrný klient `claude` pro konektor organizace, veřejný klient `claude-code` a jeden důvěrný klient pro každého, kdo se připojuje z osobního tarifu Claude.
+2. Veřejný DNS název a reverzní proxy, která adresám Anthropicu (`160.79.104.0/21`) zpřístupní `/api/mcp` a jeho metadata, nic jiného, a tyto požadavky označí hlavičkou.
+3. V `.env`: `MCP_ALLOWED_CLIENTS`, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS` a pro `X-API-Key` konektoru `MCP_CONNECTOR_KEYS`.
+4. V Claude Owner jednou přidá konektor s ID a tajemstvím klienta `claude`; členové se pak připojí.
+
+Stránka [Claude a Claude Code](../self-hosting/claude.mdx) obsahuje všechny kroky, kontroly i postup, když je připojení odmítnuto. Lidi odkažte na kapitolu [Riffado v Claude](claude.md).
 
 ## Learn
 

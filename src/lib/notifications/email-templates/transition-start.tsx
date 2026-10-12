@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
     Button,
     Column,
@@ -6,8 +7,7 @@ import {
     Row,
     Section,
     Text,
-} from "@react-email/components";
-import type { ReactNode } from "react";
+} from "../email-components";
 import { getEmailLocale, getEmailTranslator } from "../email-template-i18n";
 import { EmailLayout } from "./_layout";
 import { formatEmailDate } from "./format-date";
@@ -26,12 +26,9 @@ function Bullet({
     children: ReactNode;
     margin?: string;
 }) {
-    const i18n = getEmailTranslator();
     return (
         <Row style={{ margin }}>
-            <Column style={emailStyles.bulletGlyphColumn}>
-                {i18n("&bull;")}
-            </Column>
+            <Column style={emailStyles.bulletGlyphColumn}>•</Column>
             <Column style={emailStyles.bulletTextColumn}>{children}</Column>
         </Row>
     );

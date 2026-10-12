@@ -70,7 +70,7 @@ Existuje pět stylů přepisu:
 
 - **Whisper-style** — `POST /v1/audio/transcriptions` s multipart audio. Klasické OpenAI rozhraní.
 - **Chat-style** — `POST /v1/chat/completions` s obsahem `input_audio`. Používají poskytovatelé, kteří zpřístupňují audio-input LLM místo dedikovaného endpointu na přepis (dnes např. OpenRouter směrující Gemini, GPT-audio, Voxtral).
-- **Gemini-style** — `generateContent` s inline audio daty přes Google SDK (`src/lib/transcription/gemini-transcribe.ts`).
+- **Gemini-style** — REST `models/{model}:generateContent` od Googlu s inline audio daty, s ověřením prostřednictvím `x-goog-api-key` (`src/lib/transcription/gemini-transcribe.ts`).
 - **Scribe-style** — `POST /v1/speech-to-text`, multipart upload s ověřením prostřednictvím `xi-api-key` (`src/lib/transcription/elevenlabs-transcribe.ts`).
 - **Speechmatics-style** — Batch *job* API: `POST /v2/jobs` nahraje audio, `GET /v2/jobs/{id}` se periodicky dotazuje, dokud job neopustí `running`, a přepis je třetí požadavek (`src/lib/transcription/speechmatics-transcribe.ts`). Adaptér abstrahuje všechny tři za jeden awaitnutý call, takže worker vidí stejnou strukturu, jakou má u synchronních poskytovatelů.
 
