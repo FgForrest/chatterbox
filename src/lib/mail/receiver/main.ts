@@ -5,6 +5,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { parseTrustedProxies } from "@/lib/mail/receiver/proxy";
 import { createReceiver } from "@/lib/mail/receiver/receiver";
 import { AllowedSources } from "@/lib/mail/receiver/sources";
 
@@ -24,7 +25,25 @@ function optionalFile(name: string): Buffer | undefined {
     return path ? readFileSync(path) : undefined;
 }
 
+function trustedProxies(): string[] {
+    try {
+        return parseTrustedProxies(process.env.MAIL_PROXY_PROTOCOL_FROM);
+    } catch (error) {
+        console.error(
+            "[mail-receiver] MAIL_PROXY_PROTOCOL_FROM:",
+            error instanceof Error ? error.message : error,
+        );
+        process.exit(1);
+    }
+}
+
 async function main(): Promise<void> {
+    const proxies = trustedProxies();
+    if (proxies.length > 0) {
+        console.log(
+            `[mail-receiver] trusting PROXY protocol headers from ${proxies.join(", ")}`,
+        );
+    }
     const sources = new AllowedSources(
         process.env.MAIL_ALLOWED_SOURCES?.trim() || "google",
     );
@@ -56,6 +75,7 @@ async function main(): Promise<void> {
         maxMessageBytes:
             Number(process.env.MAIL_MAX_MESSAGE_MB || "36") * 1024 * 1024,
         sources,
+        trustedProxies: proxies,
         tlsKey,
         tlsCert,
         spoolDir: process.env.MAIL_SPOOL_DIR?.trim() || "/spool",

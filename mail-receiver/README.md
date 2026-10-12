@@ -9,8 +9,9 @@ never authenticates clients and never sends mail.
 
 ## How a message gets in
 
-1. Google's MTA connects to port 25. Connections from anywhere else are
-   refused (`MAIL_ALLOWED_SOURCES`, default `google`: the ranges of
+1. Google's MTA connects to port 25, directly or through a TCP proxy (see
+   [Behind a TCP proxy](#behind-a-tcp-proxy)). Connections from anywhere
+   else are refused (`MAIL_ALLOWED_SOURCES`, default `google`: the ranges of
    `_spf.google.com`, refreshed every six hours).
 2. `RCPT TO` for another domain gets `550 5.7.1`. Up to 100 recipients.
 3. After `DATA` the receiver verifies DKIM (at most three signatures, those
@@ -49,7 +50,8 @@ provider vouched for.
 
 Receiver: `MAIL_HOSTNAME` (the MX name, also the TLS certificate's name),
 `MAIL_TLS_DIR` (holding `fullchain.pem` and `privkey.pem`), optionally
-`MAIL_ALLOWED_SOURCES`. Start with `docker compose --profile mail up -d`.
+`MAIL_ALLOWED_SOURCES` and `MAIL_PROXY_PROTOCOL_FROM`. Start with
+`docker compose --profile mail up -d`.
 
 The image: the `Mail receiver image` workflow publishes it next to the app
 image as `ghcr.io/<owner>/<repository>-mail-receiver`, with the app's tags
@@ -67,6 +69,37 @@ services:
     ports: !override
       - "25:2525"
 ```
+
+## Behind a TCP proxy
+
+The source check needs the client's address. When port 25 lives on another
+host that forwards TCP to the receiver, the receiver sees only the proxy,
+unless the proxy prepends a PROXY protocol header naming the client. Set
+`MAIL_PROXY_PROTOCOL_FROM` to the addresses the proxies connect from, as the
+receiver sees them: comma-separated plain IP addresses, no ranges, hostnames
+or `*`. The receiver then reads the header before its greeting and checks,
+counts and limits the client it names. The override publishes the receiver's
+port for the proxy (`"2525:2525"`) instead of port 25; the proxy's side, in
+HAProxy:
+
+```
+backend mail-receiver
+    mode tcp
+    server receiver 198.51.100.20:2525 send-proxy check
+```
+
+- Version 1 only: HAProxy `send-proxy`, not `send-proxy-v2`; nginx `stream`
+  with `proxy_protocol on;`.
+- Only a listed peer's header is read. Any other peer is a direct client,
+  and a listed peer that does not start with a valid header is disconnected.
+  Still open the receiver's port to the proxy alone at the firewall.
+- STARTTLS stays end to end: the proxy forwards TCP, the receiver keeps the
+  certificate for `MAIL_HOSTNAME`, whose `A` record now points at the proxy.
+- Health checks: a plain TCP check (HAProxy `check`) works, whether or not
+  it sends the header (`check-send-proxy`). One that waits for the greeting
+  (`option smtpchk`) does not: with the header the connection counts as the
+  proxy's own, which is no allowed source, and gets `554`; without it,
+  nothing. Do not add the proxy to `MAIL_ALLOWED_SOURCES` to make it pass.
 
 ## The app's internal endpoints
 
@@ -90,7 +123,8 @@ keep them off the internet as well:
 - Google Workspace: allow automatic forwarding only for the organizational
   unit of Klepna users (it is an exfiltration switch); a TLS-compliance rule
   for the mail domain; rotate the company's DKIM key to 2048 bits.
-- Firewall: TCP 25 to this host only.
+- Firewall: TCP 25 to this host only; behind a TCP proxy, TCP 25 to the
+  proxy and the receiver's port from the proxy alone.
 - Before rollout: a data-protection assessment for storing and mining mail
   of third parties.
 

@@ -214,6 +214,9 @@ services:
       MAIL_MAX_MESSAGE_MB: ${MAIL_MAX_MESSAGE_MB:-36}
       # `google` (Google's published sending ranges), CIDRs, or both.
       MAIL_ALLOWED_SOURCES: ${MAIL_ALLOWED_SOURCES:-google}
+      # Behind a TCP proxy: the proxies' IP addresses whose PROXY protocol
+      # v1 header names the client (see mail-receiver/README.md).
+      MAIL_PROXY_PROTOCOL_FROM: ${MAIL_PROXY_PROTOCOL_FROM:-}
       MAIL_TLS_CERT_FILE: /tls/fullchain.pem
       MAIL_TLS_KEY_FILE: /tls/privkey.pem
     volumes:
