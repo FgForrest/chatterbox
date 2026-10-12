@@ -2,12 +2,12 @@ name: CodeQL
 
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
   schedule:
-    # Weekly full scan of main (Mondays 06:17 UTC). Randomised minute to
-    # avoid peak queue times.
+    # Weekly full scan of the default branch (Mondays 06:17 UTC).
+    # Randomised minute to avoid peak queue times.
     - cron: "17 6 * * 1"
 
 concurrency:

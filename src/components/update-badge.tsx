@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { getExtracted } from "next-intl/server";
 import { env } from "@/lib/env";
-import { fetchLatestReleaseTag } from "@/lib/install-script";
+import { fetchLatestReleaseVersion } from "@/lib/releases";
 
-import { APP_VERSION, compareSemver, releaseUrlFor } from "@/lib/version";
+import {
+    APP_VERSION,
+    compareReleaseVersions,
+    releaseUrlFor,
+} from "@/lib/version";
 
 /**
  * Self-host-only "update available" indicator. Renders nothing on the
@@ -11,11 +15,13 @@ import { APP_VERSION, compareSemver, releaseUrlFor } from "@/lib/version";
  * noise + leak of internal state) and nothing when the operator opts
  * out via `DISABLE_UPDATE_CHECK=true`.
  *
+ * Compares against the latest release of this build's own repository.
  * Failure modes degrade silently to "no badge":
- *   - GitHub API down / rate-limited      -> fetchLatestReleaseTag() returns null
- *   - Egress blocked at network layer     -> fetchLatestReleaseTag() returns null
- *   - Tag doesn't match `vX.Y.Z` shape    -> fetchLatestReleaseTag() returns null
- *   - Current version >= latest            -> returns null here
+ *   - GitHub API down / rate-limited      -> fetchLatestReleaseVersion() returns null
+ *   - Egress blocked at network layer     -> fetchLatestReleaseVersion() returns null
+ *   - Latest tag isn't a `YYYY.N` release -> fetchLatestReleaseVersion() returns null
+ *   - A dev build (`dev`, `dev-<sha>`)    -> no comparison, returns null here
+ *   - Current version >= latest           -> returns null here
  *
  * The fetch is cached 5 minutes (Next `revalidate: 300`) so this runs
  * at most ~12 times/hour per server, regardless of traffic.
@@ -29,32 +35,27 @@ export async function UpdateBadge() {
     if (env.IS_HOSTED) return null;
     if (env.DISABLE_UPDATE_CHECK) return null;
 
-    const latestTag = await fetchLatestReleaseTag();
-    if (!latestTag) return null;
-    // `compareSemver` returns null when either input fails to parse as
-    // X.Y.Z -- treat that as "can't determine, hide the badge" rather
-    // than surface a misleading or crashing UI. APP_VERSION is sourced
-    // from package.json and not pre-validated against the tag regex,
-    // so a malformed local version (e.g. "0.4.2-dirty") lands here.
-    const cmp = compareSemver(APP_VERSION, latestTag);
+    const latest = await fetchLatestReleaseVersion();
+    if (!latest) return null;
+    const cmp = compareReleaseVersions(APP_VERSION, latest);
     if (cmp === null) return null;
     if (cmp >= 0) return null;
 
     return (
         <Link
-            href={releaseUrlFor(latestTag)}
+            href={releaseUrlFor(latest)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-[10px] text-primary/70 hover:text-primary transition-colors font-mono uppercase tracking-wider underline decoration-dotted underline-offset-2"
             aria-label={i18n("Update available: {version}", {
-                version: latestTag,
+                version: latest,
             })}
             title={i18n(
                 "Update available: {version} (running {currentVersion})",
-                { version: latestTag, currentVersion: APP_VERSION },
+                { version: latest, currentVersion: APP_VERSION },
             )}
         >
-            {i18n("{version} available", { version: latestTag })}
+            {i18n("{version} available", { version: latest })}
         </Link>
     );
 }

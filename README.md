@@ -116,7 +116,7 @@ Open <http://localhost:3000/register> and create your account. The onboarding wi
 
 Full install guide, version pinning, image tags, and Windows/WSL notes: [riffado.com/docs/self-hosting/install](https://riffado.com/docs/self-hosting/install).
 
-> `main` is a rolling integration branch. Deploy from tagged image releases, not by building `main`. See [BRANCHING.md](BRANCHING.md).
+> `dev` is the integration branch and may be broken at any commit; every merge into `main` is a release (`YYYY.N`). Deploy releases (`:latest` or a version tag), not `dev`. See [BRANCHING.md](BRANCHING.md).
 
 ## Connecting Plaud
 
@@ -167,7 +167,7 @@ support development, device testing, CI, and registry costs.
 
 ## Contributing
 
-Bug reports, feature requests, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and the PR workflow, [BRANCHING.md](BRANCHING.md) for the release model, and [CHANGELOG.md](CHANGELOG.md) for version history.
+Bug reports, feature requests, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and the PR workflow, [BRANCHING.md](BRANCHING.md) for the release model, and the GitHub Releases for version history ([CHANGELOG.md](CHANGELOG.md) covers the versions before calendar versioning).
 
 ## Security
 

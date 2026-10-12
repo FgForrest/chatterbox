@@ -2,15 +2,20 @@ name: Mail receiver image
 
 # The inbound SMTP server (mail-receiver/), published next to the app
 # image as `ghcr.io/<owner>/<repository>-mail-receiver` with the same tags
-# (see docker.yml). Its own workflow, so a failed receiver build never
-# holds back the app image. Pull requests that touch it build both
-# platforms without pushing.
+# (see docker.yml): `:dev` from a push to `dev`, `:<version>` and `:latest`
+# when release.yml calls this. Its own workflow, so a receiver change can be
+# built alone. Pull requests that touch it build both platforms without
+# pushing.
 on:
   push:
     branches:
-      - main
-    tags:
-      - 'v*'
+      - dev
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (YYYY.N)
+        required: true
+        type: string
   pull_request:
     paths:
       - .github/workflows/mail-receiver.yml
@@ -22,8 +27,8 @@ on:
       - tsconfig.json
 
 concurrency:
-  group: mail-receiver-${{ github.ref }}
-  cancel-in-progress: true
+  group: mail-receiver-${{ github.ref }}-${{ inputs.version || 'dev' }}
+  cancel-in-progress: ${{ !inputs.version }}
 
 jobs:
   build:
@@ -51,6 +56,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            echo "app=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=dev" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -68,10 +86,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}-mail-receiver
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.version.outputs.app }},enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=dev,enable=${{ steps.version.outputs.release != 'true' }}
 
       - name: Compute arch-suffixed tags
         id: arch_tags
@@ -110,6 +127,19 @@ jobs:
       packages: write
 
     steps:
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE" ]; then
+            echo "app=$RELEASE" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "app=dev" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -126,10 +156,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}-mail-receiver
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ steps.version.outputs.app }},enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.version.outputs.release == 'true' }}
+            type=raw,value=dev,enable=${{ steps.version.outputs.release != 'true' }}
 
       - name: Create and push multi-arch manifest
         env:

@@ -1,116 +1,87 @@
 name: Release
 
+# Every push to `main` is a release. The version is `YYYY.N`: the year of
+# the run, then N counting up from 1 within that year (2026.1, 2026.2, ...).
+# The images are built first; the tag and the GitHub release are created
+# only when both builds pass, so a failed run releases nothing and a re-run
+# takes the same number. A tag pushed with GITHUB_TOKEN starts no other
+# workflow, which is why the builds run in here instead of on the tag.
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to generate release notes for (e.g. v0.1.0)'
-        required: true
+    branches:
+      - main
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
-  release:
+  version:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      released: ${{ steps.next.outputs.released }}
     steps:
-      # Check out the tag the workflow is publishing for, not the
-      # branch the dispatch came from. On `push: tags: v*` this is the
-      # tag commit by default; on `workflow_dispatch` `actions/checkout`
-      # otherwise defaults to the dispatch branch (typically `main`),
-      # which would make the tag/package.json gate below read main's
-      # package.json instead of the tag's. Either way, pin to the input
-      # tag when present.
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
-          # Release notes are read from local tags; the release itself is
-          # created with GITHUB_TOKEN passed as an env var, so the token
-          # does not need to live in .git/config.
           persist-credentials: false
 
-      - name: Determine tag
-        id: tag
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_TAG: ${{ github.event.inputs.tag }}
-        run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "current=$INPUT_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "current=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Find previous tag
-        id: prev
-        run: |
-          PREV=$(git tag --sort=-creatordate | grep -E '^v' | sed -n '2p')
-          if [ -z "$PREV" ]; then
-            # First release — use initial commit
-            PREV=$(git rev-list --max-parents=0 HEAD)
-          fi
-          echo "tag=$PREV" >> "$GITHUB_OUTPUT"
-
-      # Hard gate: refuse to publish if package.json doesn't match the tag.
-      # This is the structural fix for the drift that produced issue #123
-      # (tag v0.4.1 published while main still said 0.2.0). The normal
-      # release path can't trip this -- scripts/release.ts bumps before
-      # tagging -- but a manual tag, a bad rebase, or a hand-edited
-      # package.json all can. Fail loud rather than ship a mislabeled
-      # GitHub Release.
-      - name: Verify package.json matches tag
-        env:
-          TAG: ${{ steps.tag.outputs.current }}
+      - name: Compute the next version
+        id: next
         run: |
           set -euo pipefail
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          EXPECTED="${TAG#v}"
-          if [ "$PKG_VERSION" != "$EXPECTED" ]; then
-            echo "::error file=package.json::package.json version ($PKG_VERSION) does not match tag ($TAG). Push the release bump commit to main before tagging."
-            exit 1
+          existing="$(git tag --points-at HEAD | grep -E '^[0-9]{4}\.[0-9]+$' | head -n1 || true)"
+          if [ -n "$existing" ]; then
+            echo "This commit is already released as $existing"
+            echo "version=$existing" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          year="$(date -u +%Y)"
+          last="$(git tag --list "${year}.*" | sed -nE "s/^${year}\.([0-9]+)$/\1/p" | sort -n | tail -n1)"
+          version="${year}.$(( ${last:-0} + 1 ))"
+          echo "Releasing $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "released=false" >> "$GITHUB_OUTPUT"
 
-      # Pull release notes straight from CHANGELOG.md. The maintainer-curated
-      # `## [X.Y.Z]` section is the single source of truth -- the workflow
-      # just extracts it. Fail loud if the section is missing so we never
-      # publish a release with empty / wrong notes (this is the CI gate that
-      # keeps GitHub Releases, Docker tags, and CHANGELOG.md from drifting).
-      - name: Extract release notes from CHANGELOG.md
-        id: notes
-        env:
-          TAG: ${{ steps.tag.outputs.current }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          VERSION="${TAG#v}"
-          # Print the [VERSION] section: from "## [VERSION]" up to (but not
-          # including) the next "## [" heading. Use a plain-string prefix
-          # match (index()) instead of a regex so the dots/brackets in the
-          # version don't have to be escaped.
-          BODY=$(awk -v prefix="## [${VERSION}]" '
-            index($0, prefix) == 1 { found=1; print; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md)
-          if [ -z "$BODY" ]; then
-            echo "::error file=CHANGELOG.md::No '## [${VERSION}]' section found in CHANGELOG.md. Update CHANGELOG.md before tagging ${TAG}."
-            exit 1
-          fi
-          {
-            printf '%s\n' "$BODY"
-            printf '\n---\n\n'
-            printf 'Full changelog: [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md)\n' "$REPO" "$TAG"
-            printf 'Install: see `docker-compose.yml` and `env.example` attached below, or follow [README \xe2\x86\x92 Quick Start](https://github.com/%s#quick-start).\n' "$REPO"
-          } > /tmp/release-body.md
-          # Output name uses an underscore so `${{ steps.notes.outputs.body_path }}`
-          # is parsed as a property access rather than `body - path`.
-          echo "body_path=/tmp/release-body.md" >> "$GITHUB_OUTPUT"
+  app:
+    needs: version
+    if: needs.version.outputs.released != 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  mail-receiver:
+    needs: version
+    if: needs.version.outputs.released != 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/mail-receiver.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  publish:
+    needs: [version, app, mail-receiver]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # softprops/action-gh-release renames hidden files (e.g. `.env.example`)
       # by prefixing them with `default.` on upload, which breaks predictable
@@ -119,17 +90,15 @@ jobs:
       - name: Prepare install artifacts
         run: cp .env.example env.example
 
-      - name: Create draft release
+      # Creates the tag on this commit and the release, with notes generated
+      # from the pull requests merged since the previous release.
+      - name: Create the release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          tag_name: ${{ steps.tag.outputs.current }}
-          name: ${{ steps.tag.outputs.current }}
-          body_path: ${{ steps.notes.outputs.body_path }}
-          draft: true
-          # Attach self-host install artifacts so users can
-          #   curl -fLO .../releases/latest/download/docker-compose.yml
-          #   curl -fL  .../releases/latest/download/env.example -o .env
-          # without cloning the repo.
+          tag_name: ${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ needs.version.outputs.version }}
+          generate_release_notes: true
           files: |
             docker-compose.yml
             env.example
