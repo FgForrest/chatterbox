@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, ListChecks, Mic } from "lucide-react";
+import { BookOpenText, ListChecks, MessagesSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
@@ -28,7 +28,7 @@ export function AppNav({ className }: { className?: string }) {
     // Tasks assigned to the viewer since they last looked.
     const pendingTasks = usePendingTasks();
     const sections = [
-        { href: "/dashboard", label: i18n("Chatter"), icon: Mic },
+        { href: "/dashboard", label: i18n("Chatter"), icon: MessagesSquare },
         { href: "/almanac", label: i18n("Almanac"), icon: BookOpenText },
         { href: "/tasks", label: i18n("Tasks"), icon: ListChecks },
     ] as const;
