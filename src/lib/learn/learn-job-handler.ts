@@ -14,6 +14,7 @@
 
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { recordingItemJoin } from "@/db/items";
 import {
     chatterItems,
     knowledgeAliases,
@@ -701,13 +702,14 @@ async function runLearnJob({
             run.actorUserId === run.userId
                 ? await db
                       .select({
-                          start: recordings.startTime,
+                          start: chatterItems.occurredAt,
                           end: recordings.endTime,
                       })
                       .from(recordings)
+                      .innerJoin(chatterItems, recordingItemJoin)
                       .where(
                           and(
-                              eq(recordings.id, run.recordingId),
+                              eq(recordings.id, run.itemId),
                               eq(recordings.userId, run.userId),
                           ),
                       )

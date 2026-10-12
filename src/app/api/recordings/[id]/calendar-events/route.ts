@@ -1,7 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { recordings } from "@/db/schema";
+import { recordingItemJoin } from "@/db/items";
+import { chatterItems, recordings } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
@@ -14,10 +15,11 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const [recording] = await db
         .select({
-            start: recordings.startTime,
+            start: chatterItems.occurredAt,
             end: recordings.endTime,
         })
         .from(recordings)
+        .innerJoin(chatterItems, recordingItemJoin)
         .where(
             and(
                 eq(recordings.id, id),

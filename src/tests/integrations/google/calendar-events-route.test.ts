@@ -21,8 +21,10 @@ const context = { params: Promise.resolve({ id: "recording" }) };
 function selectRecording(row: unknown) {
     (db.select as Mock).mockReturnValue({
         from: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(row ? [row] : []),
+            innerJoin: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                    limit: vi.fn().mockResolvedValue(row ? [row] : []),
+                }),
             }),
         }),
     });
