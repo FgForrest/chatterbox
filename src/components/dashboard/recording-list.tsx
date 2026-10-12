@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic } from "lucide-react";
+import { MessagesSquare } from "lucide-react";
 import { useExtracted, useLocale } from "next-intl";
 import type * as React from "react";
 import {
@@ -423,7 +423,7 @@ export function RecordingList({
 
                     {filtered.length === 0 && pendingUploads.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-10 text-center">
-                            <Mic className="mb-2 size-8 text-muted-foreground" />
+                            <MessagesSquare className="mb-2 size-8 text-muted-foreground" />
                             <p className="text-sm text-muted-foreground">
                                 {query
                                     ? i18n("No recordings match your search.")
