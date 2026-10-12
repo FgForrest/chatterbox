@@ -8,7 +8,6 @@ import { productName } from "@/lib/brand";
 /**
  * Marketing footer for hosted public surfaces. Currently mounted on:
  *   - `/`                           (`src/app/page.tsx`)
- *   - `/install` (hosted branch)    (`src/app/install/page.tsx`)
  *   - `/privacy`, `/terms`          (`src/app/(legal)/layout.tsx`)
  *
  * Intentionally not used by `src/app/(app)/layout.tsx` -- signed-in
@@ -19,9 +18,8 @@ import { productName } from "@/lib/brand";
  *
  * Every call site that mounts this component is hosted-only -- either
  * by virtue of `src/app/page.tsx` redirecting to `/login` when
- * `IS_HOSTED` is unset, the `(legal)` layout calling `notFound()` on
- * self-host, or `/install` branching on `env.IS_HOSTED` to render
- * `Footer` instead. The component itself therefore never needs to
+ * `IS_HOSTED` is unset, or the `(legal)` layout calling `notFound()` on
+ * self-host. The component itself therefore never needs to
  * internally branch on hosted/self-host; new call sites must keep
  * this invariant.
  */

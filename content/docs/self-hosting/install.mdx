@@ -13,22 +13,47 @@ description: Install Riffado on your own infrastructure with Docker Compose.
 
 ## Install
 
-The one-line installer pulls the published `docker-compose.yml`, prompts for
-the values it needs, and starts the stack:
+Every release on GitHub attaches the `docker-compose.yml` and the
+`env.example` it was built with. Replace `<owner>/<repository>` with the
+repository you run:
 
 ```bash
-curl -fsSL https://riffado.com/install.sh | bash
+mkdir riffado && cd riffado
+curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
 ```
 
-Pin to a specific release:
+Generate the secrets and put them into `.env`:
 
 ```bash
-curl -fsSL https://riffado.com/v0.4.2/install.sh | bash
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)"
+echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+```
+
+Set `APP_URL` to the address people will open, then start the stack:
+
+```bash
+docker compose up -d
 ```
 
 Once the containers are healthy, open `http://localhost:3000` and create an
 account. You'll be walked through connecting your Plaud account and picking
 a transcription provider.
+
+Keep `ENCRYPTION_KEY` safe and back it up apart from the data: without it,
+the stored recordings, transcripts and credentials cannot be read.
+
+## Versions and upgrades
+
+Releases are numbered `YYYY.N`: the year, then the release number within
+that year (`2026.1`, `2026.2`, ...). The `latest` image tag always points
+at the newest release; to stay on one release, download the assets of that
+release instead of `latest` and set `RIFFADO_VERSION` in `.env` to that
+version.
+
+Upgrade with `docker compose pull && docker compose up -d`. Database
+migrations run when the app container starts.
 
 ## Next
 

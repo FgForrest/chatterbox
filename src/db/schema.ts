@@ -3092,7 +3092,8 @@ export const mcpAccessLog = pgTable(
 );
 
 /**
- * Aggregate hit counter for the install.sh routes. Counts every fetch of
+ * Aggregate hit counter of the former install.sh routes (removed; the
+ * table stays so no migration has to drop it). It counted every fetch of
  * `/install.sh` and `/{version}/install.sh` on the hosted instance.
  *
  * Privacy: no IP, no User-Agent, no identifier of any kind. Just (day,

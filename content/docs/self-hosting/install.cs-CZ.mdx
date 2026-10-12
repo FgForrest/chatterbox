@@ -17,21 +17,47 @@ description: Nainstalujte Riffado na vlastní infrastrukturu pomocí Docker Comp
 
 ## Instalace
 
-Jednořádkový instalátor stáhne publikovaný `docker-compose.yml`, vyžádá si potřebné
-hodnoty a spustí stack:
+Každé vydání na GitHubu má přiložený `docker-compose.yml` a `env.example`,
+se kterými bylo sestaveno. Místo `<owner>/<repository>` doplňte repozitář,
+který provozujete:
 
 ```bash
-curl -fsSL https://riffado.com/install.sh | bash
+mkdir riffado && cd riffado
+curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
 ```
 
-Připnutí na konkrétní verzi:
+Vygenerujte tajné klíče a vložte je do `.env`:
 
 ```bash
-curl -fsSL https://riffado.com/v0.4.2/install.sh | bash
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)"
+echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
+```
+
+Nastavte `APP_URL` na adresu, kterou budou lidé otevírat, a spusťte stack:
+
+```bash
+docker compose up -d
 ```
 
 Jakmile jsou kontejnery v pořádku, otevřete `http://localhost:3000` a vytvořte si účet.
 Budete postupně provedeni propojením s vaším Plaud účtem a výběrem poskytovatele přepisu.
+
+`ENCRYPTION_KEY` dobře uložte a zálohujte odděleně od dat: bez něj nejdou
+uložené nahrávky, přepisy ani přihlašovací údaje přečíst.
+
+<span id="versions-and-upgrades" />
+
+## Verze a aktualizace
+
+Vydání se číslují `YYYY.N`: rok a pořadové číslo vydání v daném roce
+(`2026.1`, `2026.2`, ...). Značka image `latest` vždy ukazuje na nejnovější
+vydání; chcete-li zůstat na jednom vydání, stáhněte soubory tohoto vydání
+místo `latest` a nastavte v `.env` `RIFFADO_VERSION` na jeho číslo.
+
+Aktualizace: `docker compose pull && docker compose up -d`. Migrace databáze
+proběhnou při startu kontejneru aplikace.
 
 <span id="next" />
 
