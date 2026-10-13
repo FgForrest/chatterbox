@@ -20,4 +20,5 @@ export type SettingsSection =
     | "export"
     | "billing"
     | "google-account"
+    | "mail"
     | "dev";

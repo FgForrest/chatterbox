@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { GoogleIntegrationConfig } from "./config";
+import type { GoogleOAuthConfig } from "./config";
 import { GoogleApiError } from "./errors";
 
 const AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -24,7 +24,7 @@ export function createOAuthState(): string {
 }
 
 export function buildAuthorizationUrl(input: {
-    config: GoogleIntegrationConfig;
+    config: GoogleOAuthConfig;
     scopes: string[];
     state: string;
     codeChallenge: string;
@@ -105,7 +105,7 @@ async function postToken(
 
 export function exchangeAuthorizationCode(
     input: {
-        config: GoogleIntegrationConfig;
+        config: GoogleOAuthConfig;
         code: string;
         codeVerifier: string;
     },
@@ -126,7 +126,7 @@ export function exchangeAuthorizationCode(
 
 /** Throws `GoogleApiError` with reason `invalid_grant` once access is revoked. */
 export function refreshAccessToken(
-    config: GoogleIntegrationConfig,
+    config: GoogleOAuthConfig,
     refreshToken: string,
     fetchImpl: Fetch = fetch,
 ): Promise<TokenResponse> {

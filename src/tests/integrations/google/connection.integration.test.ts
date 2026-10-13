@@ -189,6 +189,26 @@ describeWithDatabase("Google connection (PostgreSQL)", () => {
     });
 
     describe("access tokens", () => {
+        it("refreshes a cached Drive token after another process grants Calendar", async () => {
+            await saveGoogleConnection(USER, claims(), tokens());
+            const calendarScope =
+                "https://www.googleapis.com/auth/calendar.events.readonly";
+            await db()
+                .update(oauthConnections)
+                .set({ scopes: [...DRIVE_SCOPES, calendarScope].join(" ") });
+            const fetchImpl = tokenEndpoint({
+                access_token: "both-scopes",
+                expires_in: 3600,
+            });
+            await expect(
+                getGoogleAccessToken(USER, {
+                    requiredScope: calendarScope,
+                    fetchImpl,
+                }),
+            ).resolves.toBe("both-scopes");
+            expect(fetchImpl).toHaveBeenCalledOnce();
+        });
+
         it("refreshes once and serves the cached token after", async () => {
             await saveGoogleConnection(USER, claims(), tokens());
             __resetGoogleAccessTokensForTests();

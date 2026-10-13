@@ -96,8 +96,8 @@ export function FinalCtaActions() {
             {/* Mirrors the hero's secondary action verbatim so the page
                 opens and closes on the same two paths. */}
             <Link
-                href="/install"
-                aria-label={i18n("Self-host Riffado in one command")}
+                href="/docs/self-hosting/install"
+                aria-label={i18n("Self-host Riffado with Docker")}
                 onClick={() =>
                     track("final_cta_self_host_click", {
                         location: "final_cta",
@@ -105,7 +105,7 @@ export function FinalCtaActions() {
                 }
                 className="group inline-flex items-center justify-center gap-1.5 text-sm font-medium text-auth-brand-foreground/60 hover:text-auth-brand-foreground transition-colors"
             >
-                <span>{i18n("or self-host in one command")}</span>
+                <span>{i18n("or self-host with Docker")}</span>
                 <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
             </Link>
         </div>

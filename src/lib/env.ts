@@ -53,6 +53,39 @@ function isSecureOrInternalUrl(value: string): boolean {
     return protocol === "https:" || isInternalHost(hostname);
 }
 
+/** A positive integer variable with a default and a ceiling. */
+function positiveIntEnv(name: string, fallback: number, max: number) {
+    return z
+        .string()
+        .optional()
+        .transform((val, ctx) => {
+            const trimmed = val?.trim();
+            if (!trimmed) return fallback;
+            if (!/^\d+$/.test(trimmed)) {
+                ctx.addIssue({
+                    code: "custom",
+                    message: `${name} must be a positive integer`,
+                });
+                return z.NEVER;
+            }
+            return Number(trimmed);
+        })
+        .pipe(z.number().int().min(1).max(max));
+}
+
+/** An HTTP header field name (RFC 9110 token). */
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const MIN_CONNECTOR_KEY_LENGTH = 32;
+
+/** A comma-separated list, trimmed, without empty entries. */
+function commaList(val: string | undefined): string[] {
+    return (val ?? "")
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+}
+
 const baseEnvSchema = z.object({
     /** True for the Riffado-operated hosted instance; default false (self-host). */
     IS_HOSTED: z
@@ -181,15 +214,58 @@ const baseEnvSchema = z.object({
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
     /** Comma-separated `azp` allowlist; empty admits any client of the realm. */
-    MCP_ALLOWED_CLIENTS: z
+    MCP_ALLOWED_CLIENTS: z.string().optional().transform(commaList),
+    /**
+     * Header the public reverse proxy sets on every request it forwards to
+     * the MCP server (the internal route strips it). A request carrying it
+     * is served only for the clients in MCP_PUBLIC_CLIENTS.
+     */
+    MCP_PUBLIC_INGRESS_HEADER: z
         .string()
         .optional()
         .transform((val) =>
-            (val ?? "")
-                .split(",")
-                .map((client) => client.trim())
-                .filter(Boolean),
-        ),
+            val?.trim() ? val.trim().toLowerCase() : undefined,
+        )
+        .refine((val) => val === undefined || HEADER_NAME.test(val), {
+            message: "MCP_PUBLIC_INGRESS_HEADER must be an HTTP header name",
+        }),
+    /** Comma-separated `azp` served through the public entrance. */
+    MCP_PUBLIC_CLIENTS: z.string().optional().transform(commaList),
+    /**
+     * Comma-separated `client=key` pairs: a token issued to `client` is
+     * served only with an `X-API-Key: key` request header (a Claude
+     * connector's request header).
+     */
+    MCP_CONNECTOR_KEYS: z
+        .string()
+        .optional()
+        .transform((val, ctx) => {
+            const keys: { client: string; key: string }[] = [];
+            for (const entry of commaList(val)) {
+                const split = entry.indexOf("=");
+                const client = split > 0 ? entry.slice(0, split).trim() : "";
+                const key = split > 0 ? entry.slice(split + 1).trim() : "";
+                if (
+                    !client ||
+                    key.length < MIN_CONNECTOR_KEY_LENGTH ||
+                    keys.some((known) => known.client === client)
+                ) {
+                    ctx.addIssue({
+                        code: "custom",
+                        message: `MCP_CONNECTOR_KEYS must be client=key pairs, one per client, each key at least ${MIN_CONNECTOR_KEY_LENGTH} characters`,
+                    });
+                    return z.NEVER;
+                }
+                keys.push({ client, key });
+            }
+            return keys;
+        }),
+    /**
+     * Also accept tokens whose `aud` is the MCP resource URL
+     * (`<APP_URL>/api/mcp`), as Keycloak issues them with its
+     * resource-indicators feature on.
+     */
+    MCP_RESOURCE_AUDIENCE: optionalStrictBoolean,
     /** Days the MCP access log keeps a row. Default 90. */
     MCP_AUDIT_RETENTION_DAYS: z
         .string()
@@ -208,6 +284,72 @@ const baseEnvSchema = z.object({
             return Number(trimmed);
         })
         .pipe(z.number().int().min(1).max(3650)),
+
+    /**
+     * Inbound mail (Klepna): the domain the receiver accepts mail for, e.g.
+     * `klepna.example`. Unset, mail is off. Needs single sign-on (an
+     * address belongs to an identity-provider-verified email) and both mail
+     * secrets.
+     */
+    MAIL_DOMAIN: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim().toLowerCase() || undefined)
+        .refine(
+            (val) =>
+                val === undefined ||
+                /^(?=.{1,253}$)[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(val),
+            { message: "MAIL_DOMAIN must be a domain name" },
+        ),
+    /** The Organization folders' address prefix (`<nick>-weekly@`). Default `org`. */
+    MAIL_ORG_NICKNAME: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim().toLowerCase() || "org")
+        .refine((val) => /^[a-z0-9]{1,20}$/.test(val), {
+            message: "MAIL_ORG_NICKNAME must be 1-20 letters or digits",
+        }),
+    /** Former nicknames, comma-separated: kept reserved forever. */
+    MAIL_FORMER_ORG_NICKNAMES: z
+        .string()
+        .optional()
+        .transform((val) =>
+            (val ?? "")
+                .split(",")
+                .map((nick) => nick.trim().toLowerCase())
+                .filter(Boolean),
+        ),
+    /**
+     * HMAC key of the address lookup hashes. Its own secret, so rotating
+     * API_TOKEN_HASH_SECRET never unhooks every address.
+     */
+    MAIL_ADDRESS_HASH_SECRET: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || undefined)
+        .refine((val) => val === undefined || val.length >= 32, {
+            message: "MAIL_ADDRESS_HASH_SECRET must be at least 32 characters",
+        }),
+    /** Bearer secret the mail receiver presents to /api/internal/mail/*. */
+    MAIL_INGEST_SECRET: z
+        .string()
+        .optional()
+        .transform((val) => val?.trim() || undefined)
+        .refine((val) => val === undefined || val.length >= 32, {
+            message: "MAIL_INGEST_SECRET must be at least 32 characters",
+        }),
+    /** How old a DKIM signature (`t=`) may be. Default 72 hours. */
+    MAIL_MAX_SIGNATURE_AGE_HOURS: positiveIntEnv(
+        "MAIL_MAX_SIGNATURE_AGE_HOURS",
+        72,
+        720,
+    ),
+    /** Messages one owner may receive per day. Default 500. */
+    MAIL_DAILY_LIMIT: positiveIntEnv("MAIL_DAILY_LIMIT", 500, 100_000),
+    /** Largest message accepted, in MB. Default 36 (25 MB of attachments). */
+    MAIL_MAX_MESSAGE_MB: positiveIntEnv("MAIL_MAX_MESSAGE_MB", 36, 150),
+    /** Days without a single sign-on after which addresses pause. Default 180. */
+    MAIL_INACTIVE_DAYS: positiveIntEnv("MAIL_INACTIVE_DAYS", 180, 3650),
 
     /**
      * Disable sign-up: email/password registration, and under single sign-on
@@ -1117,6 +1259,50 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
             });
         }
     }
+    if (
+        parsed.MCP_PUBLIC_CLIENTS.length > 0 &&
+        !parsed.MCP_PUBLIC_INGRESS_HEADER
+    ) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["MCP_PUBLIC_CLIENTS"],
+            message: "MCP_PUBLIC_CLIENTS needs MCP_PUBLIC_INGRESS_HEADER",
+        });
+    }
+    if (
+        parsed.MCP_PUBLIC_CLIENTS.length > 0 &&
+        parsed.MCP_ALLOWED_CLIENTS.length === 0
+    ) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["MCP_ALLOWED_CLIENTS"],
+            message:
+                "MCP_ALLOWED_CLIENTS must be set when MCP_PUBLIC_CLIENTS is set",
+        });
+    }
+
+    if (parsed.MAIL_DOMAIN) {
+        if (!oidcConfigured) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["MAIL_DOMAIN"],
+                message:
+                    "MAIL_DOMAIN needs single sign-on (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)",
+            });
+        }
+        for (const key of [
+            "MAIL_ADDRESS_HASH_SECRET",
+            "MAIL_INGEST_SECRET",
+        ] as const) {
+            if (!parsed[key]) {
+                ctx.addIssue({
+                    code: "custom",
+                    path: [key],
+                    message: `MAIL_DOMAIN needs ${key}`,
+                });
+            }
+        }
+    }
 
     // With single sign-on nobody signs in with a password, the organization
     // account included, so its password is optional.
@@ -1182,6 +1368,10 @@ function validateEnv(): Env {
             OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
             MCP_AUDIENCE: process.env.MCP_AUDIENCE,
             MCP_ALLOWED_CLIENTS: process.env.MCP_ALLOWED_CLIENTS,
+            MCP_PUBLIC_INGRESS_HEADER: process.env.MCP_PUBLIC_INGRESS_HEADER,
+            MCP_PUBLIC_CLIENTS: process.env.MCP_PUBLIC_CLIENTS,
+            MCP_CONNECTOR_KEYS: process.env.MCP_CONNECTOR_KEYS,
+            MCP_RESOURCE_AUDIENCE: process.env.MCP_RESOURCE_AUDIENCE,
             MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,

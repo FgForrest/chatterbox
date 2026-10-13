@@ -7,8 +7,8 @@ import { env } from "./env";
  * verify that the SMTP server actually accepts connections.
  *
  * Lives in its own module (rather than `notifications/email.ts`) so server
- * components that only need the boolean don't pull `nodemailer` and
- * `@react-email/*` into the server bundle / cold-start path.
+ * components that only need the boolean don't pull `nodemailer` and the
+ * email templates into the server bundle / cold-start path.
  */
 export function isSmtpConfigured(): boolean {
     return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASSWORD);

@@ -7,7 +7,7 @@ import { ReportBugButton } from "@/components/report-bug-dialog";
 import { UpdateBadge } from "@/components/update-badge";
 import { productName } from "@/lib/brand";
 import { env } from "@/lib/env";
-import { APP_RELEASE_URL, APP_VERSION_TAG } from "@/lib/version";
+import { APP_RELEASE_URL, APP_REPOSITORY, APP_VERSION } from "@/lib/version";
 
 /**
  * In-app footer rendered on every signed-in screen via
@@ -15,14 +15,8 @@ import { APP_RELEASE_URL, APP_VERSION_TAG } from "@/lib/version";
  * chrome that ships under every workstation, dashboard, and settings
  * pane, so weight here is paid for on every view.
  *
- * Also mounted on `/install` when `!env.IS_HOSTED` -- on a self-host
- * instance the install page is reachable but the marketing-sitemap
- * `LandingFooter` would be dishonest chrome (no "Pricing" or "For
- * Professionals" surface exists), so the page falls back to this
- * minimal footer.
- *
  * The richer marketing footer lives in `landing-footer.tsx` and is
- * mounted on `/`, `/install` (hosted branch), and the `(legal)` layout.
+ * mounted on `/` and the `(legal)` layout.
  *
  * Server component so it can read `env.IS_HOSTED` directly -- hosted
  * gets a support link, self-host gets the update badge. Neither side
@@ -71,10 +65,10 @@ export function Footer() {
                             className="hover:text-foreground transition-colors"
                             aria-label={i18n(
                                 "Release notes for {name} {version}",
-                                { name, version: APP_VERSION_TAG },
+                                { name, version: APP_VERSION },
                             )}
                         >
-                            {APP_VERSION_TAG}
+                            {APP_VERSION}
                         </Link>
                         {/* Hosted-only "What's new" link to the public,
                             plain-language changelog. Self-host already
@@ -108,7 +102,7 @@ export function Footer() {
                             className="hover:text-foreground transition-colors"
                         />
                         <Link
-                            href="https://github.com/riffado/riffado"
+                            href={`https://github.com/${APP_REPOSITORY}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="hover:text-foreground transition-colors"

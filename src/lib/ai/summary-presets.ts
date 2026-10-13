@@ -57,7 +57,7 @@ Respond with a single JSON object and nothing else. Do not wrap it in code fence
   "actionItems": ["action item with owner if mentioned", "follow-up task"]
 }
 
-Write the summary as "###" sections, using only the ones this meeting actually supports: Attendees, Purpose, Discussion, Open questions. Leave a section out entirely rather than writing "None" under it. List attendees as bullets once there are more than two, with their role or team when it was mentioned.
+Write the summary as "###" sections covering only what this meeting supports: who attended, why they met, what was discussed, and any open questions. Name each heading in the output language. Leave a section out entirely rather than writing "None" under it. List attendees as bullets once there are more than two, with their role or team when it was mentioned.
 
 The decisions belong in keyPoints and the tasks in actionItems, so the summary covers who met, what it was about, and how the discussion went, not a second copy of those two lists.
 
@@ -102,6 +102,40 @@ Transcription:
 {transcription}`,
     },
 };
+
+const MEETING_HEADINGS: Partial<
+    Record<
+        string,
+        {
+            attendees: string;
+            purpose: string;
+            discussion: string;
+            openQuestions: string;
+        }
+    >
+> = {
+    cs: {
+        attendees: "Účastníci",
+        purpose: "Účel",
+        discussion: "Diskuse",
+        openQuestions: "Otevřené otázky",
+    },
+};
+
+/** Use a localized built-in only when the user has not edited its text. */
+export function localizedSummaryPrompt(
+    id: string,
+    prompt: string,
+    language: string | null,
+    isUneditedBuiltIn: boolean,
+): string {
+    if (!isUneditedBuiltIn || id !== "meeting-notes" || !language) {
+        return prompt;
+    }
+    const headings = MEETING_HEADINGS[language];
+    if (!headings) return prompt;
+    return `For the meeting sections in "summary", use these exact "###" headings when the content supports them: ${headings.attendees}, ${headings.purpose}, ${headings.discussion}, ${headings.openQuestions}. Keep the JSON keys unchanged.\n\n${prompt}`;
+}
 
 export const SUMMARY_TEMPLATE_KIND: TemplateKind<SummaryPreset> = {
     presets: SUMMARY_PRESETS,
@@ -157,6 +191,24 @@ export const AI_OUTPUT_LANGUAGES: readonly AiOutputLanguageOption[] = [
 ] as const;
 
 const LANGUAGE_CODES = new Set(AI_OUTPUT_LANGUAGES.map((l) => l.code));
+
+/** Resolve an explicit output preference or a recognized transcription language. */
+export function resolveAiOutputLanguage(
+    preference: string | null | undefined,
+    detectedLanguage: string | null | undefined,
+): string | null {
+    if (preference && preference !== "auto") {
+        return normalizeAiOutputLanguage(preference);
+    }
+    const detected = detectedLanguage?.trim().toLowerCase().split(/[-_]/)[0];
+    if (!detected) return null;
+    if (LANGUAGE_CODES.has(detected)) return detected;
+    return (
+        AI_OUTPUT_LANGUAGES.find(
+            (language) => language.label.toLowerCase() === detected,
+        )?.code ?? null
+    );
+}
 
 /** Validate against `AI_OUTPUT_LANGUAGES`; returns the code or null. */
 export function normalizeAiOutputLanguage(value: unknown): string | null {

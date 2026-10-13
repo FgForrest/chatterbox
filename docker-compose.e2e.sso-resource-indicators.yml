@@ -1,0 +1,12 @@
+# Keycloak's experimental resource indicators (RFC 8707) for the SSO e2e stack:
+# a token requested with `resource` carries that URL as its audience, and a
+# `resource` no client answers to is refused with `invalid_target`. The e2e
+# realm's `riffado-mcp` answers to https://riffado.example.com/api/mcp.
+#
+#   docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml \
+#     -f docker-compose.e2e.sso-resource-indicators.yml up -d --wait keycloak
+
+services:
+  keycloak:
+    environment:
+      KC_FEATURES: resource-indicators

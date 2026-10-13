@@ -63,6 +63,7 @@ This repository builds on Riffado with features for people who work with their r
 
 - **The Organization.** A shared folder tree next to each user's private one. Share a recording by filing it there; only recordings with every speaker named and every review finished can be shared. Speakers become shared people, curated by one organization account.
 - **Single sign-on** with any OpenID Connect provider, and registration that can stay closed.
+- **Ask Claude about your recordings.** An MCP server lets Claude (claude.ai, Desktop, Cowork), Claude Code and your own services search transcripts, summaries, the Almanac and tasks. People sign in through your Keycloak, and their roles there decide what each one can reach.
 
 **Your data, your way**
 
@@ -87,35 +88,30 @@ Setting these up on a self-hosted instance: [For administrators](content/docs/us
 
 You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionally) an OpenAI-compatible API key.
 
-**One-liner (Linux / macOS):**
-
-```bash
-curl -fsSL https://riffado.com/install.sh | sh
-```
-
-Prompts for an install directory and `APP_URL`, downloads `docker-compose.yml` and `.env`, generates secrets, starts the stack, and waits for `/api/health`. Source: [`scripts/install.sh`](scripts/install.sh).
-
-**Manual install:**
+Every release attaches `docker-compose.yml` and `env.example`. Replace `<owner>/<repository>` with this repository's GitHub path:
 
 ```bash
 mkdir riffado && cd riffado
-curl -fLO https://github.com/riffado/riffado/releases/latest/download/docker-compose.yml
-curl -fL  https://github.com/riffado/riffado/releases/latest/download/env.example -o .env
+curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
+curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
 
 # Generate secrets, paste into .env
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
 echo "BETTER_AUTH_SECRET=$(openssl rand -hex 32)"
 echo "ENCRYPTION_KEY=$(openssl rand -hex 32)"
 
 docker compose up -d
 ```
 
+Releases are numbered `YYYY.N` (2026.1, 2026.2, ...); the `latest` image tag is the newest release.
+
 Open <http://localhost:3000/register> and create your account. The onboarding wizard handles Plaud connection, AI providers, storage, and sync preferences.
 
 **Upgrade:** `docker compose pull && docker compose up -d`. Migrations run on container start.
 
-Full install guide, version pinning, image tags, and Windows/WSL notes: [riffado.com/docs/self-hosting/install](https://riffado.com/docs/self-hosting/install).
+Full install guide, version pinning, image tags, and Windows/WSL notes: [Self-hosting: Install](content/docs/self-hosting/install.mdx).
 
-> `main` is a rolling integration branch. Deploy from tagged image releases, not by building `main`. See [BRANCHING.md](BRANCHING.md).
+> `dev` is the integration branch and may be broken at any commit; every merge into `main` is a release (`YYYY.N`). Deploy releases (`:latest` or a version tag), not `dev`. See [BRANCHING.md](BRANCHING.md).
 
 ## Connecting Plaud
 
@@ -132,6 +128,7 @@ The **[user guide](content/docs/user-guide/index.md)** in this repository covers
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
 - [The Organization](content/docs/self-hosting/organization.mdx)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
+- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Riffado in Claude](content/docs/user-guide/claude.md)
 - [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
 - [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
 - [Meeting recorder (meetrec)](cmd/meetrec/README.md)
@@ -143,7 +140,6 @@ Every instance also serves these pages at `/docs`. The upstream documentation li
 - [Upgrading](https://riffado.com/docs/self-hosting/upgrading)
 - [S3-compatible storage](https://riffado.com/docs/self-hosting/storage-s3)
 - [Email / SMTP](https://riffado.com/docs/self-hosting/email-smtp)
-- [External MCP server](https://riffado.com/docs/self-hosting/mcp)
 - [Connect your Plaud account](https://riffado.com/docs/guides/connect-plaud-account)
 - [AI providers](https://riffado.com/docs/guides/ai-providers)
 - [Backup & restore](https://riffado.com/docs/guides/backup-and-restore)
@@ -166,7 +162,7 @@ support development, device testing, CI, and registry costs.
 
 ## Contributing
 
-Bug reports, feature requests, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and the PR workflow, [BRANCHING.md](BRANCHING.md) for the release model, and [CHANGELOG.md](CHANGELOG.md) for version history.
+Bug reports, feature requests, and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup and the PR workflow, [BRANCHING.md](BRANCHING.md) for the release model, and the GitHub Releases for version history ([CHANGELOG.md](CHANGELOG.md) covers the versions before calendar versioning).
 
 ## Security
 

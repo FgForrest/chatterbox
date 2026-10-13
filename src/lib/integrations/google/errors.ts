@@ -2,7 +2,8 @@ export type GoogleConnectionProblem =
     | "not_configured"
     | "not_connected"
     | "needs_reconnect"
-    | "account_mismatch";
+    | "account_mismatch"
+    | "missing_scope";
 
 const PROBLEM_MESSAGES: Record<GoogleConnectionProblem, string> = {
     not_configured: "The Google integration is not configured",
@@ -10,6 +11,7 @@ const PROBLEM_MESSAGES: Record<GoogleConnectionProblem, string> = {
     needs_reconnect: "The Google account must be reconnected",
     account_mismatch:
         "The export was set up with a different Google account than the one connected",
+    missing_scope: "The Google account has not granted this permission",
 };
 
 /**

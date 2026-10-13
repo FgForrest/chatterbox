@@ -1,5 +1,5 @@
 {
-  "id": "f531ac05-8132-4c81-a473-5c6448f7cf4e",
+  "id": "2d187b67-63d1-42ee-829a-1b3608a8a5a5",
   "prevId": "d9e27535-6d5a-4701-a83b-a0206ebc8580",
   "version": "7",
   "dialect": "postgresql",
@@ -1513,6 +1513,174 @@
       },
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.chatter_items": {
+      "name": "chatter_items",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title_edited_at": {
+          "name": "title_edited_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "summary_due_at": {
+          "name": "summary_due_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_reaped_at": {
+          "name": "content_reaped_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "summary_reaped_at": {
+          "name": "summary_reaped_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "chatter_items_user_id_occurred_at_live_idx": {
+          "name": "chatter_items_user_id_occurred_at_live_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "first"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"chatter_items\".\"deleted_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "chatter_items_summary_due_at_idx": {
+          "name": "chatter_items_summary_due_at_idx",
+          "columns": [
+            {
+              "expression": "summary_due_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"chatter_items\".\"summary_due_at\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chatter_items_user_id_users_id_fk": {
+          "name": "chatter_items_user_id_users_id_fk",
+          "tableFrom": "chatter_items",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "chatter_items_id_user_id_unique": {
+          "name": "chatter_items_id_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        },
+        "chatter_items_id_kind_unique": {
+          "name": "chatter_items_id_kind_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "kind"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "chatter_items_kind_check": {
+          "name": "chatter_items_kind_check",
+          "value": "\"chatter_items\".\"kind\" in ('audio', 'mail')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.drive_export_nodes": {
@@ -7308,250 +7476,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.recording_session_chunks": {
-      "name": "recording_session_chunks",
-      "schema": "",
-      "columns": {
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "index": {
-          "name": "index",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size": {
-          "name": "size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "recording_session_chunks_session_id_recording_sessions_id_fk": {
-          "name": "recording_session_chunks_session_id_recording_sessions_id_fk",
-          "tableFrom": "recording_session_chunks",
-          "tableTo": "recording_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "recording_session_chunks_session_id_index_pk": {
-          "name": "recording_session_chunks_session_id_index_pk",
-          "columns": [
-            "session_id",
-            "index"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.recording_sessions": {
-      "name": "recording_sessions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "recording_session_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "mime_type": {
-          "name": "mime_type",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "notice_acknowledged_at": {
-          "name": "notice_acknowledged_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stop_reason": {
-          "name": "stop_reason",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expected_chunk_count": {
-          "name": "expected_chunk_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "recording_id": {
-          "name": "recording_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "job_id": {
-          "name": "job_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "recording_sessions_user_id_idx": {
-          "name": "recording_sessions_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "recording_sessions_status_updated_idx": {
-          "name": "recording_sessions_status_updated_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "updated_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "recording_sessions_user_id_users_id_fk": {
-          "name": "recording_sessions_user_id_users_id_fk",
-          "tableFrom": "recording_sessions",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "recording_sessions_recording_id_recordings_id_fk": {
-          "name": "recording_sessions_recording_id_recordings_id_fk",
-          "tableFrom": "recording_sessions",
-          "tableTo": "recordings",
-          "columnsFrom": [
-            "recording_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.recording_task_rejections": {
       "name": "recording_task_rejections",
       "schema": "",
@@ -8052,6 +7976,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'audio'"
+        },
         "device_sn": {
           "name": "device_sn",
           "type": "varchar(255)",
@@ -8340,7 +8271,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "recordings_kind_check": {
+          "name": "recordings_kind_check",
+          "value": "\"recordings\".\"kind\" = 'audio'"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.sessions": {
@@ -11161,8 +11097,7 @@
       "schema": "public",
       "values": [
         "manual",
-        "device-flow",
-        "recorder"
+        "device-flow"
       ]
     },
     "public.async_job_status": {
@@ -11213,17 +11148,6 @@
         "consumed",
         "released",
         "expired"
-      ]
-    },
-    "public.recording_session_status": {
-      "name": "recording_session_status",
-      "schema": "public",
-      "values": [
-        "open",
-        "completing",
-        "completed",
-        "failed",
-        "aborted"
       ]
     },
     "public.stripe_webhook_event_status": {

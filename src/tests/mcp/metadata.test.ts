@@ -56,6 +56,7 @@ describe("protected-resource metadata", () => {
         await expect(response.json()).resolves.toEqual({
             resource: "https://riffado.example.com/api/mcp",
             authorization_servers: [ISSUER],
+            scopes_supported: ["openid"],
             bearer_methods_supported: ["header"],
             resource_name: "Riffado",
         });
@@ -75,14 +76,20 @@ describe("protected-resource metadata", () => {
         await expect(root.json()).resolves.toEqual(await scoped.json());
     });
 
-    it("answers 401 pointing the client at the metadata", async () => {
+    it("answers 401 pointing the client at the metadata and the scope", async () => {
         const response = unauthorized();
         expect(response.status).toBe(401);
         expect(response.headers.get("WWW-Authenticate")).toBe(
-            'Bearer resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp"',
+            'Bearer resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp", scope="openid"',
         );
         await expect(response.json()).resolves.toEqual({
             error: "Unauthorized",
         });
+    });
+
+    it("says invalid_token for a token it did not accept", () => {
+        expect(unauthorized(true).headers.get("WWW-Authenticate")).toBe(
+            'Bearer error="invalid_token", resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp", scope="openid"',
+        );
     });
 });

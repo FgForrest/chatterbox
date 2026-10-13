@@ -8,10 +8,15 @@ export interface GoogleConnectionInfo {
     email: string;
     hostedDomain: string | null;
     status: "active" | "needs_reconnect";
+    calendarGranted?: boolean;
+    meetGranted?: boolean;
+    driveGranted?: boolean;
 }
 
 export interface GoogleConnectionState {
     available: boolean;
+    calendarAvailable?: boolean;
+    meetAvailable?: boolean;
     connection: GoogleConnectionInfo | null;
 }
 
@@ -75,6 +80,34 @@ export function useGoogleConnectOutcome(onConnected?: () => void) {
                     toast.error(
                         i18n(
                             "Google Drive access was not granted. Connect again and allow it.",
+                        ),
+                    );
+                    return;
+                case "missing_calendar_scope":
+                    toast.error(
+                        i18n(
+                            "Google Calendar access was not granted. Connect again and allow it.",
+                        ),
+                    );
+                    return;
+                case "missing_meet_scope":
+                    toast.error(
+                        i18n(
+                            "Google Meet access was not granted. Connect again and allow it.",
+                        ),
+                    );
+                    return;
+                case "account_mismatch":
+                    toast.error(
+                        i18n(
+                            "Use the same Google account already connected here.",
+                        ),
+                    );
+                    return;
+                case "missing_existing_scope":
+                    toast.error(
+                        i18n(
+                            "Google did not preserve existing access. Reconnect and allow all requested permissions.",
                         ),
                     );
                     return;

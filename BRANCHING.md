@@ -1,65 +1,59 @@
 # Branching & Release Model
 
-Riffado uses a **rolling-trunk + tagged-release** model. Self-hosters consume releases, not branches.
+Integration happens on `dev`; every push to `main` is a release. Deployments
+run releases, not branches.
 
 ## Branches
 
 | Branch | What it is | Who uses it |
 |--------|------------|-------------|
-| `main` | Rolling integration branch. Feature branches squash-merge here as they land. May be broken at any commit. | Contributors, CI, the `dev` Docker tag |
-| `feature/*`, `fix/*`, etc. | Short-lived branches that open PRs into `main`. | Contributors |
+| `dev` | Integration branch and the repository's default branch. Feature branches open PRs here and squash-merge as they land. May be broken at any commit. Every push publishes the `:dev` images. | Contributors, CI, the AI review |
+| `main` | Release branch. Receives only merges from `dev`; every push to it is a release. | The release workflow, deployments via `:latest` |
+| `feature/*`, `fix/*`, etc. | Short-lived branches with PRs into `dev`. | Contributors |
 
-**`main` is not a deployment target.** Do not `git clone && docker compose up --build` against `main` for production use.
+**`dev` is not a deployment target.** Production pulls `:latest` or a pinned
+release.
 
-## Releases
+## Versions
 
-Stable versions are cut as **git tags** (`v0.1.0`, `v0.2.0`, …) from `main` when the tree is in a known-good state. Tagging triggers two workflows:
+Releases use calendar versioning, `YYYY.N`: the year, then a number that
+counts up from 1 with each release of that year (`2026.1`, `2026.2`, ... and
+`2027.1` after New Year). There is no major/minor distinction; a breaking
+change is marked in its PR title and the release notes instead. Tags carry
+no `v` prefix.
 
-- **`docker.yml`** — builds multi-arch images on `ghcr.io/riffado/riffado` and tags them `:X.Y.Z`, `:X.Y`, and `:latest`.
-- **`release.yml`** — drafts a GitHub Release with generated notes and attaches `docker-compose.yml` + `.env.example` as install artifacts.
+## Releasing
 
-Every push to `main` additionally publishes `:dev` — opt-in rolling image for users who explicitly want the bleeding edge. `:latest` deliberately does **not** track `main`.
+Open a PR from `dev` into `main` and merge it. `release.yml` then:
 
-## Cutting a release
+1. computes the next version from the current year's tags,
+2. builds the app image (`docker.yml`) and the mail receiver image
+   (`mail-receiver.yml`) for amd64 and arm64, tagged `:<version>` and
+   `:latest` on `ghcr.io/<owner>/<repository>` and
+   `ghcr.io/<owner>/<repository>-mail-receiver`,
+3. only when both builds pass, creates the git tag on the merge commit and
+   publishes the GitHub release, with notes generated from the pull
+   requests merged since the previous release and `docker-compose.yml` +
+   `env.example` attached.
 
-`main` is protected with required status checks, so releases go through a PR like everything else. The release script handles this in two phases.
+A failed build releases nothing; re-running the workflow takes the same
+number. A re-run on a commit that is already released does nothing.
 
-### Phase 1 — open the release PR
+The version is baked into the image (`APP_VERSION` build argument): the
+footer, `/api/health` and bug reports show it, and the footer's update
+badge compares it with the repository's latest release. Images built from
+`dev` show `dev-<commit>`.
 
-From a clean `main` that's in sync with `origin/main`:
+### Release notes
 
-```bash
-bun scripts/release.ts <major|minor|patch>
-# or an explicit version:
-bun scripts/release.ts 0.6.0
-```
+The notes are the titles of the merged pull requests, so a PR title should
+read as a line of release notes (see `AGENTS.md`). For a breaking change,
+copy the migration note from its PR description into the release text after
+the release is published.
 
-This bumps `package.json`, rewrites `## [Unreleased]` → `## [X.Y.Z] - <date>` in `CHANGELOG.md`, re-adds an empty `[Unreleased]` section, commits both on a `release/vX.Y.Z` branch, pushes the branch, and opens a PR via `gh`. **No tag is created yet.** Local `main` is restored to `origin/main` before the script exits so the working tree stays clean while the PR is in review.
+## Hotfixes
 
-### Phase 2 — finalize after merge
-
-Wait for the required checks to pass, then merge the PR. Merge-commit is preferred (preserves the release commit's SHA on `main`); squash also works because GitHub uses the PR title as the squash subject, which matches the pattern the finalize step greps for.
-
-Then:
-
-```bash
-bun scripts/release.ts finalize
-```
-
-This fetches `origin/main`, reads the merged version from `package.json`, finds the release commit by message, creates and pushes the `vX.Y.Z` tag, and deletes the `release/vX.Y.Z` branch. The tag push triggers `docker.yml` and `release.yml`.
-
-### After both phases
-
-1. Wait for `docker.yml` and `release.yml` to finish.
-2. Review the draft release on GitHub, edit notes if needed, publish.
-
-## Hotfixes (when needed)
-
-If a released version has an urgent bug and `main` has already diverged with unrelated changes:
-
-1. Fix the bug on `main` first.
-2. Branch from the release tag: `git checkout -b release-0.1 v0.1.0`.
-3. Cherry-pick the fix. Push.
-4. Tag `v0.1.1` from that branch and push.
-
-If `main` is still shippable, just cut a normal release from `main` instead.
+Fix on `dev`, then merge `dev` into `main` as usual: there is no separate
+release line. If `dev` holds unrelated work that must not ship yet, branch
+from `main`, open the fix as a PR into `main`, and merge it back into `dev`
+afterwards.

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { learnRuns, transcriptions } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
+import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { apiHandler } from "@/lib/errors";
 import { type LearnSource, startLearnRun } from "@/lib/learn/learn-job";
 import {
@@ -28,6 +29,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         actorUserId,
         source: requestedSource(request),
         trigger: "manual",
+        calendarEventId:
+            new URL(request.url).searchParams.get("calendarEventId") ??
+            undefined,
     });
     return NextResponse.json(started, { status: 202 });
 });
@@ -47,13 +51,14 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             finishedAt: learnRuns.finishedAt,
         })
         .from(learnRuns)
-        .innerJoin(
+        // A run on a mail read no transcript.
+        .leftJoin(
             transcriptions,
             eq(transcriptions.id, learnRuns.transcriptionId),
         )
         .where(
             and(
-                eq(learnRuns.recordingId, access.recordingId),
+                eq(learnRuns.itemId, access.recordingId),
                 eq(learnRuns.view, access.view),
             ),
         )
@@ -73,6 +78,7 @@ async function authorizeLearn(request: Request, recordingId: string) {
         session.user.id,
         recordingId,
         requestedRecordingView(request),
+        { kinds: ALL_ITEM_KINDS },
     );
     assertMayChange(access, session.user.id);
     return { access, actorUserId: session.user.id };

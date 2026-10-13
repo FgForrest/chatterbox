@@ -9,6 +9,7 @@ import { DevSection } from "./settings-sections/dev-section";
 import { DisplaySection } from "./settings-sections/display-section";
 import { ExportSection } from "./settings-sections/export-section";
 import { GoogleAccountSection } from "./settings-sections/google-account-section";
+import { MailSection } from "./settings-sections/mail-section";
 import { NotificationsSection } from "./settings-sections/notifications-section";
 import { PlaudAccountSection } from "./settings-sections/plaud-account-section";
 import { PlaybackSection } from "./settings-sections/playback-section";
@@ -35,6 +36,7 @@ interface SettingsContentProps {
     initialProviders?: Provider[];
     onReRunOnboarding?: () => void;
     isHosted?: boolean;
+    mailEnabled?: boolean;
     /** Forwarded to `PlaudAccountSection`; see its prop doc. */
     onPlaudReconnected?: () => void;
 }
@@ -44,6 +46,7 @@ export function SettingsContent({
     initialProviders = EMPTY_PROVIDERS,
     onReRunOnboarding,
     isHosted = false,
+    mailEnabled = false,
     onPlaudReconnected,
 }: SettingsContentProps) {
     switch (activeSection) {
@@ -88,6 +91,9 @@ export function SettingsContent({
         case "google-account":
             if (isHosted) return null;
             return <GoogleAccountSection />;
+        case "mail":
+            if (!mailEnabled) return null;
+            return <MailSection />;
         case "dev":
             if (process.env.NODE_ENV === "production") return null;
             return <DevSection />;

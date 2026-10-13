@@ -217,7 +217,6 @@ export async function extractEmailTemplateMessages(): Promise<void> {
     i18n("self-host for free");
     i18n("export everything");
     i18n("whenever you want.");
-    i18n("&bull;");
     i18n(
         "Hosted Pro is live. The essentials are at the top; the story's below. Nothing changes until {deadline}.",
         { deadline: "" },

@@ -10,8 +10,11 @@
 #          (without this override) to see the account linked
 #   dave   unverified email; same, to see linking refused
 # MCP clients: `riffado-mcp` (resource, holds the roles), `riffado-mcp-tester`
-# (public, password grant, test only) and `riffado-mcp-bot` (service account,
-# secret riffado-mcp-bot-secret).
+# (public, password grant, test only), `riffado-mcp-bot` (service account,
+# secret riffado-mcp-bot-secret), `claude` (hosted Claude apps, secret
+# claude-e2e-client-secret) and `claude-code` (public, loopback redirects).
+# Add -f docker-compose.e2e.sso-resource-indicators.yml for Keycloak's
+# experimental RFC 8707 support.
 #
 # The browser reaches Keycloak at RIFFADO_E2E_KEYCLOAK_URL; the app container
 # reaches it over the compose network. KC_HOSTNAME keeps the issuer and the
@@ -26,7 +29,7 @@
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.4.0
+    image: quay.io/keycloak/keycloak:26.6.4
     command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin

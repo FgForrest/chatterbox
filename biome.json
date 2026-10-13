@@ -11,7 +11,8 @@
             "src/**/*.{js,jsx,ts,tsx,json,css}",
             "*.{js,jsx,ts,tsx,json}",
             "!src/db/migrations",
-            "!src/.source"
+            "!src/.source",
+            "!src/lib/knowledge/stemming/snowball"
         ]
     },
     "formatter": {

@@ -5,10 +5,9 @@ import { runWithEmailLocale } from "@/lib/notifications/email-template-i18n";
 /**
  * Renders a React email template to an HTML email body.
  *
- * A minimal, dependency-free replacement for `@react-email/render`'s
- * `render(node, { pretty: false })`. Every call site in this codebase
- * already opted out of prettier-based pretty-printing (recipients never
- * see the raw HTML source), but that package's Node build eagerly
+ * Does what `@react-email/render`'s `render(node, { pretty: false })`
+ * did, without it: recipients never see the raw HTML source, and that
+ * package's Node build eagerly
  * `require()`s `prettier/plugins/html` and `prettier/standalone` at
  * module load time regardless of that option. Next.js's `standalone`
  * output tracer externalizes those into a second `.next/node_modules`

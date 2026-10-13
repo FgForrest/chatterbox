@@ -37,21 +37,16 @@ const nextConfig: NextConfig = {
             },
         ];
     },
-    // `scripts/install.sh` is read from disk at request time by the
-    // /install.sh routes; declare it so the standalone tracer ships it.
-    outputFileTracingIncludes: {
-        "/install.sh": ["./scripts/install.sh"],
-        "/[version]/install.sh": ["./scripts/install.sh"],
-    },
     images: {
         loader: "custom",
         loaderFile: "./loader.ts",
         remotePatterns: [],
     },
-    // @xenova/transformers statically imports Node-only optional deps
-    // (`onnxruntime-node`, `sharp`). Browser transcription uses
-    // `onnxruntime-web` inside a Web Worker, so stub those native deps
-    // for both Next 16's Turbopack build path and the webpack fallback.
+    // @huggingface/transformers' Node build loads `onnxruntime-node` and
+    // `sharp`. Browser transcription uses its web
+    // build (`onnxruntime-web`) inside a Web Worker, so stub those native
+    // deps in case a bundler resolves the Node build, for both Next 16's
+    // Turbopack build path and the webpack fallback.
     turbopack: {
         resolveAlias: {
             "onnxruntime-node": "./src/lib/transcription/empty-module.ts",

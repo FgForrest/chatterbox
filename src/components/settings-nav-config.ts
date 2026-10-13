@@ -10,6 +10,7 @@ import {
     KeyRound,
     ListChecks,
     ListTree,
+    Mail,
     Mic,
     Monitor,
     Play,
@@ -91,31 +92,49 @@ const baseSettingsNavGroups: { label: string; items: NavItem[] }[] = [
         : []),
 ];
 
+/** What the deployment offers the viewer, deciding which sections exist. */
+export interface SettingsNavOptions {
+    isHosted: boolean;
+    /** The instance receives mail and the viewer may have addresses. */
+    mailEnabled?: boolean;
+}
+
 /**
  * Build the settings nav. `isHosted` toggles the Billing group, which
  * is meaningless on self-host, and the Google account, which exists
- * only there.
+ * only there; `mailEnabled` adds Mail.
  */
-export function buildSettingsNavGroups(opts: {
-    isHosted: boolean;
-}): { label: string; items: NavItem[] }[] {
-    const groups = opts.isHosted
-        ? baseSettingsNavGroups
-        : baseSettingsNavGroups.map((group) =>
-              group.label === "Integrations"
-                  ? {
-                        ...group,
-                        items: [
-                            ...group.items,
-                            {
-                                name: "Google Account",
-                                id: "google-account" as SettingsSection,
-                                icon: Cloud,
-                            },
-                        ],
-                    }
-                  : group,
-          );
+export function buildSettingsNavGroups(
+    opts: SettingsNavOptions,
+): { label: string; items: NavItem[] }[] {
+    const groups = baseSettingsNavGroups.map((group) =>
+        group.label === "Integrations"
+            ? {
+                  ...group,
+                  items: [
+                      ...(opts.mailEnabled
+                          ? [
+                                {
+                                    name: "Mail",
+                                    id: "mail" as SettingsSection,
+                                    icon: Mail,
+                                },
+                            ]
+                          : []),
+                      ...group.items,
+                      ...(opts.isHosted
+                          ? []
+                          : [
+                                {
+                                    name: "Google Account",
+                                    id: "google-account" as SettingsSection,
+                                    icon: Cloud,
+                                },
+                            ]),
+                  ],
+              }
+            : group,
+    );
     return [
         ...(opts.isHosted
             ? [
@@ -140,7 +159,7 @@ export function buildSettingsNavGroups(opts: {
  * for keyboard nav / hash routing / localStorage. Changing the group
  * structure must not break index-based iteration.
  */
-export function buildSettingsNav(opts: { isHosted: boolean }): NavItem[] {
+export function buildSettingsNav(opts: SettingsNavOptions): NavItem[] {
     return buildSettingsNavGroups(opts).flatMap((g) => g.items);
 }
 

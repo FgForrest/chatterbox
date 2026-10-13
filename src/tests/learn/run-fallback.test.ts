@@ -59,6 +59,135 @@ const relations = [
 ];
 
 describe("runFallbackPass", () => {
+    it("offers matched names for every addressed label after identifying the recorder", async () => {
+        const turns: TranscriptTurn[] = [
+            {
+                speaker: "speaker_0",
+                startMs: 0,
+                endMs: 1_000,
+                text: "Marto, can you take this?",
+            },
+            {
+                speaker: "speaker_4",
+                startMs: 1_000,
+                endMs: 2_000,
+                text: "Yes, I can.",
+            },
+            {
+                speaker: "speaker_0",
+                startMs: 2_000,
+                endMs: 3_000,
+                text: "Pavle, what about you?",
+            },
+            {
+                speaker: "speaker_3",
+                startMs: 3_000,
+                endMs: 4_000,
+                text: "I will handle it.",
+            },
+        ];
+        const people: Record<string, FoundEntity[]> = {
+            Marto: [
+                {
+                    id: "p-marta-a",
+                    kind: "person",
+                    typeKey: "person",
+                    name: "Marta Adamová",
+                    scope: "personal",
+                    reasons: ["stem"],
+                    score: 0.88,
+                },
+                {
+                    id: "p-marta-b",
+                    kind: "person",
+                    typeKey: "person",
+                    name: "Marta Benešová",
+                    scope: "personal",
+                    reasons: ["stem"],
+                    score: 0.88,
+                },
+            ],
+            Pavle: [
+                {
+                    id: "p-pavel",
+                    kind: "person",
+                    typeKey: "person",
+                    name: "Pavel Dvořák",
+                    scope: "personal",
+                    reasons: ["stem"],
+                    score: 0.88,
+                },
+            ],
+        };
+        const lookup = {
+            findEntities: vi.fn(async ({ text }: { text: string }) => ({
+                entities: people[text] ?? [],
+            })),
+        };
+        const { chat, calls } = fakeChat([
+            JSON.stringify({
+                mentions: [{ text: "Pavle", turn: 2 }],
+            }),
+            JSON.stringify({
+                speakers: [
+                    {
+                        label: "speaker_3",
+                        personId: "p-pavel",
+                        evidence: ["00:02", "00:03"],
+                        reason: "Pavel answers",
+                    },
+                ],
+                corrections: [],
+                facts: [],
+                relationPhrases: [],
+            }),
+        ]);
+        const result = await runFallbackPass({
+            chat,
+            lookup,
+            turns,
+            language: "cs",
+            relations: [],
+            unnamedLabels: ["speaker_0", "speaker_3", "speaker_4"],
+            recorder: { personId: "p-recorder", name: "Recorder" },
+            speakerCandidates: [{ name: "Marta Adamová", source: "calendar" }],
+        });
+        const context = JSON.parse(
+            (calls[1]?.[1]?.content ?? "").split("\n")[1] ?? "{}",
+        );
+        expect(
+            context.candidates.filter((item: { mentionedAs: string[] }) =>
+                item.mentionedAs.includes("Marto"),
+            ),
+        ).toHaveLength(2);
+        expect(lookup.findEntities).toHaveBeenCalledWith({
+            text: "Marto",
+            type: "person",
+            byName: true,
+        });
+        expect(
+            context.candidates.filter((item: { addressedLabels: string[] }) =>
+                item.addressedLabels.includes("speaker_4"),
+            ),
+        ).toHaveLength(2);
+        expect(
+            context.candidates.find(
+                (item: { id: string }) => item.id === "p-pavel",
+            ).mentionedAs,
+        ).toEqual(["Pavle"]);
+        expect(context.speakerCandidates).toEqual([
+            { name: "Marta Adamová", source: "calendar" },
+        ]);
+        expect(calls[1]?.[0]?.content).toContain(
+            "assess every unnamed label separately",
+        );
+        expect(calls[1]?.[0]?.content).toContain(
+            "not proof that a person spoke",
+        );
+        expect(result.output.speakers.map((speaker) => speaker.label)).toEqual([
+            "speaker_3",
+        ]);
+    });
     it("renders each turn with its index, time and label, the times the model must quote", () => {
         expect(renderLearnTranscript(TURNS, 0)).toBe(
             "[T0 00:00] speaker_0: Dobrý den. Máme dnes Tavesy a Tavesy znovu.\n[T1 00:18] speaker_1: Ahoj, tady Jan. Vedu projekt Orion.",

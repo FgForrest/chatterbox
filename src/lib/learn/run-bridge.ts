@@ -25,9 +25,11 @@ import {
     type LearnEntityTypeChoice,
     type LearnRecorder,
     type LearnRelationChoice,
+    type LearnSpeakerCandidate,
     NEW_RECORDS_RULE,
     RECORDER_RULE,
     renderLearnTranscript,
+    SPEAKER_RULE,
 } from "@/lib/learn/run-fallback";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -54,6 +56,8 @@ export interface BridgeInput {
     unnamedLabels: readonly string[];
     /** Who made the recording, when the knowledge base knows them. */
     recorder?: LearnRecorder | null;
+    /** Optional possible attendees; never direct speaker evidence. */
+    speakerCandidates?: readonly LearnSpeakerCandidate[];
     signal?: AbortSignal;
 }
 
@@ -67,8 +71,9 @@ const BRIDGE_SYSTEM = [
     "You get a meeting transcript, the relation types and entity types you may use, and the speaker labels nobody has named yet.",
     DATA_RULE,
     "Look things up with the knowledge base tools: find_entities for words that may name a person, organization, project, product or term (as written, misheard or not), get_entity and find_facts for what a record says. Use only ids the tools returned. Before proposing a new record, look its name up again in its base form (the nominative, spelled right where it sounds misheard) and, for a nickname or short form, by the full name it stands for (Honza: Jan); only a name none of these finds may be a new record.",
+    "For each unnamed speaker label, inspect adjacent address-and-reply turns and call find_entities for the spoken name or nickname and its base form. Check every returned person with that name before deciding whether the label is identifiable.",
     "Propose only what the transcript itself supports; propose nothing rather than guess. Everything you propose is reviewed by a person.",
-    "speakers: for an unnamed label only. Name a known person (personId) only on direct evidence in the transcript: the speaker introduces themselves, or is addressed by name and answers in the next turn, or confirms a name said about them. Never from what they talk about, and never because another label is someone else. The meeting may include people the knowledge base does not know: a first name alone (or its inflected form, such as a vocative) fits a known person only when no other known person has that first name, and even then it may be someone else; when in doubt answer null. evidence is 1-3 times copied from the transcript lines where the name is said or answered.",
+    SPEAKER_RULE,
     RECORDER_RULE,
     NEW_RECORDS_RULE,
     "corrections: only for a known record or a new one. Kind `correct` where the transcript misheard or misspelled its name: the turn index, the heard words exactly as written, their 0-based character offsets in that turn's text, the target id and the replacement, which is the same word spelled right in the same grammatical form (keep the case ending the sentence needs). Kind `link` with replacement null only where the words are a nickname, short name or slang for a known person or thing (such as Vonďa or Excelík): never rewrite those. Where the words already are the name, inflected or not, propose nothing, and never link or rewrite a first name alone: it may be anyone of that name. A misheard person's replacement is their full name in the form the sentence needs.",
@@ -96,6 +101,7 @@ export async function runBridgePass(
         entityTypes: input.entityTypes ?? [],
         unnamedSpeakerLabels: input.unnamedLabels,
         recorder: input.recorder ?? null,
+        speakerCandidates: input.speakerCandidates ?? [],
     };
     const user = `CHOICES (JSON):\n${JSON.stringify(context)}\n\nTRANSCRIPT:\n${renderLearnTranscript(input.turns, 0)}`;
     const result: FallbackResult = {

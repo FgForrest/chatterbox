@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, RefreshCw, Upload } from "lucide-react";
+import { MessagesSquare, RefreshCw, Upload } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,7 +21,7 @@ export function WorkstationEmptyState({ isSyncing, onSync, onUpload }: Props) {
     return (
         <Card>
             <CardContent className="flex flex-col items-center justify-center py-16">
-                <Mic className="mb-4 size-16 text-muted-foreground" />
+                <MessagesSquare className="mb-4 size-16 text-muted-foreground" />
                 <h3 className="mb-2 text-lg font-semibold">
                     {i18n("No recordings yet")}
                 </h3>
