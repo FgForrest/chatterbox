@@ -23,6 +23,7 @@ import {
 } from "./finalize-job";
 import { buildMeetingTitle, readRecordingSessionMetadata } from "./metadata";
 import {
+    getRecordingForCapture,
     getRecordingSessionForUser,
     listRecordingSessionChunks,
     markRecordingSessionCompleted,
@@ -120,12 +121,14 @@ async function assembleChunks(
     storage: StorageProvider,
     chunks: RecordingSessionChunkRow[],
     destinationPath: string,
+    signal: AbortSignal,
 ): Promise<void> {
     const output = createWriteStream(destinationPath);
     try {
         for (const chunk of chunks) {
+            signal.throwIfAborted();
             const stream = await storage.downloadStream(chunk.storageKey);
-            await pipeline(stream, output, { end: false });
+            await pipeline(stream, output, { end: false, signal });
         }
         await new Promise<void>((resolve, reject) => {
             output.end((error?: Error | null) =>
@@ -200,6 +203,37 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
             }
 
             const storage = await createUserStorageProvider(userId);
+            const existing = await getRecordingForCapture(
+                userId,
+                session.clientRecordingId,
+            );
+            if (existing) {
+                if (
+                    await markRecordingSessionCompleted(
+                        session.id,
+                        userId,
+                        existing.recordingId,
+                    )
+                ) {
+                    await purgeRecordingSessionChunks(storage, session.id);
+                } else {
+                    const latest = await getRecordingSessionForUser(
+                        session.id,
+                        userId,
+                    );
+                    if (
+                        latest?.status !== "completed" ||
+                        latest.recordingId !== existing.recordingId
+                    ) {
+                        throw new AppError(
+                            ErrorCode.CONFLICT,
+                            "Recording session changed during finalization",
+                            409,
+                        );
+                    }
+                }
+                return { ...existing, alreadyDone: true };
+            }
             const chunks = (
                 await listRecordingSessionChunks(session.id)
             ).filter(
@@ -215,7 +249,7 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                 const rawPath = path.join(temporaryDirectory, "input");
                 const oggPath = path.join(temporaryDirectory, "audio.ogg");
 
-                await assembleChunks(storage, chunks, rawPath);
+                await assembleChunks(storage, chunks, rawPath, signal);
                 const rawStat = await stat(rawPath);
                 if (rawStat.size === 0) {
                     throw new AppError(
@@ -232,22 +266,54 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                 );
                 const title = buildMeetingTitle(metadata, session.startedAt);
 
-                const saved = await saveUploadedAudioFile({
-                    userId,
-                    fileId: `meeting-${session.id}`,
-                    basename: title,
-                    extension: ".ogg",
-                    filePath: oggPath,
-                    storage,
-                    recordedAt: session.startedAt,
-                });
+                signal.throwIfAborted();
+                let saved: {
+                    recordingId: string;
+                    durationMs: number;
+                    filesize: number;
+                };
+                try {
+                    saved = await saveUploadedAudioFile({
+                        userId,
+                        fileId: `meeting-${session.clientRecordingId}`,
+                        basename: title,
+                        extension: ".ogg",
+                        filePath: oggPath,
+                        storage,
+                        recordedAt: session.startedAt,
+                    });
+                } catch (error) {
+                    const alreadySaved = await getRecordingForCapture(
+                        userId,
+                        session.clientRecordingId,
+                    );
+                    if (!alreadySaved) throw error;
+                    saved = alreadySaved;
+                }
 
-                await markRecordingSessionCompleted(
+                const completed = await markRecordingSessionCompleted(
                     session.id,
                     userId,
                     saved.recordingId,
                 );
-                await purgeRecordingSessionChunks(storage, session.id);
+                if (completed) {
+                    await purgeRecordingSessionChunks(storage, session.id);
+                } else {
+                    const latest = await getRecordingSessionForUser(
+                        session.id,
+                        userId,
+                    );
+                    if (
+                        latest?.status !== "completed" ||
+                        latest.recordingId !== saved.recordingId
+                    ) {
+                        throw new AppError(
+                            ErrorCode.CONFLICT,
+                            "Recording session changed during finalization",
+                            409,
+                        );
+                    }
+                }
 
                 return {
                     recordingId: saved.recordingId,
@@ -258,7 +324,7 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
             } catch (error) {
                 const willRetry =
                     attempt < maxAttempts && isRetryableError(error);
-                if (!willRetry) {
+                if (!willRetry && !signal.aborted) {
                     // Terminal: record why and keep the chunks for recovery.
                     // The sweeper deletes them after the retention window.
                     const message =

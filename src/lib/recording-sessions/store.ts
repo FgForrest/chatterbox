@@ -5,6 +5,7 @@ import {
     recordingCaptureKeys,
     recordingSessionChunks,
     recordingSessions,
+    recordings,
 } from "@/db/schema";
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -266,6 +267,32 @@ export async function getRecordingSessionForUser(
     return row ?? null;
 }
 
+/** Find the one recording produced by a capture, including a replacement session. */
+export async function getRecordingForCapture(
+    userId: string,
+    clientRecordingId: string,
+): Promise<{
+    recordingId: string;
+    durationMs: number;
+    filesize: number;
+} | null> {
+    const [row] = await db
+        .select({
+            recordingId: recordings.id,
+            durationMs: recordings.duration,
+            filesize: recordings.filesize,
+        })
+        .from(recordings)
+        .where(
+            and(
+                eq(recordings.userId, userId),
+                eq(recordings.plaudFileId, `meeting-${clientRecordingId}`),
+            ),
+        )
+        .limit(1);
+    return row ?? null;
+}
+
 export async function listRecordingSessionsForUser(
     userId: string,
     opts: { limit: number; status?: RecordingSessionStatus },
@@ -492,8 +519,8 @@ export async function markRecordingSessionCompleted(
     sessionId: string,
     userId: string,
     recordingId: string,
-): Promise<void> {
-    await db.transaction(async (tx) => {
+): Promise<boolean> {
+    return db.transaction(async (tx) => {
         const [session] = await tx
             .update(recordingSessions)
             .set({
@@ -507,10 +534,11 @@ export async function markRecordingSessionCompleted(
                 and(
                     eq(recordingSessions.id, sessionId),
                     eq(recordingSessions.userId, userId),
+                    eq(recordingSessions.status, "completing"),
                 ),
             )
             .returning({ captureKeyId: recordingSessions.captureKeyId });
-        if (!session) throw new Error("Completed session not found");
+        if (!session) return false;
         await tx
             .update(recordingCaptureKeys)
             .set({
@@ -525,6 +553,7 @@ export async function markRecordingSessionCompleted(
                     eq(recordingCaptureKeys.userId, userId),
                 ),
             );
+        return true;
     });
 }
 
@@ -545,6 +574,7 @@ export async function markRecordingSessionFailed(
             and(
                 eq(recordingSessions.id, sessionId),
                 eq(recordingSessions.userId, userId),
+                eq(recordingSessions.status, "completing"),
             ),
         );
 }

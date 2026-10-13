@@ -28,4 +28,4 @@ You can stop a recording, change the destination server, revoke the recorder key
 
 ## Policy updates and contact
 
-We will update this policy when the extension's data handling changes and ask for renewed agreement when required. For questions about this extension, open an issue in the [Chatterbox repository](https://github.com/FgForrest/chatterbox/issues). For questions about a self-hosted server's handling of recordings, contact that server's operator.
+We will update this policy when the extension's data handling changes and ask for renewed agreement when required. For questions about this extension, email [application_development@fg.cz](mailto:application_development@fg.cz). For questions about a self-hosted server's handling of recordings, contact that server's operator.

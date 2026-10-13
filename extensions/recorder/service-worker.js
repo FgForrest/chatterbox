@@ -248,6 +248,7 @@ async function startRecording({
     if (!(await getSettings()).dataUseAcknowledgedAt) {
         throw new Error(t("dataUseRequired"));
     }
+    const apiKey = await readToken();
 
     await setState({ state: STATE.awaitingPicker, error: null });
 
@@ -277,7 +278,7 @@ async function startRecording({
         await setState({ state: STATE.error, error: t("encryptedServerRequired") });
         throw new Error(t("encryptedServerRequired"));
     }
-    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+    const auth = { serverUrl: settings.serverUrl, apiKey };
     const startedAt = new Date().toISOString();
     const clientRecordingId = crypto.randomUUID();
     const channelLayout =
@@ -497,10 +498,9 @@ async function finalize(truncatedAtChunk = null) {
     if (state.state === STATE.finalizing && state.jobId) return;
 
     await setState({ state: STATE.finalizing });
-    const settings = await getSettings();
-    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
-
     try {
+        const settings = await getSettings();
+        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
         const result = await completeSession(auth, state.sessionId, {
             chunkCount: state.chunkCount,
             ...(truncatedAtChunk ? { truncatedAtChunk } : {}),

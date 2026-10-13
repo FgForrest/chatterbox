@@ -28,4 +28,4 @@ Můžete zastavit nahrávání, změnit cílový server, zneplatnit klíč na se
 
 ## Změny zásad a kontakt
 
-Při změně nakládání s daty v rozšíření tyto zásady aktualizujeme a tam, kde je to vyžadováno, požádáme o nový souhlas. Dotazy k rozšíření můžete zadat jako [issue v repozitáři Chatterbox](https://github.com/FgForrest/chatterbox/issues). Dotazy ke zpracování dat na vlastním serveru směřujte na jeho provozovatele.
+Při změně nakládání s daty v rozšíření tyto zásady aktualizujeme a tam, kde je to vyžadováno, požádáme o nový souhlas. S dotazy k rozšíření pište na [application_development@fg.cz](mailto:application_development@fg.cz). Dotazy ke zpracování dat na vlastním serveru směřujte na jeho provozovatele.
