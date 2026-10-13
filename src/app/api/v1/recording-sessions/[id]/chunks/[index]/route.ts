@@ -6,10 +6,7 @@ import {
     CHUNK_ENVELOPE_OVERHEAD,
     decryptRecorderChunk,
 } from "@/lib/recording-sessions/chunk-crypto";
-import {
-    MAX_CHUNK_BYTES,
-    MAX_SESSION_BYTES,
-} from "@/lib/recording-sessions/constants";
+import { MAX_CHUNK_BYTES } from "@/lib/recording-sessions/constants";
 import {
     parseChunkIndex,
     parseSha256,
@@ -18,9 +15,9 @@ import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate
 import { recordingSessionChunkKey } from "@/lib/recording-sessions/storage-keys";
 import {
     getRecordingCaptureKey,
+    getRecordingSessionChunk,
     getRecordingSessionForUser,
     insertRecordingSessionChunk,
-    sumRecordingSessionBytes,
     touchRecordingSession,
 } from "@/lib/recording-sessions/store";
 import { createUserStorageProvider } from "@/lib/storage/factory";
@@ -128,14 +125,19 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
         throw new AppError(ErrorCode.FILE_TOO_LARGE, "Chunk too large", 413);
     }
     const plaintextSha = createHash("sha256").update(plaintext).digest("hex");
-
-    // Running total guard, before writing this chunk's bytes.
-    const alreadyStored = await sumRecordingSessionBytes(session.id);
-    if (alreadyStored + plaintext.length > MAX_SESSION_BYTES) {
-        throw new AppError(
-            ErrorCode.FILE_TOO_LARGE,
-            `Recording exceeds the ${MAX_SESSION_BYTES} byte session limit`,
-            413,
+    const prior = await getRecordingSessionChunk(session.id, index);
+    if (prior) {
+        if (prior.sha256 !== plaintextSha) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                `Chunk ${index} already exists with different content`,
+                409,
+            );
+        }
+        await touchRecordingSession(session.id, authn.user.id);
+        return NextResponse.json(
+            { index, size: prior.size, sha256: prior.sha256, duplicate: true },
+            { status: 200 },
         );
     }
 
@@ -161,13 +163,31 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
     const storage = await createUserStorageProvider(authn.user.id);
     await storage.uploadFile(storageKey, plaintext, session.mimeType);
 
-    const { inserted, row } = await insertRecordingSessionChunk({
-        sessionId: session.id,
-        index,
-        size: plaintext.length,
-        sha256: plaintextSha,
-        storageKey,
-    });
+    let committed: Awaited<ReturnType<typeof insertRecordingSessionChunk>>;
+    try {
+        committed = await insertRecordingSessionChunk({
+            sessionId: session.id,
+            userId: authn.user.id,
+            index,
+            size: plaintext.length,
+            sha256: plaintextSha,
+            storageKey,
+        });
+    } catch (error) {
+        const existing = await getRecordingSessionChunk(session.id, index);
+        if (existing?.storageKey !== storageKey) {
+            await storage
+                .deleteFile(storageKey)
+                .catch((cleanupError) =>
+                    console.error(
+                        "Could not remove uncommitted recorder chunk:",
+                        cleanupError,
+                    ),
+                );
+        }
+        throw error;
+    }
+    const { inserted, row } = committed;
 
     if (!inserted) {
         if (row.sha256 !== plaintextSha) {

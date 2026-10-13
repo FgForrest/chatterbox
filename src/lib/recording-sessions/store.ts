@@ -9,6 +9,7 @@ import {
 import { decrypt, encrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { StorageProvider } from "@/lib/storage/types";
+import { MAX_SESSION_BYTES } from "./constants";
 import type { RecordingSessionMetadata } from "./metadata";
 
 export type RecordingSessionRow = typeof recordingSessions.$inferSelect;
@@ -306,18 +307,6 @@ export async function getRecordingSessionChunk(
     return row ?? null;
 }
 
-export async function sumRecordingSessionBytes(
-    sessionId: string,
-): Promise<number> {
-    const [row] = await db
-        .select({
-            total: sql<number>`coalesce(sum(${recordingSessionChunks.size}), 0)::bigint`,
-        })
-        .from(recordingSessionChunks)
-        .where(eq(recordingSessionChunks.sessionId, sessionId));
-    return Number(row?.total ?? 0);
-}
-
 /**
  * Record a chunk. Returns the committed row for this index, which is the
  * new one when the insert won and the pre-existing one when it did not --
@@ -325,27 +314,68 @@ export async function sumRecordingSessionBytes(
  */
 export async function insertRecordingSessionChunk(input: {
     sessionId: string;
+    userId: string;
     index: number;
     size: number;
     sha256: string;
     storageKey: string;
 }): Promise<{ inserted: boolean; row: RecordingSessionChunkRow }> {
-    const [inserted] = await db
-        .insert(recordingSessionChunks)
-        .values(input)
-        .onConflictDoNothing()
-        .returning();
-    if (inserted) return { inserted: true, row: inserted };
-    const existing = await getRecordingSessionChunk(
-        input.sessionId,
-        input.index,
-    );
-    if (!existing) {
-        throw new Error(
-            `Chunk ${input.index} of session ${input.sessionId} vanished between insert and read`,
-        );
-    }
-    return { inserted: false, row: existing };
+    return db.transaction(async (tx) => {
+        const [session] = await tx
+            .select({ status: recordingSessions.status })
+            .from(recordingSessions)
+            .where(
+                and(
+                    eq(recordingSessions.id, input.sessionId),
+                    eq(recordingSessions.userId, input.userId),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!session || session.status !== "open") {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Recording session is no longer open",
+                409,
+            );
+        }
+        const [existing] = await tx
+            .select()
+            .from(recordingSessionChunks)
+            .where(
+                and(
+                    eq(recordingSessionChunks.sessionId, input.sessionId),
+                    eq(recordingSessionChunks.index, input.index),
+                ),
+            )
+            .limit(1);
+        if (existing) return { inserted: false, row: existing };
+        const [total] = await tx
+            .select({
+                value: sql<number>`coalesce(sum(${recordingSessionChunks.size}), 0)::bigint`,
+            })
+            .from(recordingSessionChunks)
+            .where(eq(recordingSessionChunks.sessionId, input.sessionId));
+        if (Number(total?.value ?? 0) + input.size > MAX_SESSION_BYTES) {
+            throw new AppError(
+                ErrorCode.FILE_TOO_LARGE,
+                "Recording exceeds the session limit",
+                413,
+            );
+        }
+        const [inserted] = await tx
+            .insert(recordingSessionChunks)
+            .values({
+                sessionId: input.sessionId,
+                index: input.index,
+                size: input.size,
+                sha256: input.sha256,
+                storageKey: input.storageKey,
+            })
+            .returning();
+        if (!inserted) throw new Error("Chunk insert returned no row");
+        return { inserted: true, row: inserted };
+    });
 }
 
 /** Touch `updated_at` so the sweeper knows the session is alive. */
@@ -391,27 +421,61 @@ export async function markRecordingSessionCompleting(input: {
     expectedChunkCount: number;
     truncatedAtChunk: number | null;
 }): Promise<RecordingSessionRow | null> {
-    const [row] = await db
-        .update(recordingSessions)
-        .set({
-            status: "completing",
-            endedAt: input.endedAt,
-            stopReason: input.stopReason,
-            expectedChunkCount: input.expectedChunkCount,
-            truncatedAtChunk: input.truncatedAtChunk,
-            lastError: null,
-            terminalCode: null,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(recordingSessions.id, input.sessionId),
-                eq(recordingSessions.userId, input.userId),
-                eq(recordingSessions.status, "open"),
-            ),
-        )
-        .returning();
-    return row ?? null;
+    return db.transaction(async (tx) => {
+        const [session] = await tx
+            .select({ status: recordingSessions.status })
+            .from(recordingSessions)
+            .where(
+                and(
+                    eq(recordingSessions.id, input.sessionId),
+                    eq(recordingSessions.userId, input.userId),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!session || session.status !== "open") return null;
+        const chunks = await tx
+            .select({ index: recordingSessionChunks.index })
+            .from(recordingSessionChunks)
+            .where(eq(recordingSessionChunks.sessionId, input.sessionId))
+            .orderBy(asc(recordingSessionChunks.index));
+        const prefix = chunks.filter(
+            (chunk) => chunk.index < input.expectedChunkCount,
+        );
+        if (
+            prefix.length !== input.expectedChunkCount ||
+            prefix.some((chunk, index) => chunk.index !== index) ||
+            (!input.truncatedAtChunk &&
+                chunks.length !== input.expectedChunkCount)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Recording chunks changed while completing; retry with current server state",
+                422,
+            );
+        }
+        const [row] = await tx
+            .update(recordingSessions)
+            .set({
+                status: "completing",
+                endedAt: input.endedAt,
+                stopReason: input.stopReason,
+                expectedChunkCount: input.expectedChunkCount,
+                truncatedAtChunk: input.truncatedAtChunk,
+                lastError: null,
+                terminalCode: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingSessions.id, input.sessionId),
+                    eq(recordingSessions.userId, input.userId),
+                    eq(recordingSessions.status, "open"),
+                ),
+            )
+            .returning();
+        return row ?? null;
+    });
 }
 
 export async function setRecordingSessionJob(
