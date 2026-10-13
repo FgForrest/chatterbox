@@ -66,6 +66,7 @@ vi.mock("@/lib/auth-request", () => ({
     authenticateRequest: vi
         .fn()
         .mockResolvedValue({ user: { id: "user-alice" }, via: "session" }),
+    requireApiScope: vi.fn(),
 }));
 vi.mock("@/lib/v1/rate-limit", () => ({
     enforceV1IpRateLimit: vi.fn().mockResolvedValue(null),

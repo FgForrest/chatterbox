@@ -254,12 +254,39 @@ curl -L -H "Authorization: Bearer op_..." \
 for unsatisfiable starts (past EOF or `start > end`). Oversized `end`
 values are clamped to `fileSize - 1` per RFC 7233.
 
-## What about writes?
+## Writes: recording sessions
 
-There are no public write endpoints. The `/api/v1/*` surface is
-read-only by design today. If you need to push data *in*, run the
-Riffado UI or sync the source Plaud account via the configured
-sync loop.
+The read endpoints above accept any key. Writing is gated on the
+`recordings:write` scope, which only the streaming recording-session
+surface uses. A key with just `read` (the default) cannot call these.
+
+This surface exists for the [Meeting Recorder](../guides/meeting-recorder)
+extension, which uploads audio in chunks as it is captured. The flow is:
+
+1. `POST /api/v1/recording-sessions` — open a session. Body includes
+   `mimeType` (`audio/webm` or `audio/ogg`), `channelLayout`, `startedAt`,
+   and optional `platformHint`, `clientVersion`, `timezoneOffsetMinutes`,
+   `noticeAcknowledgedAt`. Returns the session `id`.
+2. `PUT /api/v1/recording-sessions/{id}/chunks/{index}` — upload one chunk as
+   the raw request body, with an `X-Chunk-SHA256` header. Indices start at 0
+   and must be contiguous. Re-sending an index with the same bytes is a no-op;
+   a different body on a taken index is a `409`.
+3. `POST /api/v1/recording-sessions/{id}/complete` — declare the session
+   finished with `chunkCount`, `endedAt`, and `stopReason`. The server verifies
+   every chunk arrived, then assembles and remuxes them into a recording. The
+   response carries a `job_id`; follow `GET /api/jobs/{job_id}` for progress.
+4. `GET /api/v1/recording-sessions/{id}` — status and the list of received
+   chunk indices, used to resume after an interruption.
+5. `DELETE /api/v1/recording-sessions/{id}` — abort and delete buffered chunks.
+
+A paired extension also reads its server defaults from
+`GET /api/v1/recorder/config` (same scope): which platforms record
+automatically, the auto-stop quiet period, the notice text, and whether
+users may override them. These come from the `RECORDER_*` environment
+variables and are inert when unset.
+
+There are no other public write endpoints. To push finished audio in through
+the UI instead, use the upload button in the dashboard.
 
 ## Stability
 

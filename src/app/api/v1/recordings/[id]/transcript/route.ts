@@ -2,7 +2,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
-import { authenticateRequest } from "@/lib/auth-request";
+import { authenticateRequest, requireApiScope } from "@/lib/auth-request";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { correctionOverlay } from "@/lib/learn/llm-input";
 import {
@@ -25,6 +25,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     if (!authn) {
         throw new AppError(ErrorCode.UNAUTHORIZED, "Unauthorized", 401);
     }
+
+    requireApiScope(authn, "read");
 
     const authLimitResponse = await enforceV1AuthenticatedRateLimit(authn);
     if (authLimitResponse) return authLimitResponse;

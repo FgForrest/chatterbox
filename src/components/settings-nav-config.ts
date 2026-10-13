@@ -15,6 +15,7 @@ import {
     Monitor,
     Play,
     RefreshCw,
+    Video,
     Webhook,
     Wrench,
 } from "lucide-react";
@@ -70,6 +71,7 @@ const baseSettingsNavGroups: { label: string; items: NavItem[] }[] = [
     {
         label: "Integrations",
         items: [
+            { name: "Meeting Recorder", id: "recorder", icon: Video },
             { name: "API Keys", id: "api-keys", icon: KeyRound },
             { name: "Webhooks", id: "webhooks", icon: Webhook },
         ],

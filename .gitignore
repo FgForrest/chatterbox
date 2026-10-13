@@ -59,3 +59,7 @@ plans/
 # bun (we use pnpm; bun is only a runtime for scripts/tests)
 bun.lock
 /src/.source
+
+# meeting recorder extension build output
+/extensions/recorder/dist/
+/extensions/signing-keys/*.pem

@@ -1,0 +1,1 @@
+ALTER TABLE "recording_sessions" ADD COLUMN "terminal_code" varchar(32);

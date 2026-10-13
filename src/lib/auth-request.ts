@@ -10,7 +10,27 @@ export type AuthenticatedRequest = {
     user: { id: string };
     via: "session" | "api-key";
     apiKeyId?: string;
+    /** Scopes of the API key that authenticated this request. Absent for sessions. */
+    scopes?: ApiKeyScope[];
 };
+
+/**
+ * Every scope an API key can carry.
+ *
+ * `read` is the original, implicit grant of every key. `recordings:write`
+ * lets a key create recordings through the streaming upload surface
+ * (`/api/v1/recording-sessions`); it is what the meeting recorder extension
+ * is issued, and nothing else.
+ */
+export const API_KEY_SCOPES = ["read", "recordings:write"] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+function isApiKeyScope(value: unknown): value is ApiKeyScope {
+    return (
+        typeof value === "string" &&
+        (API_KEY_SCOPES as readonly string[]).includes(value)
+    );
+}
 
 export type ApiKeyRow = typeof apiKeys.$inferSelect;
 
@@ -122,12 +142,38 @@ export function isApiKeyActive(
     return true;
 }
 
-export function normalizeApiKeyScopes(scopes: unknown): string[] {
+export function normalizeApiKeyScopes(scopes: unknown): ApiKeyScope[] {
     if (!Array.isArray(scopes)) return ["read"];
-    const normalized = scopes.filter((scope): scope is string => {
-        return scope === "read";
-    });
+    const normalized = [...new Set(scopes.filter(isApiKeyScope))];
     return normalized.length > 0 ? normalized : ["read"];
+}
+
+/**
+ * Whether the request may perform an action needing `scope`.
+ *
+ * A browser session is the user themselves and is never scope-limited; an
+ * API key is limited to exactly what it was issued with.
+ */
+export function hasApiScope(
+    authn: AuthenticatedRequest,
+    scope: ApiKeyScope,
+): boolean {
+    if (authn.via === "session") return true;
+    return (authn.scopes ?? []).includes(scope);
+}
+
+/** Throw a 403 unless the request carries `scope`. */
+export function requireApiScope(
+    authn: AuthenticatedRequest,
+    scope: ApiKeyScope,
+): void {
+    if (hasApiScope(authn, scope)) return;
+    throw new AppError(
+        ErrorCode.FORBIDDEN,
+        `This API key does not have the ${scope} scope`,
+        403,
+        { requiredScope: scope },
+    );
 }
 
 function getBearerToken(request: Request): string | null {
@@ -195,6 +241,7 @@ export async function authenticateRequest(
             user: { id: apiKey.userId },
             via: "api-key",
             apiKeyId: apiKey.id,
+            scopes: normalizeApiKeyScopes(apiKey.scopes),
         };
     }
 

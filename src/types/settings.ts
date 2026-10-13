@@ -5,6 +5,7 @@
 export type SettingsSection =
     | "providers"
     | "api-keys"
+    | "recorder"
     | "webhooks"
     | "transcription"
     | "topics"

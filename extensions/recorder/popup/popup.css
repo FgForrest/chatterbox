@@ -1,0 +1,141 @@
+:root {
+    color-scheme: light dark;
+    font-family:
+        system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+    width: 300px;
+    margin: 0;
+    padding: 12px 14px 16px;
+    background: Canvas;
+    color: CanvasText;
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+h1 {
+    font-size: 14px;
+    margin: 0;
+}
+
+p {
+    font-size: 13px;
+    line-height: 1.4;
+    margin: 0 0 10px;
+}
+
+.hint {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+.error {
+    color: #d33;
+}
+
+button {
+    font: inherit;
+    font-size: 13px;
+    padding: 7px 12px;
+    border-radius: 7px;
+    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+    background: color-mix(in srgb, CanvasText 6%, transparent);
+    color: inherit;
+    cursor: pointer;
+}
+
+button.primary {
+    background: #2f6feb;
+    border-color: #2f6feb;
+    color: #fff;
+    width: 100%;
+}
+
+button.danger {
+    background: #d33;
+    border-color: #d33;
+    color: #fff;
+    width: 100%;
+}
+
+button.link {
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: 12px;
+    opacity: 0.75;
+    width: auto;
+}
+
+.row {
+    display: flex;
+    gap: 8px;
+}
+
+.row button {
+    flex: 1;
+}
+
+.check {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+.dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #d33;
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    50% {
+        opacity: 0.3;
+    }
+}
+
+.meter {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.meter label {
+    width: 44px;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.bar {
+    flex: 1;
+    height: 8px;
+    border-radius: 4px;
+    background: color-mix(in srgb, CanvasText 12%, transparent);
+    overflow: hidden;
+}
+
+.bar > div {
+    height: 100%;
+    width: 0%;
+    background: #2f6feb;
+    transition: width 0.12s linear;
+}
