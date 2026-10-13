@@ -12,6 +12,10 @@ import {
     STORAGE_KEYS,
 } from "./constants.js";
 import { PLATFORM_IDS } from "./platforms.js";
+import { t } from "./i18n.js";
+
+const LEGACY_SERVER_NOTICE =
+    "Meetings I record with Riffado are transcribed and summarized. I will inform the other participants before recording.";
 
 /**
  * @typedef {Object} ServerDefaults
@@ -49,7 +53,10 @@ export async function getSettings() {
             raw[STORAGE_KEYS.localCopyPolicy] ?? DEFAULT_LOCAL_COPY_POLICY,
         noticeText: raw[STORAGE_KEYS.noticeText] ?? null,
         downloadFolder:
-            raw[STORAGE_KEYS.downloadFolder] ?? DEFAULT_DOWNLOAD_FOLDER,
+            raw[STORAGE_KEYS.downloadFolder] ??
+            (t("appName") === "appName"
+                ? DEFAULT_DOWNLOAD_FOLDER
+                : t("appName")),
         channelMode: raw[STORAGE_KEYS.channelMode] ?? DEFAULT_CHANNEL_MODE,
         platformModes: raw[STORAGE_KEYS.platformModes] ?? {},
         serverDefaults: raw[STORAGE_KEYS.serverDefaults] ?? null,
@@ -76,10 +83,14 @@ export async function isPaired() {
 
 /** @param {RecorderSettings} settings */
 export function effectiveNoticeText(settings) {
+    const localizedNotice = t("noticeDefault");
+    const serverNotice = settings.serverDefaults?.noticeText;
     return (
         settings.noticeText ||
-        settings.serverDefaults?.noticeText ||
-        DEFAULT_NOTICE_TEXT
+        (serverNotice === LEGACY_SERVER_NOTICE ? "" : serverNotice) ||
+        (localizedNotice === "noticeDefault"
+            ? DEFAULT_NOTICE_TEXT
+            : localizedNotice)
     );
 }
 

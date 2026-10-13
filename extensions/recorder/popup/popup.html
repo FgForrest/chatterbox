@@ -3,37 +3,34 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Riffado Meeting Recorder</title>
+        <title>Chatterbox Meeting Recorder</title>
         <link rel="stylesheet" href="popup.css" />
     </head>
     <body>
         <header>
-            <h1>Riffado Recorder</h1>
-            <button id="open-options" class="link" type="button">Options</button>
+            <h1 data-i18n="extensionName">Chatterbox Meeting Recorder</h1>
+            <button id="open-options" class="link" type="button" data-i18n="options">Options</button>
         </header>
 
         <!-- Not paired, and the active tab is a site we could connect to -->
         <section id="view-connect" hidden>
-            <p>
-                Connect this extension to the Riffado instance in the current tab.
-                Then click <strong>Set up recorder</strong> on that page.
-            </p>
+            <p data-i18n="popupConnectIntro">Connect this extension to the Chatterbox instance in the current tab. Then click Set up recorder on that page.</p>
             <button id="connect-origin" class="primary" type="button"></button>
             <p id="connect-status" class="hint"></p>
-            <button id="connect-options" class="link" type="button">Or connect manually in options</button>
+            <button id="connect-options" class="link" type="button" data-i18n="connectManually">Or connect manually in options</button>
         </section>
 
         <!-- Not paired, nothing to connect to here -->
         <section id="view-unpaired" hidden>
-            <p>Connect the extension to your Riffado account to start recording.</p>
-            <p class="hint">Open your Riffado instance and go to Settings → Meeting Recorder, or enter the details manually.</p>
-            <button id="go-options" class="primary" type="button">Open options</button>
+            <p data-i18n="unpairedIntro">Connect the extension to your Chatterbox account to start recording.</p>
+            <p class="hint" data-i18n="unpairedHint">Open your Chatterbox instance and go to Settings → Meeting Recorder, or enter the details manually.</p>
+            <button id="go-options" class="primary" type="button" data-i18n="openOptions">Open options</button>
         </section>
 
         <!-- Idle -->
         <section id="view-idle" hidden>
-            <p id="idle-hint">Ready to record the meeting in the active tab.</p>
-            <button id="start" class="primary" type="button">Record meeting</button>
+            <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
+            <button id="start" class="primary" type="button" data-i18n="recordMeeting">Record meeting</button>
             <p id="auto-hint" class="hint" hidden></p>
         </section>
 
@@ -42,30 +39,27 @@
             <p id="notice-text"></p>
             <label class="check">
                 <input id="notice-ack" type="checkbox" />
-                <span>I confirm the above.</span>
+                <span data-i18n="confirmAbove">I confirm the above.</span>
             </label>
             <div class="row">
-                <button id="notice-cancel" type="button">Cancel</button>
-                <button id="notice-confirm" class="primary" type="button" disabled>Record</button>
+                <button id="notice-cancel" type="button" data-i18n="cancel">Cancel</button>
+                <button id="notice-confirm" class="primary" type="button" disabled data-i18n="record">Record</button>
             </div>
-            <p id="picker-hint" class="hint" hidden>
-                Next, pick <strong>Entire screen</strong> and enable
-                <strong>Share system audio</strong> in the dialog Chrome shows.
-            </p>
+            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Next, pick Entire screen and enable Share system audio in Chrome's dialog.</p>
         </section>
 
         <!-- Recording -->
         <section id="view-recording" hidden>
-            <div class="status"><span class="dot"></span> Recording <span id="elapsed">0:00</span></div>
-            <div class="meter"><label>You</label><div class="bar"><div id="mic-bar"></div></div></div>
-            <div class="meter"><label>Others</label><div class="bar"><div id="sys-bar"></div></div></div>
+            <div class="status"><span class="dot"></span> <span data-i18n="recording">Recording</span> <span id="elapsed">0:00</span></div>
+            <div class="meter"><label data-i18n="you">You</label><div class="bar"><div id="mic-bar"></div></div></div>
+            <div class="meter"><label data-i18n="others">Others</label><div class="bar"><div id="sys-bar"></div></div></div>
             <p id="upload-status" class="hint"></p>
-            <button id="stop" class="danger" type="button">Stop &amp; save</button>
+            <button id="stop" class="danger" type="button" data-i18n="stopSave">Stop and save</button>
         </section>
 
         <!-- Finalizing -->
         <section id="view-finalizing" hidden>
-            <p>Finishing upload and handing off to Riffado…</p>
+            <p data-i18n="finishing">Finishing upload and handing off to Chatterbox…</p>
             <p id="finalizing-status" class="hint"></p>
         </section>
 
@@ -73,8 +67,8 @@
         <section id="view-error" hidden>
             <p id="error-text" class="error"></p>
             <div class="row">
-                <button id="retry" type="button">Retry upload</button>
-                <button id="discard" class="danger" type="button">Discard</button>
+                <button id="retry" type="button" data-i18n="retryUpload">Retry upload</button>
+                <button id="discard" class="danger" type="button" data-i18n="discard">Discard</button>
             </div>
         </section>
 

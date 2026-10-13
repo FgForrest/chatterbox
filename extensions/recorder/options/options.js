@@ -14,8 +14,54 @@ import {
     getSettings,
     saveSettings,
 } from "../lib/settings.js";
+import { localizeDocument, t } from "../lib/i18n.js";
+import { PENDING_PAIR_KEY } from "../lib/pairing-request.js";
+
+localizeDocument();
 
 const el = (id) => document.getElementById(id);
+
+async function renderPendingPair() {
+    const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
+        PENDING_PAIR_KEY
+    ];
+    const origin = pending ? originOf(pending.serverUrl) : null;
+    el("pending-pair").hidden = !origin || !pending.apiKey;
+    if (origin) el("pending-origin").textContent = origin;
+}
+
+el("confirm-pair").addEventListener("click", async () => {
+    const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
+        PENDING_PAIR_KEY
+    ];
+    const origin = pending ? originOf(pending.serverUrl) : null;
+    if (!origin || !pending.apiKey) {
+        await renderPendingPair();
+        return;
+    }
+    const granted = await grantHostAccess(origin);
+    if (!granted) {
+        setStatus(el("pending-status"), t("serverAccessDenied"), false);
+        return;
+    }
+    await storePairing({ serverUrl: origin, apiKey: pending.apiKey });
+    await registerPairingScript(origin);
+    await chrome.storage.session.remove(PENDING_PAIR_KEY);
+    await renderPendingPair();
+    await restore();
+    chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
+});
+
+el("reject-pair").addEventListener("click", async () => {
+    await chrome.storage.session.remove(PENDING_PAIR_KEY);
+    await renderPendingPair();
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "session" && changes[PENDING_PAIR_KEY]) {
+        void renderPendingPair();
+    }
+});
 
 function setStatus(node, message, ok) {
     node.textContent = message;
@@ -31,7 +77,7 @@ el("save-connection").addEventListener("click", async () => {
     if (!origin || !apiKey) {
         setStatus(
             el("connection-status"),
-            "Enter a valid server URL (with https://) and a key.",
+            t("invalidConnection"),
             false,
         );
         return;
@@ -41,14 +87,14 @@ el("save-connection").addEventListener("click", async () => {
     if (!granted) {
         setStatus(
             el("connection-status"),
-            "Access to the server was not granted. The extension cannot upload without it.",
+            t("accessDenied"),
             false,
         );
         return;
     }
     await storePairing({ serverUrl: origin, apiKey });
     await registerPairingScript(origin);
-    setStatus(el("connection-status"), "Connected.", true);
+    setStatus(el("connection-status"), t("connected"), true);
     await renderServerDefaults();
     await renderPlatformTable();
     chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
@@ -59,13 +105,13 @@ el("refresh-config").addEventListener("click", async () => {
         .sendMessage({ type: "refresh-config" })
         .catch((error) => ({ ok: false, error: String(error) }));
     if (response?.ok) {
-        setStatus(el("connection-status"), "Server defaults refreshed.", true);
+        setStatus(el("connection-status"), t("defaultsRefreshed"), true);
         await renderServerDefaults();
         await renderPlatformTable();
     } else {
         setStatus(
             el("connection-status"),
-            response?.error ?? "Could not fetch server defaults.",
+            response?.error ?? t("defaultsFailed"),
             false,
         );
     }
@@ -77,18 +123,19 @@ async function renderServerDefaults() {
     const server = settings.serverDefaults;
     if (!server) {
         node.textContent = settings.serverUrl
-            ? "No server defaults fetched yet."
+            ? t("noDefaults")
             : "";
         return;
     }
     const names = server.autoRecordPlatforms
         .map((id) => PLATFORMS.find((p) => p.id === id)?.name ?? id)
         .join(", ");
-    node.textContent =
-        `Server defaults (fetched ${new Date(server.fetchedAt).toLocaleString()}): ` +
-        (names ? `automatic recording on ${names}` : "no automatic recording") +
-        `, stop after ${server.autoStopQuietSeconds}s of silence` +
-        (server.lockDefaults ? ", locked by the server." : ".");
+    node.textContent = t("defaultsSummary", [
+        new Date(server.fetchedAt).toLocaleString(),
+        names ? t("autoOn", names) : t("autoOff"),
+        String(server.autoStopQuietSeconds),
+        server.lockDefaults ? t("lockedSuffix") : t("period"),
+    ]);
 }
 
 // ---- Automatic recording ----------------------------------------------------
@@ -96,13 +143,13 @@ async function renderServerDefaults() {
 function sourceLabel(source) {
     switch (source) {
         case "locked":
-            return "set by your server (locked)";
+            return t("sourceLocked");
         case "server":
-            return "server default";
+            return t("sourceServer");
         case "user":
-            return "your choice";
+            return t("sourceUser");
         default:
-            return "default";
+            return t("sourceDefault");
     }
 }
 
@@ -122,9 +169,9 @@ async function renderPlatformTable() {
         const select = document.createElement("select");
         select.dataset.platform = platform.id;
         for (const [value, label] of [
-            ["off", "Off"],
-            ["prompt", "Prompt"],
-            ["auto", "Auto"],
+            ["off", t("off")],
+            ["prompt", t("prompt")],
+            ["auto", t("auto")],
         ]) {
             const option = document.createElement("option");
             option.value = value;
@@ -168,9 +215,9 @@ async function renderShortcut() {
     try {
         const commands = await chrome.commands.getAll();
         const toggle = commands.find((c) => c.name === "toggle-recording");
-        el("shortcut").textContent = toggle?.shortcut || "not set";
+        el("shortcut").textContent = toggle?.shortcut || t("notSet");
     } catch {
-        el("shortcut").textContent = "unknown";
+        el("shortcut").textContent = t("unknown");
     }
 }
 
@@ -189,11 +236,15 @@ async function loadMicList() {
         return;
     }
     const settings = await getSettings();
-    select.innerHTML = '<option value="">Default (recommended)</option>';
+    select.replaceChildren();
+    const defaultOption = document.createElement("option");
+    defaultOption.value = "";
+    defaultOption.textContent = t("defaultRecommended");
+    select.append(defaultOption);
     for (const device of devices.filter((d) => d.kind === "audioinput")) {
         const option = document.createElement("option");
         option.value = device.deviceId;
-        option.textContent = device.label || `Microphone ${select.length}`;
+        option.textContent = device.label || t("micLabel", String(select.length));
         select.append(option);
     }
     select.value = settings.microphoneId || "";
@@ -205,7 +256,7 @@ el("grant-mic").addEventListener("click", async () => {
         for (const track of stream.getTracks()) track.stop();
         await loadMicList();
     } catch {
-        setStatus(el("save-status"), "Microphone access was denied.", false);
+        setStatus(el("save-status"), t("micDenied"), false);
     }
 });
 
@@ -221,7 +272,7 @@ el("save-all").addEventListener("click", async () => {
         if (!el("ack-check").checked) {
             setStatus(
                 el("save-status"),
-                "Confirm the recording policy to enable automatic recording.",
+                t("confirmPolicy"),
                 false,
             );
             el("ack-section").scrollIntoView({ behavior: "smooth" });
@@ -245,7 +296,7 @@ el("save-all").addEventListener("click", async () => {
     await saveSettings({
         microphoneId: el("mic-device").value,
         localCopyPolicy: el("local-copy").value,
-        downloadFolder: el("download-folder").value.trim() || "Riffado",
+        downloadFolder: el("download-folder").value.trim() || t("appName"),
         channelMode: el("channel-mode").value === "split" ? "split" : "mixed",
         noticeText: el("notice-text").value.trim() || null,
         platformModes,
@@ -256,7 +307,7 @@ el("save-all").addEventListener("click", async () => {
                 : null,
         autoModeAcknowledgedAt,
     });
-    setStatus(el("save-status"), "Saved.", true);
+    setStatus(el("save-status"), t("saved"), true);
     await renderPlatformTable();
     chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
 });
@@ -268,7 +319,7 @@ el("save-all").addEventListener("click", async () => {
 // persists the moment it changes.
 el("local-copy").addEventListener("change", async () => {
     await saveSettings({ localCopyPolicy: el("local-copy").value });
-    setStatus(el("save-status"), "Saved.", true);
+    setStatus(el("save-status"), t("saved"), true);
 });
 
 // ---- Restore ------------------------------------------------------------
@@ -290,9 +341,10 @@ async function restore() {
         settings.serverDefaults?.autoStopQuietSeconds ?? 180,
     );
     if (settings.serverUrl && settings.apiKey) {
-        setStatus(el("connection-status"), "Connected.", true);
+        setStatus(el("connection-status"), t("connected"), true);
     }
     await Promise.all([
+        renderPendingPair(),
         loadMicList(),
         renderServerDefaults(),
         renderPlatformTable(),

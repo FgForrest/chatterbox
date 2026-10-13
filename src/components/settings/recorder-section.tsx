@@ -9,6 +9,7 @@ import {
     Trash2,
     Video,
 } from "lucide-react";
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
@@ -44,21 +45,27 @@ type RecorderStatus = {
 
 type PairResponse = RecorderStatus & { key_id: string; api_key: string };
 
-function formatDate(value: string | null): string {
-    if (!value) return "Never";
-    return new Date(value).toLocaleString();
+function formatDate(value: string | null, locale: string): string {
+    if (!value) return locale.startsWith("cs") ? "Nikdy" : "Never";
+    return new Date(value).toLocaleString(locale);
 }
 
 /**
  * Meeting Recorder pairing card.
  *
  * Detects the browser extension from this page and, when it can reach it,
- * pairs it with one click: the server mints a `recordings:write` key and the
- * page hands it over. Where the extension is installed but cannot yet talk to
+ * starts pairing: the server mints a `recordings:write` key, the page hands it
+ * over, and the extension asks the user to confirm its destination. Where the extension is installed but cannot yet talk to
  * this origin (a self-hosted instance on first contact) the card explains the
  * one-time grant in the extension popup. Manual copy-paste stays available.
  */
 export function RecorderSection() {
+    const locale = useLocale();
+    const t = useCallback(
+        (english: string, czech: string) =>
+            locale.startsWith("cs") ? czech : english,
+        [locale],
+    );
     const [extension, setExtension] = useState<RecorderExtensionState | null>(
         null,
     );
@@ -86,7 +93,10 @@ export function RecorderSection() {
                 throw new Error(
                     await getApiErrorMessage(
                         response,
-                        "Failed to load recorder status",
+                        t(
+                            "Failed to load recorder status",
+                            "Nelze načíst stav nahrávání",
+                        ),
                     ),
                 );
             }
@@ -95,18 +105,27 @@ export function RecorderSection() {
             toast.error(
                 error instanceof Error
                     ? error.message
-                    : "Failed to load recorder status",
+                    : t(
+                          "Failed to load recorder status",
+                          "Nelze načíst stav nahrávání",
+                      ),
             );
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         void detect();
         void loadStatus();
         const client = browserRecorderExtensionClient();
         clientRef.current = client;
+        const onFocus = () => void detect();
+        window.addEventListener("focus", onFocus);
         // A popup-side grant injects the relay live; pick it up without a reload.
-        return client.onPresence((state) => setExtension(state));
+        const stopPresence = client.onPresence((state) => setExtension(state));
+        return () => {
+            window.removeEventListener("focus", onFocus);
+            stopPresence();
+        };
     }, [detect, loadStatus]);
 
     const mintKey = useCallback(async (): Promise<PairResponse> => {
@@ -119,12 +138,15 @@ export function RecorderSection() {
             throw new Error(
                 await getApiErrorMessage(
                     response,
-                    "Failed to create recorder key",
+                    t(
+                        "Failed to create recorder key",
+                        "Nelze vytvořit klíč pro nahrávání",
+                    ),
                 ),
             );
         }
         return (await response.json()) as PairResponse;
-    }, []);
+    }, [t]);
 
     const setUp = useCallback(async () => {
         if (
@@ -145,19 +167,32 @@ export function RecorderSection() {
             );
             if (!result.ok) {
                 throw new Error(
-                    result.error ?? "The extension refused pairing",
+                    result.error ??
+                        t(
+                            "The extension refused pairing",
+                            "Rozšíření odmítlo propojení",
+                        ),
                 );
             }
-            toast.success("Recorder connected");
+            toast.success(
+                result.pending
+                    ? t(
+                          "Confirm the server in the extension's options page",
+                          "Potvrďte server v možnostech rozšíření",
+                      )
+                    : t("Recorder connected", "Nahrávání propojeno"),
+            );
             await Promise.all([detect(), loadStatus()]);
         } catch (error) {
             toast.error(
-                error instanceof Error ? error.message : "Pairing failed",
+                error instanceof Error
+                    ? error.message
+                    : t("Pairing failed", "Propojení se nepodařilo"),
             );
         } finally {
             setBusy(false);
         }
-    }, [detect, extension, loadStatus, mintKey]);
+    }, [detect, extension, loadStatus, mintKey, t]);
 
     const generateManual = useCallback(async () => {
         setBusy(true);
@@ -167,12 +202,14 @@ export function RecorderSection() {
             await loadStatus();
         } catch (error) {
             toast.error(
-                error instanceof Error ? error.message : "Failed to create key",
+                error instanceof Error
+                    ? error.message
+                    : t("Failed to create key", "Klíč nelze vytvořit"),
             );
         } finally {
             setBusy(false);
         }
-    }, [loadStatus, mintKey]);
+    }, [loadStatus, mintKey, t]);
 
     const copyManual = useCallback(async () => {
         if (!manualKey) return;
@@ -189,18 +226,25 @@ export function RecorderSection() {
                 });
                 if (!response.ok) {
                     throw new Error(
-                        await getApiErrorMessage(response, "Failed to revoke"),
+                        await getApiErrorMessage(
+                            response,
+                            t("Failed to revoke", "Klíč nelze zrušit"),
+                        ),
                     );
                 }
-                toast.success("Recorder key revoked");
+                toast.success(
+                    t("Recorder key revoked", "Klíč pro nahrávání zrušen"),
+                );
                 await loadStatus();
             } catch (error) {
                 toast.error(
-                    error instanceof Error ? error.message : "Failed to revoke",
+                    error instanceof Error
+                        ? error.message
+                        : t("Failed to revoke", "Klíč nelze zrušit"),
                 );
             }
         },
-        [loadStatus],
+        [loadStatus, t],
     );
 
     const autoPlatformNames = status
@@ -216,42 +260,64 @@ export function RecorderSection() {
     return (
         <div className="space-y-6">
             <SettingsSectionHeader
-                title="Meeting Recorder"
-                description="Record meeting audio in your browser and send it straight to Riffado for transcription."
+                title={t("Meeting Recorder", "Nahrávání schůzek")}
+                description={t(
+                    "Record meeting audio in your browser and send it straight to Chatterbox for transcription.",
+                    "Nahrávejte zvuk schůzek v prohlížeči a posílejte ho do Klepny k přepisu.",
+                )}
                 icon={Video}
                 action={
                     <Button
                         size="sm"
                         variant="outline"
                         onClick={() => void detect()}
-                        aria-label="Re-check extension"
+                        aria-label={t(
+                            "Re-check extension",
+                            "Znovu zkontrolovat rozšíření",
+                        )}
                     >
                         <RefreshCw className="size-4" />
-                        Re-check
+                        {t("Re-check", "Zkontrolovat")}
                     </Button>
                 }
             />
 
-            <SettingsCard title="Browser extension" icon={Plug}>
+            <SettingsCard
+                title={t("Browser extension", "Rozšíření prohlížeče")}
+                icon={Plug}
+            >
                 {extension === null && (
                     <p className="text-sm text-muted-foreground">
-                        Looking for the extension…
+                        {t("Looking for the extension…", "Hledá se rozšíření…")}
                     </p>
                 )}
 
                 {extension?.kind === "not-installed" && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            The Riffado Meeting Recorder extension is not
-                            installed in this browser.
+                            {t(
+                                "The Chatterbox Meeting Recorder extension is not installed in this browser.",
+                                "Rozšíření Klepna pro nahrávání schůzek není v tomto prohlížeči nainstalované.",
+                            )}
                         </p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                             <li>
-                                Install the extension (load the{" "}
-                                <code>extensions/recorder</code> folder
-                                unpacked, or the packaged build).
+                                {t(
+                                    "Install the extension: load the",
+                                    "Nainstalujte rozšíření: načtěte složku",
+                                )}{" "}
+                                <code>extensions/recorder</code>{" "}
+                                {t(
+                                    "unpacked, or use the packaged build.",
+                                    "jako rozbalené rozšíření nebo použijte zabalenou verzi.",
+                                )}
                             </li>
-                            <li>Come back here and click Re-check.</li>
+                            <li>
+                                {t(
+                                    "Come back here and click Re-check.",
+                                    "Vraťte se sem a klikněte na Zkontrolovat.",
+                                )}
+                            </li>
                         </ol>
                     </div>
                 )}
@@ -259,23 +325,31 @@ export function RecorderSection() {
                 {extension?.kind === "installed-unreachable" && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            The extension is installed but cannot talk to this
-                            Riffado yet. Chrome requires you to allow it once.
+                            {t(
+                                "The extension is installed but cannot reach this Chatterbox yet. Chrome requires one permission grant.",
+                                "Rozšíření je nainstalované, ale zatím se s Klepnou nespojí. Chrome vyžaduje jednorázové povolení.",
+                            )}
                         </p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                             <li>
-                                Click the Riffado Recorder icon in the toolbar.
+                                {t(
+                                    "Click the Chatterbox Recorder icon in the toolbar.",
+                                    "Klikněte na ikonu Klepny na liště.",
+                                )}
                             </li>
                             <li>
-                                Choose{" "}
+                                {t("Choose", "Zvolte")}{" "}
                                 <strong>
-                                    Connect to {window.location.origin}
+                                    {t("Connect to", "Propojit s")}{" "}
+                                    {window.location.origin}
                                 </strong>
                                 .
                             </li>
                             <li>
-                                This page will update by itself; then click Set
-                                up recorder.
+                                {t(
+                                    "This page will update automatically. Then click Set up recorder.",
+                                    "Stránka se sama aktualizuje. Potom klikněte na Nastavit nahrávání.",
+                                )}
                             </li>
                         </ol>
                     </div>
@@ -284,15 +358,18 @@ export function RecorderSection() {
                 {extension?.kind === "reachable" && !extension.paired && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            Extension found
+                            {t("Extension found", "Rozšíření nalezeno")}
                             {extension.version
                                 ? ` (v${extension.version})`
                                 : ""}
-                            . One click connects it to this Riffado.
+                            {t(
+                                ". Select Set up recorder, then confirm the server in the extension's options page.",
+                                ". Zvolte Nastavit nahrávání a potom potvrďte server v možnostech rozšíření.",
+                            )}
                         </p>
                         <Button onClick={() => void setUp()} disabled={busy}>
                             <Plug className="size-4" />
-                            Set up recorder
+                            {t("Set up recorder", "Nastavit nahrávání")}
                         </Button>
                     </div>
                 )}
@@ -302,7 +379,10 @@ export function RecorderSection() {
                     extension.pairedHere && (
                         <p className="text-sm">
                             <Check className="mr-1 inline size-4 text-green-600" />
-                            Connected to this Riffado
+                            {t(
+                                "Connected to this Chatterbox",
+                                "Propojeno s touto Klepnou",
+                            )}
                             {extension.version
                                 ? ` (extension v${extension.version})`
                                 : ""}
@@ -315,7 +395,10 @@ export function RecorderSection() {
                     !extension.pairedHere && (
                         <div className="space-y-3">
                             <p className="text-sm">
-                                The extension is connected to another Riffado
+                                {t(
+                                    "The extension is connected to another Chatterbox",
+                                    "Rozšíření je propojené s jinou Klepnou",
+                                )}
                                 {extension.pairedTo
                                     ? ` (${extension.pairedTo})`
                                     : ""}
@@ -326,7 +409,10 @@ export function RecorderSection() {
                                 disabled={busy}
                             >
                                 <Plug className="size-4" />
-                                Switch it to this Riffado
+                                {t(
+                                    "Switch it to this Chatterbox",
+                                    "Přepojit na tuto Klepnu",
+                                )}
                             </Button>
                         </div>
                     )}
@@ -334,8 +420,14 @@ export function RecorderSection() {
 
             {status && status.keys.length > 0 && (
                 <SettingsCard
-                    title="Connected recorders"
-                    description="Each key is write-only: it can create recordings but cannot read your library."
+                    title={t(
+                        "Connected recorders",
+                        "Propojená nahrávací zařízení",
+                    )}
+                    description={t(
+                        "Each key is write-only: it can create recordings but cannot read your library.",
+                        "Každý klíč slouží jen k zápisu: může vytvářet nahrávky, ale nemůže číst knihovnu.",
+                    )}
                 >
                     <div className="space-y-2">
                         {status.keys.map((key) => (
@@ -353,15 +445,17 @@ export function RecorderSection() {
                                         </span>
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        Created {formatDate(key.created_at)} ·
-                                        Last used {formatDate(key.last_used_at)}
+                                        {t("Created", "Vytvořeno")}{" "}
+                                        {formatDate(key.created_at, locale)} ·{" "}
+                                        {t("Last used", "Naposledy použito")}{" "}
+                                        {formatDate(key.last_used_at, locale)}
                                     </div>
                                 </div>
                                 <Button
                                     variant="outline"
                                     size="icon"
                                     onClick={() => void revoke(key.id)}
-                                    aria-label={`Revoke ${key.name}`}
+                                    aria-label={`${t("Revoke", "Zrušit")} ${key.name}`}
                                 >
                                     <Trash2 className="size-4 text-destructive" />
                                 </Button>
@@ -373,39 +467,60 @@ export function RecorderSection() {
 
             {status && (
                 <SettingsCard
-                    title="Automatic recording"
-                    description="Defaults this server pushes to paired extensions. Users can change them in the extension's options unless locked."
+                    title={t("Automatic recording", "Automatické nahrávání")}
+                    description={t(
+                        "Defaults this server sends to paired extensions. Users can change them in the extension's options unless locked.",
+                        "Výchozí hodnoty, které server posílá propojeným rozšířením. Pokud nejsou uzamčené, lze je změnit v možnostech rozšíření.",
+                    )}
                 >
                     <p className="text-sm">
                         {autoPlatformNames
-                            ? `Automatic recording is on by default for: ${autoPlatformNames}.`
-                            : "No platform records automatically by default."}{" "}
-                        Recordings stop after{" "}
-                        {status.defaults.auto_stop_quiet_seconds} seconds of
-                        silence.
+                            ? t(
+                                  `Automatic recording is on by default for: ${autoPlatformNames}.`,
+                                  `Automatické nahrávání je ve výchozím stavu zapnuté pro: ${autoPlatformNames}.`,
+                              )
+                            : t(
+                                  "No platform records automatically by default.",
+                                  "Ve výchozím stavu se žádná platforma nenahrává automaticky.",
+                              )}{" "}
+                        {t("Recordings stop after", "Nahrávání se zastaví po")}{" "}
+                        {status.defaults.auto_stop_quiet_seconds}{" "}
+                        {t("seconds of silence.", "sekundách ticha.")}
                         {status.defaults.lock_defaults
-                            ? " These defaults are locked by the server."
+                            ? t(
+                                  " These defaults are locked by the server.",
+                                  " Tyto výchozí hodnoty jsou uzamčené serverem.",
+                              )
                             : ""}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                        Change with <code>RECORDER_AUTO_RECORD_PLATFORMS</code>{" "}
-                        and related environment variables.
+                        {t("Change with", "Změňte pomocí")}{" "}
+                        <code>RECORDER_AUTO_RECORD_PLATFORMS</code>{" "}
+                        {t(
+                            "and related environment variables.",
+                            "a souvisejících proměnných prostředí.",
+                        )}
                     </p>
                 </SettingsCard>
             )}
 
             <details className="rounded-lg border bg-card/40 px-4 py-3.5">
                 <summary className="cursor-pointer text-sm font-medium">
-                    Manual setup
+                    {t("Manual setup", "Ruční nastavení")}
                 </summary>
                 <div className="mt-3 space-y-3">
                     <p className="text-xs text-muted-foreground">
-                        If automatic pairing is not possible, generate a key
-                        here and paste it, with the server URL{" "}
+                        {t(
+                            "If automatic pairing is unavailable, generate a key here and paste it with the server URL",
+                            "Pokud automatické propojení není dostupné, vytvořte zde klíč a vložte ho spolu s adresou serveru",
+                        )}{" "}
                         <code>
                             {status?.server_url ?? window.location.origin}
                         </code>
-                        , into the extension's options.
+                        {t(
+                            " into the extension's options.",
+                            " do možností rozšíření.",
+                        )}
                     </p>
                     {manualKey ? (
                         <div className="space-y-2">
@@ -413,7 +528,10 @@ export function RecorderSection() {
                                 {manualKey}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Shown once. Copy it now.
+                                {t(
+                                    "Shown once. Copy it now.",
+                                    "Zobrazí se pouze jednou. Zkopírujte ho nyní.",
+                                )}
                             </p>
                             <Button
                                 type="button"
@@ -425,7 +543,7 @@ export function RecorderSection() {
                                 ) : (
                                     <Clipboard className="size-4" />
                                 )}
-                                Copy key
+                                {t("Copy key", "Kopírovat klíč")}
                             </Button>
                         </div>
                     ) : (
@@ -436,7 +554,10 @@ export function RecorderSection() {
                             disabled={busy}
                         >
                             <Download className="size-4" />
-                            Generate recorder key
+                            {t(
+                                "Generate recorder key",
+                                "Vytvořit klíč pro nahrávání",
+                            )}
                         </Button>
                     )}
                 </div>

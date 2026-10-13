@@ -1,4 +1,4 @@
-// Riffado Meeting Recorder service worker.
+// Chatterbox Meeting Recorder service worker.
 //
 // Owns the recording lifecycle: starts capture (tab audio for a detected
 // meeting tab, screen picker otherwise), creates the server session, drives
@@ -37,13 +37,11 @@ import {
     SESSION_MIME_TYPE,
     STATE,
 } from "./lib/constants.js";
-import {
-    originOf,
-    refreshServerConfig,
-    registerPairingScript,
-    storePairing,
-} from "./lib/pairing.js";
+import { t } from "./lib/i18n.js";
+import { originOf, refreshServerConfig } from "./lib/pairing.js";
+import { queuePairing } from "./lib/pairing-request.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
+import { canPumpUploads } from "./lib/upload-state.js";
 import {
     anyPlatformAuto,
     effectivePlatformModes,
@@ -56,7 +54,7 @@ const STATE_KEY = "recordingState";
 const ARMED_KEY = "armedTabs";
 const OFFSCREEN_URL = "offscreen/offscreen.html";
 const POPUP_URL = "popup/popup.html";
-const DEFAULT_TITLE = "Riffado Meeting Recorder";
+const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
 
@@ -233,12 +231,10 @@ async function startRecording({
 }) {
     const current = await getState();
     if (current.state !== STATE.idle && current.state !== STATE.error) {
-        throw new Error("A recording is already in progress");
+        throw new Error(t("alreadyInProgress"));
     }
     if (!(await isPaired())) {
-        throw new Error(
-            "Connect the extension to Riffado first (open the options page).",
-        );
+        throw new Error(t("connectFirst"));
     }
 
     await setState({ state: STATE.awaitingPicker, error: null });
@@ -317,7 +313,7 @@ async function startRecording({
         await safe(
             chrome.action.setTitle({
                 tabId,
-                title: "Recording. Click to stop and save.",
+                title: t("recordingTitle"),
             }),
         );
     }
@@ -347,7 +343,7 @@ async function startRecording({
         microphoneId: settings.microphoneId,
     });
     if (!response?.ok) {
-        const message = response?.error ?? "Could not start audio capture";
+        const message = response?.error ?? t("couldNotCapture");
         await setState({ state: STATE.error, error: message });
         await closeOffscreen();
         throw new Error(message);
@@ -378,13 +374,7 @@ async function pumpUploads() {
     try {
         for (;;) {
             const state = await getState();
-            if (!state.sessionId) break;
-            if (
-                state.state !== STATE.recording &&
-                state.state !== STATE.finalizing
-            ) {
-                break;
-            }
+            if (!canPumpUploads(state)) break;
             const settings = await getSettings();
             const auth = {
                 serverUrl: settings.serverUrl,
@@ -414,7 +404,7 @@ async function pumpUploads() {
                 } catch (error) {
                     if (error?.status === 401 || error?.status === 403) {
                         await setState({
-                            error: "The recorder key was rejected. Reconnect in options.",
+                            error: t("keyRejected"),
                         });
                     }
                     break;
@@ -453,8 +443,8 @@ async function finalize() {
         await deleteLocalSession(state.sessionId);
 
         await notify(
-            "Recording sent",
-            "Your meeting is uploading to Riffado and will be transcribed shortly.",
+            t("recordingSent"),
+            t("recordingSentBody"),
         );
         await resetState();
     } catch (error) {
@@ -462,7 +452,7 @@ async function finalize() {
             state: STATE.error,
             error:
                 error?.message ??
-                "Could not finalize the recording. Your local copy is kept.",
+                t("finalizeFailed"),
         });
     }
 }
@@ -495,8 +485,8 @@ async function maybeSaveLocalCopy(sessionId) {
 
     if (blob.size > MAX_LOCAL_COPY_BYTES) {
         await notify(
-            "Local copy skipped",
-            "The recording is large and was uploaded to Riffado, but not saved locally.",
+            t("localSkipped"),
+            t("localSkippedBody"),
         );
         return;
     }
@@ -585,8 +575,8 @@ async function applyArmedUi(tabId, platform, mode) {
             tabId,
             title:
                 mode === "auto"
-                    ? `Click to record this ${platform.name} meeting with Riffado`
-                    : `Riffado: ${platform.name} meeting detected`,
+                    ? t("autoActionTitle", platform.name)
+                    : t("promptActionTitle", platform.name),
         }),
     );
 }
@@ -625,10 +615,10 @@ async function nudge(tabId, platform, mode) {
     armed[tabId].nudged = true;
     await setArmed(armed);
     await notify(
-        `${platform.name} meeting detected`,
+        t("meetingDetected", platform.name),
         mode === "auto"
-            ? "Click the Riffado icon or press the shortcut to record. Click here to go to the meeting."
-            : "Click the Riffado icon to record this meeting.",
+            ? t("nudgeAuto")
+            : t("nudgePrompt"),
         { id: `${NUDGE_PREFIX}${tabId}`, requireInteraction: true },
     );
 }
@@ -746,8 +736,8 @@ async function startFromInvocation(tab) {
     }
     if (state.state === STATE.recording || state.state === STATE.finalizing) {
         await notify(
-            "Already recording",
-            "Stop the current recording before starting another.",
+            t("alreadyRecording"),
+            t("alreadyRecordingBody"),
         );
         return;
     }
@@ -761,8 +751,8 @@ async function startFromInvocation(tab) {
     const settings = await getSettings();
     if (!settings.autoModeAcknowledgedAt) {
         await notify(
-            "One-time confirmation needed",
-            "Confirm the recording policy once in the extension options, then click again.",
+            t("confirmationNeeded"),
+            t("confirmationNeededBody"),
         );
         chrome.runtime.openOptionsPage();
         return;
@@ -776,7 +766,7 @@ async function startFromInvocation(tab) {
             noticeAcknowledgedAt: settings.autoModeAcknowledgedAt,
         });
     } catch (error) {
-        await notify("Could not start", error?.message ?? String(error));
+        await notify(t("couldNotStart"), error?.message ?? String(error));
     }
 }
 
@@ -817,8 +807,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         if (tab?.audible) return; // sound came back; a new quiet clock will start
         await stopRecording("auto-quiet");
         await notify(
-            "Recording stopped",
-            "The meeting went quiet, so the recording was saved.",
+            t("recordingStopped"),
+            t("recordingStoppedBody"),
         );
     }
 });
@@ -845,36 +835,11 @@ async function pingStatus() {
     };
 }
 
-/**
- * Accept a pairing only from the origin it names. `senderOrigin` is derived
- * from the sender's URL by Chrome, so it cannot be forged by the page.
- */
-async function handlePairing(message, senderOrigin) {
-    if (
-        typeof message.serverUrl !== "string" ||
-        typeof message.apiKey !== "string"
-    ) {
-        throw new Error("Pairing message missing server URL or key");
-    }
-    const serverOrigin = originOf(message.serverUrl);
-    if (!serverOrigin || !senderOrigin || serverOrigin !== senderOrigin) {
-        throw new Error("Pairing refused: the page origin does not match the server URL");
-    }
-    await storePairing({ serverUrl: serverOrigin, apiKey: message.apiKey });
-    await registerPairingScript(serverOrigin);
-    await notify(
-        "Riffado connected",
-        "The recorder is paired with your Riffado account.",
-    );
-    await reevaluateAllTabs();
-    return { ok: true, paired: true, pairedTo: serverOrigin };
-}
-
-// From the Riffado web page on origins listed in externally_connectable.
+// From the Chatterbox web page on origins listed in externally_connectable.
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
     const senderOrigin = originOf(sender.url ?? sender.origin ?? "");
     if (!senderOrigin || !message || typeof message.type !== "string") {
-        sendResponse({ ok: false, error: "Unrecognized sender" });
+        sendResponse({ ok: false, error: t("unrecognizedSender") });
         return false;
     }
     if (message.type === MESSAGES.ping) {
@@ -884,7 +849,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
     if (message.type === MESSAGES.pair) {
-        handlePairing(message, senderOrigin)
+        queuePairing(message, senderOrigin)
             .then(sendResponse)
             .catch((error) =>
                 sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -958,7 +923,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case MESSAGES.pair:
-            handlePairing(message, originOf(sender.url ?? ""))
+            queuePairing(message, originOf(sender.url ?? ""))
                 .then(sendResponse)
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -982,8 +947,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "mic-unavailable":
             // Non-fatal: the meeting audio is recording without the mic.
             notify(
-                "Recording without microphone",
-                "Your microphone could not be opened, so only the meeting audio is being recorded.",
+                t("micUnavailable"),
+                t("micUnavailableBody"),
             );
             return false;
 
@@ -1009,8 +974,8 @@ async function handleRecordingStopped(message) {
     if (!message.chunkCount || message.chunkCount < 1) {
         await discardSession(message.sessionId);
         await notify(
-            "Nothing recorded",
-            "No audio was captured, so nothing was saved. If you used the screen picker, make sure “Share system audio” was enabled.",
+            t("nothingRecorded"),
+            t("nothingRecordedBody"),
         );
         return;
     }
@@ -1095,8 +1060,8 @@ async function reconcileOnStartup() {
     const buffered = await totalBufferedBytes();
     if (buffered > OPFS_WARN_BYTES) {
         await notify(
-            "Unsent recordings",
-            "Riffado has buffered recordings waiting to upload. Open the extension to retry.",
+            t("unsentRecordings"),
+            t("unsentRecordingsBody"),
         );
     }
 }

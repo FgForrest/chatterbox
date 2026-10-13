@@ -1,4 +1,4 @@
-// Shared constants for the Riffado Meeting Recorder extension.
+// Shared constants for the Chatterbox Meeting Recorder extension.
 // Kept in sync with the server's src/lib/recording-sessions/constants.ts and
 // src/lib/recorder/config.ts.
 
@@ -62,7 +62,7 @@ export const DEFAULT_AUTO_STOP_QUIET_SECONDS = 180;
 export const DEFAULT_NOTICE_TEXT =
     "I have informed the other participants that this meeting is being recorded.";
 
-export const DEFAULT_DOWNLOAD_FOLDER = "Riffado";
+export const DEFAULT_DOWNLOAD_FOLDER = "Chatterbox";
 
 export const DEFAULT_LOCAL_COPY_POLICY = "always";
 
@@ -73,7 +73,7 @@ export const ALARMS = {
     quietPrefix: "quiet:",
 };
 
-/** Message types shared with the Riffado web app (page <-> extension). */
+/** Message types shared with the Chatterbox web app (page <-> extension). */
 export const MESSAGES = {
     ping: "riffado-recorder-ping",
     present: "riffado-recorder-present",

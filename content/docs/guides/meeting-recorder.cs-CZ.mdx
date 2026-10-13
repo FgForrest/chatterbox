@@ -1,10 +1,10 @@
 ---
 title: Nahrávání schůzek
-description: Nahrávejte zvuk schůzek v prohlížeči a posílejte ho do Riffada k přepisu a shrnutí.
+description: Nahrávejte zvuk schůzek v prohlížeči a posílejte ho do Klepny k přepisu a shrnutí.
 ---
 
-Riffado Meeting Recorder je rozšíření pro prohlížeče na bázi Chromia, které
-nahraje zvuk schůzky a nahraje ho do vaší instance Riffada, kde se přepíše a
+Klepna – nahrávání schůzek je rozšíření pro prohlížeče na bázi Chromia, které
+zachytí zvuk schůzky a odešle ho do vaší instance Klepny, kde se přepíše a
 shrne jako každá jiná nahrávka.
 
 Zachytává váš **mikrofon** a **systémový zvuk**, který počítač přehrává, takže
@@ -16,7 +16,7 @@ Safari rozšířením zachytávání systémového zvuku neumožňují.
 
 ## Instalace
 
-Rozšíření není součástí Riffada; je to samostatná složka `extensions/recorder`
+Rozšíření není součástí Klepny; je to samostatná složka `extensions/recorder`
 v repozitáři, případně zabalený zip.
 
 1. Otevřete `chrome://extensions` a zapněte **Režim pro vývojáře**.
@@ -24,17 +24,18 @@ v repozitáři, případně zabalený zip.
    rozbalený zip vydání).
 3. Otevřete **Možnosti** rozšíření a povolte přístup k mikrofonu.
 
-## Propojení s Riffadem
+## Propojení s Klepnou
 
-V Riffadu otevřete **Nastavení → Nahrávání schůzek**. Stránka rozšíření ve
+V Klepně otevřete **Nastavení → Nahrávání schůzek**. Stránka rozšíření ve
 vašem prohlížeči sama najde a řekne vám, co dál:
 
-- **Nastavit nahrávání**: jedno kliknutí. Riffado vytvoří klíč pouze pro zápis
+- **Nastavit nahrávání**: Klepna vytvoří klíč pouze pro zápis
   (umí vytvářet nahrávky, ale nečte vaši knihovnu) a předá ho rozšíření. Nic
-  se nekopíruje.
+  se nekopíruje. Propojení potom potvrďte v možnostech rozšíření; Chrome se
+  případně zeptá na povolení přístupu k serveru.
 - **Na vlastní instanci, pouze poprvé**: Chrome vyžaduje, abyste rozšíření
   jednou povolili přístup k vašemu serveru. Klikněte na ikonu rozšíření,
-  zvolte **Connect to váš-server** a stránka nastavení se sama aktualizuje.
+  zvolte **Propojit s váš-server** a stránka nastavení se sama aktualizuje.
   Pak klikněte na Nastavit nahrávání.
 - **Ruční nastavení** je vždy k dispozici dole na stránce, pokud chcete klíč
   vložit do Možností rozšíření sami.
@@ -71,6 +72,26 @@ výběrem obrazovky.
 Pokud klávesová zkratka nic nedělá, Chrome ji mohl nechat nepřiřazenou;
 stránka Možností ukazuje aktuální přiřazení a odkazuje na nastavení zkratek
 v Chromu.
+
+## Nahrání schůzky
+
+1. Klikněte na ikonu rozšíření a zvolte **Nahrát schůzku**.
+2. Potvrďte upozornění účastníkům.
+3. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
+   klávesovou zkratkou (`Ctrl+Shift+U` ve výchozím nastavení).
+
+Rozšíření používá výchozí mikrofon systému. Zvuk schůzky zachytí podle zdroje:
+
+- **Schůzka v kartě prohlížeče** (Google Meet nebo webové verze Zoomu a Teams):
+  nahrává se zvuk této karty. Výběr obrazovky není potřeba a zvuky ostatních
+  aplikací se nezachytí.
+- **Samostatná aplikace Zoom nebo Teams**: vyberte **Celou obrazovku** a zapněte
+  **Sdílet systémový zvuk**. Na macOS může Chrome poprvé požádat o oprávnění
+  k záznamu obrazovky.
+
+Pokud pro schůzky používáte jiný než výchozí mikrofon, vyberte ho v Možnostech
+rozšíření. Po zastavení se nahrávka objeví v knihovně Klepny. Ve výchozím
+nastavení se také uloží místní kopie `.webm` do Stažených souborů.
 
 ## Spolehlivost
 

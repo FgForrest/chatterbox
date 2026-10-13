@@ -3,112 +3,102 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Riffado Recorder options</title>
+        <title>Chatterbox Meeting Recorder</title>
         <link rel="stylesheet" href="options.css" />
     </head>
     <body>
         <main>
-            <h1>Riffado Meeting Recorder</h1>
+            <h1 data-i18n="extensionName">Chatterbox Meeting Recorder</h1>
+
+            <section id="pending-pair" hidden>
+                <h2 data-i18n="confirmConnection">Confirm connection</h2>
+                <p data-i18n="pendingQuestion">Connect this recorder to the server below?</p>
+                <p><strong id="pending-origin"></strong></p>
+                <p class="hint" data-i18n="pendingWarning">Recordings will be sent to this server. Confirm only if you trust it.</p>
+                <div class="row">
+                    <button id="confirm-pair" class="primary" type="button" data-i18n="connect">Connect</button>
+                    <button id="reject-pair" type="button" data-i18n="cancel">Cancel</button>
+                </div>
+                <p id="pending-status" class="status"></p>
+            </section>
 
             <section>
-                <h2>Connection</h2>
-                <p class="hint">
-                    The easy way: open your Riffado instance, go to
-                    Settings → Meeting Recorder, and click <strong>Set up recorder</strong>.
-                    Or enter the details here.
-                </p>
-                <label for="server-url">Server URL</label>
-                <input id="server-url" type="url" placeholder="https://riffado.example.com" />
-                <label for="api-key">Recorder key</label>
+                <h2 data-i18n="connection">Connection</h2>
+                <p class="hint" data-i18n="optionsIntro">Open your Chatterbox instance, go to Settings → Meeting Recorder, and click Set up recorder. Or enter the details here.</p>
+                <label for="server-url" data-i18n="serverUrl">Server URL</label>
+                <input id="server-url" type="url" placeholder="https://example.com" />
+                <label for="api-key" data-i18n="recorderKey">Recorder key</label>
                 <input id="api-key" type="password" placeholder="op_…" />
                 <div class="row">
-                    <button id="save-connection" class="primary" type="button">Save &amp; grant access</button>
-                    <button id="refresh-config" type="button">Refresh server defaults</button>
+                    <button id="save-connection" class="primary" type="button" data-i18n="saveGrant">Save and grant access</button>
+                    <button id="refresh-config" type="button" data-i18n="refreshDefaults">Refresh server defaults</button>
                 </div>
                 <p id="connection-status" class="status"></p>
                 <p id="server-defaults" class="hint"></p>
             </section>
 
             <section>
-                <h2>Automatic recording</h2>
-                <p class="hint">
-                    Choose what happens when you open a meeting on each platform.
-                    <strong>Auto</strong> arms the toolbar icon: one click (or the
-                    shortcut) starts recording immediately, and it stops by itself
-                    when the meeting ends. <strong>Prompt</strong> only notifies you.
-                    Chrome requires that one click; nothing can start capture without it.
-                </p>
+                <h2 data-i18n="automaticRecording">Automatic recording</h2>
+                <p class="hint" data-i18n="autoIntro">Choose what happens when you open a meeting on each platform.</p>
                 <table id="platform-table">
-                    <thead><tr><th>Platform</th><th>Mode</th><th>Source</th></tr></thead>
+                    <thead><tr><th data-i18n="platform">Platform</th><th data-i18n="mode">Mode</th><th data-i18n="source">Source</th></tr></thead>
                     <tbody></tbody>
                 </table>
                 <label class="check">
                     <input id="nudge" type="checkbox" />
-                    <span>Show a notification when a meeting is detected</span>
+                    <span data-i18n="nudge">Show a notification when a meeting is detected</span>
                 </label>
-                <label for="quiet-seconds">Stop after this many seconds of silence (auto mode)</label>
+                <label for="quiet-seconds" data-i18n="quietSeconds">Stop after this many seconds of silence (auto mode)</label>
                 <input id="quiet-seconds" type="number" min="30" max="3600" step="10" placeholder="180" />
                 <p class="hint">
-                    Keyboard shortcut: <span id="shortcut">not set</span>.
-                    <button id="open-shortcuts" class="link" type="button">Change in Chrome</button>
-                    Chrome may leave the suggested key unassigned; set it there if empty.
+                    <span data-i18n="shortcut">Keyboard shortcut:</span> <span id="shortcut">not set</span>.
+                    <button id="open-shortcuts" class="link" type="button" data-i18n="changeChrome">Change in Chrome</button>
+                    <span data-i18n="shortcutHint">Chrome may leave the suggested key unassigned; set it there if empty.</span>
                 </p>
             </section>
 
             <section id="ack-section" hidden>
-                <h2>One-time confirmation</h2>
-                <p class="hint">
-                    Automatic recording skips the per-recording checkbox. Confirm your
-                    recording policy once; the confirmation time is stored with every
-                    automatic recording.
-                </p>
+                <h2 data-i18n="oneTimeConfirmation">One-time confirmation</h2>
+                <p class="hint" data-i18n="ackIntro">Automatic recording skips the per-recording checkbox.</p>
                 <p id="ack-text" class="policy"></p>
                 <label class="check">
                     <input id="ack-check" type="checkbox" />
-                    <span>I confirm this policy.</span>
+                    <span data-i18n="ackPolicy">I confirm this policy.</span>
                 </label>
             </section>
 
             <section>
-                <h2>Microphone</h2>
-                <p class="hint">
-                    Grant microphone access once. By default the recorder uses your
-                    system default input, which is almost always the same mic your
-                    meeting app uses. Override it here only if your meeting runs on a
-                    different device.
-                </p>
-                <button id="grant-mic" type="button">Grant microphone access</button>
-                <label for="mic-device">Input device (override)</label>
-                <select id="mic-device"><option value="">Default (recommended)</option></select>
+                <h2 data-i18n="microphone">Microphone</h2>
+                <p class="hint" data-i18n="micIntro">Grant microphone access once.</p>
+                <button id="grant-mic" type="button" data-i18n="grantMic">Grant microphone access</button>
+                <label for="mic-device" data-i18n="inputDevice">Input device (override)</label>
+                <select id="mic-device"><option value="" data-i18n="defaultRecommended">Default (recommended)</option></select>
             </section>
 
             <section>
-                <h2>Recording</h2>
-                <label for="local-copy">Keep a local copy</label>
+                <h2 data-i18n="recording">Recording</h2>
+                <label for="local-copy" data-i18n="keepLocal">Keep a local copy</label>
                 <select id="local-copy">
-                    <option value="always">Always download to my computer</option>
-                    <option value="ask">Ask where to save each time</option>
-                    <option value="never">Never keep a local copy</option>
+                    <option value="always" data-i18n="alwaysDownload">Always download to my computer</option>
+                    <option value="ask" data-i18n="askLocation">Ask where to save each time</option>
+                    <option value="never" data-i18n="neverLocal">Never keep a local copy</option>
                 </select>
-                <label for="download-folder">Download subfolder</label>
-                <input id="download-folder" type="text" placeholder="Riffado" />
-                <label for="channel-mode">Channel layout</label>
+                <label for="download-folder" data-i18n="downloadFolder">Download subfolder</label>
+                <input id="download-folder" type="text" placeholder="Chatterbox" data-i18n-placeholder="appName" />
+                <label for="channel-mode" data-i18n="channelLayout">Channel layout</label>
                 <select id="channel-mode">
-                    <option value="mixed">Mixed (natural, recommended)</option>
-                    <option value="split">Split (you left, others right)</option>
+                    <option value="mixed" data-i18n="mixed">Mixed (natural, recommended)</option>
+                    <option value="split" data-i18n="split">Split (you left, others right)</option>
                 </select>
             </section>
 
             <section>
-                <h2>Participant notice</h2>
-                <p class="hint" id="notice-hint">
-                    Shown before a manual recording and used for the one-time
-                    confirmation above. Leave empty to use your server's text.
-                </p>
+                <h2 data-i18n="participantNotice">Participant notice</h2>
+                <p class="hint" id="notice-hint" data-i18n="noticeHint">Shown before a manual recording and used for the one-time confirmation above. Leave empty to use your server's text.</p>
                 <textarea id="notice-text" rows="3"></textarea>
             </section>
 
-            <button id="save-all" class="primary" type="button">Save settings</button>
+            <button id="save-all" class="primary" type="button" data-i18n="saveSettings">Save settings</button>
             <p id="save-status" class="status"></p>
         </main>
         <script type="module" src="options.js"></script>

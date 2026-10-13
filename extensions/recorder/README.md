@@ -1,13 +1,13 @@
-# Riffado Meeting Recorder
+# Chatterbox Meeting Recorder
 
 A Chromium extension that records a meeting's audio and streams it to a
-Riffado instance, where it is transcribed and summarized like any other
+Chatterbox instance, where it is transcribed and summarized like any other
 recording.
 
 It captures **system audio** (so it works with meetings in a browser tab and
-with native Zoom or Teams desktop clients) plus your **microphone**, mixed
-into a two-channel file: your voice on the left, everyone else on the right.
-That split lets Riffado tell "you" from "the others" without guessing.
+with native Zoom or Teams desktop clients) plus your **microphone**. Audio is
+mixed by default; an optional split mode puts your voice on the left and
+everyone else on the right.
 
 Chromium only (Chrome, Edge, Brave, Vivaldi). Firefox and Safari do not expose
 system audio to extensions.
@@ -15,10 +15,11 @@ system audio to extensions.
 ## How it works
 
 1. You click **Record** and confirm the participant notice.
-2. Chrome's picker opens; you choose **Entire screen** and enable
-   **Share system audio**. The extension keeps only the audio.
+2. On a detected meeting tab, Chrome captures that tab's audio directly. For
+   a desktop meeting app, choose **Entire screen** and enable **Share system
+   audio** in Chrome's picker. The extension keeps only the audio.
 3. Audio is encoded in 5-second slices, buffered locally, and uploaded to
-   Riffado as it is captured.
+   Chatterbox as it is captured.
 4. On stop, the server assembles the slices, remuxes them to Ogg/Opus, and
    creates a recording. A local `.webm` copy is saved to your Downloads
    (configurable).
@@ -32,18 +33,19 @@ system, a dropped connection or a closed tab loses seconds, not the meeting.
 2. Turn on **Developer mode**.
 3. **Load unpacked** and select this `extensions/recorder` folder.
 4. Open the extension's **Options**, grant microphone access, and pair it with
-   your Riffado instance (see below).
+   your Chatterbox instance (see below).
 
 No build step is required: the extension is plain ES-module JavaScript loaded
 directly by Chrome.
 
 ## Pairing
 
-In Riffado, open **Settings → Meeting Recorder** and generate a recorder key
+In Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
 (a `recordings:write` API key that cannot read your library). Then either:
 
-- Click **Send to extension** on that page (works once the extension has been
-  granted access to the server's origin), or
+- Click **Set up recorder** on that page, then confirm the destination in the
+  extension's Options page. Chrome may ask for access to that server origin.
+  For self-hosted sites, grant the origin from the extension popup first.
 - Paste the **server URL** and **key** into the extension's Options.
 
 ## Packaging
@@ -55,11 +57,11 @@ repository root:
 node extensions/recorder/pack.mjs
 ```
 
-This writes `dist/riffado-recorder-<version>.zip`.
+This writes `dist/chatterbox-recorder-<version>.zip`.
 
 The extension ID is pinned by the `key` in `manifest.json`:
 `hiipabbdnlhdkgldhkdndmohejoaecnh`. It is the same whether loaded unpacked,
-packed, or from the store, and the Riffado web app uses it to detect and
+packed, or from the store, and the Chatterbox web app uses it to detect and
 message the extension. The matching private key lives outside this folder in
 `extensions/signing-keys/` (git-ignored) so Chrome does not warn about a
 `.pem` inside the loaded extension; keep it if you ever sign a `.crx`
@@ -78,7 +80,7 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
 | `downloads` | Saves the local copy. |
 | `storage` | Stores settings and recording state. |
-| `scripting` | Registers the pairing relay on your Riffado origin. |
+| `scripting` | Registers the pairing relay on your Chatterbox origin. |
 | optional host access | Granted per server origin so the extension can upload only there. |
 
 ## Legal

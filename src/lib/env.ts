@@ -1122,8 +1122,7 @@ const baseEnvSchema = z.object({
      * automatically unless a platform is listed here or the user opts in.
      *
      * Comma-separated platform ids (see `src/lib/recorder/platforms.ts`) or
-     * `all`. Unknown ids are rejected so a typo cannot silently disable the
-     * intended platform.
+     * `all`. Unknown ids are logged and ignored by recorder config resolution.
      */
     RECORDER_AUTO_RECORD_PLATFORMS: z
         .string()

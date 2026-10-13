@@ -1,11 +1,12 @@
 // Popup UI: manual start with notice confirmation, live meters, error
 // recovery, and the first-contact "Connect to this site" bootstrap for
-// self-hosted Riffado instances.
+// self-hosted Chatterbox instances.
 //
 // On tabs armed in auto mode the popup is disabled entirely (the toolbar
 // click starts recording directly), so this UI only appears elsewhere.
 
 import { STATE } from "../lib/constants.js";
+import { localizeDocument, t } from "../lib/i18n.js";
 import {
     grantHostAccess,
     injectPairingScript,
@@ -29,6 +30,8 @@ const views = {
     finalizing: document.getElementById("view-finalizing"),
     error: document.getElementById("view-error"),
 };
+
+localizeDocument();
 
 const el = (id) => document.getElementById(id);
 
@@ -79,7 +82,7 @@ async function renderUnpaired() {
         ? Boolean(detectMeetingPlatform(currentTab.url))
         : false;
     if (origin && !isMeeting) {
-        el("connect-origin").textContent = `Connect to ${origin}`;
+        el("connect-origin").textContent = t("connectTo", origin);
         el("connect-status").textContent = "";
         show("connect");
     } else {
@@ -91,18 +94,16 @@ el("connect-origin").addEventListener("click", async () => {
     const origin = currentTab?.url ? originOf(currentTab.url) : null;
     if (!origin || !currentTab) return;
     const status = el("connect-status");
-    status.textContent = "Requesting access…";
+    status.textContent = t("requestingAccess");
     // This click is the user gesture Chrome requires for a host grant.
     const granted = await grantHostAccess(origin);
     if (!granted) {
-        status.textContent =
-            "Access was not granted. The extension cannot reach this server without it.";
+        status.textContent = t("popupAccessDenied");
         return;
     }
     await registerPairingScript(origin);
     await injectPairingScript(currentTab.id);
-    status.textContent =
-        "Connected to this site. Now click “Set up recorder” on the Riffado page.";
+    status.textContent = t("siteConnected");
     setTimeout(() => window.close(), 1800);
 });
 
@@ -120,17 +121,16 @@ async function renderIdle() {
     el("picker-hint").hidden = true;
 
     if (currentPlatform) {
-        hint.textContent = `Record this ${currentPlatform.name} meeting.`;
-        el("start").textContent = "Record meeting";
+        hint.textContent = t("recordThis", currentPlatform.name);
+        el("start").textContent = t("recordMeeting");
         const mode = effectivePlatformModes(settings)[currentPlatform.id]?.mode;
         if (mode === "off") {
             autoHint.hidden = false;
-            autoHint.textContent = `Tip: turn on automatic recording for ${currentPlatform.name} in Options, and the icon will offer to record with one click.`;
+            autoHint.textContent = t("autoTip", currentPlatform.name);
         }
     } else {
-        hint.textContent =
-            "No meeting detected in this tab. Record via the screen picker (works for native Zoom or Teams apps).";
-        el("start").textContent = "Record via screen picker";
+        hint.textContent = t("noMeeting");
+        el("start").textContent = t("recordPicker");
     }
     show("idle");
 }
@@ -176,8 +176,8 @@ function renderUploadStatus(state, elementId = "upload-status") {
     if (!node) return;
     const uploaded = state.uploaded?.length ?? 0;
     node.textContent = state.stopped
-        ? `Uploaded ${uploaded} of ${state.chunkCount} segments`
-        : `${uploaded} segment(s) uploaded`;
+        ? t("uploadedOf", [String(uploaded), String(state.chunkCount)])
+        : t("segmentsUploaded", String(uploaded));
 }
 
 async function render(state) {
@@ -209,11 +209,11 @@ async function render(state) {
             break;
         case STATE.awaitingPicker:
             show("idle");
-            el("idle-hint").textContent = "Waiting for you to choose a screen…";
+            el("idle-hint").textContent = t("waitingPicker");
             break;
         case STATE.error:
             show("error");
-            el("error-text").textContent = state.error ?? "Something went wrong.";
+            el("error-text").textContent = state.error ?? t("somethingWrong");
             break;
         default:
             await renderIdle();

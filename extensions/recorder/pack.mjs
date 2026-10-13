@@ -1,25 +1,18 @@
 // Package the extension into a distributable zip.
 //
-// Run from the repository root so `archiver` (a Riffado dependency) resolves:
+// Run from the repository root so `archiver` resolves:
 //   node extensions/recorder/pack.mjs
 //
-// Produces extensions/recorder/dist/riffado-recorder-<version>.zip, suitable
+// Produces extensions/recorder/dist/chatterbox-recorder-<version>.zip, suitable
 // for an unlisted Chrome Web Store upload or manual distribution. For local
 // development you do not need this: load the extensions/recorder folder as an
 // unpacked extension instead.
 
+import { ZipArchive } from "archiver";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
-
-// archiver@8 is ESM with named exports; import it from the repo-root
-// node_modules so this script works run from the repository root.
-const archiverUrl = pathToFileURL(
-    join(process.cwd(), "node_modules", "archiver", "index.js"),
-).href;
-const { ZipArchive } = await import(archiverUrl);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const manifest = JSON.parse(
@@ -27,7 +20,7 @@ const manifest = JSON.parse(
 );
 const distDir = join(here, "dist");
 await mkdir(distDir, { recursive: true });
-const outPath = join(distDir, `riffado-recorder-${manifest.version}.zip`);
+const outPath = join(distDir, `chatterbox-recorder-${manifest.version}.zip`);
 
 const output = createWriteStream(outPath);
 const archive = new ZipArchive({ zlib: { level: 9 } });
@@ -45,6 +38,7 @@ for (const entry of [
     "content-pairing.js",
     "probe.png",
     "lib",
+    "_locales",
     "offscreen",
     "popup",
     "options",

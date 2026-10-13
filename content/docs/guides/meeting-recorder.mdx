@@ -1,23 +1,23 @@
 ---
 title: Meeting Recorder
-description: Record meeting audio in your browser and send it to Riffado for transcription and summaries.
+description: Record meeting audio in your browser and send it to Chatterbox for transcription and summaries.
 ---
 
-The Riffado Meeting Recorder is a Chromium extension that records a meeting's
-audio and uploads it to your Riffado instance, where it is transcribed and
+The Chatterbox Meeting Recorder is a Chromium extension that records a meeting's
+audio and uploads it to your Chatterbox instance, where it is transcribed and
 summarized like any other recording.
 
 It captures your **microphone** and the **system audio** your computer plays,
 so it works both for meetings in a browser tab and for native Zoom or Teams
-desktop apps. The two are recorded on separate channels — your voice on the
-left, everyone else on the right — which helps Riffado attribute who said what.
+desktop apps. Audio is mixed by default. The optional split mode places your
+voice on the left and everyone else on the right.
 
 Chromium browsers only: Chrome, Edge, Brave, Vivaldi. Firefox and Safari do not
 let extensions capture system audio.
 
 ## Install
 
-The extension is not built into Riffado; it is a separate, load-unpackable
+The extension is not built into Chatterbox; it is a separate, load-unpackable
 folder under `extensions/recorder` in the repository, or a packaged zip.
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
@@ -25,15 +25,16 @@ folder under `extensions/recorder` in the repository, or a packaged zip.
    release and select that folder).
 3. Open the extension's **Options** and grant microphone access.
 
-## Connect it to Riffado
+## Connect it to Chatterbox
 
-Open **Settings → Meeting Recorder** in Riffado. The page detects the
+Open **Settings → Meeting Recorder** in Chatterbox. The page detects the
 extension in your browser and tells you what to do:
 
-- **Set up recorder**: one click. Riffado creates a write-only key (it can
+- **Set up recorder**: Chatterbox creates a write-only key (it can
   create recordings but cannot read your library) and hands it to the
-  extension. Nothing to copy.
-- **On a self-hosted Riffado, the first time only**: Chrome requires you to
+  extension. Nothing to copy. Confirm the server in the extension's Options
+  page; Chrome may also ask you to grant host access.
+- **On a self-hosted Chatterbox, the first time only**: Chrome requires you to
   allow the extension to reach your server once. Click the extension icon,
   choose **Connect to your-server**, and the settings page updates by itself.
   Then click Set up recorder.

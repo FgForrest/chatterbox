@@ -35,6 +35,7 @@ export type RecorderExtensionState =
 
 export interface PairResult {
     ok: boolean;
+    pending?: boolean;
     error?: string;
 }
 
@@ -204,7 +205,11 @@ export function createRecorderExtensionClient(
                                 return;
                             }
                             if (isRecord(response) && response.ok === true) {
-                                resolve({ ok: true });
+                                resolve(
+                                    response.pending === true
+                                        ? { ok: true, pending: true }
+                                        : { ok: true },
+                                );
                             } else {
                                 resolve({
                                     ok: false,
@@ -234,7 +239,11 @@ export function createRecorderExtensionClient(
                 if (event.data.type !== PAIR_RESULT) return;
                 stop();
                 if (event.data.ok === true) {
-                    resolve({ ok: true });
+                    resolve(
+                        event.data.pending === true
+                            ? { ok: true, pending: true }
+                            : { ok: true },
+                    );
                 } else {
                     resolve({
                         ok: false,

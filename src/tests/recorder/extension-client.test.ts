@@ -138,6 +138,21 @@ describe("pairRecorderExtension", () => {
         );
     });
 
+    it("does not treat an awaiting confirmation as a completed pairing", async () => {
+        const { deps } = fakePage({
+            external: () => ({ ok: true, pending: true }),
+        });
+        const client = createRecorderExtensionClient(deps);
+        expect(
+            await client.pair(
+                ID,
+                "external",
+                { serverUrl: ORIGIN, apiKey: "op_x" },
+                50,
+            ),
+        ).toEqual({ ok: true, pending: true });
+    });
+
     it("relays a refusal from the content channel", async () => {
         const { deps } = fakePage({
             content: (message) =>
