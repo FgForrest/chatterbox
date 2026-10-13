@@ -41,6 +41,7 @@ for (const entry of [
     "_locales",
     "offscreen",
     "popup",
+    "picker",
     "options",
     "icons",
 ]) {

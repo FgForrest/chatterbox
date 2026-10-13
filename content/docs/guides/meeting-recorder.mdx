@@ -7,10 +7,10 @@ The Chatterbox Meeting Recorder is a Chromium extension that records a meeting's
 audio and uploads it to your Chatterbox instance, where it is transcribed and
 summarized like any other recording.
 
-It captures your **microphone** and the **system audio** your computer plays,
-so it works both for meetings in a browser tab and for native Zoom or Teams
-desktop apps. Audio is mixed by default. The optional split mode places your
-voice on the left and everyone else on the right.
+It captures your **microphone** and meeting audio from a browser tab. Native
+Zoom or Teams desktop audio is available only when Chrome offers system audio
+for screen sharing on your computer. Audio is mixed by default. The optional
+split mode places your voice on the left and everyone else on the right.
 
 Chromium browsers only: Chrome, Edge, Brave, Vivaldi. Firefox and Safari do not
 let extensions capture system audio.
@@ -75,9 +75,9 @@ settings.
 
 ## Record a meeting
 
-1. Click the extension icon and choose **Record meeting**.
-2. Confirm the participant notice.
-3. Talk. Stop from the extension popup, or with the keyboard shortcut
+1. Click the extension icon, read the short participant reminder, and choose
+   **Consent confirmed · Record**.
+2. Talk. Stop from the extension popup, or with the keyboard shortcut
    (`Ctrl+Shift+U` by default).
 
 There is nothing to configure. The recorder uses your system default
@@ -86,10 +86,12 @@ microphone, and captures the meeting audio automatically:
 - **Meeting in a browser tab** (Google Meet, or Zoom/Teams web): the extension
   records that tab's audio directly. No screen picker, no "share system audio"
   step, and other apps' sounds are not captured.
+- **Another browser tab**: select the tab in Chrome's picker and enable audio.
 - **Native Zoom or Teams desktop app**: there is no tab to capture, so the
-  extension falls back to the screen picker. Choose **Entire screen** and turn
-  on **Share system audio**. On macOS, Chrome asks for the **Screen Recording**
-  permission the first time; grant it once.
+  extension opens Chrome's picker. Choose **Entire screen** and turn on
+  **Share system audio** if available. If Chrome says screen audio cannot be
+  shared, use the meeting's browser version instead. On macOS, Chrome may ask
+  for **Screen Recording** permission the first time.
 
 The microphone is always your system default input. An extension cannot read
 which device another tab chose, but the default is almost always the same mic
@@ -97,8 +99,8 @@ your meeting app uses. If yours is on a non-default mic, set an override in the
 extension's Options.
 
 When you stop, the recording is assembled on the server and appears in your
-library shortly after, ready to transcribe and summarize. A local `.webm` copy
-is also saved to your Downloads unless you turned that off.
+library shortly after, ready to transcribe and summarize. You can download a
+playable copy from the recording page after upload completes.
 
 ## Reliability
 

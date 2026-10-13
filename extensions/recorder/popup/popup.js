@@ -1,4 +1,4 @@
-// Popup UI: manual start with notice confirmation, live meters, error
+// Popup UI: manual start, live meters, error
 // recovery, and the first-contact "Connect to this site" bootstrap for
 // self-hosted Chatterbox instances.
 //
@@ -25,9 +25,9 @@ const views = {
     connect: document.getElementById("view-connect"),
     unpaired: document.getElementById("view-unpaired"),
     idle: document.getElementById("view-idle"),
-    notice: document.getElementById("view-notice"),
     recording: document.getElementById("view-recording"),
     finalizing: document.getElementById("view-finalizing"),
+    completed: document.getElementById("view-completed"),
     error: document.getElementById("view-error"),
 };
 
@@ -127,11 +127,12 @@ async function renderIdle() {
     const hint = el("idle-hint");
     const autoHint = el("auto-hint");
     autoHint.hidden = true;
-    el("picker-hint").hidden = true;
+    el("start").textContent = t("recordWithConsent");
+    el("notice-text").textContent = effectiveNoticeText(settings);
+    el("picker-hint").hidden = Boolean(currentPlatform);
 
     if (currentPlatform) {
         hint.textContent = t("recordThis", currentPlatform.name);
-        el("start").textContent = t("recordMeeting");
         const mode = effectivePlatformModes(settings)[currentPlatform.id]?.mode;
         if (mode === "off") {
             autoHint.hidden = false;
@@ -139,46 +140,33 @@ async function renderIdle() {
         }
     } else {
         hint.textContent = t("noMeeting");
-        el("start").textContent = t("recordPicker");
     }
     show("idle");
 }
 
 el("start").addEventListener("click", async () => {
-    const settings = await getSettings();
-    if (!settings.dataUseAcknowledgedAt) {
-        chrome.runtime.openOptionsPage();
-        return;
-    }
-    el("notice-text").textContent = effectiveNoticeText(settings);
-    el("notice-ack").checked = false;
-    el("notice-confirm").disabled = true;
-    el("picker-hint").hidden = Boolean(currentPlatform);
-    show("notice");
-});
-
-el("notice-ack").addEventListener("change", (event) => {
-    el("notice-confirm").disabled = !event.target.checked;
-});
-
-el("notice-cancel").addEventListener("click", () => {
-    void renderIdle();
-});
-
-el("notice-confirm").addEventListener("click", async () => {
-    const response = await sendMessage({
-        type: "start-recording",
-        payload: {
-            tabId: currentTab?.id,
-            platformHint: currentPlatform?.id ?? undefined,
-            noticeAcknowledgedAt: new Date().toISOString(),
-        },
-    });
-    if (response && response.ok === false) {
-        el("error-text").textContent = response.error;
-        show("error");
-    } else {
+    const button = el("start");
+    button.disabled = true;
+    button.textContent = t(currentPlatform ? "startingCapture" : "openingPicker");
+    try {
+        const response = await sendMessage({
+            type: "start-recording",
+            payload: {
+                tabId: currentTab?.id,
+                platformHint: currentPlatform?.id ?? undefined,
+                noticeAcknowledgedAt: new Date().toISOString(),
+            },
+        });
+        if (response?.ok !== true) {
+            throw new Error(response?.error ?? t("couldNotStart"));
+        }
         window.close();
+    } catch (error) {
+        el("error-text").textContent = error?.message ?? String(error);
+        show("error");
+    } finally {
+        button.disabled = false;
+        button.textContent = t("recordWithConsent");
     }
 });
 
@@ -191,6 +179,20 @@ function renderUploadStatus(state, elementId = "upload-status") {
     node.textContent = state.stopped
         ? t("uploadedOf", [String(uploaded), String(state.chunkCount)])
         : t("segmentsUploaded", String(uploaded));
+}
+
+function renderFinalizing(state) {
+    const total = Math.max(0, state.chunkCount ?? 0);
+    const uploaded = Math.min(total, state.uploaded?.length ?? 0);
+    const percent = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+    el("finalizing-stage").textContent = t(
+        state.state === STATE.finalizing ? "processingRecording" : "uploadingRecording",
+    );
+    el("finalizing-progress").setAttribute("aria-valuenow", String(percent));
+    el("finalizing-progress").setAttribute("aria-label", t("uploadProgress"));
+    el("finalizing-progress-fill").style.width = `${percent}%`;
+    renderUploadStatus(state, "finalizing-status");
+    show("finalizing");
 }
 
 async function render(state) {
@@ -208,6 +210,10 @@ async function render(state) {
 
     switch (state.state) {
         case STATE.recording: {
+            if (state.stopped) {
+                renderFinalizing(state);
+                break;
+            }
             show("recording");
             const tick = () => {
                 el("elapsed").textContent = formatElapsed(state.startedAt);
@@ -218,8 +224,14 @@ async function render(state) {
             break;
         }
         case STATE.finalizing:
-            show("finalizing");
-            renderUploadStatus(state, "finalizing-status");
+            renderFinalizing(state);
+            break;
+        case STATE.completed:
+            el("completion-check").hidden = Boolean(state.partial);
+            el("completion-message").textContent = t(
+                state.partial ? "partialRecordingSent" : "recordingStored",
+            );
+            show("completed");
             break;
         case STATE.awaitingPicker:
             show("idle");

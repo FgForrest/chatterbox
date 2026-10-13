@@ -4,26 +4,34 @@ A Chromium extension that records a meeting's audio and streams it to a
 Chatterbox instance, where it is transcribed and summarized like any other
 recording.
 
-It captures **system audio** (so it works with meetings in a browser tab and
-with native Zoom or Teams desktop clients) plus your **microphone**. Audio is
-mixed by default; an optional split mode puts your voice on the left and
-everyone else on the right.
+It captures your **microphone** and the audio of a selected browser tab. It can
+also capture native Zoom or Teams desktop audio when Chrome offers system audio
+for screen sharing on your computer. Audio is mixed by default; an optional
+split mode puts your voice on the left and everyone else on the right.
 
 Chromium only (Chrome, Edge, Brave, Vivaldi). Firefox and Safari do not expose
 system audio to extensions.
 
 ## How it works
 
-1. You click **Record** and confirm the participant notice.
+1. In the popup, read the short participant reminder and click
+   **Consent confirmed · Record**. This is the manual recording confirmation.
 2. On a detected meeting tab, Chrome captures that tab's audio directly. For
-   a desktop meeting app, choose **Entire screen** and enable **Share system
-   audio** in Chrome's picker. The extension keeps only the audio.
+   another browser tab, select it in Chrome's picker. For a desktop meeting
+   app, choose **Entire screen** and enable **Share system audio** if Chrome
+   offers it. The extension keeps only the audio. A small recorder window stays
+   open during desktop capture and shows microphone and meeting audio levels;
+   you can minimize it. Closing it stops the recording and uploads the saved
+   chunks. If Chrome says screen audio is unavailable, use the meeting's
+   browser version instead.
 3. Audio is encoded in 5-second slices, encrypted with a server-issued
    per-recording key before it is written to browser storage, and uploaded to
    Chatterbox as it is captured.
 4. On stop, the server assembles the slices, remuxes them to Ogg/Opus, and
-   creates a recording. You can download a playable copy from the authenticated
-   recording page after the server confirms completion.
+   creates a recording. The popup shows upload progress, then confirms when
+   Chatterbox has saved the recording. It returns to the ready screen and opens
+   the new recording in an existing Chatterbox tab, or a new tab if none is open.
+   You can download a playable copy from that authenticated recording page.
 
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
@@ -83,11 +91,11 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 
 | Permission | Why |
 | --- | --- |
-| `offscreen` | MV3 only allows `getUserMedia`/`MediaRecorder` in an offscreen document. |
+| `offscreen` | Keeps a detected meeting tab's capture running while the toolbar popup is closed. |
 | `desktopCapture` | Opens the screen picker to capture system audio. |
 | `tabCapture` | Records a detected meeting tab's audio directly, without the screen picker. |
 | `alarms` | Auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
-| `tabs` | Detects meeting URLs and knows which tab a recording belongs to. |
+| `tabs` | Detects meeting URLs, tracks the recording tab, and opens a server-confirmed recording in your Chatterbox tab. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
 | `storage` | Stores settings, an encrypted recorder token, and recording state. Encrypted audio chunks use the browser's private file system. |
 | `scripting` | Registers the pairing relay on your Chatterbox origin. |
@@ -99,6 +107,6 @@ Suggested Chrome Web Store explanations for every manifest permission are in
 ## Legal
 
 Recording people can require their consent, and the rules differ by country.
-The participant-notice confirmation records that you were reminded before each
-recording; it is not itself consent. You are responsible for complying with the
-laws and meeting-platform terms that apply to you.
+Clicking **Consent confirmed · Record** records your acknowledgement; it does
+not obtain consent from other participants. You are responsible for complying
+with the laws and meeting-platform terms that apply to you.

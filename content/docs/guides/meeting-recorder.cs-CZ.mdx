@@ -7,9 +7,9 @@ Klepna – nahrávání schůzek je rozšíření pro prohlížeče na bázi Chr
 zachytí zvuk schůzky a odešle ho do vaší instance Klepny, kde se přepíše a
 shrne jako každá jiná nahrávka.
 
-Zachytává váš **mikrofon** a **systémový zvuk**, který počítač přehrává, takže
-funguje jak pro schůzky v záložce prohlížeče, tak pro nativní aplikace Zoom
-nebo Teams.
+Zachytává váš **mikrofon** a zvuk schůzky v kartě prohlížeče. Zvuk samostatné
+aplikace Zoom nebo Teams lze zachytit jen tehdy, když Chrome na vašem počítači
+umožňuje sdílet systémový zvuk při sdílení obrazovky.
 
 Pouze prohlížeče na bázi Chromia: Chrome, Edge, Brave, Vivaldi. Firefox a
 Safari rozšířením zachytávání systémového zvuku neumožňují.
@@ -75,9 +75,9 @@ v Chromu.
 
 ## Nahrání schůzky
 
-1. Klikněte na ikonu rozšíření a zvolte **Nahrát schůzku**.
-2. Potvrďte upozornění účastníkům.
-3. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
+1. Klikněte na ikonu rozšíření, přečtěte si stručné připomenutí pro účastníky a
+   zvolte **Souhlas potvrzen · Nahrávat**.
+2. Po skončení schůzky zastavte nahrávání ve vyskakovacím okně rozšíření nebo
    klávesovou zkratkou (`Ctrl+Shift+U` ve výchozím nastavení).
 
 Rozšíření používá výchozí mikrofon systému. Zvuk schůzky zachytí podle zdroje:
@@ -85,13 +85,16 @@ Rozšíření používá výchozí mikrofon systému. Zvuk schůzky zachytí pod
 - **Schůzka v kartě prohlížeče** (Google Meet nebo webové verze Zoomu a Teams):
   nahrává se zvuk této karty. Výběr obrazovky není potřeba a zvuky ostatních
   aplikací se nezachytí.
+- **Jiná karta prohlížeče**: vyberte ji v dialogu Chromu a zapněte sdílení
+  zvuku.
 - **Samostatná aplikace Zoom nebo Teams**: vyberte **Celou obrazovku** a zapněte
-  **Sdílet systémový zvuk**. Na macOS může Chrome poprvé požádat o oprávnění
-  k záznamu obrazovky.
+  **Sdílet systémový zvuk**, pokud je tato možnost dostupná. Pokud Chrome
+  upozorní, že zvuk obrazovky nelze sdílet, použijte webovou verzi schůzky.
+  Na macOS může Chrome poprvé požádat o oprávnění k záznamu obrazovky.
 
 Pokud pro schůzky používáte jiný než výchozí mikrofon, vyberte ho v Možnostech
-rozšíření. Po zastavení se nahrávka objeví v knihovně Klepny. Ve výchozím
-nastavení se také uloží místní kopie `.webm` do Stažených souborů.
+rozšíření. Po zastavení se nahrávka objeví v knihovně Klepny.
+Přehratelnou kopii můžete po odeslání stáhnout ze stránky nahrávky.
 
 ## Spolehlivost
 
