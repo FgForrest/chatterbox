@@ -6,6 +6,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 function setupPicker(chooseDesktopMedia) {
     const nodes = new Map();
+    let onMessage;
     const node = (id) => {
         if (!nodes.has(id)) {
             nodes.set(id, {
@@ -13,6 +14,10 @@ function setupPicker(chooseDesktopMedia) {
                 hidden: false,
                 disabled: false,
                 style: {},
+                attributes: new Map(),
+                setAttribute(name, value) {
+                    this.attributes.set(name, value);
+                },
                 classList: { add: vi.fn() },
                 addEventListener: vi.fn(),
             });
@@ -43,18 +48,35 @@ function setupPicker(chooseDesktopMedia) {
         getElementById: node,
         querySelectorAll: () => [],
     });
-    vi.stubGlobal("window", { close: vi.fn() });
+    const close = vi.fn();
+    vi.stubGlobal("window", { close });
     vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
     vi.stubGlobal("chrome", {
         i18n: { getUILanguage: () => "en", getMessage: (key) => key },
         runtime: {
             sendMessage,
-            onMessage: { addListener: vi.fn() },
+            onMessage: {
+                addListener: (listener) => {
+                    onMessage = listener;
+                },
+            },
         },
         desktopCapture: { chooseDesktopMedia },
     });
 
-    return { node, events, getUserMedia, sendMessage, stream };
+    return {
+        node,
+        events,
+        getUserMedia,
+        sendMessage,
+        stream,
+        close,
+        dispatchState: (state) =>
+            onMessage({
+                type: "state",
+                state: { pickerRequestId: "request-1", ...state },
+            }),
+    };
 }
 
 describe("desktop recorder extension window", () => {
@@ -130,5 +152,63 @@ describe("desktop recorder extension window", () => {
         );
 
         expect(node("picker-status").textContent).toBe("Picker unavailable");
+    });
+
+    it("keeps the recorder window visible through upload, server save, and confirmation", async () => {
+        const chooseDesktopMedia = vi.fn((_sources, callback) => {
+            callback("desktop-stream", { canRequestAudioTrack: true });
+            return 123;
+        });
+        const { node, sendMessage, close, dispatchState } =
+            setupPicker(chooseDesktopMedia);
+        await import("../../../extensions/recorder/picker/picker.js");
+        await vi.waitFor(() =>
+            expect(sendMessage).toHaveBeenCalledWith(
+                expect.objectContaining({ type: "desktop-capture-ready" }),
+            ),
+        );
+
+        dispatchState({
+            state: "recording",
+            stopped: true,
+            chunkCount: 4,
+            uploaded: [0, 1],
+        });
+        expect(node("picker-progress").hidden).toBe(false);
+        expect(node("picker-controls").hidden).toBe(true);
+        expect(node("picker-upload-progress-fill").style.width).toBe("50%");
+        expect(
+            node("picker-upload-progress").attributes.get("aria-valuenow"),
+        ).toBe("50");
+        expect(node("picker-processing").hidden).toBe(true);
+        expect(close).not.toHaveBeenCalled();
+
+        dispatchState({
+            state: "finalizing",
+            stopped: true,
+            chunkCount: 4,
+            uploaded: [0, 1, 2, 3],
+        });
+        expect(node("picker-progress-stage").textContent).toBe(
+            "processingRecording",
+        );
+        expect(node("picker-processing").hidden).toBe(false);
+        expect(node("picker-processing-status").textContent).toBe(
+            "uploadComplete",
+        );
+        expect(node("picker-completed").hidden).toBe(true);
+        expect(close).not.toHaveBeenCalled();
+
+        dispatchState({ state: "completed", partial: false });
+        expect(node("picker-progress").hidden).toBe(true);
+        expect(node("picker-completed").hidden).toBe(false);
+        expect(node("picker-completion-check").hidden).toBe(false);
+        expect(node("picker-completion-message").textContent).toBe(
+            "recordingStored",
+        );
+        expect(close).not.toHaveBeenCalled();
+
+        dispatchState({ state: "idle" });
+        expect(close).toHaveBeenCalledOnce();
     });
 });

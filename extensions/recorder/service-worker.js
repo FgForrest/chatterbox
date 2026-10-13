@@ -1381,15 +1381,15 @@ async function handleRecordingStopped(message) {
     if (state.sessionId !== message.sessionId) return;
     if (state.captureMode === "desktop") {
         await setState({ stopped: true });
-        if (state.captureWindowId != null) {
-            await chrome.windows.remove(state.captureWindowId).catch(() => {});
-        }
     } else {
         await closeOffscreen();
     }
 
     if (!message.chunkCount || message.chunkCount < 1) {
         await discardSession(message.sessionId);
+        if (state.captureMode === "desktop" && state.captureWindowId != null) {
+            await chrome.windows.remove(state.captureWindowId).catch(() => {});
+        }
         await notify(
             t("nothingRecorded"),
             t("nothingRecordedBody"),
@@ -1408,6 +1408,12 @@ async function handleRecordingStopped(message) {
         chunkCount: message.chunkCount,
         recoverablePrefix: firstMissing && firstMissing > 0 ? firstMissing : null,
     });
+    if (state.captureMode === "desktop" && state.captureWindowId != null) {
+        await chrome.windows.update(state.captureWindowId, {
+            state: "normal",
+            focused: true,
+        }).catch(() => {});
+    }
     await pumpUploads();
 }
 
