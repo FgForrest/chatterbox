@@ -343,6 +343,51 @@ describe("recorder token-vault failures", () => {
         });
     });
 
+    it("marks a failed desktop start before closing its window", async () => {
+        harness.readToken.mockResolvedValue("recorder-token");
+        harness.createSession.mockResolvedValue({
+            id: "failed-desktop-session",
+            encryption: { protocol: 1, key: "capture-key" },
+        });
+        harness.listChunkIndices.mockResolvedValue([0]);
+        chrome.runtime.sendMessage.mockImplementation(async (message) =>
+            message.target === "desktop-recorder" && message.type === "start"
+                ? { ok: false, error: "Capture failed" }
+                : { ok: true },
+        );
+        chrome.windows.remove.mockImplementation(async (windowId) => {
+            expect(harness.sessionValues.recordingState).toMatchObject({
+                state: "error",
+                sessionId: "failed-desktop-session",
+                stopped: true,
+                blocked: true,
+                captureWindowId: null,
+            });
+            await harness.listeners.windowRemoved(windowId);
+        });
+        await new Promise((resolve) => {
+            harness.listeners.message(
+                { type: "start-recording", payload: { tabId: 7 } },
+                {},
+                resolve,
+            );
+        });
+
+        expect(await pickerMessage("desktop-capture-ready")).toEqual({
+            ok: false,
+            error: "Capture failed",
+        });
+        expect(chrome.windows.remove).toHaveBeenCalledWith(77);
+        expect(harness.deleteLocalSession).not.toHaveBeenCalled();
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            state: "error",
+            sessionId: "failed-desktop-session",
+            stopped: true,
+            blocked: true,
+            error: "Capture failed",
+        });
+    });
+
     it("clears the waiting state when the picker window closes", async () => {
         harness.readToken.mockResolvedValue("recorder-token");
         await new Promise((resolve) => {
@@ -408,45 +453,56 @@ describe("recorder token-vault failures", () => {
     });
 
     it("shows completion only after server storage and navigates the open app tab", async () => {
-        harness.sessionValues.recordingState = {
-            state: "finalizing",
-            sessionId: "session-4",
-            bufferId: "session-4",
-            tabId: 7,
-            stopped: true,
-            chunkCount: 2,
-            uploaded: [0, 1],
-            blocked: false,
-        };
-        harness.readToken.mockResolvedValue("recorder-token");
-        harness.getSession.mockResolvedValue({
-            status: "completed",
-            recording_id: "recording-4",
-        });
-        chrome.tabs.query.mockResolvedValue([
-            { id: 3, url: "https://other.example/home", active: true },
-            { id: 7, url: "https://example.com/settings", windowId: 9 },
-        ]);
+        vi.useFakeTimers();
+        try {
+            harness.sessionValues.recordingState = {
+                state: "finalizing",
+                sessionId: "session-4",
+                bufferId: "session-4",
+                tabId: 7,
+                stopped: true,
+                chunkCount: 2,
+                uploaded: [0, 1],
+                blocked: false,
+            };
+            harness.readToken.mockResolvedValue("recorder-token");
+            harness.getSession.mockResolvedValue({
+                status: "completed",
+                recording_id: "recording-4",
+            });
+            chrome.tabs.query.mockResolvedValue([
+                { id: 3, url: "https://other.example/home", active: true },
+                { id: 7, url: "https://example.com/settings", windowId: 9 },
+            ]);
 
-        const finished = new Promise((resolve) => {
-            harness.listeners.message({ type: "retry-upload" }, {}, resolve);
-        });
-        await vi.waitFor(() =>
+            const finished = new Promise((resolve) => {
+                harness.listeners.message(
+                    { type: "retry-upload" },
+                    {},
+                    resolve,
+                );
+            });
+            await vi.advanceTimersByTimeAsync(0);
             expect(harness.sessionValues.recordingState).toMatchObject({
                 state: "completed",
                 recordingUrl: "https://example.com/recordings/recording-4",
                 partial: false,
-            }),
-        );
-        expect(harness.deleteLocalSession).toHaveBeenCalledWith("session-4");
-        expect(chrome.tabs.update).not.toHaveBeenCalled();
+            });
+            expect(harness.deleteLocalSession).toHaveBeenCalledWith(
+                "session-4",
+            );
+            expect(chrome.tabs.update).not.toHaveBeenCalled();
 
-        expect(await finished).toEqual({ ok: true });
-        expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-            url: "https://example.com/recordings/recording-4",
-            active: true,
-        });
-        expect(harness.sessionValues.recordingState).toBeUndefined();
+            await vi.advanceTimersByTimeAsync(2800);
+            expect(await finished).toEqual({ ok: true });
+            expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
+                url: "https://example.com/recordings/recording-4",
+                active: true,
+            });
+            expect(harness.sessionValues.recordingState).toBeUndefined();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("keeps the buffer and never shows success when completion lacks a recording ID", async () => {

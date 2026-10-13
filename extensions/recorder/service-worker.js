@@ -496,10 +496,8 @@ async function startCapturedRecording({
         return { sessionId: session.id };
     } catch (error) {
         if (captureMode === "tab") await closeOffscreen().catch(() => {});
-        if (captureMode === "desktop") {
-            await chrome.windows.remove(captureWindowId).catch(() => {});
-        }
         const state = await getState();
+        const ownsState = state.sessionId === session.id;
         if (state.sessionId === session.id && (await listChunkIndices(session.id)).length === 0) {
             await discardSession(session.id);
         } else if (state.sessionId === session.id) {
@@ -509,17 +507,26 @@ async function startCapturedRecording({
                 bufferId: session.id,
                 stopped: true,
                 blocked: true,
+                captureWindowId: null,
                 error: error?.message ?? String(error),
             });
         }
         const latest = await getState();
         if (
             captureMode === "tab" ||
+            (ownsState && latest.state === STATE.idle) ||
             latest.sessionId === session.id ||
             (latest.state === STATE.awaitingPicker &&
                 latest.pickerRequestId === pickerRequestId)
         ) {
-            await setState({ state: STATE.error, error: error?.message ?? String(error) });
+            await setState({
+                state: STATE.error,
+                captureWindowId: null,
+                error: error?.message ?? String(error),
+            });
+        }
+        if (captureMode === "desktop") {
+            await chrome.windows.remove(captureWindowId).catch(() => {});
         }
         throw error;
     }
