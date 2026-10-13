@@ -32,3 +32,9 @@ Record meeting audio at the user's request and send it to the Chatterbox server 
 Declare recording audio, authentication information (the recorder key), website/tab information used for meeting detection, and user settings as applicable to the current Store form. State that recordings go to the user-selected server, not to the extension publisher by default. Declare no advertising use or sale only while the implementation continues to match those statements. If the publisher also operates a selectable server, disclose that service and its separate privacy policy accurately.
 
 The privacy policy, store listing, permission explanations, and in-extension consent text must describe the same behavior. Approval remains the Chrome Web Store reviewer's decision.
+
+## Remaining submission risks
+
+- The recorder key in `chrome.storage.local` and recovery audio in Chrome's private file system are currently unencrypted at rest. Chrome's user-data guidance calls for strong encryption of sensitive data at rest. The extension restricts storage access to trusted extension contexts, but that does not encrypt the browser profile. Do not claim at-rest encryption in the Store dashboard.
+- Required `riffado.com` host access remains in the manifest for compatibility with the existing hosted site, although pairing also asks for access to the chosen origin. Review whether that required access can be removed without affecting the product flow; Chrome requires the narrowest permissions needed.
+- Verify the consent, pairing, microphone, manual recording, one-click recording, failed-upload recovery, and local-download flows in Chrome before submission. Automated tests do not exercise Chrome's permission dialogs or the screen picker.
