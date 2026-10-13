@@ -61,7 +61,7 @@ export const DEFAULT_PLATFORM_MODE = "off";
 export const DEFAULT_AUTO_STOP_QUIET_SECONDS = 180;
 
 export const DEFAULT_NOTICE_TEXT =
-    "I have informed the other participants that this meeting is being recorded.";
+    "Inform participants and obtain any required consent before recording.";
 
 /** chrome.alarms names. */
 export const ALARMS = {
@@ -85,5 +85,6 @@ export const STATE = {
     awaitingPicker: "awaiting-picker",
     recording: "recording",
     finalizing: "finalizing",
+    completed: "completed",
     error: "error",
 };

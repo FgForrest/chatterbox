@@ -8,7 +8,7 @@
     </head>
     <body>
         <header>
-            <h1 data-i18n="extensionName">Chatterbox Meeting Recorder</h1>
+            <h1><img src="../icons/icon-48.png" alt="" width="28" height="28" /><span data-i18n="extensionName">Chatterbox Meeting Recorder</span></h1>
             <button id="open-options" class="link" type="button" data-i18n="options">Options</button>
         </header>
 
@@ -30,23 +30,10 @@
         <!-- Idle -->
         <section id="view-idle" hidden>
             <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
-            <button id="start" class="primary" type="button" data-i18n="recordMeeting">Record meeting</button>
+            <p id="notice-text" data-i18n="noticeDefault">Inform participants and obtain any required consent before recording.</p>
+            <button id="start" class="primary" type="button" data-i18n="recordWithConsent">Consent confirmed · Record</button>
+            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Chrome will ask you to choose a tab or screen with audio.</p>
             <p id="auto-hint" class="hint" hidden></p>
-        </section>
-
-        <!-- Notice confirmation (manual flow) -->
-        <section id="view-notice" hidden>
-            <p data-i18n="recordingReminder">This records your microphone and meeting audio. Encrypted audio chunks are buffered in this browser and sent to your paired server as they are captured.</p>
-            <p id="notice-text"></p>
-            <label class="check">
-                <input id="notice-ack" type="checkbox" />
-                <span data-i18n="confirmAbove">I confirm the above.</span>
-            </label>
-            <div class="row">
-                <button id="notice-cancel" type="button" data-i18n="cancel">Cancel</button>
-                <button id="notice-confirm" class="primary" type="button" disabled data-i18n="record">Record</button>
-            </div>
-            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Next, pick Entire screen and enable Share system audio in Chrome's dialog.</p>
         </section>
 
         <!-- Recording -->
@@ -60,8 +47,22 @@
 
         <!-- Finalizing -->
         <section id="view-finalizing" hidden>
-            <p data-i18n="finishing">Finishing upload and handing off to Chatterbox…</p>
+            <p id="finalizing-stage" data-i18n="uploadingRecording">Uploading encrypted audio…</p>
+            <div id="finalizing-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress">
+                <div id="finalizing-progress-fill" class="progress-fill"></div>
+            </div>
             <p id="finalizing-status" class="hint"></p>
+        </section>
+
+        <!-- Server confirmed recording -->
+        <section id="view-completed" hidden>
+            <div id="completion-check" class="completion-check" aria-hidden="true">
+                <svg viewBox="0 0 52 52" width="52" height="52" fill="none">
+                    <circle class="completion-ring" cx="26" cy="26" r="23" />
+                    <path class="completion-tick" d="M14 26.5 22.5 35 39 18" />
+                </svg>
+            </div>
+            <p id="completion-message" class="completion-message" role="status"></p>
         </section>
 
         <!-- Error -->

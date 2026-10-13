@@ -20,7 +20,7 @@ The server operator controls the recording after receipt, including storage, ret
 
 ## Recording other people
 
-You decide when to start a recording and which server receives it. Inform meeting participants and obtain any consent required by applicable law or meeting rules. The extension's participant-notice checkbox is your acknowledgement; it does not obtain consent from other participants.
+You decide when to start a recording and which server receives it. Inform meeting participants and obtain any consent required by applicable law or meeting rules. Clicking **Consent confirmed · Record** acknowledges the reminder; it does not obtain consent from other participants.
 
 ## Your choices
 

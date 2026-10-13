@@ -6,8 +6,8 @@
 // the session. Also owns auto mode: detecting meeting tabs,
 // arming the toolbar icon for one-click start, nudging, and auto-stop.
 //
-// Capture itself lives in the offscreen document; binary never crosses the
-// messaging boundary -- chunks travel through OPFS, which both contexts share.
+// Capture lives in the offscreen document for tabs and in a persistent
+// extension window for desktop audio. Chunks travel through shared OPFS.
 // Every piece of per-tab state lives in chrome.storage.session, never in
 // module scope: MV3 suspends this worker between events.
 
@@ -59,6 +59,7 @@ const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
 const COMPLETION_PREFIX = "completed:";
+const COMPLETION_DISPLAY_MS = 2400;
 
 chrome.storage.local
     .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
@@ -106,6 +107,8 @@ const IDLE_STATE = Object.freeze({
     blocked: false,
     recoverablePrefix: null,
     jobId: null,
+    recordingUrl: null,
+    partial: false,
     error: null,
     levels: { micDb: -100, systemDb: -100 },
 });
@@ -192,24 +195,86 @@ function messageOffscreen(type, payload) {
 
 // ---- Capture sources ---------------------------------------------------
 
-function chooseDesktopMedia(tab) {
-    return new Promise((resolve) => {
-        try {
-            chrome.desktopCapture.chooseDesktopMedia(
-                ["screen", "audio"],
-                tab ?? undefined,
-                (streamId) => {
-                    resolve({
-                        streamId:
-                            chrome.runtime.lastError || !streamId
-                                ? null
-                                : streamId,
-                    });
-                },
-            );
-        } catch {
-            resolve({ streamId: null });
-        }
+async function openDesktopRecorder(input) {
+    const requestId = crypto.randomUUID();
+    await setState({
+        state: STATE.awaitingPicker,
+        captureMode: "desktop",
+        pickerRequestId: requestId,
+        captureWindowId: null,
+        tabId: input.tabId ?? null,
+        platformHint: input.platformHint ?? null,
+        autoStarted: input.auto ?? false,
+        noticeAcknowledgedAt: input.noticeAcknowledgedAt ?? null,
+        error: null,
+    });
+    try {
+        const url = new URL(chrome.runtime.getURL("picker/picker.html"));
+        url.searchParams.set("requestId", requestId);
+        const pickerWindow = await chrome.windows.create({
+            url: url.href,
+            type: "popup",
+            focused: true,
+            width: 430,
+            height: 360,
+        });
+        if (pickerWindow?.id == null) throw new Error(t("couldNotCapture"));
+        await setState({ captureWindowId: pickerWindow.id });
+    } catch (error) {
+        await setState({ state: STATE.error, error: error?.message ?? String(error) });
+        throw error;
+    }
+    return { pending: true };
+}
+
+chrome.windows.onRemoved.addListener((windowId) => {
+    void handleDesktopWindowClosed(windowId);
+});
+
+async function handleDesktopWindowClosed(windowId) {
+    const state = await getState();
+    if (state.captureWindowId !== windowId) return;
+    if (state.state === STATE.awaitingPicker) {
+        await resetState();
+        return;
+    }
+    if (
+        (state.state !== STATE.recording && state.state !== STATE.error) ||
+        state.stopped ||
+        !state.sessionId
+    ) return;
+    const stored = await listChunkIndices(state.bufferId ?? state.sessionId);
+    if (stored.length === 0) {
+        await discardSession(state.sessionId);
+        return;
+    }
+    await setState({
+        stopped: true,
+        stopReason: state.stopReason === "error" ? "error" : "stream-ended",
+        chunkCount: Math.max(...stored) + 1,
+        captureWindowId: null,
+    });
+    await pumpUploads();
+}
+
+async function reconcileDesktopWindow() {
+    const state = await getState();
+    if (state.captureMode !== "desktop" || state.captureWindowId == null) return;
+    if (
+        state.state !== STATE.awaitingPicker &&
+        state.state !== STATE.recording &&
+        state.state !== STATE.error
+    ) return;
+    const window = await chrome.windows.get(state.captureWindowId).catch(() => null);
+    if (!window) await handleDesktopWindowClosed(state.captureWindowId);
+}
+
+function messageDesktop(type, requestId, payload) {
+    return chrome.runtime.sendMessage({
+        target: "desktop-recorder",
+        type,
+        requestId,
+        payload,
     });
 }
 
@@ -272,33 +337,37 @@ async function startRecordingLocked({
 
     await setState({ state: STATE.awaitingPicker, error: null });
 
-    // Hybrid capture: a recognized meeting tab is captured directly (no
-    // picker, no "share system audio" step). Anything else falls back to the
-    // screen + system-audio picker, shown up front so a cancel costs nothing.
-    // A tab-capture stream id is short-lived, so it is minted just before the
-    // offscreen document consumes it, below.
     const useTab = typeof tabId === "number" && Boolean(platformHint);
-    let captureMode = useTab ? "tab" : "desktop";
-    let streamId = null;
     if (!useTab) {
-        let tab = null;
-        if (typeof tabId === "number") {
-            tab = await chrome.tabs.get(tabId).catch(() => null);
-        }
-        const picked = await chooseDesktopMedia(tab);
-        streamId = picked.streamId;
-        if (!streamId) {
-            await resetState();
-            return { cancelled: true };
-        }
+        return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt });
     }
 
+    return startCapturedRecording({
+        tabId,
+        platformHint,
+        auto,
+        noticeAcknowledgedAt,
+        captureMode: "tab",
+        apiKey,
+    });
+}
+
+async function startCapturedRecording({
+    tabId,
+    platformHint,
+    auto = false,
+    noticeAcknowledgedAt,
+    captureMode,
+    captureWindowId = null,
+    pickerRequestId = null,
+    apiKey,
+}) {
     const settings = await getSettings();
     if (settings.serverDefaults?.encryptedRecordingProtocol !== 1) {
         await setState({ state: STATE.error, error: t("encryptedServerRequired") });
         throw new Error(t("encryptedServerRequired"));
     }
-    const auth = { serverUrl: settings.serverUrl, apiKey };
+    const auth = { serverUrl: settings.serverUrl, apiKey: apiKey ?? await readToken() };
     const startedAt = new Date().toISOString();
     const clientRecordingId = crypto.randomUUID();
     const channelLayout =
@@ -319,16 +388,35 @@ async function startRecordingLocked({
             noticeAcknowledgedAt: noticeAcknowledgedAt ?? startedAt,
         });
     } catch (error) {
-        await setState({
-            state: STATE.error,
-            error: error?.message ?? String(error),
-        });
+        const current = await getState();
+        if (
+            captureMode === "tab" ||
+            (current.state === STATE.awaitingPicker &&
+                current.pickerRequestId === pickerRequestId)
+        ) {
+            await setState({
+                state: STATE.error,
+                error: error?.message ?? String(error),
+            });
+        }
         throw error;
     }
 
     try {
         if (session.encryption?.protocol !== 1 || !session.encryption.key) {
             throw new Error(t("encryptedServerRequired"));
+        }
+        if (captureMode === "desktop") {
+            const current = await getState();
+            const window = await chrome.windows.get(captureWindowId).catch(() => null);
+            if (
+                current.state !== STATE.awaitingPicker ||
+                current.pickerRequestId !== pickerRequestId ||
+                !window
+            ) {
+                await abortSession(auth, session.id).catch(() => {});
+                return { cancelled: true };
+            }
         }
 
         await createLocalSession(session.id, {
@@ -354,6 +442,9 @@ async function startRecordingLocked({
             stopReason: "user",
             uploaded: [],
             jobId: null,
+            captureMode,
+            captureWindowId,
+            pickerRequestId,
         });
 
         if (typeof tabId === "number") {
@@ -366,47 +457,77 @@ async function startRecordingLocked({
             );
         }
 
-        await ensureOffscreen();
-
-        if (useTab) {
-            streamId = await getTabMediaStreamId(tabId);
+        let response;
+        if (captureMode === "tab") {
+            await ensureOffscreen();
+            const streamId = await getTabMediaStreamId(tabId);
             if (!streamId) {
-                const tab = await chrome.tabs.get(tabId).catch(() => null);
-                const picked = await chooseDesktopMedia(tab);
-                streamId = picked.streamId;
-                captureMode = "desktop";
-                if (!streamId) {
-                    await closeOffscreen();
-                    await discardSession(session.id);
-                    return { cancelled: true };
-                }
+                await closeOffscreen();
+                await discardSession(session.id);
+                return openDesktopRecorder({ tabId, platformHint, auto, noticeAcknowledgedAt });
             }
+            response = await messageOffscreen("start", {
+                sessionId: session.id,
+                clientRecordingId,
+                captureKey: session.encryption.key,
+                captureMode,
+                channelMode: settings.channelMode,
+                streamId,
+                microphoneId: settings.microphoneId,
+            });
+        } else {
+            const current = await getState();
+            if (current.captureWindowId !== captureWindowId) {
+                throw new Error(t("couldNotCapture"));
+            }
+            response = await messageDesktop("start", pickerRequestId, {
+                sessionId: session.id,
+                clientRecordingId,
+                captureKey: session.encryption.key,
+                captureMode,
+                channelMode: settings.channelMode,
+                microphoneId: settings.microphoneId,
+            });
         }
-
-        const response = await messageOffscreen("start", {
-            sessionId: session.id,
-            clientRecordingId,
-            captureKey: session.encryption.key,
-            captureMode,
-            channelMode: settings.channelMode,
-            streamId,
-            microphoneId: settings.microphoneId,
-        });
         if (!response?.ok) {
             throw new Error(response?.error ?? t("couldNotCapture"));
         }
 
         return { sessionId: session.id };
     } catch (error) {
-        await closeOffscreen().catch(() => {});
-        await setState({
-            state: STATE.error,
-            sessionId: session.id,
-            bufferId: session.id,
-            stopped: true,
-            blocked: true,
-            error: error?.message ?? String(error),
-        });
+        if (captureMode === "tab") await closeOffscreen().catch(() => {});
+        const state = await getState();
+        const ownsState = state.sessionId === session.id;
+        if (state.sessionId === session.id && (await listChunkIndices(session.id)).length === 0) {
+            await discardSession(session.id);
+        } else if (state.sessionId === session.id) {
+            await setState({
+                state: STATE.error,
+                sessionId: session.id,
+                bufferId: session.id,
+                stopped: true,
+                blocked: true,
+                captureWindowId: null,
+                error: error?.message ?? String(error),
+            });
+        }
+        const latest = await getState();
+        if (
+            captureMode === "tab" ||
+            (ownsState && latest.state === STATE.idle) ||
+            latest.sessionId === session.id ||
+            (latest.state === STATE.awaitingPicker &&
+                latest.pickerRequestId === pickerRequestId)
+        ) {
+            await setState({
+                state: STATE.error,
+                captureWindowId: null,
+                error: error?.message ?? String(error),
+            });
+        }
+        if (captureMode === "desktop") {
+            await chrome.windows.remove(captureWindowId).catch(() => {});
+        }
         throw error;
     }
 }
@@ -418,9 +539,14 @@ async function stopRecording(reason = "user") {
         await chrome.alarms.clear(`${ALARMS.quietPrefix}${state.tabId}`);
     }
     await setState({ stopReason: reason });
-    await messageOffscreen("stop").catch(() => {});
-    // The offscreen 'recording-stopped' message carries the final chunk
-    // count and drives finalization from there.
+    if (state.captureMode === "desktop") {
+        await messageDesktop("stop", state.pickerRequestId).catch(() =>
+            handleDesktopWindowClosed(state.captureWindowId),
+        );
+    } else {
+        await messageOffscreen("stop").catch(() => {});
+    }
+    // The capture host reports the final chunk count after its last write.
 }
 
 // ---- Upload pump -------------------------------------------------------
@@ -572,21 +698,40 @@ async function reconcileServerSession(sessionId, auth) {
         return;
     }
     if (remote.status === "completed") {
-        const url = remote.recording_id
-            ? `${auth.serverUrl}/recordings/${encodeURIComponent(remote.recording_id)}`
-            : auth.serverUrl;
+        if (!remote.recording_id) {
+            await setState({
+                state: STATE.error,
+                error: "Server confirmed completion without a recording ID",
+            });
+            return;
+        }
+        const state = await getState();
+        if (state.sessionId !== sessionId || state.state === STATE.completed) return;
+        const url = new URL(
+            `/recordings/${encodeURIComponent(remote.recording_id)}`,
+            auth.serverUrl,
+        ).href;
+        await deleteLocalSession(state.bufferId ?? sessionId);
+        await setState({
+            state: STATE.completed,
+            recordingUrl: url,
+            partial: Boolean(remote.truncated_at_chunk),
+        });
         await notify(
             t("recordingSent"),
             remote.truncated_at_chunk
                 ? t("partialRecordingSent")
                 : t("recordingSentBody"),
-            {
-            id: `${COMPLETION_PREFIX}${encodeURIComponent(url)}`,
-            },
+            { id: `${COMPLETION_PREFIX}${encodeURIComponent(url)}` },
         );
-        const state = await getState();
-        await deleteLocalSession(state.bufferId ?? sessionId);
+        await new Promise((resolve) => setTimeout(resolve, COMPLETION_DISPLAY_MS));
+        const shown = await getState();
+        if (shown.state !== STATE.completed || shown.sessionId !== sessionId) return;
         await resetState();
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        if ((await getState()).state === STATE.idle) {
+            await navigateToRecording(auth.serverUrl, url, state.tabId).catch(() => {});
+        }
         return;
     }
     if (remote.status === "failed" || remote.status === "aborted") {
@@ -596,6 +741,28 @@ async function reconcileServerSession(sessionId, auth) {
             error: remote.error ?? `Server session ${remote.status}`,
         });
     }
+}
+
+async function navigateToRecording(serverUrl, recordingUrl, preferredTabId) {
+    const serverOrigin = originOf(serverUrl);
+    const tabs = await chrome.tabs.query({}).catch(() => []);
+    const matching = tabs.filter((tab) => tab.url && originOf(tab.url) === serverOrigin);
+    const target =
+        matching.find((tab) => tab.id === preferredTabId) ??
+        matching.find((tab) => tab.active) ??
+        matching.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
+    if (target?.id != null) {
+        const updated = await chrome.tabs
+            .update(target.id, { url: recordingUrl, active: true })
+            .then(() => true, () => false);
+        if (updated) {
+            if (target.windowId != null) {
+                await chrome.windows.update(target.windowId, { focused: true }).catch(() => {});
+            }
+            return;
+        }
+    }
+    await chrome.tabs.create({ url: recordingUrl, active: true });
 }
 
 // ---- Notifications -----------------------------------------------------
@@ -997,14 +1164,58 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
     return false;
 });
 
+async function handleDesktopPickerMessage(message, sender) {
+    const state = await getState();
+    const expectedUrl = chrome.runtime.getURL("picker/picker.html");
+    if (
+        !sender.url?.startsWith(`${expectedUrl}?`) ||
+        new URL(sender.url).searchParams.get("requestId") !== message.requestId ||
+        state.state !== STATE.awaitingPicker ||
+        state.pickerRequestId !== message.requestId ||
+        state.captureWindowId == null ||
+        (sender.tab && sender.tab.windowId !== state.captureWindowId)
+    ) {
+        return { ok: false, error: t("couldNotStart") };
+    }
+    if (message.type === "desktop-picker-cancelled") {
+        await resetState();
+        return { ok: true };
+    }
+    if (message.type === "desktop-picker-error") {
+        await setState({ state: STATE.error, error: message.error ?? t("couldNotCapture") });
+        return { ok: true };
+    }
+    return startCapturedRecording({
+        tabId: state.tabId,
+        platformHint: state.platformHint,
+        auto: state.autoStarted,
+        noticeAcknowledgedAt: state.noticeAcknowledgedAt,
+        captureMode: "desktop",
+        captureWindowId: state.captureWindowId,
+        pickerRequestId: state.pickerRequestId,
+    }).then(() => ({ ok: true }));
+}
+
 // ---- Internal messaging (popup, options, offscreen, content script) --------
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.target === "offscreen") return false;
 
     switch (message.type) {
+        case "desktop-capture-ready":
+        case "desktop-picker-cancelled":
+        case "desktop-picker-error":
+            handleDesktopPickerMessage(message, sender)
+                .then(sendResponse)
+                .catch((error) =>
+                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                );
+            return true;
+
         case "get-state":
-            getState().then((state) => sendResponse({ state }));
+            reconcileDesktopWindow()
+                .then(getState)
+                .then((state) => sendResponse({ state }));
             return true;
 
         case "get-armed":
@@ -1130,7 +1341,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleRecordingStopped(message) {
     const state = await getState();
     if (state.sessionId !== message.sessionId) return;
-    await closeOffscreen();
+    if (state.captureMode === "desktop") {
+        await setState({ stopped: true });
+        if (state.captureWindowId != null) {
+            await chrome.windows.remove(state.captureWindowId).catch(() => {});
+        }
+    } else {
+        await closeOffscreen();
+    }
 
     if (!message.chunkCount || message.chunkCount < 1) {
         await discardSession(message.sessionId);
@@ -1257,6 +1475,7 @@ async function discardBuffer(bufferId) {
 
 async function reconcileOnStartup() {
     await ensureConfigAlarm();
+    await reconcileDesktopWindow();
     // Session storage is empty after a browser restart; re-arm open meetings.
     await reevaluateAllTabs();
 
@@ -1282,6 +1501,10 @@ async function reconcileOnStartup() {
     const auth = { serverUrl: settings.serverUrl, apiKey: token };
 
     const state = await getState();
+    if (state.state === STATE.recording && state.captureMode === "desktop") {
+        pumpUploads();
+        return;
+    }
     if (state.state === STATE.recording && (await hasOffscreen())) {
         pumpUploads();
         return;

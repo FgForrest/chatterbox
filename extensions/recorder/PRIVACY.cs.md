@@ -20,7 +20,7 @@ Po přijetí dat o nich rozhoduje provozovatel serveru: o ukládání, době uch
 
 ## Nahrávání dalších osob
 
-Vy rozhodujete, kdy spustíte nahrávání a který server je obdrží. Informujte účastníky schůzky a získejte souhlas, pokud jej vyžadují právní předpisy nebo pravidla schůzky. Zaškrtávací políčko rozšíření potvrzuje vaše prohlášení; samo o sobě nezískává souhlas ostatních účastníků.
+Vy rozhodujete, kdy spustíte nahrávání a který server je obdrží. Informujte účastníky schůzky a získejte souhlas, pokud jej vyžadují právní předpisy nebo pravidla schůzky. Kliknutím na **Souhlas potvrzen · Nahrávat** potvrdíte připomenutí; samo o sobě to nezískává souhlas ostatních účastníků.
 
 ## Vaše možnosti
 

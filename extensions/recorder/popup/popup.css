@@ -1,27 +1,60 @@
 :root {
     color-scheme: light dark;
+    --background: #faf9f5;
+    --foreground: #243348;
+    --surface: #fff;
+    --muted: #f1eee8;
+    --muted-foreground: #626b73;
+    --border: #dad9d4;
+    --primary: #c63b50;
+    --primary-foreground: #fff;
+    --error: #b42332;
+    --success: #277a49;
     font-family:
         system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #3b3a38;
+        --foreground: #d4d0c9;
+        --surface: #444340;
+        --muted: #302f2d;
+        --muted-foreground: #c3bdb3;
+        --border: #62605b;
+        --primary: #f35f6d;
+        --primary-foreground: #14263c;
+        --error: #ff8b94;
+        --success: #80d2a0;
+    }
 }
 
 body {
     width: 300px;
     margin: 0;
     padding: 12px 14px 16px;
-    background: Canvas;
-    color: CanvasText;
+    background: var(--background);
+    color: var(--foreground);
 }
 
 header {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
+    gap: 12px;
     margin-bottom: 10px;
 }
 
 h1 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
     margin: 0;
+}
+
+h1 img {
+    flex: none;
 }
 
 p {
@@ -32,11 +65,16 @@ p {
 
 .hint {
     font-size: 11px;
-    opacity: 0.7;
+    color: var(--muted-foreground);
+}
+
+#picker-hint,
+#auto-hint {
+    margin-top: 8px;
 }
 
 .error {
-    color: #d33;
+    color: var(--error);
 }
 
 button {
@@ -44,23 +82,38 @@ button {
     font-size: 13px;
     padding: 7px 12px;
     border-radius: 7px;
-    border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
-    background: color-mix(in srgb, CanvasText 6%, transparent);
+    border: 1px solid var(--border);
+    background: var(--surface);
     color: inherit;
     cursor: pointer;
 }
 
+button:hover:not(:disabled) {
+    border-color: var(--primary);
+}
+
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
 button.primary {
-    background: #2f6feb;
-    border-color: #2f6feb;
-    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
     width: 100%;
 }
 
 button.danger {
-    background: #d33;
-    border-color: #d33;
-    color: #fff;
+    background: var(--error);
+    border-color: var(--error);
+    color: var(--background);
     width: 100%;
 }
 
@@ -69,7 +122,7 @@ button.link {
     background: none;
     padding: 0;
     font-size: 12px;
-    opacity: 0.75;
+    color: var(--primary);
     width: auto;
 }
 
@@ -90,6 +143,10 @@ button.link {
     margin-bottom: 10px;
 }
 
+input[type="checkbox"] {
+    accent-color: var(--primary);
+}
+
 .status {
     display: flex;
     align-items: center;
@@ -102,7 +159,7 @@ button.link {
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #d33;
+    background: var(--primary);
     animation: pulse 1.4s ease-in-out infinite;
 }
 
@@ -129,13 +186,84 @@ button.link {
     flex: 1;
     height: 8px;
     border-radius: 4px;
-    background: color-mix(in srgb, CanvasText 12%, transparent);
+    background: var(--muted);
     overflow: hidden;
 }
 
 .bar > div {
     height: 100%;
     width: 0%;
-    background: #2f6feb;
+    background: var(--primary);
     transition: width 0.12s linear;
+}
+
+.progress-track {
+    height: 10px;
+    overflow: hidden;
+    border-radius: 5px;
+    background: var(--muted);
+    margin: 14px 0 8px;
+}
+
+.progress-fill {
+    width: 0;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+    transition: width 0.3s ease;
+}
+
+#view-completed {
+    text-align: center;
+    padding: 8px 0 4px;
+}
+
+.completion-check {
+    display: inline-flex;
+    color: var(--success);
+    margin-bottom: 8px;
+}
+
+.completion-check[hidden] {
+    display: none;
+}
+
+.completion-ring,
+.completion-tick {
+    stroke: currentColor;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.completion-ring {
+    stroke-dasharray: 145;
+    stroke-dashoffset: 145;
+    animation: draw-ring 0.6s ease forwards;
+}
+
+.completion-tick {
+    stroke-dasharray: 36;
+    stroke-dashoffset: 36;
+    animation: draw-tick 0.45s ease 0.5s forwards;
+}
+
+.completion-message {
+    font-weight: 600;
+}
+
+@keyframes draw-ring {
+    to { stroke-dashoffset: 0; }
+}
+
+@keyframes draw-tick {
+    to { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .completion-ring,
+    .completion-tick {
+        animation-duration: 0.01ms;
+        animation-delay: 0ms;
+    }
 }
