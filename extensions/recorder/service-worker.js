@@ -58,6 +58,8 @@ const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
 
+chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+
 /** Ignore errors from chrome.action calls on tabs that just closed. */
 async function safe(promise) {
     try {
@@ -235,6 +237,9 @@ async function startRecording({
     }
     if (!(await isPaired())) {
         throw new Error(t("connectFirst"));
+    }
+    if (!(await getSettings()).dataUseAcknowledgedAt) {
+        throw new Error(t("dataUseRequired"));
     }
 
     await setState({ state: STATE.awaitingPicker, error: null });
@@ -629,6 +634,11 @@ async function nudge(tabId, platform, mode) {
  */
 async function evaluateTab(tab) {
     if (!tab || tab.id == null) return;
+    const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt) {
+        await disarm(tab.id);
+        return;
+    }
     const platform = tab.url ? detectMeetingPlatform(tab.url) : null;
     const state = await getState();
 
@@ -645,7 +655,6 @@ async function evaluateTab(tab) {
     }
 
     if (!(await isPaired())) return;
-    const settings = await getSettings();
     const mode = effectivePlatformModes(settings)[platform.id]?.mode ?? "off";
     if (mode === "off") {
         await disarm(tab.id);
@@ -667,6 +676,12 @@ async function reevaluateTab(tabId) {
 }
 
 async function reevaluateAllTabs() {
+    if (!(await getSettings()).dataUseAcknowledgedAt) {
+        for (const tabId of Object.keys(await getArmed())) {
+            await disarm(Number(tabId));
+        }
+        return;
+    }
     const tabs = await chrome.tabs.query({}).catch(() => []);
     for (const tab of tabs) await evaluateTab(tab);
 }
@@ -716,8 +731,11 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 // defaults, without waiting for the next navigation.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.platformModes || changes.serverDefaults || changes.apiKey) {
+    if (changes.platformModes || changes.serverDefaults || changes.apiKey || changes.dataUseAcknowledgedAt) {
         void reevaluateAllTabs();
+    }
+    if (changes.dataUseAcknowledgedAt?.newValue) {
+        void reconcileOnStartup();
     }
 });
 
@@ -742,13 +760,17 @@ async function startFromInvocation(tab) {
         return;
     }
 
+    const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt) {
+        chrome.runtime.openOptionsPage();
+        return;
+    }
     const platform = tab.url ? detectMeetingPlatform(tab.url) : null;
     if (!platform) {
         chrome.runtime.openOptionsPage();
         return;
     }
 
-    const settings = await getSettings();
     if (!settings.autoModeAcknowledgedAt) {
         await notify(
             t("confirmationNeeded"),
@@ -826,12 +848,13 @@ async function ensureConfigAlarm() {
 
 async function pingStatus() {
     const settings = await getSettings();
+    const consented = Boolean(settings.dataUseAcknowledgedAt);
     return {
         installed: true,
         version: chrome.runtime.getManifest().version,
-        paired: Boolean(settings.serverUrl && settings.apiKey),
-        pairedTo: settings.serverUrl ? originOf(settings.serverUrl) : null,
-        autoMode: anyPlatformAuto(settings),
+        paired: consented && Boolean(settings.serverUrl && settings.apiKey),
+        pairedTo: consented && settings.serverUrl ? originOf(settings.serverUrl) : null,
+        autoMode: consented && anyPlatformAuto(settings),
     };
 }
 
@@ -849,7 +872,13 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         return true;
     }
     if (message.type === MESSAGES.pair) {
-        queuePairing(message, senderOrigin)
+        getSettings()
+            .then((settings) => {
+                if (!settings.dataUseAcknowledgedAt) {
+                    return { ok: false, error: t("dataUseRequired") };
+                }
+                return queuePairing(message, senderOrigin);
+            })
             .then(sendResponse)
             .catch((error) =>
                 sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -923,7 +952,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case MESSAGES.pair:
-            queuePairing(message, originOf(sender.url ?? ""))
+            getSettings()
+                .then((settings) => {
+                    if (!settings.dataUseAcknowledgedAt) {
+                        return { ok: false, error: t("dataUseRequired") };
+                    }
+                    return queuePairing(message, originOf(sender.url ?? ""));
+                })
                 .then(sendResponse)
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -1004,7 +1039,7 @@ async function reconcileOnStartup() {
     await reevaluateAllTabs();
 
     const settings = await getSettings();
-    if (!settings.serverUrl || !settings.apiKey) return;
+    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.apiKey) return;
     const auth = { serverUrl: settings.serverUrl, apiKey: settings.apiKey };
 
     const state = await getState();

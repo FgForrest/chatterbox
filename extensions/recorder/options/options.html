@@ -10,6 +10,18 @@
         <main>
             <h1 data-i18n="extensionName">Chatterbox Meeting Recorder</h1>
 
+            <section id="data-use-section">
+                <h2 data-i18n="dataUseTitle">Before you connect or record</h2>
+                <p data-i18n="dataUseDisclosure">When you record, this extension captures your microphone and meeting audio, buffers it in this browser, and uploads it to the Chatterbox server you choose. By default it also downloads a local audio copy. The recorder key is stored in this browser. Your server operator controls data after upload. You must inform participants and obtain any required consent.</p>
+                <p><a href="https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="privacyPolicy">Read the extension privacy policy</a></p>
+                <label id="data-use-label" class="check">
+                    <input id="data-use-check" type="checkbox" />
+                    <span data-i18n="dataUseAgree">I understand and agree to this data handling.</span>
+                </label>
+                <button id="accept-data-use" class="primary" type="button" data-i18n="dataUseAccept">Agree and continue</button>
+                <p id="data-use-status" class="status"></p>
+            </section>
+
             <section id="pending-pair" hidden>
                 <h2 data-i18n="confirmConnection">Confirm connection</h2>
                 <p data-i18n="pendingQuestion">Connect this recorder to the server below?</p>

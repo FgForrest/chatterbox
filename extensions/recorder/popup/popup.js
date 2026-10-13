@@ -93,6 +93,14 @@ async function renderUnpaired() {
 el("connect-origin").addEventListener("click", async () => {
     const origin = currentTab?.url ? originOf(currentTab.url) : null;
     if (!origin || !currentTab) return;
+    if (!(await getSettings()).dataUseAcknowledgedAt) {
+        chrome.tabs.create({
+            url: chrome.runtime.getURL(
+                `options/options.html?origin=${encodeURIComponent(origin)}`,
+            ),
+        });
+        return;
+    }
     const status = el("connect-status");
     status.textContent = t("requestingAccess");
     // This click is the user gesture Chrome requires for a host grant.
@@ -137,6 +145,10 @@ async function renderIdle() {
 
 el("start").addEventListener("click", async () => {
     const settings = await getSettings();
+    if (!settings.dataUseAcknowledgedAt) {
+        chrome.runtime.openOptionsPage();
+        return;
+    }
     el("notice-text").textContent = effectiveNoticeText(settings);
     el("notice-ack").checked = false;
     el("notice-confirm").disabled = true;
@@ -252,6 +264,11 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Initial paint.
 (async () => {
+    if (!(await getSettings()).dataUseAcknowledgedAt) {
+        el("unpaired-intro").textContent = t("reviewDataUse");
+        show("unpaired");
+        return;
+    }
     currentTab = await activeTab();
     currentPlatform = currentTab?.url
         ? detectMeetingPlatform(currentTab.url)

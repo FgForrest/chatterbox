@@ -38,6 +38,7 @@ import { t } from "./i18n.js";
  * @property {boolean} nudgeEnabled
  * @property {number|null} autoStopQuietSeconds
  * @property {string|null} autoModeAcknowledgedAt
+ * @property {string|null} dataUseAcknowledgedAt
  */
 
 /** @returns {Promise<RecorderSettings>} */
@@ -61,6 +62,7 @@ export async function getSettings() {
         nudgeEnabled: raw[STORAGE_KEYS.nudgeEnabled] ?? true,
         autoStopQuietSeconds: raw[STORAGE_KEYS.autoStopQuietSeconds] ?? null,
         autoModeAcknowledgedAt: raw[STORAGE_KEYS.autoModeAcknowledgedAt] ?? null,
+        dataUseAcknowledgedAt: raw[STORAGE_KEYS.dataUseAcknowledgedAt] ?? null,
     };
 }
 

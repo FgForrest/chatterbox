@@ -51,6 +51,8 @@ export const STORAGE_KEYS = {
     autoStopQuietSeconds: "autoStopQuietSeconds",
     /** ISO timestamp of the one-time auto-mode policy acknowledgement. */
     autoModeAcknowledgedAt: "autoModeAcknowledgedAt",
+    /** ISO timestamp of explicit extension data-use consent. */
+    dataUseAcknowledgedAt: "dataUseAcknowledgedAt",
 };
 
 /** Per-platform recording modes. */

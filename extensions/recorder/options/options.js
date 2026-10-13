@@ -18,8 +18,33 @@ import { localizeDocument, t } from "../lib/i18n.js";
 import { PENDING_PAIR_KEY } from "../lib/pairing-request.js";
 
 localizeDocument();
+if (chrome.i18n.getUILanguage().toLowerCase().startsWith("cs")) {
+    document.querySelector('a[data-i18n="privacyPolicy"]').href =
+        "https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.cs.md";
+}
 
 const el = (id) => document.getElementById(id);
+let dataUseConsentGranted = false;
+
+function requireDataUseConsent() {
+    if (dataUseConsentGranted) return true;
+    setStatus(el("data-use-status"), t("dataUseRequired"), false);
+    el("data-use-section").scrollIntoView({ behavior: "smooth" });
+    return false;
+}
+
+el("accept-data-use").addEventListener("click", async () => {
+    if (!el("data-use-check").checked) {
+        setStatus(el("data-use-status"), t("dataUseRequired"), false);
+        return;
+    }
+    await saveSettings({ dataUseAcknowledgedAt: new Date().toISOString() });
+    dataUseConsentGranted = true;
+    el("data-use-label").hidden = true;
+    el("accept-data-use").hidden = true;
+    setStatus(el("data-use-status"), t("dataUseSaved"), true);
+    chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
+});
 
 async function renderPendingPair() {
     const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
@@ -31,6 +56,7 @@ async function renderPendingPair() {
 }
 
 el("confirm-pair").addEventListener("click", async () => {
+    if (!requireDataUseConsent()) return;
     const pending = (await chrome.storage.session.get(PENDING_PAIR_KEY))[
         PENDING_PAIR_KEY
     ];
@@ -71,6 +97,7 @@ function setStatus(node, message, ok) {
 // ---- Connection -----------------------------------------------------------
 
 el("save-connection").addEventListener("click", async () => {
+    if (!requireDataUseConsent()) return;
     const serverUrl = el("server-url").value.trim().replace(/\/+$/, "");
     const apiKey = el("api-key").value.trim();
     const origin = originOf(serverUrl);
@@ -101,6 +128,7 @@ el("save-connection").addEventListener("click", async () => {
 });
 
 el("refresh-config").addEventListener("click", async () => {
+    if (!requireDataUseConsent()) return;
     const response = await chrome.runtime
         .sendMessage({ type: "refresh-config" })
         .catch((error) => ({ ok: false, error: String(error) }));
@@ -251,6 +279,7 @@ async function loadMicList() {
 }
 
 el("grant-mic").addEventListener("click", async () => {
+    if (!requireDataUseConsent()) return;
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         for (const track of stream.getTracks()) track.stop();
@@ -263,6 +292,7 @@ el("grant-mic").addEventListener("click", async () => {
 // ---- Save ---------------------------------------------------------------
 
 el("save-all").addEventListener("click", async () => {
+    if (!requireDataUseConsent()) return;
     const settings = await getSettings();
     const modes = selectedModes();
     const anyAuto = Object.values(modes).includes("auto");
@@ -326,6 +356,12 @@ el("local-copy").addEventListener("change", async () => {
 
 async function restore() {
     const settings = await getSettings();
+    dataUseConsentGranted = Boolean(settings.dataUseAcknowledgedAt);
+    if (settings.dataUseAcknowledgedAt) {
+        el("data-use-label").hidden = true;
+        el("accept-data-use").hidden = true;
+        setStatus(el("data-use-status"), t("dataUseSaved"), true);
+    }
     const params = new URLSearchParams(location.search);
     el("server-url").value =
         settings.serverUrl || originOf(params.get("origin") ?? "") || "";
@@ -345,11 +381,11 @@ async function restore() {
     }
     await Promise.all([
         renderPendingPair(),
-        loadMicList(),
         renderServerDefaults(),
         renderPlatformTable(),
         renderShortcut(),
     ]);
+    if (settings.dataUseAcknowledgedAt) await loadMicList();
 }
 
 restore();

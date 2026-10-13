@@ -22,7 +22,7 @@
 
         <!-- Not paired, nothing to connect to here -->
         <section id="view-unpaired" hidden>
-            <p data-i18n="unpairedIntro">Connect the extension to your Chatterbox account to start recording.</p>
+            <p id="unpaired-intro" data-i18n="unpairedIntro">Connect the extension to your Chatterbox account to start recording.</p>
             <p class="hint" data-i18n="unpairedHint">Open your Chatterbox instance and go to Settings → Meeting Recorder, or enter the details manually.</p>
             <button id="go-options" class="primary" type="button" data-i18n="openOptions">Open options</button>
         </section>
@@ -36,6 +36,7 @@
 
         <!-- Notice confirmation (manual flow) -->
         <section id="view-notice" hidden>
+            <p data-i18n="recordingReminder">This records your microphone and meeting audio. Audio is buffered in this browser and sent to your paired server as it is captured. A local copy is downloaded by default.</p>
             <p id="notice-text"></p>
             <label class="check">
                 <input id="notice-ack" type="checkbox" />

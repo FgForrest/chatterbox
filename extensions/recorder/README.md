@@ -27,6 +27,12 @@ system audio to extensions.
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
 
+Before pairing or recording, the extension shows a data-use disclosure and
+requires your agreement. See the [extension privacy policy](PRIVACY.md)
+([Czech](PRIVACY.cs.md)) for
+details about the browser buffer, recorder key, local downloads, and the
+responsibilities of the server operator.
+
 ## Load it for development
 
 1. Open `chrome://extensions`.
@@ -40,7 +46,8 @@ directly by Chrome.
 
 ## Pairing
 
-In Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
+First open the extension's **Options**, read the data-use disclosure, and agree.
+Then in Chatterbox, open **Settings → Meeting Recorder** and generate a recorder key
 (a `recordings:write` API key that cannot read your library). Then either:
 
 - Click **Set up recorder** on that page, then confirm the destination in the
@@ -82,6 +89,9 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `storage` | Stores settings and recording state. |
 | `scripting` | Registers the pairing relay on your Chatterbox origin. |
 | optional host access | Granted per server origin so the extension can upload only there. |
+
+Suggested Chrome Web Store explanations for every manifest permission are in
+[STORE_SUBMISSION.md](STORE_SUBMISSION.md).
 
 ## Legal
 

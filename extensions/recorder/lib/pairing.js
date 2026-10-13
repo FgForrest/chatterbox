@@ -91,7 +91,7 @@ export async function storePairing({ serverUrl, apiKey }) {
  */
 export async function refreshServerConfig() {
     const settings = await getSettings();
-    if (!settings.serverUrl || !settings.apiKey) return false;
+    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.apiKey) return false;
     const config = await getRecorderConfig({
         serverUrl: settings.serverUrl,
         apiKey: settings.apiKey,
