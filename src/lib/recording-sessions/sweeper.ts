@@ -4,6 +4,7 @@ import { FAILED_SESSION_RETENTION_MS, OPEN_SESSION_TTL_MS } from "./constants";
 import {
     expireRecordingCaptureKeys,
     listStaleRecordingSessions,
+    markFailedRecordingSessionPurged,
     markRecordingSessionAborted,
     purgeRecordingSessionChunks,
 } from "./store";
@@ -59,6 +60,10 @@ async function tick(): Promise<void> {
         for (const session of failed) {
             try {
                 await purgeRecordingSessionChunks(storage, session.id);
+                await markFailedRecordingSessionPurged(
+                    session.id,
+                    session.userId,
+                );
             } catch (error) {
                 console.error(
                     `[recording-sessions] failed to purge failed session ${session.id}:`,

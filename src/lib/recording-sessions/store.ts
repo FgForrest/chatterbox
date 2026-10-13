@@ -153,7 +153,8 @@ export async function replaceRecordingSession(input: {
             (old.status !== "failed" &&
                 !(
                     old.status === "aborted" &&
-                    old.terminalCode === "stale_open"
+                    (old.terminalCode === "stale_open" ||
+                        old.terminalCode === "failed_expired")
                 ))
         ) {
             throw new AppError(
@@ -295,9 +296,13 @@ export async function getRecordingForCapture(
 
 export async function listRecordingSessionsForUser(
     userId: string,
+    apiKeyId: string,
     opts: { limit: number; status?: RecordingSessionStatus },
 ): Promise<RecordingSessionRow[]> {
-    const conditions = [eq(recordingSessions.userId, userId)];
+    const conditions = [
+        eq(recordingSessions.userId, userId),
+        eq(recordingSessions.apiKeyId, apiKeyId),
+    ];
     if (opts.status) conditions.push(eq(recordingSessions.status, opts.status));
     return db
         .select()
@@ -409,6 +414,7 @@ export async function insertRecordingSessionChunk(input: {
 export async function touchRecordingSession(
     sessionId: string,
     userId: string,
+    captureKeyId: string,
 ): Promise<void> {
     const now = new Date();
     await db
@@ -428,6 +434,7 @@ export async function touchRecordingSession(
         })
         .where(
             and(
+                eq(recordingCaptureKeys.id, captureKeyId),
                 eq(recordingCaptureKeys.activeSessionId, sessionId),
                 eq(recordingCaptureKeys.userId, userId),
                 eq(recordingCaptureKeys.status, "active"),
@@ -606,6 +613,27 @@ export async function markRecordingSessionAborted(
         )
         .returning({ id: recordingSessions.id });
     return rows.length > 0;
+}
+
+/** Retire a failed session after its recovery chunks have been purged. */
+export async function markFailedRecordingSessionPurged(
+    sessionId: string,
+    userId: string,
+): Promise<void> {
+    await db
+        .update(recordingSessions)
+        .set({
+            status: "aborted",
+            terminalCode: "failed_expired",
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(recordingSessions.id, sessionId),
+                eq(recordingSessions.userId, userId),
+                eq(recordingSessions.status, "failed"),
+            ),
+        );
 }
 
 export async function deleteRecordingSessionChunkRows(

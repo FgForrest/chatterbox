@@ -281,6 +281,7 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                         filePath: oggPath,
                         storage,
                         recordedAt: session.startedAt,
+                        signal,
                     });
                 } catch (error) {
                     const alreadySaved = await getRecordingForCapture(

@@ -134,7 +134,11 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
                 409,
             );
         }
-        await touchRecordingSession(session.id, authn.user.id);
+        await touchRecordingSession(
+            session.id,
+            authn.user.id,
+            session.captureKeyId,
+        );
         return NextResponse.json(
             { index, size: prior.size, sha256: prior.sha256, duplicate: true },
             { status: 200 },
@@ -213,7 +217,11 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
         // clean up.
     }
 
-    await touchRecordingSession(session.id, authn.user.id);
+    await touchRecordingSession(
+        session.id,
+        authn.user.id,
+        session.captureKeyId,
+    );
 
     return NextResponse.json(
         {

@@ -66,9 +66,13 @@ export const GET = apiHandler(async (request: Request) => {
         ? Math.min(100, Math.max(1, Number.parseInt(limitRaw, 10) || 25))
         : 25;
 
-    const sessions = await listRecordingSessionsForUser(authn.user.id, {
-        limit,
-    });
+    const sessions = await listRecordingSessionsForUser(
+        authn.user.id,
+        authn.apiKeyId,
+        {
+            limit,
+        },
+    );
 
     return NextResponse.json({
         data: sessions.map((session) => serializeRecordingSession(session, [])),

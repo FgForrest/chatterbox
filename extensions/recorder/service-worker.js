@@ -228,10 +228,30 @@ function getTabMediaStreamId(tabId) {
 
 // ---- Start / stop ------------------------------------------------------
 
+let starting = false;
+
 /**
  * @param {{tabId?: number, platformHint?: string, auto?: boolean, noticeAcknowledgedAt?: string}} input
  */
-async function startRecording({
+async function startRecording(input) {
+    if (starting) throw new Error(t("alreadyInProgress"));
+    starting = true;
+    try {
+        return await startRecordingLocked(input);
+    } catch (error) {
+        if ((await getState()).state === STATE.awaitingPicker) {
+            await setState({
+                state: STATE.error,
+                error: error?.message ?? String(error),
+            });
+        }
+        throw error;
+    } finally {
+        starting = false;
+    }
+}
+
+async function startRecordingLocked({
     tabId,
     platformHint,
     auto = false,
@@ -306,80 +326,89 @@ async function startRecording({
         throw error;
     }
 
-    if (session.encryption?.protocol !== 1 || !session.encryption.key) {
-        await setState({ state: STATE.error, error: t("encryptedServerRequired") });
-        throw new Error(t("encryptedServerRequired"));
-    }
+    try {
+        if (session.encryption?.protocol !== 1 || !session.encryption.key) {
+            throw new Error(t("encryptedServerRequired"));
+        }
 
-    await createLocalSession(session.id, {
-        serverSessionId: session.id,
-        clientRecordingId,
-        serverUrl: settings.serverUrl,
-        keyExpiresAt: session.encryption.expires_at,
-        startedAt,
-        platformHint: platformHint ?? null,
-        done: false,
-    });
+        await createLocalSession(session.id, {
+            serverSessionId: session.id,
+            clientRecordingId,
+            serverUrl: settings.serverUrl,
+            keyExpiresAt: session.encryption.expires_at,
+            startedAt,
+            platformHint: platformHint ?? null,
+            done: false,
+        });
 
-    await setState({
-        state: STATE.recording,
-        sessionId: session.id,
-        bufferId: session.id,
-        startedAt,
-        platformHint: platformHint ?? null,
-        tabId: typeof tabId === "number" ? tabId : null,
-        autoStarted: auto,
-        chunkCount: 0,
-        stopped: false,
-        stopReason: "user",
-        uploaded: [],
-        jobId: null,
-    });
+        await setState({
+            state: STATE.recording,
+            sessionId: session.id,
+            bufferId: session.id,
+            startedAt,
+            platformHint: platformHint ?? null,
+            tabId: typeof tabId === "number" ? tabId : null,
+            autoStarted: auto,
+            chunkCount: 0,
+            stopped: false,
+            stopReason: "user",
+            uploaded: [],
+            jobId: null,
+        });
 
-    if (typeof tabId === "number") {
-        await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
-        await safe(
-            chrome.action.setTitle({
-                tabId,
-                title: t("recordingTitle"),
-            }),
-        );
-    }
+        if (typeof tabId === "number") {
+            await chrome.notifications.clear(`${NUDGE_PREFIX}${tabId}`).catch(() => {});
+            await safe(
+                chrome.action.setTitle({
+                    tabId,
+                    title: t("recordingTitle"),
+                }),
+            );
+        }
 
-    await ensureOffscreen();
+        await ensureOffscreen();
 
-    if (useTab) {
-        streamId = await getTabMediaStreamId(tabId);
-        if (!streamId) {
-            const tab = await chrome.tabs.get(tabId).catch(() => null);
-            const picked = await chooseDesktopMedia(tab);
-            streamId = picked.streamId;
-            captureMode = "desktop";
+        if (useTab) {
+            streamId = await getTabMediaStreamId(tabId);
             if (!streamId) {
-                await closeOffscreen();
-                await discardSession(session.id);
-                return { cancelled: true };
+                const tab = await chrome.tabs.get(tabId).catch(() => null);
+                const picked = await chooseDesktopMedia(tab);
+                streamId = picked.streamId;
+                captureMode = "desktop";
+                if (!streamId) {
+                    await closeOffscreen();
+                    await discardSession(session.id);
+                    return { cancelled: true };
+                }
             }
         }
-    }
 
-    const response = await messageOffscreen("start", {
-        sessionId: session.id,
-        clientRecordingId,
-        captureKey: session.encryption.key,
-        captureMode,
-        channelMode: settings.channelMode,
-        streamId,
-        microphoneId: settings.microphoneId,
-    });
-    if (!response?.ok) {
-        const message = response?.error ?? t("couldNotCapture");
-        await setState({ state: STATE.error, error: message });
-        await closeOffscreen();
-        throw new Error(message);
-    }
+        const response = await messageOffscreen("start", {
+            sessionId: session.id,
+            clientRecordingId,
+            captureKey: session.encryption.key,
+            captureMode,
+            channelMode: settings.channelMode,
+            streamId,
+            microphoneId: settings.microphoneId,
+        });
+        if (!response?.ok) {
+            throw new Error(response?.error ?? t("couldNotCapture"));
+        }
 
-    return { sessionId: session.id };
+        return { sessionId: session.id };
+    } catch (error) {
+        await closeOffscreen().catch(() => {});
+        await setState({
+            state: STATE.error,
+            sessionId: session.id,
+            bufferId: session.id,
+            stopped: true,
+            blocked: true,
+            error: error?.message ?? String(error),
+        });
+        throw error;
+    }
 }
 
 async function stopRecording(reason = "user") {
@@ -814,7 +843,11 @@ async function startFromInvocation(tab) {
         await stopRecording("user");
         return;
     }
-    if (state.state === STATE.recording || state.state === STATE.finalizing) {
+    if (
+        state.state === STATE.awaitingPicker ||
+        state.state === STATE.recording ||
+        state.state === STATE.finalizing
+    ) {
         await notify(
             t("alreadyRecording"),
             t("alreadyRecordingBody"),

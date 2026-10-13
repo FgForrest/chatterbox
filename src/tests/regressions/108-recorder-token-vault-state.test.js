@@ -30,11 +30,21 @@ const harness = vi.hoisted(() => {
             onInstalled: event("installed"),
             sendMessage: vi.fn(async () => {}),
             getContexts: vi.fn(async () => []),
+            getManifest: vi.fn(() => ({ version: "0.2.0" })),
         },
-        action: { onClicked: event("actionClicked") },
+        action: {
+            onClicked: event("actionClicked"),
+            setTitle: vi.fn(async () => {}),
+            setBadgeText: vi.fn(async () => {}),
+            setBadgeBackgroundColor: vi.fn(async () => {}),
+        },
         commands: { onCommand: event("command") },
         alarms: { onAlarm: event("alarm") },
-        notifications: { onClicked: event("notificationClicked") },
+        notifications: {
+            onClicked: event("notificationClicked"),
+            clear: vi.fn(async () => {}),
+        },
+        offscreen: { createDocument: vi.fn(async () => {}) },
         tabs: {
             onUpdated: event("tabUpdated"),
             onRemoved: event("tabRemoved"),
@@ -45,6 +55,8 @@ const harness = vi.hoisted(() => {
         sessionValues,
         readToken: vi.fn(),
         listChunkIndices: vi.fn(),
+        createSession: vi.fn(),
+        createLocalSession: vi.fn(),
     };
 });
 
@@ -55,6 +67,7 @@ vi.mock("../../../extensions/recorder/lib/settings.js", () => ({
     getSettings: vi.fn(async () => ({
         dataUseAcknowledgedAt: "2026-10-13T00:00:00.000Z",
         serverUrl: "https://example.com",
+        serverDefaults: { encryptedRecordingProtocol: 1 },
     })),
     isPaired: vi.fn(async () => true),
     anyPlatformAuto: vi.fn(() => false),
@@ -62,13 +75,22 @@ vi.mock("../../../extensions/recorder/lib/settings.js", () => ({
     effectiveQuietSeconds: vi.fn(() => 30),
 }));
 vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
-    createLocalSession: vi.fn(),
+    createLocalSession: harness.createLocalSession,
     deleteLocalSession: vi.fn(),
     listChunkIndices: harness.listChunkIndices,
     listLocalSessions: vi.fn(async () => []),
     readChunk: vi.fn(),
     readLocalMeta: vi.fn(async () => null),
     totalBufferedBytes: vi.fn(async () => 0),
+}));
+vi.mock("../../../extensions/recorder/lib/api.js", () => ({
+    abortSession: vi.fn(),
+    completeSession: vi.fn(),
+    createSession: harness.createSession,
+    getSession: vi.fn(),
+    recoverSession: vi.fn(),
+    sha256Hex: vi.fn(),
+    uploadChunk: vi.fn(),
 }));
 
 import "../../../extensions/recorder/service-worker.js";
@@ -77,6 +99,9 @@ beforeEach(() => {
     delete harness.sessionValues.recordingState;
     harness.readToken.mockReset();
     harness.listChunkIndices.mockReset().mockResolvedValue([]);
+    harness.createSession.mockReset();
+    harness.createLocalSession.mockReset();
+    chrome.offscreen.createDocument.mockReset().mockResolvedValue(undefined);
 });
 
 describe("recorder token-vault failures", () => {
@@ -126,6 +151,69 @@ describe("recorder token-vault failures", () => {
                 stopped: true,
                 error: "Re-pair recorder",
             });
+        });
+    });
+
+    it("rejects a second start while the first is waiting for its token", async () => {
+        let rejectFirst;
+        harness.readToken.mockImplementationOnce(
+            () =>
+                new Promise((_, reject) => {
+                    rejectFirst = reject;
+                }),
+        );
+        const first = new Promise((resolve) => {
+            harness.listeners.message(
+                { type: "start-recording", payload: {} },
+                {},
+                resolve,
+            );
+        });
+        await vi.waitFor(() =>
+            expect(harness.readToken).toHaveBeenCalledTimes(1),
+        );
+        const second = await new Promise((resolve) => {
+            harness.listeners.message(
+                { type: "start-recording", payload: {} },
+                {},
+                resolve,
+            );
+        });
+
+        expect(second).toEqual({ ok: false, error: "alreadyInProgress" });
+        expect(harness.readToken).toHaveBeenCalledTimes(1);
+        rejectFirst(new Error("Re-pair recorder"));
+        expect(await first).toEqual({ ok: false, error: "Re-pair recorder" });
+        expect(harness.sessionValues.recordingState).toBeUndefined();
+    });
+
+    it("leaves recording state when offscreen startup fails", async () => {
+        harness.readToken.mockResolvedValue("recorder-token");
+        harness.createSession.mockResolvedValue({
+            id: "session-2",
+            encryption: { protocol: 1, key: "capture-key" },
+        });
+        chrome.offscreen.createDocument.mockRejectedValue(
+            new Error("Offscreen unavailable"),
+        );
+        const response = await new Promise((resolve) => {
+            harness.listeners.message(
+                {
+                    type: "start-recording",
+                    payload: { tabId: 7, platformHint: "meet" },
+                },
+                {},
+                resolve,
+            );
+        });
+
+        expect(response).toEqual({ ok: false, error: "Offscreen unavailable" });
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            state: "error",
+            sessionId: "session-2",
+            stopped: true,
+            blocked: true,
+            error: "Offscreen unavailable",
         });
     });
 });

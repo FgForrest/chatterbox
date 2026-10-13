@@ -27,6 +27,7 @@ export async function saveUploadedAudioFile(input: {
     filePath: string;
     storage: StorageProvider;
     recordedAt: Date;
+    signal?: AbortSignal;
 }): Promise<SavedUploadedAudio> {
     const info = await stat(input.filePath);
     const durationMs = await readAudioFileDurationMs(input.filePath);
@@ -47,10 +48,13 @@ export async function saveUploadedAudioFile(input: {
             input.filePath,
             durationMs,
             DEFAULT_BUCKETS,
+            input.signal,
         );
     } catch (error) {
+        if (input.signal?.aborted) throw error;
         console.warn("Recorder waveform generation failed:", error);
     }
+    input.signal?.throwIfAborted();
     const recordingId = nanoid();
     const storageKey = buildRecordingStagingPath(
         input.userId,

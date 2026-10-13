@@ -20,6 +20,7 @@ const MAX_PENDING_WRITES = 3;
 
 /** @type {{recorder: MediaRecorder, context: AudioContext, streams: MediaStream[], sessionId: string, nextIndex: number, meterTimer: number|undefined, analysers: {mic: AnalyserNode, system: AnalyserNode}}|null} */
 let active = null;
+let pendingCapture = null;
 
 function send(message) {
     chrome.runtime.sendMessage(message).catch(() => {
@@ -94,7 +95,30 @@ function rmsToDb(analyser, buffer) {
     return Math.max(-100, 20 * Math.log10(rms));
 }
 
-async function start({
+async function start(input) {
+    if (active || pendingCapture) {
+        throw new Error("A recording is already in progress");
+    }
+    const pending = { streams: [], context: null, stopRequested: false };
+    pendingCapture = pending;
+    try {
+        await startCapture(input, pending);
+    } catch (error) {
+        if (active) {
+            stop();
+        } else {
+            for (const stream of pending.streams) {
+                for (const track of stream.getTracks()) track.stop();
+            }
+            await pending.context?.close().catch(() => {});
+        }
+        throw error;
+    } finally {
+        pendingCapture = null;
+    }
+}
+
+async function startCapture({
     sessionId,
     clientRecordingId,
     captureKey,
@@ -102,8 +126,7 @@ async function start({
     channelMode,
     streamId,
     microphoneId,
-}) {
-    if (active) throw new Error("A recording is already in progress");
+}, pending) {
     const key = await importCaptureKey(captureKey);
 
     const isTab = captureMode === "tab";
@@ -122,10 +145,12 @@ async function start({
             `Could not capture the meeting audio (${captureMode}): ${error?.name ?? ""} ${error?.message ?? error}`,
         );
     }
+    pending.streams.push(systemStream);
 
     let micStream = null;
     try {
         micStream = await openMicrophone(microphoneId);
+        pending.streams.push(micStream);
     } catch (error) {
         send({
             type: "mic-unavailable",
@@ -135,6 +160,7 @@ async function start({
     }
 
     const context = new AudioContext({ sampleRate: SAMPLE_RATE });
+    pending.context = context;
     const systemSource = context.createMediaStreamSource(systemStream);
     const micSource = micStream
         ? context.createMediaStreamSource(micStream)
@@ -181,6 +207,8 @@ async function start({
         mimeType: RECORDER_MIME_TYPE,
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
     });
+
+    if (pending.stopRequested) throw new Error("Capture stopped before start");
 
     active = {
         recorder,
@@ -253,6 +281,11 @@ async function start({
     systemStream.getAudioTracks()[0]?.addEventListener("ended", () => {
         send({ type: "stream-ended", sessionId });
     });
+    micStream?.getAudioTracks()[0]?.addEventListener("ended", () => {
+        if (active?.sessionId === sessionId) {
+            send({ type: "mic-unavailable", sessionId });
+        }
+    });
 
     // Live meters, reported a few times a second.
     const micBuffer = new Float32Array(micAnalyser.fftSize);
@@ -268,6 +301,7 @@ async function start({
 
     recorder.start(CHUNK_INTERVAL_MS);
     send({ type: "recording-started", sessionId });
+    if (pending.stopRequested) stop();
 }
 
 /** Tear down capture resources. Called from onstop, after the final flush. */
@@ -283,7 +317,10 @@ function cleanup(session) {
 }
 
 function stop() {
-    if (!active) return;
+    if (!active) {
+        if (pendingCapture) pendingCapture.stopRequested = true;
+        return;
+    }
     // Stop metering immediately, then ask the recorder to stop. The final
     // dataavailable and onstop do the rest: they flush the last chunk, report
     // the true count, and only then release the streams and audio graph.
@@ -314,7 +351,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         start(message.payload)
             .then(() => sendResponse({ ok: true }))
             .catch((error) => {
-                stop();
                 sendResponse({ ok: false, error: error?.message ?? String(error) });
             });
         return true; // async response
