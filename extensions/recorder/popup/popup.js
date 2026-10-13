@@ -37,6 +37,7 @@ const el = (id) => document.getElementById(id);
 
 let elapsedTimer;
 let currentSessionId = null;
+let currentRecoverablePrefix = null;
 let currentTab = null;
 let currentPlatform = null;
 
@@ -194,6 +195,7 @@ function renderUploadStatus(state, elementId = "upload-status") {
 
 async function render(state) {
     currentSessionId = state.sessionId;
+    currentRecoverablePrefix = state.recoverablePrefix;
     if (elapsedTimer) {
         clearInterval(elapsedTimer);
         elapsedTimer = undefined;
@@ -226,6 +228,15 @@ async function render(state) {
         case STATE.error:
             show("error");
             el("error-text").textContent = state.error ?? t("somethingWrong");
+            el("partial-recovery").hidden = !(state.recoverablePrefix > 0);
+            if (state.recoverablePrefix > 0) {
+                el("partial-recovery-detail").textContent = t(
+                    "partialRecoveryDetail",
+                    [String(state.recoverablePrefix), String(state.chunkCount)],
+                );
+                el("partial-recovery-check").checked = false;
+                el("save-prefix").disabled = true;
+            }
             break;
         default:
             await renderIdle();
@@ -238,7 +249,23 @@ el("stop").addEventListener("click", async () => {
 });
 
 el("retry").addEventListener("click", async () => {
-    await sendMessage({ type: "retry-upload" });
+    const result = await sendMessage({ type: "retry-upload" });
+    if (result?.ok === false) {
+        el("error-text").textContent = result.error ?? t("recoveryUnavailable");
+    }
+});
+
+el("partial-recovery-check").addEventListener("change", (event) => {
+    el("save-prefix").disabled = !event.target.checked;
+});
+
+el("save-prefix").addEventListener("click", async () => {
+    if (!el("partial-recovery-check").checked || !currentRecoverablePrefix) return;
+    const response = await sendMessage({
+        type: "save-prefix",
+        chunkCount: currentRecoverablePrefix,
+    });
+    if (response?.ok === false) el("error-text").textContent = response.error;
 });
 
 el("discard").addEventListener("click", async () => {

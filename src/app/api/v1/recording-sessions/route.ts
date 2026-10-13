@@ -27,8 +27,10 @@ export const POST = apiHandler(async (request: Request) => {
     const body = await request.json().catch(() => null);
     const input = parseCreateRecordingSessionBody(body);
 
-    const session = await createRecordingSession({
+    const created = await createRecordingSession({
         userId: authn.user.id,
+        apiKeyId: authn.apiKeyId,
+        clientRecordingId: input.clientRecordingId,
         mimeType: input.mimeType,
         metadata: input.metadata,
         startedAt: input.startedAt,
@@ -37,7 +39,12 @@ export const POST = apiHandler(async (request: Request) => {
 
     return NextResponse.json(
         {
-            ...serializeRecordingSession(session, []),
+            ...serializeRecordingSession(created.session, []),
+            encryption: {
+                protocol: 1,
+                key: created.key,
+                expires_at: created.expiresAt,
+            },
             limits: {
                 max_chunk_bytes: MAX_CHUNK_BYTES,
                 max_session_bytes: MAX_SESSION_BYTES,

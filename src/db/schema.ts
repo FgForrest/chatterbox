@@ -2846,6 +2846,7 @@ export const apiKeys = pgTable(
         keyHash: text("key_hash").notNull().unique(),
         keyPrefix: varchar("key_prefix", { length: 16 }).notNull(),
         source: apiKeySourceEnum("source").notNull().default("manual"),
+        installationId: text("installation_id"),
         scopes: jsonb("scopes").$type<string[]>().notNull().default(["read"]),
         lastUsedAt: timestamp("last_used_at"),
         expiresAt: timestamp("expires_at"),
@@ -3489,6 +3490,40 @@ export const recordingSessionStatusEnum = pgEnum("recording_session_status", [
     "aborted",
 ]);
 
+export const recordingCaptureKeys = pgTable(
+    "recording_capture_keys",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        clientRecordingId: text("client_recording_id").notNull(),
+        apiKeyId: text("api_key_id")
+            .notNull()
+            .references(() => apiKeys.id, { onDelete: "cascade" }),
+        encryptedKey: text("encrypted_key"),
+        activeSessionId: text("active_session_id"),
+        status: varchar("status", { length: 16 })
+            .$type<"active" | "completed" | "discarded" | "expired">()
+            .notNull()
+            .default("active"),
+        expiresAt: timestamp("expires_at").notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userClientUnique: unique(
+            "recording_capture_keys_user_client_unique",
+        ).on(table.userId, table.clientRecordingId),
+        expiresIdx: index("recording_capture_keys_expires_idx").on(
+            table.status,
+            table.expiresAt,
+        ),
+    }),
+);
+
 /**
  * A meeting recording being streamed in by the browser extension.
  *
@@ -3515,6 +3550,13 @@ export const recordingSessions = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
+        captureKeyId: text("capture_key_id")
+            .notNull()
+            .references(() => recordingCaptureKeys.id, { onDelete: "cascade" }),
+        clientRecordingId: text("client_recording_id").notNull(),
+        apiKeyId: text("api_key_id")
+            .notNull()
+            .references(() => apiKeys.id, { onDelete: "cascade" }),
         status: recordingSessionStatusEnum("status").notNull().default("open"),
         mimeType: varchar("mime_type", { length: 100 }).notNull(),
         metadata: jsonb("metadata")
@@ -3530,17 +3572,22 @@ export const recordingSessions = pgTable(
         // Declared by the client on complete; the finalize job verifies that
         // chunks 0..expectedChunkCount-1 all exist before assembling.
         expectedChunkCount: integer("expected_chunk_count"),
+        truncatedAtChunk: integer("truncated_at_chunk"),
         recordingId: text("recording_id").references(() => recordings.id, {
             onDelete: "set null",
         }),
         jobId: text("job_id"),
         // Mapped, user-safe message (same rule as `async_jobs.last_error`).
         lastError: text("last_error"),
+        terminalCode: varchar("terminal_code", { length: 32 }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
         userIdIdx: index("recording_sessions_user_id_idx").on(table.userId),
+        captureKeyIdx: index("recording_sessions_capture_key_id_idx").on(
+            table.captureKeyId,
+        ),
         // Sweeper scan: stale rows by status.
         statusUpdatedIdx: index("recording_sessions_status_updated_idx").on(
             table.status,

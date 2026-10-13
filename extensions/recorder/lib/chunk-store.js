@@ -73,16 +73,6 @@ export async function listChunkIndices(sessionId) {
     return indices.sort((a, b) => a - b);
 }
 
-/** Concatenate every stored chunk into one Blob, in order. */
-export async function assembleBlob(sessionId, mimeType) {
-    const indices = await listChunkIndices(sessionId);
-    const parts = [];
-    for (const index of indices) {
-        parts.push(await readChunk(sessionId, index));
-    }
-    return new Blob(parts, { type: mimeType });
-}
-
 /** List session ids that still have a directory in OPFS. */
 export async function listLocalSessions() {
     const dir = await root();

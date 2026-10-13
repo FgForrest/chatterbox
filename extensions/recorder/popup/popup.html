@@ -36,7 +36,7 @@
 
         <!-- Notice confirmation (manual flow) -->
         <section id="view-notice" hidden>
-            <p data-i18n="recordingReminder">This records your microphone and meeting audio. Audio is buffered in this browser and sent to your paired server as it is captured. A local copy is downloaded by default.</p>
+            <p data-i18n="recordingReminder">This records your microphone and meeting audio. Encrypted audio chunks are buffered in this browser and sent to your paired server as they are captured.</p>
             <p id="notice-text"></p>
             <label class="check">
                 <input id="notice-ack" type="checkbox" />
@@ -67,6 +67,14 @@
         <!-- Error -->
         <section id="view-error" hidden>
             <p id="error-text" class="error"></p>
+            <div id="partial-recovery" hidden>
+                <p id="partial-recovery-detail" class="hint"></p>
+                <label class="check">
+                    <input id="partial-recovery-check" type="checkbox" />
+                    <span data-i18n="partialRecoveryConfirm">I understand that the missing part and everything after it will be lost.</span>
+                </label>
+                <button id="save-prefix" type="button" disabled data-i18n="savePlayablePrefix">Save playable beginning</button>
+            </div>
             <div class="row">
                 <button id="retry" type="button" data-i18n="retryUpload">Retry upload</button>
                 <button id="discard" class="danger" type="button" data-i18n="discard">Discard</button>

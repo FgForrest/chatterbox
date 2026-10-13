@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
+import { createWriteStream } from "node:fs";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import {
@@ -11,7 +13,7 @@ import {
 } from "@/lib/jobs/types";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
-import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
+import { saveUploadedAudioFile } from "@/lib/uploads/save-uploaded-audio-file";
 import {
     parseRecordingSessionFinalizePayload,
     RECORDING_SESSION_FINALIZE_JOB_KIND,
@@ -119,8 +121,6 @@ async function assembleChunks(
     chunks: RecordingSessionChunkRow[],
     destinationPath: string,
 ): Promise<void> {
-    const { createWriteStream } = await import("node:fs");
-    const { pipeline } = await import("node:stream/promises");
     const output = createWriteStream(destinationPath);
     try {
         for (const chunk of chunks) {
@@ -200,7 +200,11 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
             }
 
             const storage = await createUserStorageProvider(userId);
-            const chunks = await listRecordingSessionChunks(session.id);
+            const chunks = (
+                await listRecordingSessionChunks(session.id)
+            ).filter(
+                (chunk) => chunk.index < (session.expectedChunkCount ?? 0),
+            );
             assertContiguous(chunks, session.expectedChunkCount);
 
             let temporaryDirectory: string | null = null;
@@ -223,28 +227,24 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
 
                 await remuxToOgg(rawPath, oggPath, signal);
 
-                const { readFile } = await import("node:fs/promises");
-                const audio = await readFile(oggPath);
-
                 const metadata = readRecordingSessionMetadata(
                     session.metadata as Record<string, unknown>,
                 );
                 const title = buildMeetingTitle(metadata, session.startedAt);
 
-                const saved = await saveUploadedAudio({
+                const saved = await saveUploadedAudioFile({
                     userId,
                     fileId: `meeting-${session.id}`,
                     basename: title,
                     extension: ".ogg",
-                    buffer: audio,
+                    filePath: oggPath,
                     storage,
-                    sourceExtension: ".webm",
-                    convertedFromVideo: false,
                     recordedAt: session.startedAt,
                 });
 
                 await markRecordingSessionCompleted(
                     session.id,
+                    userId,
                     saved.recordingId,
                 );
                 await purgeRecordingSessionChunks(storage, session.id);
@@ -265,7 +265,11 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                         error instanceof AppError
                             ? error.message
                             : "The recording could not be finalized.";
-                    await markRecordingSessionFailed(session.id, message);
+                    await markRecordingSessionFailed(
+                        session.id,
+                        userId,
+                        message,
+                    );
                 }
                 throw error;
             } finally {

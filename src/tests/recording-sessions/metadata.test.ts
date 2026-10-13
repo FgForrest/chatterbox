@@ -29,6 +29,7 @@ describe("normalizeMimeType", () => {
 
 describe("parseCreateRecordingSessionBody", () => {
     const valid = {
+        clientRecordingId: "5c21c9a8-b924-44cc-bbc8-6c2c1f486522",
         mimeType: "audio/webm;codecs=opus",
         channelLayout: ["microphone", "system"],
         startedAt: "2026-09-18T12:00:00.000Z",
@@ -41,6 +42,7 @@ describe("parseCreateRecordingSessionBody", () => {
     it("accepts a well-formed body", () => {
         const parsed = parseCreateRecordingSessionBody(valid);
         expect(parsed.mimeType).toBe("audio/webm");
+        expect(parsed.clientRecordingId).toBe(valid.clientRecordingId);
         expect(parsed.metadata.channelLayout).toEqual(["microphone", "system"]);
         expect(parsed.metadata.platformHint).toBe("zoom");
         expect(parsed.startedAt.toISOString()).toBe("2026-09-18T12:00:00.000Z");
@@ -54,6 +56,15 @@ describe("parseCreateRecordingSessionBody", () => {
             parseCreateRecordingSessionBody({
                 ...valid,
                 mimeType: "audio/mp3",
+            }),
+        ).toThrowError(AppError);
+    });
+
+    it("requires a stable client recording id", () => {
+        expect(() =>
+            parseCreateRecordingSessionBody({
+                ...valid,
+                clientRecordingId: "",
             }),
         ).toThrowError(AppError);
     });
@@ -97,6 +108,7 @@ describe("parseCompleteRecordingSessionBody", () => {
     it("accepts a valid body and defaults stop reason", () => {
         const parsed = parseCompleteRecordingSessionBody({ chunkCount: 3 });
         expect(parsed.chunkCount).toBe(3);
+        expect(parsed.truncatedAtChunk).toBeNull();
         expect(parsed.stopReason).toBe("unknown");
         expect(parsed.endedAt).toBeInstanceOf(Date);
     });
@@ -121,6 +133,21 @@ describe("parseCompleteRecordingSessionBody", () => {
     it("rejects a zero chunk count", () => {
         expect(() =>
             parseCompleteRecordingSessionBody({ chunkCount: 0 }),
+        ).toThrowError(AppError);
+    });
+
+    it("accepts only a shorter verified prefix", () => {
+        expect(
+            parseCompleteRecordingSessionBody({
+                chunkCount: 10,
+                truncatedAtChunk: 3,
+            }).truncatedAtChunk,
+        ).toBe(3);
+        expect(() =>
+            parseCompleteRecordingSessionBody({
+                chunkCount: 10,
+                truncatedAtChunk: 10,
+            }),
         ).toThrowError(AppError);
     });
 });

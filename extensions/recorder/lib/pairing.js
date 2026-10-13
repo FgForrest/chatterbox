@@ -2,11 +2,26 @@
 // host-permission grants, pairing-relay registration, storing the pair, and
 // fetching the server's recorder defaults.
 
-import { getRecorderConfig } from "./api.js";
+import { confirmPairing, getRecorderConfig } from "./api.js";
+import { listLocalSessions, readLocalMeta } from "./chunk-store.js";
 import { STORAGE_KEYS } from "./constants.js";
 import { getSettings } from "./settings.js";
+import { clearToken, readToken, storeToken } from "./token-vault.js";
 
 const PAIRING_SCRIPT_ID = "riffado-pairing";
+let installationIdPromise;
+
+/** Persistent non-secret identifier for this browser installation. */
+export function getInstallationId() {
+    installationIdPromise ??= (async () => {
+        const stored = await chrome.storage.local.get(STORAGE_KEYS.installationId);
+        if (stored[STORAGE_KEYS.installationId]) return stored[STORAGE_KEYS.installationId];
+        const id = crypto.randomUUID();
+        await chrome.storage.local.set({ [STORAGE_KEYS.installationId]: id });
+        return id;
+    })();
+    return installationIdPromise;
+}
 
 /** `https://host[:port]` for a URL, or null. */
 export function originOf(url) {
@@ -74,14 +89,30 @@ export async function injectPairingScript(tabId) {
 }
 
 /** Store the pair, then pull the server's defaults. */
-export async function storePairing({ serverUrl, apiKey }) {
+export async function storePairing({ serverUrl, apiKey, allowPendingRecovery = false }) {
     const cleanUrl = String(serverUrl).replace(/\/+$/, "");
-    await chrome.storage.local.set({
-        [STORAGE_KEYS.serverUrl]: cleanUrl,
-        [STORAGE_KEYS.apiKey]: String(apiKey),
-    });
+    const pending = await listLocalSessions();
+    if (pending.length > 0) {
+        if (!allowPendingRecovery) {
+            throw new Error("Finish or discard pending encrypted recordings before changing the recorder key");
+        }
+        for (const id of pending) {
+            const meta = await readLocalMeta(id);
+            if (meta?.serverUrl !== cleanUrl) {
+                throw new Error("Pending recordings belong to another server");
+            }
+        }
+    }
+    await storeToken(String(apiKey));
+    await chrome.storage.local.set({ [STORAGE_KEYS.serverUrl]: cleanUrl });
     await refreshServerConfig().catch((error) =>
         console.warn("[recorder] config fetch after pairing failed:", error),
+    );
+    await confirmPairing(
+        { serverUrl: cleanUrl, apiKey: String(apiKey) },
+        await getInstallationId(),
+    ).catch((error) =>
+        console.warn("[recorder] could not retire previous installation keys:", error),
     );
 }
 
@@ -91,14 +122,15 @@ export async function storePairing({ serverUrl, apiKey }) {
  */
 export async function refreshServerConfig() {
     const settings = await getSettings();
-    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.apiKey) return false;
+    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.hasApiKey) return false;
     const config = await getRecorderConfig({
         serverUrl: settings.serverUrl,
-        apiKey: settings.apiKey,
+        apiKey: await readToken(),
     });
     const defaults = config?.defaults ?? {};
     await chrome.storage.local.set({
         [STORAGE_KEYS.serverDefaults]: {
+            encryptedRecordingProtocol: config.encrypted_recording_protocol,
             autoRecordPlatforms: Array.isArray(defaults.auto_record_platforms)
                 ? defaults.auto_record_platforms.filter(
                       (id) => typeof id === "string",
@@ -122,9 +154,12 @@ export async function refreshServerConfig() {
 
 /** Forget the pairing and the server defaults that came with it. */
 export async function clearPairing() {
+    if ((await listLocalSessions()).length > 0) {
+        throw new Error("Finish or discard pending encrypted recordings before disconnecting");
+    }
+    await clearToken();
     await chrome.storage.local.remove([
         STORAGE_KEYS.serverUrl,
-        STORAGE_KEYS.apiKey,
         STORAGE_KEYS.serverDefaults,
     ]);
 }

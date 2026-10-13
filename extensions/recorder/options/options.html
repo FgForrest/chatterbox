@@ -12,7 +12,7 @@
 
             <section id="data-use-section">
                 <h2 data-i18n="dataUseTitle">Before you connect or record</h2>
-                <p data-i18n="dataUseDisclosure">When you record, this extension captures your microphone and meeting audio, buffers it in this browser, and uploads it to the Chatterbox server you choose. By default it also downloads a local audio copy. The recorder key is stored in this browser. Your server operator controls data after upload. You must inform participants and obtain any required consent.</p>
+                <p data-i18n="dataUseDisclosure">When you record, this extension captures your microphone and meeting audio, encrypts temporary audio chunks in this browser, and uploads them to the Chatterbox server you choose. That server decrypts them for storage and processing. Download a playable copy from your Chatterbox account after upload. The recorder key is encrypted in this browser. Your server operator controls data after upload. You must inform participants and obtain any required consent.</p>
                 <p><a href="https://github.com/FgForrest/chatterbox/blob/dev/extensions/recorder/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="privacyPolicy">Read the extension privacy policy</a></p>
                 <label id="data-use-label" class="check">
                     <input id="data-use-check" type="checkbox" />
@@ -44,9 +44,20 @@
                 <div class="row">
                     <button id="save-connection" class="primary" type="button" data-i18n="saveGrant">Save and grant access</button>
                     <button id="refresh-config" type="button" data-i18n="refreshDefaults">Refresh server defaults</button>
+                    <button id="disconnect" type="button" data-i18n="disconnect">Disconnect</button>
                 </div>
                 <p id="connection-status" class="status"></p>
                 <p id="server-defaults" class="hint"></p>
+            </section>
+
+            <section id="pending-buffers" hidden>
+                <h2 data-i18n="pendingBuffers">Pending encrypted recordings</h2>
+                <p class="hint" data-i18n="pendingBuffersHint">Finish uploading or discard these recordings before changing the connection. Discarding permanently deletes the encrypted browser buffer.</p>
+                <label class="check">
+                    <input id="allow-pending-recovery" type="checkbox" />
+                    <span data-i18n="pendingRecoveryRebind">My old recorder token is unavailable. I will authorize these recordings for a new token in Chatterbox settings.</span>
+                </label>
+                <ul id="pending-buffer-list"></ul>
             </section>
 
             <section>
@@ -89,14 +100,7 @@
 
             <section>
                 <h2 data-i18n="recording">Recording</h2>
-                <label for="local-copy" data-i18n="keepLocal">Keep a local copy</label>
-                <select id="local-copy">
-                    <option value="always" data-i18n="alwaysDownload">Always download to my computer</option>
-                    <option value="ask" data-i18n="askLocation">Ask where to save each time</option>
-                    <option value="never" data-i18n="neverLocal">Never keep a local copy</option>
-                </select>
-                <label for="download-folder" data-i18n="downloadFolder">Download subfolder</label>
-                <input id="download-folder" type="text" placeholder="Chatterbox" data-i18n-placeholder="appName" />
+                <p class="hint" data-i18n="encryptedBufferNotice">Encrypted chunks stay in this browser until the server confirms completion. Download a playable copy from your Chatterbox recording page.</p>
                 <label for="channel-mode" data-i18n="channelLayout">Channel layout</label>
                 <select id="channel-mode">
                     <option value="mixed" data-i18n="mixed">Mixed (natural, recommended)</option>

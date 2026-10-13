@@ -1,6 +1,13 @@
+import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { recordingSessionChunks, recordingSessions } from "@/db/schema";
+import {
+    recordingCaptureKeys,
+    recordingSessionChunks,
+    recordingSessions,
+} from "@/db/schema";
+import { decrypt, encrypt } from "@/lib/encryption";
+import { AppError, ErrorCode } from "@/lib/errors";
 import type { StorageProvider } from "@/lib/storage/types";
 import type { RecordingSessionMetadata } from "./metadata";
 
@@ -8,26 +15,236 @@ export type RecordingSessionRow = typeof recordingSessions.$inferSelect;
 export type RecordingSessionChunkRow =
     typeof recordingSessionChunks.$inferSelect;
 export type RecordingSessionStatus = RecordingSessionRow["status"];
+const CAPTURE_KEY_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export async function createRecordingSession(input: {
     userId: string;
+    apiKeyId: string;
+    clientRecordingId: string;
     mimeType: string;
     metadata: RecordingSessionMetadata;
     startedAt: Date;
     noticeAcknowledgedAt: Date | null;
+}): Promise<{ session: RecordingSessionRow; key: string; expiresAt: Date }> {
+    const key = randomBytes(32).toString("base64");
+    const expiresAt = new Date(Date.now() + CAPTURE_KEY_RETENTION_MS);
+    const session = await db.transaction(async (tx) => {
+        const [capture] = await tx
+            .insert(recordingCaptureKeys)
+            .values({
+                userId: input.userId,
+                apiKeyId: input.apiKeyId,
+                clientRecordingId: input.clientRecordingId,
+                encryptedKey: encrypt(key),
+                expiresAt,
+            })
+            .onConflictDoNothing()
+            .returning();
+        if (!capture) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "This client recording ID has already been used",
+                409,
+            );
+        }
+        const [row] = await tx
+            .insert(recordingSessions)
+            .values({
+                userId: input.userId,
+                apiKeyId: input.apiKeyId,
+                clientRecordingId: input.clientRecordingId,
+                captureKeyId: capture.id,
+                mimeType: input.mimeType,
+                metadata: { ...input.metadata },
+                startedAt: input.startedAt,
+                noticeAcknowledgedAt: input.noticeAcknowledgedAt,
+            })
+            .returning();
+        if (!row) throw new Error("Recording session insert returned no row");
+        await tx
+            .update(recordingCaptureKeys)
+            .set({ activeSessionId: row.id })
+            .where(
+                and(
+                    eq(recordingCaptureKeys.id, capture.id),
+                    eq(recordingCaptureKeys.userId, input.userId),
+                ),
+            );
+        return row;
+    });
+    return { session, key, expiresAt };
+}
+
+/** Resolve only the active capture's key for its original recorder credential. */
+export async function getRecordingCaptureKey(input: {
+    userId: string;
+    apiKeyId: string;
+    session: RecordingSessionRow;
+}): Promise<Buffer | null> {
+    const [capture] = await db
+        .select()
+        .from(recordingCaptureKeys)
+        .where(
+            and(
+                eq(recordingCaptureKeys.id, input.session.captureKeyId),
+                eq(recordingCaptureKeys.userId, input.userId),
+                eq(recordingCaptureKeys.apiKeyId, input.apiKeyId),
+                eq(recordingCaptureKeys.status, "active"),
+                eq(recordingCaptureKeys.activeSessionId, input.session.id),
+            ),
+        )
+        .limit(1);
+    if (!capture?.encryptedKey || capture.expiresAt <= new Date()) return null;
+    return Buffer.from(decrypt(capture.encryptedKey), "base64");
+}
+
+/** Replace a swept or failed server session while keeping its capture key. */
+export async function replaceRecordingSession(input: {
+    userId: string;
+    apiKeyId: string;
+    sessionId: string;
 }): Promise<RecordingSessionRow> {
-    const [row] = await db
-        .insert(recordingSessions)
-        .values({
-            userId: input.userId,
-            mimeType: input.mimeType,
-            metadata: { ...input.metadata },
-            startedAt: input.startedAt,
-            noticeAcknowledgedAt: input.noticeAcknowledgedAt,
+    return db.transaction(async (tx) => {
+        const [old] = await tx
+            .select()
+            .from(recordingSessions)
+            .where(
+                and(
+                    eq(recordingSessions.id, input.sessionId),
+                    eq(recordingSessions.userId, input.userId),
+                    eq(recordingSessions.apiKeyId, input.apiKeyId),
+                ),
+            )
+            .limit(1);
+        if (!old)
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Recording session not found",
+                404,
+            );
+        const [capture] = await tx
+            .select()
+            .from(recordingCaptureKeys)
+            .where(
+                and(
+                    eq(recordingCaptureKeys.id, old.captureKeyId),
+                    eq(recordingCaptureKeys.userId, input.userId),
+                    eq(recordingCaptureKeys.apiKeyId, input.apiKeyId),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (
+            !capture ||
+            capture.status !== "active" ||
+            !capture.encryptedKey ||
+            capture.expiresAt <= new Date()
+        ) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Capture key has expired or been retired",
+                410,
+            );
+        }
+        if (
+            capture.activeSessionId !== old.id ||
+            (old.status !== "failed" &&
+                !(
+                    old.status === "aborted" &&
+                    old.terminalCode === "stale_open"
+                ))
+        ) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "This capture cannot be resumed",
+                409,
+            );
+        }
+        const [replacement] = await tx
+            .insert(recordingSessions)
+            .values({
+                userId: old.userId,
+                apiKeyId: old.apiKeyId,
+                clientRecordingId: old.clientRecordingId,
+                captureKeyId: old.captureKeyId,
+                mimeType: old.mimeType,
+                metadata: old.metadata,
+                startedAt: old.startedAt,
+                noticeAcknowledgedAt: old.noticeAcknowledgedAt,
+            })
+            .returning();
+        if (!replacement)
+            throw new Error("Replacement session insert returned no row");
+        await tx
+            .update(recordingCaptureKeys)
+            .set({ activeSessionId: replacement.id, updatedAt: new Date() })
+            .where(
+                and(
+                    eq(recordingCaptureKeys.id, capture.id),
+                    eq(recordingCaptureKeys.userId, input.userId),
+                ),
+            );
+        return replacement;
+    });
+}
+
+/** Irreversibly retire a capture when its owner discards it. */
+export async function retireRecordingCaptureKey(input: {
+    userId: string;
+    captureKeyId: string;
+}): Promise<void> {
+    await db
+        .update(recordingCaptureKeys)
+        .set({
+            status: "discarded",
+            encryptedKey: null,
+            activeSessionId: null,
+            updatedAt: new Date(),
         })
-        .returning();
-    if (!row) throw new Error("Recording session insert returned no row");
-    return row;
+        .where(
+            and(
+                eq(recordingCaptureKeys.id, input.captureKeyId),
+                eq(recordingCaptureKeys.userId, input.userId),
+            ),
+        );
+}
+
+/** Remove expired key material while keeping a replay tombstone. */
+export async function expireRecordingCaptureKeys(
+    limit: number,
+): Promise<number> {
+    const expired = await db
+        .select({
+            id: recordingCaptureKeys.id,
+            userId: recordingCaptureKeys.userId,
+        })
+        .from(recordingCaptureKeys)
+        .where(
+            and(
+                eq(recordingCaptureKeys.status, "active"),
+                lt(recordingCaptureKeys.expiresAt, new Date()),
+            ),
+        )
+        .limit(limit);
+    for (const capture of expired) {
+        await db
+            .update(recordingCaptureKeys)
+            .set({
+                status: "expired",
+                encryptedKey: null,
+                activeSessionId: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingCaptureKeys.id, capture.id),
+                    eq(recordingCaptureKeys.userId, capture.userId),
+                    eq(recordingCaptureKeys.status, "active"),
+                    lt(recordingCaptureKeys.expiresAt, new Date()),
+                ),
+            );
+    }
+    return expired.length;
 }
 
 /** One session by id, scoped to its owner so an id alone grants nothing. */
@@ -132,11 +349,33 @@ export async function insertRecordingSessionChunk(input: {
 }
 
 /** Touch `updated_at` so the sweeper knows the session is alive. */
-export async function touchRecordingSession(sessionId: string): Promise<void> {
+export async function touchRecordingSession(
+    sessionId: string,
+    userId: string,
+): Promise<void> {
+    const now = new Date();
     await db
         .update(recordingSessions)
-        .set({ updatedAt: new Date() })
-        .where(eq(recordingSessions.id, sessionId));
+        .set({ updatedAt: now })
+        .where(
+            and(
+                eq(recordingSessions.id, sessionId),
+                eq(recordingSessions.userId, userId),
+            ),
+        );
+    await db
+        .update(recordingCaptureKeys)
+        .set({
+            expiresAt: new Date(now.getTime() + CAPTURE_KEY_RETENTION_MS),
+            updatedAt: now,
+        })
+        .where(
+            and(
+                eq(recordingCaptureKeys.activeSessionId, sessionId),
+                eq(recordingCaptureKeys.userId, userId),
+                eq(recordingCaptureKeys.status, "active"),
+            ),
+        );
 }
 
 /**
@@ -150,6 +389,7 @@ export async function markRecordingSessionCompleting(input: {
     endedAt: Date;
     stopReason: string;
     expectedChunkCount: number;
+    truncatedAtChunk: number | null;
 }): Promise<RecordingSessionRow | null> {
     const [row] = await db
         .update(recordingSessions)
@@ -158,7 +398,9 @@ export async function markRecordingSessionCompleting(input: {
             endedAt: input.endedAt,
             stopReason: input.stopReason,
             expectedChunkCount: input.expectedChunkCount,
+            truncatedAtChunk: input.truncatedAtChunk,
             lastError: null,
+            terminalCode: null,
             updatedAt: new Date(),
         })
         .where(
@@ -184,27 +426,63 @@ export async function setRecordingSessionJob(
 
 export async function markRecordingSessionCompleted(
     sessionId: string,
+    userId: string,
     recordingId: string,
 ): Promise<void> {
-    await db
-        .update(recordingSessions)
-        .set({
-            status: "completed",
-            recordingId,
-            lastError: null,
-            updatedAt: new Date(),
-        })
-        .where(eq(recordingSessions.id, sessionId));
+    await db.transaction(async (tx) => {
+        const [session] = await tx
+            .update(recordingSessions)
+            .set({
+                status: "completed",
+                recordingId,
+                lastError: null,
+                terminalCode: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingSessions.id, sessionId),
+                    eq(recordingSessions.userId, userId),
+                ),
+            )
+            .returning({ captureKeyId: recordingSessions.captureKeyId });
+        if (!session) throw new Error("Completed session not found");
+        await tx
+            .update(recordingCaptureKeys)
+            .set({
+                status: "completed",
+                encryptedKey: null,
+                activeSessionId: null,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(recordingCaptureKeys.id, session.captureKeyId),
+                    eq(recordingCaptureKeys.userId, userId),
+                ),
+            );
+    });
 }
 
 export async function markRecordingSessionFailed(
     sessionId: string,
+    userId: string,
     message: string,
 ): Promise<void> {
     await db
         .update(recordingSessions)
-        .set({ status: "failed", lastError: message, updatedAt: new Date() })
-        .where(eq(recordingSessions.id, sessionId));
+        .set({
+            status: "failed",
+            lastError: message,
+            terminalCode: "finalize_failed",
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(recordingSessions.id, sessionId),
+                eq(recordingSessions.userId, userId),
+            ),
+        );
 }
 
 /**
@@ -213,18 +491,22 @@ export async function markRecordingSessionFailed(
  */
 export async function markRecordingSessionAborted(
     sessionId: string,
+    userId: string,
+    code: "user_discard" | "stale_open",
     reason: string | null,
 ): Promise<boolean> {
     const rows = await db
         .update(recordingSessions)
         .set({
             status: "aborted",
+            terminalCode: code,
             ...(reason ? { lastError: reason } : {}),
             updatedAt: new Date(),
         })
         .where(
             and(
                 eq(recordingSessions.id, sessionId),
+                eq(recordingSessions.userId, userId),
                 inArray(recordingSessions.status, ["open", "failed"]),
             ),
         )

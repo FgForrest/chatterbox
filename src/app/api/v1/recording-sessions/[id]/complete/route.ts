@@ -38,6 +38,9 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             404,
         );
     }
+    if (session.apiKeyId !== authn.apiKeyId) {
+        throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
+    }
 
     // Idempotent re-complete: if a previous call already advanced the
     // session, hand back its current state rather than erroring.
@@ -46,11 +49,16 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         return NextResponse.json(serializeRecordingSession(session, chunks));
     }
 
-    const chunks = await listRecordingSessionChunks(session.id);
-    if (chunks.length !== input.chunkCount) {
+    const allChunks = await listRecordingSessionChunks(session.id);
+    const expectedCount = input.truncatedAtChunk ?? input.chunkCount;
+    const chunks = allChunks.filter((chunk) => chunk.index < expectedCount);
+    if (
+        chunks.length !== expectedCount ||
+        (!input.truncatedAtChunk && allChunks.length !== input.chunkCount)
+    ) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            `Expected ${input.chunkCount} chunks but ${chunks.length} were uploaded`,
+            `Expected ${expectedCount} prefix chunks but ${chunks.length} were uploaded`,
             422,
             { field: "chunkCount" },
         );
@@ -71,7 +79,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         userId: authn.user.id,
         endedAt: input.endedAt,
         stopReason: input.stopReason,
-        expectedChunkCount: input.chunkCount,
+        expectedChunkCount: expectedCount,
+        truncatedAtChunk: input.truncatedAtChunk,
     });
     if (!completing) {
         // Lost the race with another complete call; report the live state.

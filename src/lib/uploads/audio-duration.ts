@@ -77,6 +77,17 @@ function probeDurationSeconds(inputPath: string): Promise<number> {
     });
 }
 
+/** Read the duration of an audio file without loading its bytes into memory. */
+export async function readAudioFileDurationMs(
+    inputPath: string,
+): Promise<number> {
+    try {
+        return Math.round((await probeDurationSeconds(inputPath)) * 1000);
+    } catch {
+        return 0;
+    }
+}
+
 async function probeBufferDurationMs(buffer: Uint8Array): Promise<number> {
     const temporaryDirectory = await mkdtemp(
         path.join(tmpdir(), "riffado-audio-probe-"),

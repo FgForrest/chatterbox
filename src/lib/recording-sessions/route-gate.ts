@@ -13,7 +13,10 @@ import {
 
 export type RecordingSessionGate =
     | { response: NextResponse; authn?: undefined }
-    | { response?: undefined; authn: AuthenticatedRequest };
+    | {
+          response?: undefined;
+          authn: AuthenticatedRequest & { via: "api-key"; apiKeyId: string };
+      };
 
 /**
  * The checks every recording-session route runs before touching data:
@@ -37,6 +40,13 @@ export async function gateRecordingSessionRequest(
     if (authLimitResponse) return { response: authLimitResponse };
 
     requireApiScope(authn, "recordings:write");
+    if (authn.via !== "api-key" || !authn.apiKeyId) {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "A recorder API key is required",
+            403,
+        );
+    }
 
     if (await isHostedLockedOut(authn.user.id)) {
         throw new AppError(
@@ -46,5 +56,7 @@ export async function gateRecordingSessionRequest(
         );
     }
 
-    return { authn };
+    return {
+        authn: { ...authn, via: "api-key", apiKeyId: authn.apiKeyId },
+    };
 }

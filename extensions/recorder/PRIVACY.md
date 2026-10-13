@@ -8,9 +8,9 @@ This policy describes the **Chatterbox Meeting Recorder browser extension**. It 
 
 - When you choose to record, the extension captures microphone audio and either the selected meeting tab's audio or the system audio from Chrome's screen picker. It records audio, not the screen video.
 - When meeting detection is enabled, it checks browser tab URLs and audible status to identify supported meeting sites and show a recording prompt. It does not upload browsing history or tab URLs.
-- It stores the server address, a write-only recorder API key, recording preferences, and recording state in browser extension storage. The key is used to authenticate uploads to your selected server.
-- It buffers audio segments and session metadata in Chrome's private file system so interrupted uploads can resume. Buffered audio is removed after a successful upload or when you discard the session. If an upload fails, buffered audio can remain until you retry or discard it. The buffer and the stored key are **not encrypted by the extension at rest**; protect access to your browser profile and computer.
-- By default, after a successful upload it downloads a `.webm` audio copy to your computer's Downloads folder. You can change this to ask for a save location or never download a copy in the extension's Options. A downloaded file remains until you delete it.
+- It stores the server address, recording preferences, a random installation identifier, and recording state in browser extension storage. The installation identifier is sent to the paired server to retire older recorder keys from this installation; it is not a device fingerprint or a secret. The write-only recorder API token is encrypted before it is stored in `chrome.storage.local`. A non-exportable Web Crypto key is stored in the extension's IndexedDB. This protects against casual reading of local extension storage, but code running in the extension or someone with a copy of the whole browser profile may still use the token.
+- It encrypts each five-second audio segment with a key issued by your server before writing that segment to Chrome's private file system. It sends the encrypted segments over HTTPS to your selected server. The server decrypts them for normal storage, transcription, and export. Encrypted segments remain on this device until the server confirms completion or you explicitly discard them. A browser crash or full disk can still interrupt capture; only the verified prefix may be recoverable. Browser media internals may temporarily store data outside the extension's encrypted buffer.
+- It does not automatically download a playable local copy. Once the server finishes the recording, you can download one from the authenticated Chatterbox recording page. A file you download remains until you delete it.
 
 ## Where data goes
 
@@ -24,7 +24,7 @@ You decide when to start a recording and which server receives it. Inform meetin
 
 ## Your choices
 
-You can stop a recording, change the destination server, revoke the recorder key on your server, change or disable local downloads, and remove the extension. Deleting a local download or browser buffer does not delete a copy already received by the server; use that server's controls or contact its operator for server-side deletion. Removing the extension removes its extension storage under normal browser behavior, but downloaded files and server copies remain.
+You can stop a recording, change the destination server, revoke the recorder key on your server, discard an encrypted browser buffer, and remove the extension. A pending buffer is tied to the server and recorder account that created it; changing servers cannot make that buffer readable elsewhere. Deleting a downloaded file or browser buffer does not delete a copy already received by the server; use that server's controls or contact its operator for server-side deletion. Removing the extension removes its extension storage under normal browser behavior, but downloaded files and server copies remain.
 
 ## Policy updates and contact
 

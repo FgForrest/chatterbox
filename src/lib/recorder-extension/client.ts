@@ -22,6 +22,7 @@ export type RecorderExtensionState =
           kind: "reachable";
           channel: RecorderExtensionChannel;
           paired: false;
+          installationId?: string;
           version?: string;
       }
     | {
@@ -30,6 +31,7 @@ export type RecorderExtensionState =
           paired: true;
           pairedTo: string | null;
           pairedHere: boolean;
+          installationId?: string;
           version?: string;
       };
 
@@ -49,6 +51,7 @@ interface PresenceReply {
     paired?: boolean;
     pairedTo?: string | null;
     version?: string;
+    installationId?: string;
     unreachable?: boolean;
 }
 
@@ -81,6 +84,10 @@ function toState(
 ): RecorderExtensionState {
     const version =
         typeof reply.version === "string" ? reply.version : undefined;
+    const installationId =
+        typeof reply.installationId === "string"
+            ? reply.installationId
+            : undefined;
     if (reply.paired) {
         const pairedTo =
             typeof reply.pairedTo === "string" ? reply.pairedTo : null;
@@ -91,9 +98,16 @@ function toState(
             pairedTo,
             pairedHere: pairedTo === origin,
             version,
+            installationId,
         };
     }
-    return { kind: "reachable", channel, paired: false, version };
+    return {
+        kind: "reachable",
+        channel,
+        paired: false,
+        version,
+        installationId,
+    };
 }
 
 function withTimeout<T>(

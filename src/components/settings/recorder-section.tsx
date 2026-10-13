@@ -32,6 +32,12 @@ type RecorderKey = {
 
 type RecorderStatus = {
     keys: RecorderKey[];
+    pending_captures: {
+        client_recording_id: string;
+        api_key_id: string;
+        created_at: string;
+        expires_at: string;
+    }[];
     server_url: string | null;
     extension_id: string;
     defaults: {
@@ -73,6 +79,10 @@ export function RecorderSection() {
     const [busy, setBusy] = useState(false);
     const [manualKey, setManualKey] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [rebindTargets, setRebindTargets] = useState<Record<string, string>>(
+        {},
+    );
+    const [revokeCandidate, setRevokeCandidate] = useState<string | null>(null);
     const clientRef = useRef<ReturnType<
         typeof browserRecorderExtensionClient
     > | null>(null);
@@ -126,7 +136,13 @@ export function RecorderSection() {
         const response = await fetch("/api/settings/recorder/pair", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label: navigator.platform || "browser" }),
+            body: JSON.stringify({
+                label: navigator.platform || "browser",
+                installationId:
+                    extension?.kind === "reachable"
+                        ? extension.installationId
+                        : undefined,
+            }),
         });
         if (!response.ok) {
             throw new Error(
@@ -137,7 +153,7 @@ export function RecorderSection() {
             );
         }
         return (await response.json()) as PairResponse;
-    }, [i18n]);
+    }, [i18n, extension]);
 
     const setUp = useCallback(async () => {
         if (
@@ -225,6 +241,41 @@ export function RecorderSection() {
             }
         },
         [loadStatus, i18n],
+    );
+
+    const rebind = useCallback(
+        async (clientRecordingId: string) => {
+            const apiKeyId = rebindTargets[clientRecordingId];
+            if (!apiKeyId) return;
+            try {
+                const response = await fetch("/api/settings/recorder/rebind", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientRecordingId, apiKeyId }),
+                });
+                if (!response.ok) {
+                    throw new Error(
+                        await getApiErrorMessage(
+                            response,
+                            i18n("Could not authorize capture recovery"),
+                        ),
+                    );
+                }
+                toast.success(
+                    i18n(
+                        "Recorder key updated. Retry the upload in the extension.",
+                    ),
+                );
+                await loadStatus();
+            } catch (error) {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Recovery failed"),
+                );
+            }
+        },
+        [rebindTargets, i18n, loadStatus],
     );
 
     const autoPlatformNames = status
@@ -410,13 +461,145 @@ export function RecorderSection() {
                                 <Button
                                     variant="outline"
                                     size="icon"
-                                    onClick={() => void revoke(key.id)}
+                                    onClick={() => {
+                                        if (
+                                            status.pending_captures.some(
+                                                (capture) =>
+                                                    capture.api_key_id ===
+                                                    key.id,
+                                            )
+                                        ) {
+                                            setRevokeCandidate(key.id);
+                                        } else {
+                                            void revoke(key.id);
+                                        }
+                                    }}
                                     aria-label={i18n("Revoke {name}", {
                                         name: key.name,
                                     })}
                                 >
                                     <Trash2 className="size-4 text-destructive" />
                                 </Button>
+                                {revokeCandidate === key.id && (
+                                    <div className="space-y-2 text-xs">
+                                        <p>
+                                            {i18n(
+                                                "This key has unfinished recordings. Revoke it only if you can rebind them to another recorder key.",
+                                            )}
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            onClick={() => {
+                                                setRevokeCandidate(null);
+                                                void revoke(key.id);
+                                            }}
+                                        >
+                                            {i18n("Revoke anyway")}
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            onClick={() =>
+                                                setRevokeCandidate(null)
+                                            }
+                                        >
+                                            {i18n("Cancel")}
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </SettingsCard>
+            )}
+
+            {status && status.pending_captures.length > 0 && (
+                <SettingsCard
+                    title={i18n("Unfinished recorder captures")}
+                    description={i18n(
+                        "Encrypted browser chunks remain tied to their original recorder key until this account authorizes a new key. The extension keeps the chunks for upload recovery.",
+                    )}
+                >
+                    <div className="space-y-3">
+                        {status.pending_captures.map((capture) => (
+                            <div
+                                key={capture.client_recording_id}
+                                className="rounded-lg border p-3 text-sm"
+                            >
+                                <p>
+                                    {i18n("Started")}{" "}
+                                    {formatDate(
+                                        capture.created_at,
+                                        locale,
+                                        i18n("Never"),
+                                    )}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    {i18n("Recovery key expires")}{" "}
+                                    {formatDate(
+                                        capture.expires_at,
+                                        locale,
+                                        i18n("Never"),
+                                    )}
+                                </p>
+                                <p className="text-xs font-mono break-all">
+                                    {capture.client_recording_id}
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                    <select
+                                        aria-label={i18n("New recorder key")}
+                                        className="rounded border bg-background px-2 py-1"
+                                        value={
+                                            rebindTargets[
+                                                capture.client_recording_id
+                                            ] ?? ""
+                                        }
+                                        onChange={(event) =>
+                                            setRebindTargets((current) => ({
+                                                ...current,
+                                                [capture.client_recording_id]:
+                                                    event.target.value,
+                                            }))
+                                        }
+                                    >
+                                        <option value="">
+                                            {i18n(
+                                                "Select another recorder key",
+                                            )}
+                                        </option>
+                                        {status.keys
+                                            .filter(
+                                                (key) =>
+                                                    key.id !==
+                                                    capture.api_key_id,
+                                            )
+                                            .map((key) => (
+                                                <option
+                                                    key={key.id}
+                                                    value={key.id}
+                                                >
+                                                    {key.name} ({key.key_prefix}
+                                                    )
+                                                </option>
+                                            ))}
+                                    </select>
+                                    <Button
+                                        size="sm"
+                                        disabled={
+                                            !rebindTargets[
+                                                capture.client_recording_id
+                                            ]
+                                        }
+                                        onClick={() =>
+                                            void rebind(
+                                                capture.client_recording_id,
+                                            )
+                                        }
+                                    >
+                                        {i18n("Authorize recovery")}
+                                    </Button>
+                                </div>
                             </div>
                         ))}
                     </div>

@@ -14,6 +14,9 @@ import {
     SAMPLE_RATE,
 } from "../lib/constants.js";
 import { writeChunk } from "../lib/chunk-store.js";
+import { encryptChunk, importCaptureKey } from "../lib/chunk-crypto.js";
+
+const MAX_PENDING_WRITES = 3;
 
 /** @type {{recorder: MediaRecorder, context: AudioContext, streams: MediaStream[], sessionId: string, nextIndex: number, meterTimer: number|undefined, analysers: {mic: AnalyserNode, system: AnalyserNode}}|null} */
 let active = null;
@@ -93,12 +96,15 @@ function rmsToDb(analyser, buffer) {
 
 async function start({
     sessionId,
+    clientRecordingId,
+    captureKey,
     captureMode,
     channelMode,
     streamId,
     microphoneId,
 }) {
     if (active) throw new Error("A recording is already in progress");
+    const key = await importCaptureKey(captureKey);
 
     const isTab = captureMode === "tab";
     const isSplit = channelMode === "split";
@@ -181,28 +187,46 @@ async function start({
         context,
         streams: [systemStream, micStream].filter(Boolean),
         sessionId,
+        clientRecordingId,
+        key,
         nextIndex: 0,
         meterTimer: undefined,
         analysers: { mic: micAnalyser, system: systemAnalyser },
-        pendingWrites: [],
+        pendingWrites: new Set(),
+        writeFailed: false,
     };
 
     recorder.ondataavailable = (event) => {
-        if (!active || event.data.size === 0) return;
+        if (!active || event.data.size === 0 || active.writeFailed) return;
+        const current = active;
+        if (current.pendingWrites.size >= MAX_PENDING_WRITES) {
+            current.writeFailed = true;
+            send({
+                type: "capture-error",
+                sessionId,
+                message: "Encrypted buffer could not keep up with capture",
+            });
+            stop();
+            return;
+        }
         // Assign the index synchronously so the final blob flushed by
         // stop() is counted before onstop reads the total; buffer the write
         // so onstop can wait for it to land in OPFS before completing.
-        const index = active.nextIndex++;
-        const write = writeChunk(sessionId, index, event.data)
+        const index = current.nextIndex++;
+        const write = encryptChunk(key, clientRecordingId, index, event.data)
+            .then((encrypted) => writeChunk(sessionId, index, encrypted))
             .then(() => send({ type: "chunk-ready", sessionId, index }))
-            .catch((error) =>
+            .catch((error) => {
+                current.writeFailed = true;
                 send({
                     type: "capture-error",
                     sessionId,
                     message: `Could not buffer chunk ${index}: ${error?.message ?? error}`,
-                }),
-            );
-        active.pendingWrites.push(write);
+                });
+                stop();
+            })
+            .finally(() => current.pendingWrites.delete(write));
+        current.pendingWrites.add(write);
     };
 
     recorder.onstop = async () => {
@@ -210,7 +234,7 @@ async function start({
         if (!current) return;
         // Wait for the last slices to finish writing so the server sees every
         // chunk the count promises, then tear the graph down.
-        await Promise.allSettled(current.pendingWrites);
+        await Promise.allSettled([...current.pendingWrites]);
         const chunkCount = current.nextIndex;
         cleanup(current);
         active = null;

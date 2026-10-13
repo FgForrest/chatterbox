@@ -30,6 +30,16 @@ async function request(auth, path, init = {}) {
         const message = await readError(response);
         const error = new Error(message);
         error.status = response.status;
+        const retryAfter = response.headers.get("Retry-After");
+        if (retryAfter) {
+            const seconds = Number(retryAfter);
+            const dateSeconds = (Date.parse(retryAfter) - Date.now()) / 1000;
+            error.retryAfterSeconds = Number.isFinite(seconds)
+                ? seconds
+                : Number.isFinite(dateSeconds)
+                  ? Math.max(0, dateSeconds)
+                  : null;
+        }
         throw error;
     }
     return response;
@@ -84,6 +94,16 @@ export async function getSession(auth, sessionId) {
     return response.json();
 }
 
+/** Replace an expired or failed upload session for the same encrypted capture. */
+export async function recoverSession(auth, sessionId) {
+    const response = await request(
+        auth,
+        `/api/v1/recording-sessions/${sessionId}/recover`,
+        { method: "POST" },
+    );
+    return response.json();
+}
+
 /**
  * @param {{serverUrl: string, apiKey: string}} auth
  * @param {string} sessionId
@@ -119,6 +139,15 @@ export async function abortSession(auth, sessionId) {
 export async function getRecorderConfig(auth) {
     const response = await request(auth, "/api/v1/recorder/config");
     return response.json();
+}
+
+/** Retire older keys issued to the same installation after pairing succeeds. */
+export async function confirmPairing(auth, installationId) {
+    await request(auth, "/api/v1/recorder/confirm-pairing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ installationId }),
+    });
 }
 
 /** Compute the lowercase hex SHA-256 of a Blob's bytes. */

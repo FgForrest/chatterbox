@@ -2,6 +2,7 @@ import { captureServerException } from "@/lib/posthog-server";
 import { createStorageProvider } from "@/lib/storage/factory";
 import { FAILED_SESSION_RETENTION_MS, OPEN_SESSION_TTL_MS } from "./constants";
 import {
+    expireRecordingCaptureKeys,
     listStaleRecordingSessions,
     markRecordingSessionAborted,
     purgeRecordingSessionChunks,
@@ -36,6 +37,8 @@ async function tick(): Promise<void> {
                 await purgeRecordingSessionChunks(storage, session.id);
                 await markRecordingSessionAborted(
                     session.id,
+                    session.userId,
+                    "stale_open",
                     "Abandoned before completion",
                 );
             } catch (error) {
@@ -63,6 +66,8 @@ async function tick(): Promise<void> {
                 );
             }
         }
+
+        await expireRecordingCaptureKeys(MAX_SESSIONS_PER_TICK);
 
         const swept = abandoned.length + failed.length;
         if (swept > 0) {

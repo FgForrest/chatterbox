@@ -2,11 +2,13 @@
 // the one-time policy acknowledgement, microphone and recording settings.
 
 import {
+    clearPairing,
     grantHostAccess,
     originOf,
     registerPairingScript,
     storePairing,
 } from "../lib/pairing.js";
+import { listLocalSessions, readLocalMeta } from "../lib/chunk-store.js";
 import { PLATFORMS } from "../lib/platforms.js";
 import {
     effectiveNoticeText,
@@ -70,7 +72,16 @@ el("confirm-pair").addEventListener("click", async () => {
         setStatus(el("pending-status"), t("serverAccessDenied"), false);
         return;
     }
-    await storePairing({ serverUrl: origin, apiKey: pending.apiKey });
+    try {
+        await storePairing({
+            serverUrl: origin,
+            apiKey: pending.apiKey,
+            allowPendingRecovery: el("allow-pending-recovery").checked,
+        });
+    } catch (error) {
+        setStatus(el("pending-status"), error?.message ?? String(error), false);
+        return;
+    }
     await registerPairingScript(origin);
     await chrome.storage.session.remove(PENDING_PAIR_KEY);
     await renderPendingPair();
@@ -119,13 +130,65 @@ el("save-connection").addEventListener("click", async () => {
         );
         return;
     }
-    await storePairing({ serverUrl: origin, apiKey });
+    try {
+        await storePairing({
+            serverUrl: origin,
+            apiKey,
+            allowPendingRecovery: el("allow-pending-recovery").checked,
+        });
+    } catch (error) {
+        setStatus(el("connection-status"), error?.message ?? String(error), false);
+        return;
+    }
+    el("api-key").value = "";
     await registerPairingScript(origin);
     setStatus(el("connection-status"), t("connected"), true);
     await renderServerDefaults();
     await renderPlatformTable();
     chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
 });
+
+el("disconnect").addEventListener("click", async () => {
+    try {
+        await clearPairing();
+        await restore();
+        setStatus(el("connection-status"), t("disconnected"), true);
+    } catch (error) {
+        setStatus(el("connection-status"), error?.message ?? String(error), false);
+    }
+});
+
+async function renderPendingBuffers() {
+    const ids = await listLocalSessions();
+    const list = el("pending-buffer-list");
+    list.replaceChildren();
+    el("pending-buffers").hidden = ids.length === 0;
+    for (const id of ids) {
+        const meta = await readLocalMeta(id);
+        const item = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = `${meta?.serverUrl ?? t("unknown")} · ${meta?.startedAt ?? id} · ${meta?.clientRecordingId ?? ""} · ${meta?.keyExpiresAt ?? ""}`;
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = t("discard");
+        button.disabled = true;
+        check.addEventListener("change", () => {
+            button.disabled = !check.checked;
+        });
+        button.addEventListener("click", async () => {
+            const result = await chrome.runtime.sendMessage({
+                type: "discard-buffer",
+                bufferId: id,
+            });
+            if (result?.ok) await renderPendingBuffers();
+            else setStatus(el("connection-status"), result?.error ?? t("somethingWrong"), false);
+        });
+        item.append(label, check, button);
+        list.append(item);
+    }
+}
 
 el("refresh-config").addEventListener("click", async () => {
     if (!requireDataUseConsent()) return;
@@ -325,8 +388,6 @@ el("save-all").addEventListener("click", async () => {
 
     await saveSettings({
         microphoneId: el("mic-device").value,
-        localCopyPolicy: el("local-copy").value,
-        downloadFolder: el("download-folder").value.trim() || t("appName"),
         channelMode: el("channel-mode").value === "split" ? "split" : "mixed",
         noticeText: el("notice-text").value.trim() || null,
         platformModes,
@@ -342,16 +403,6 @@ el("save-all").addEventListener("click", async () => {
     chrome.runtime.sendMessage({ type: "reevaluate-tabs" }).catch(() => {});
 });
 
-// ---- Immediate-save controls --------------------------------------------
-
-// The "Keep a local copy" choice has a visible side effect (a file written to
-// disk), so it must not depend on remembering to click Save afterwards. It
-// persists the moment it changes.
-el("local-copy").addEventListener("change", async () => {
-    await saveSettings({ localCopyPolicy: el("local-copy").value });
-    setStatus(el("save-status"), t("saved"), true);
-});
-
 // ---- Restore ------------------------------------------------------------
 
 async function restore() {
@@ -365,9 +416,7 @@ async function restore() {
     const params = new URLSearchParams(location.search);
     el("server-url").value =
         settings.serverUrl || originOf(params.get("origin") ?? "") || "";
-    el("api-key").value = settings.apiKey;
-    el("local-copy").value = settings.localCopyPolicy;
-    el("download-folder").value = settings.downloadFolder;
+    el("api-key").value = "";
     el("channel-mode").value = settings.channelMode;
     el("notice-text").value = settings.noticeText ?? "";
     el("notice-text").placeholder = effectiveNoticeText(settings);
@@ -376,10 +425,11 @@ async function restore() {
     el("quiet-seconds").placeholder = String(
         settings.serverDefaults?.autoStopQuietSeconds ?? 180,
     );
-    if (settings.serverUrl && settings.apiKey) {
+    if (settings.serverUrl && settings.hasApiKey) {
         setStatus(el("connection-status"), t("connected"), true);
     }
     await Promise.all([
+        renderPendingBuffers(),
         renderPendingPair(),
         renderServerDefaults(),
         renderPlatformTable(),

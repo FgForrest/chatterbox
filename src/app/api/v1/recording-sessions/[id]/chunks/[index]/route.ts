@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import {
+    CHUNK_ENVELOPE_OVERHEAD,
+    decryptRecorderChunk,
+} from "@/lib/recording-sessions/chunk-crypto";
+import {
     MAX_CHUNK_BYTES,
     MAX_SESSION_BYTES,
 } from "@/lib/recording-sessions/constants";
@@ -13,6 +17,7 @@ import {
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import { recordingSessionChunkKey } from "@/lib/recording-sessions/storage-keys";
 import {
+    getRecordingCaptureKey,
     getRecordingSessionForUser,
     insertRecordingSessionChunk,
     sumRecordingSessionBytes,
@@ -54,20 +59,34 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
             409,
         );
     }
+    if (session.apiKeyId !== authn.apiKeyId) {
+        throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
+    }
 
-    const body = await request.arrayBuffer();
-    const buffer = Buffer.from(body);
+    const reader = request.body?.getReader();
+    if (!reader) {
+        throw new AppError(ErrorCode.INVALID_INPUT, "Chunk body is empty", 400);
+    }
+    const parts: Buffer[] = [];
+    let inputBytes = 0;
+    for (;;) {
+        const result = await reader.read();
+        if (result.done) break;
+        inputBytes += result.value.byteLength;
+        if (inputBytes > MAX_CHUNK_BYTES + CHUNK_ENVELOPE_OVERHEAD) {
+            await reader.cancel();
+            throw new AppError(
+                ErrorCode.FILE_TOO_LARGE,
+                `Chunk exceeds the ${MAX_CHUNK_BYTES} byte limit`,
+                413,
+            );
+        }
+        parts.push(Buffer.from(result.value));
+    }
+    const buffer = Buffer.concat(parts, inputBytes);
     if (buffer.length === 0) {
         throw new AppError(ErrorCode.INVALID_INPUT, "Chunk body is empty", 400);
     }
-    if (buffer.length > MAX_CHUNK_BYTES) {
-        throw new AppError(
-            ErrorCode.FILE_TOO_LARGE,
-            `Chunk exceeds the ${MAX_CHUNK_BYTES} byte limit`,
-            413,
-        );
-    }
-
     const actualSha = createHash("sha256").update(buffer).digest("hex");
     if (actualSha !== expectedSha) {
         throw new AppError(
@@ -78,9 +97,41 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
         );
     }
 
+    const key = await getRecordingCaptureKey({
+        userId: authn.user.id,
+        apiKeyId: authn.apiKeyId,
+        session,
+    });
+    if (!key) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            "Recording encryption key has expired or been retired",
+            410,
+        );
+    }
+    let plaintext: Buffer;
+    try {
+        plaintext = decryptRecorderChunk({
+            envelope: buffer,
+            key,
+            clientRecordingId: session.clientRecordingId,
+            index,
+        });
+    } catch {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Encrypted chunk authentication failed",
+            422,
+        );
+    }
+    if (plaintext.length > MAX_CHUNK_BYTES) {
+        throw new AppError(ErrorCode.FILE_TOO_LARGE, "Chunk too large", 413);
+    }
+    const plaintextSha = createHash("sha256").update(plaintext).digest("hex");
+
     // Running total guard, before writing this chunk's bytes.
     const alreadyStored = await sumRecordingSessionBytes(session.id);
-    if (alreadyStored + buffer.length > MAX_SESSION_BYTES) {
+    if (alreadyStored + plaintext.length > MAX_SESSION_BYTES) {
         throw new AppError(
             ErrorCode.FILE_TOO_LARGE,
             `Recording exceeds the ${MAX_SESSION_BYTES} byte session limit`,
@@ -91,7 +142,7 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
     // Hosted storage cap, same gate as the whole-file upload route.
     const cap = await enforceStorageCap({
         userId: authn.user.id,
-        additionalBytes: buffer.length,
+        additionalBytes: plaintext.length,
     });
     if (!cap.allowed) {
         throw new AppError(
@@ -105,21 +156,21 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
         authn.user.id,
         session.id,
         index,
-        actualSha,
+        plaintextSha,
     );
     const storage = await createUserStorageProvider(authn.user.id);
-    await storage.uploadFile(storageKey, buffer, session.mimeType);
+    await storage.uploadFile(storageKey, plaintext, session.mimeType);
 
     const { inserted, row } = await insertRecordingSessionChunk({
         sessionId: session.id,
         index,
-        size: buffer.length,
-        sha256: actualSha,
+        size: plaintext.length,
+        sha256: plaintextSha,
         storageKey,
     });
 
     if (!inserted) {
-        if (row.sha256 !== actualSha) {
+        if (row.sha256 !== plaintextSha) {
             // A different body already occupies this index. Drop the file we
             // just wrote (its key differs, so it did not overwrite) and tell
             // the client its numbering conflicts.
@@ -142,10 +193,15 @@ export const PUT = apiHandler<ChunkContext>(async (request, context) => {
         // clean up.
     }
 
-    await touchRecordingSession(session.id);
+    await touchRecordingSession(session.id, authn.user.id);
 
     return NextResponse.json(
-        { index, size: buffer.length, sha256: actualSha, duplicate: !inserted },
+        {
+            index,
+            size: plaintext.length,
+            sha256: plaintextSha,
+            duplicate: !inserted,
+        },
         { status: inserted ? 201 : 200 },
     );
 });

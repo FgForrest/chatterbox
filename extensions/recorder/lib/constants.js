@@ -36,11 +36,10 @@ export const SAMPLE_RATE = 48_000;
 /** chrome.storage.local keys. */
 export const STORAGE_KEYS = {
     serverUrl: "serverUrl",
-    apiKey: "apiKey",
+    encryptedApiKey: "encryptedApiKey",
+    installationId: "installationId",
     microphoneId: "microphoneId",
-    localCopyPolicy: "localCopyPolicy", // "always" | "never" | "ask"
     noticeText: "noticeText",
-    downloadFolder: "downloadFolder",
     channelMode: "channelMode",
     /** { [platformId]: "off" | "prompt" | "auto" } -- the user's own choices. */
     platformModes: "platformModes",
@@ -64,13 +63,10 @@ export const DEFAULT_AUTO_STOP_QUIET_SECONDS = 180;
 export const DEFAULT_NOTICE_TEXT =
     "I have informed the other participants that this meeting is being recorded.";
 
-export const DEFAULT_DOWNLOAD_FOLDER = "Chatterbox";
-
-export const DEFAULT_LOCAL_COPY_POLICY = "always";
-
 /** chrome.alarms names. */
 export const ALARMS = {
     configRefresh: "config-refresh",
+    uploadRetry: "upload-retry",
     /** `quiet:<tabId>` -- fires when an auto recording's tab has been silent long enough. */
     quietPrefix: "quiet:",
 };

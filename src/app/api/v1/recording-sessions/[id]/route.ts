@@ -7,6 +7,7 @@ import {
     listRecordingSessionChunks,
     markRecordingSessionAborted,
     purgeRecordingSessionChunks,
+    retireRecordingCaptureKey,
 } from "@/lib/recording-sessions/store";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 
@@ -31,6 +32,9 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             "Recording session not found",
             404,
         );
+    }
+    if (session.apiKeyId !== authn.apiKeyId) {
+        throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
     }
     const chunks = await listRecordingSessionChunks(session.id);
 
@@ -57,9 +61,14 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             404,
         );
     }
+    if (session.apiKeyId !== authn.apiKeyId) {
+        throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
+    }
 
     const aborted = await markRecordingSessionAborted(
         session.id,
+        authn.user.id,
+        "user_discard",
         "Aborted by client",
     );
     if (!aborted) {
@@ -72,6 +81,10 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
 
     const storage = await createUserStorageProvider(authn.user.id);
     await purgeRecordingSessionChunks(storage, session.id);
+    await retireRecordingCaptureKey({
+        userId: authn.user.id,
+        captureKeyId: session.captureKeyId,
+    });
 
     return NextResponse.json({ success: true });
 });

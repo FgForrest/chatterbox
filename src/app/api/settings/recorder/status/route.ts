@@ -1,7 +1,7 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { apiKeys } from "@/db/schema";
+import { apiKeys, recordingCaptureKeys } from "@/db/schema";
 import { requireApiSession } from "@/lib/auth-server";
 import { apiHandler } from "@/lib/errors";
 import {
@@ -34,6 +34,23 @@ export const GET = apiHandler(async (request: Request) => {
         )
         .orderBy(desc(apiKeys.createdAt));
 
+    const captures = await db
+        .select({
+            clientRecordingId: recordingCaptureKeys.clientRecordingId,
+            apiKeyId: recordingCaptureKeys.apiKeyId,
+            expiresAt: recordingCaptureKeys.expiresAt,
+            createdAt: recordingCaptureKeys.createdAt,
+        })
+        .from(recordingCaptureKeys)
+        .where(
+            and(
+                eq(recordingCaptureKeys.userId, session.user.id),
+                eq(recordingCaptureKeys.status, "active"),
+                gt(recordingCaptureKeys.expiresAt, new Date()),
+            ),
+        )
+        .orderBy(desc(recordingCaptureKeys.createdAt));
+
     return NextResponse.json({
         keys: rows.map((row) => ({
             id: row.id,
@@ -41,6 +58,12 @@ export const GET = apiHandler(async (request: Request) => {
             key_prefix: row.keyPrefix,
             created_at: row.createdAt,
             last_used_at: row.lastUsedAt,
+        })),
+        pending_captures: captures.map((capture) => ({
+            client_recording_id: capture.clientRecordingId,
+            api_key_id: capture.apiKeyId,
+            created_at: capture.createdAt,
+            expires_at: capture.expiresAt,
         })),
         ...serializeRecorderServerConfig(getRecorderServerConfig()),
     });

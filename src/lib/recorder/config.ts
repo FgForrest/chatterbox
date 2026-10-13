@@ -82,6 +82,7 @@ export function serializeRecorderServerConfig(config: RecorderServerConfig) {
     return {
         extension_id: config.extensionId,
         server_url: config.serverUrl,
+        encrypted_recording_protocol: 1,
         defaults: {
             auto_record_platforms: config.defaults.autoRecordPlatforms,
             auto_stop_quiet_seconds: config.defaults.autoStopQuietSeconds,

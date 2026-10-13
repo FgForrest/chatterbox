@@ -18,19 +18,23 @@ system audio to extensions.
 2. On a detected meeting tab, Chrome captures that tab's audio directly. For
    a desktop meeting app, choose **Entire screen** and enable **Share system
    audio** in Chrome's picker. The extension keeps only the audio.
-3. Audio is encoded in 5-second slices, buffered locally, and uploaded to
+3. Audio is encoded in 5-second slices, encrypted with a server-issued
+   per-recording key before it is written to browser storage, and uploaded to
    Chatterbox as it is captured.
 4. On stop, the server assembles the slices, remuxes them to Ogg/Opus, and
-   creates a recording. A local `.webm` copy is saved to your Downloads
-   (configurable).
+   creates a recording. You can download a playable copy from the authenticated
+   recording page after the server confirms completion.
 
 Because uploads are incremental and buffered in the browser's private file
 system, a dropped connection or a closed tab loses seconds, not the meeting.
+The server keeps unfinished capture keys for up to 30 days after activity so
+encrypted chunks can be replayed after an outage. The buffer is not a playable
+offline copy, and a browser profile loss can make it unrecoverable.
 
 Before pairing or recording, the extension shows a data-use disclosure and
 requires your agreement. See the [extension privacy policy](PRIVACY.md)
 ([Czech](PRIVACY.cs.md)) for
-details about the browser buffer, recorder key, local downloads, and the
+details about the encrypted browser buffer, recorder key, downloads, and the
 responsibilities of the server operator.
 
 ## Load it for development
@@ -82,11 +86,10 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | `offscreen` | MV3 only allows `getUserMedia`/`MediaRecorder` in an offscreen document. |
 | `desktopCapture` | Opens the screen picker to capture system audio. |
 | `tabCapture` | Records a detected meeting tab's audio directly, without the screen picker. |
-| `alarms` | Auto-stop quiet timer and the daily server-defaults refresh; survives worker suspension. |
+| `alarms` | Auto-stop quiet timer, upload retry and completion polling, and the daily server-defaults refresh; survives worker suspension. |
 | `tabs` | Detects meeting URLs and knows which tab a recording belongs to. |
 | `notifications` | "Meeting detected" prompt and "recording sent" confirmation. |
-| `downloads` | Saves the local copy. |
-| `storage` | Stores settings and recording state. |
+| `storage` | Stores settings, an encrypted recorder token, and recording state. Encrypted audio chunks use the browser's private file system. |
 | `scripting` | Registers the pairing relay on your Chatterbox origin. |
 | optional host access | Granted per server origin so the extension can upload only there. |
 

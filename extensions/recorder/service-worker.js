@@ -2,8 +2,8 @@
 //
 // Owns the recording lifecycle: starts capture (tab audio for a detected
 // meeting tab, screen picker otherwise), creates the server session, drives
-// the offscreen document, pumps buffered chunks to the server, completes the
-// session and saves a local copy. Also owns auto mode: detecting meeting tabs,
+// the offscreen document, pumps buffered chunks to the server, and completes
+// the session. Also owns auto mode: detecting meeting tabs,
 // arming the toolbar icon for one-click start, nudging, and auto-stop.
 //
 // Capture itself lives in the offscreen document; binary never crosses the
@@ -16,11 +16,11 @@ import {
     completeSession,
     createSession,
     getSession,
+    recoverSession,
     sha256Hex,
     uploadChunk,
 } from "./lib/api.js";
 import {
-    assembleBlob,
     createLocalSession,
     deleteLocalSession,
     listChunkIndices,
@@ -38,10 +38,11 @@ import {
     STATE,
 } from "./lib/constants.js";
 import { t } from "./lib/i18n.js";
-import { originOf, refreshServerConfig } from "./lib/pairing.js";
+import { getInstallationId, originOf, refreshServerConfig } from "./lib/pairing.js";
 import { queuePairing } from "./lib/pairing-request.js";
 import { detectMeetingPlatform, platformById } from "./lib/platforms.js";
 import { canPumpUploads } from "./lib/upload-state.js";
+import { readToken } from "./lib/token-vault.js";
 import {
     anyPlatformAuto,
     effectivePlatformModes,
@@ -57,8 +58,11 @@ const POPUP_URL = "popup/popup.html";
 const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
+const COMPLETION_PREFIX = "completed:";
 
-chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" });
+chrome.storage.local
+    .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
+    .catch((error) => console.warn("[recorder] storage access level:", error));
 
 /** Ignore errors from chrome.action calls on tabs that just closed. */
 async function safe(promise) {
@@ -99,6 +103,8 @@ const IDLE_STATE = Object.freeze({
     stopped: false,
     stopReason: "user",
     uploaded: [],
+    blocked: false,
+    recoverablePrefix: null,
     jobId: null,
     error: null,
     levels: { micDb: -100, systemDb: -100 },
@@ -235,6 +241,7 @@ async function startRecording({
     if (current.state !== STATE.idle && current.state !== STATE.error) {
         throw new Error(t("alreadyInProgress"));
     }
+    if (current.sessionId) throw new Error(t("unsentRecordingsBody"));
     if (!(await isPaired())) {
         throw new Error(t("connectFirst"));
     }
@@ -266,8 +273,13 @@ async function startRecording({
     }
 
     const settings = await getSettings();
-    const auth = { serverUrl: settings.serverUrl, apiKey: settings.apiKey };
+    if (settings.serverDefaults?.encryptedRecordingProtocol !== 1) {
+        await setState({ state: STATE.error, error: t("encryptedServerRequired") });
+        throw new Error(t("encryptedServerRequired"));
+    }
+    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
     const startedAt = new Date().toISOString();
+    const clientRecordingId = crypto.randomUUID();
     const channelLayout =
         settings.channelMode === "split"
             ? CHANNEL_LAYOUT_SPLIT
@@ -276,6 +288,7 @@ async function startRecording({
     let session;
     try {
         session = await createSession(auth, {
+            clientRecordingId,
             mimeType: SESSION_MIME_TYPE,
             channelLayout,
             startedAt,
@@ -292,8 +305,16 @@ async function startRecording({
         throw error;
     }
 
+    if (session.encryption?.protocol !== 1 || !session.encryption.key) {
+        await setState({ state: STATE.error, error: t("encryptedServerRequired") });
+        throw new Error(t("encryptedServerRequired"));
+    }
+
     await createLocalSession(session.id, {
         serverSessionId: session.id,
+        clientRecordingId,
+        serverUrl: settings.serverUrl,
+        keyExpiresAt: session.encryption.expires_at,
         startedAt,
         platformHint: platformHint ?? null,
         done: false,
@@ -302,6 +323,7 @@ async function startRecording({
     await setState({
         state: STATE.recording,
         sessionId: session.id,
+        bufferId: session.id,
         startedAt,
         platformHint: platformHint ?? null,
         tabId: typeof tabId === "number" ? tabId : null,
@@ -342,6 +364,8 @@ async function startRecording({
 
     const response = await messageOffscreen("start", {
         sessionId: session.id,
+        clientRecordingId,
+        captureKey: session.encryption.key,
         captureMode,
         channelMode: settings.channelMode,
         streamId,
@@ -383,75 +407,109 @@ async function pumpUploads() {
             const settings = await getSettings();
             const auth = {
                 serverUrl: settings.serverUrl,
-                apiKey: settings.apiKey,
+                apiKey: await readToken(),
             };
 
-            const stored = await listChunkIndices(state.sessionId);
+            const bufferId = state.bufferId ?? state.sessionId;
+            const meta = await readLocalMeta(bufferId);
+            if (meta?.nextRetryAt && Date.parse(meta.nextRetryAt) > Date.now()) {
+                await chrome.alarms.create(ALARMS.uploadRetry, {
+                    when: Date.parse(meta.nextRetryAt),
+                });
+                break;
+            }
+
+            const stored = await listChunkIndices(bufferId);
             const uploaded = new Set(state.uploaded);
             const pending = stored.filter((index) => !uploaded.has(index));
 
             if (pending.length === 0) {
-                if (state.stopped) await finalize();
+                if (state.stopped) {
+                    const missing = Array.from(
+                        { length: state.chunkCount },
+                        (_, index) => index,
+                    ).find((index) => !uploaded.has(index));
+                    if (missing !== undefined) {
+                        await setState({
+                            state: STATE.error,
+                            blocked: true,
+                            recoverablePrefix: missing > 0 ? missing : null,
+                            error: `Encrypted buffer is missing chunk ${missing}`,
+                        });
+                    } else {
+                        await finalize();
+                    }
+                }
                 break;
             }
 
             let progressed = false;
             for (const index of pending) {
                 try {
-                    const blob = await readChunk(state.sessionId, index);
+                    const blob = await readChunk(state.bufferId ?? state.sessionId, index);
                     const hash = await sha256Hex(blob);
                     await uploadChunk(auth, state.sessionId, index, blob, hash);
                     const now = await getState();
                     await setState({
                         uploaded: [...new Set([...now.uploaded, index])],
                     });
+                    if (meta?.nextRetryAt) {
+                        await createLocalSession(bufferId, {
+                            ...meta,
+                            retryAttempt: 0,
+                            nextRetryAt: null,
+                        });
+                    }
                     progressed = true;
                 } catch (error) {
-                    if (error?.status === 401 || error?.status === 403) {
+                    if (error?.status && ![429, 500, 502, 503, 504].includes(error.status)) {
                         await setState({
-                            error: t("keyRejected"),
+                            state: STATE.error,
+                            blocked: true,
+                            recoverablePrefix:
+                                [409, 413, 422].includes(error.status) && index > 0
+                                    ? index
+                                    : null,
+                            error: error?.message ?? t("keyRejected"),
                         });
+                    } else {
+                        await scheduleUploadRetry(state.bufferId ?? state.sessionId, error);
                     }
                     break;
                 }
             }
             if (!progressed) break;
         }
+    } catch (error) {
+        await setState({
+            state: STATE.error,
+            blocked: true,
+            error: error?.message ?? t("recoveryUnavailable"),
+        });
     } finally {
         pumping = false;
     }
 }
 
-async function finalize() {
+async function finalize(truncatedAtChunk = null) {
     const state = await getState();
     if (!state.sessionId || !state.stopped) return;
     if (state.state === STATE.finalizing && state.jobId) return;
 
     await setState({ state: STATE.finalizing });
     const settings = await getSettings();
-    const auth = { serverUrl: settings.serverUrl, apiKey: settings.apiKey };
+    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
 
     try {
         const result = await completeSession(auth, state.sessionId, {
             chunkCount: state.chunkCount,
+            ...(truncatedAtChunk ? { truncatedAtChunk } : {}),
             endedAt: new Date().toISOString(),
             stopReason: state.stopReason,
         });
         await setState({ jobId: result.job_id ?? null });
 
-        await maybeSaveLocalCopy(state.sessionId);
-
-        const meta = await readLocalMeta(state.sessionId);
-        if (meta) {
-            await createLocalSession(state.sessionId, { ...meta, done: true });
-        }
-        await deleteLocalSession(state.sessionId);
-
-        await notify(
-            t("recordingSent"),
-            t("recordingSentBody"),
-        );
-        await resetState();
+        await reconcileServerSession(state.sessionId, auth);
     } catch (error) {
         await setState({
             state: STATE.error,
@@ -462,55 +520,52 @@ async function finalize() {
     }
 }
 
-// ---- Local copy --------------------------------------------------------
-
-// MV3 service workers do not expose URL.createObjectURL, so the local copy is
-// handed to the downloads API as a data: URL built here. Base64 inflates the
-// payload ~33%, so past this size the local copy is skipped (the server has
-// the recording) rather than risk a failed or memory-heavy encode.
-const MAX_LOCAL_COPY_BYTES = 200 * 1024 * 1024;
-
-async function blobToDataUrl(blob) {
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    let binary = "";
-    const step = 0x8000;
-    for (let i = 0; i < bytes.length; i += step) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + step));
-    }
-    return `data:${blob.type || "audio/webm"};base64,${btoa(binary)}`;
+async function scheduleUploadRetry(sessionId, error) {
+    const meta = await readLocalMeta(sessionId);
+    if (!meta) return;
+    const attempt = Math.min((meta.retryAttempt ?? 0) + 1, 10);
+    const backoffSeconds = Math.min(3600, 5 * 2 ** (attempt - 1));
+    const delaySeconds = Math.max(
+        error?.retryAfterSeconds ?? 0,
+        backoffSeconds * (0.75 + Math.random() * 0.5),
+    );
+    const nextRetryAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+    await createLocalSession(sessionId, { ...meta, retryAttempt: attempt, nextRetryAt });
+    await chrome.alarms.create(ALARMS.uploadRetry, {
+        when: Date.parse(nextRetryAt),
+    });
 }
 
-async function maybeSaveLocalCopy(sessionId) {
-    const settings = await getSettings();
-    if (settings.localCopyPolicy === "never") return;
-
-    const meta = await readLocalMeta(sessionId);
-    const blob = await assembleBlob(sessionId, "audio/webm");
-    if (blob.size === 0) return;
-
-    if (blob.size > MAX_LOCAL_COPY_BYTES) {
-        await notify(
-            t("localSkipped"),
-            t("localSkippedBody"),
-        );
+async function reconcileServerSession(sessionId, auth) {
+    const remote = await getSession(auth, sessionId);
+    if (remote.status === "completing") {
+        await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 });
         return;
     }
-
-    const started = meta?.startedAt ? new Date(meta.startedAt) : new Date();
-    const stamp = started.toISOString().slice(0, 16).replace(/[:T]/g, "-");
-    const folder = settings.downloadFolder.replace(/[\\/]+$/, "");
-    const filename = `${folder}/meeting-${stamp}.webm`;
-
-    try {
-        const url = await blobToDataUrl(blob);
-        await chrome.downloads.download({
-            url,
-            filename,
-            saveAs: settings.localCopyPolicy === "ask",
-            conflictAction: "uniquify",
+    if (remote.status === "completed") {
+        const url = remote.recording_id
+            ? `${auth.serverUrl}/recordings/${encodeURIComponent(remote.recording_id)}`
+            : auth.serverUrl;
+        await notify(
+            t("recordingSent"),
+            remote.truncated_at_chunk
+                ? t("partialRecordingSent")
+                : t("recordingSentBody"),
+            {
+            id: `${COMPLETION_PREFIX}${encodeURIComponent(url)}`,
+            },
+        );
+        const state = await getState();
+        await deleteLocalSession(state.bufferId ?? sessionId);
+        await resetState();
+        return;
+    }
+    if (remote.status === "failed" || remote.status === "aborted") {
+        await setState({
+            state: STATE.error,
+            blocked: true,
+            error: remote.error ?? `Server session ${remote.status}`,
         });
-    } catch (error) {
-        console.error("[recorder] local copy failed:", error);
     }
 }
 
@@ -531,6 +586,13 @@ async function notify(title, message, options = {}) {
 }
 
 chrome.notifications.onClicked.addListener(async (notificationId) => {
+    if (notificationId.startsWith(COMPLETION_PREFIX)) {
+        const url = decodeURIComponent(
+            notificationId.slice(COMPLETION_PREFIX.length),
+        );
+        await chrome.tabs.create({ url });
+        return;
+    }
     if (!notificationId.startsWith(NUDGE_PREFIX)) return;
     chrome.notifications.clear(notificationId);
     const tabId = Number.parseInt(notificationId.slice(NUDGE_PREFIX.length), 10);
@@ -731,7 +793,7 @@ chrome.tabs.onRemoved.addListener(async (tabId) => {
 // defaults, without waiting for the next navigation.
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.platformModes || changes.serverDefaults || changes.apiKey || changes.dataUseAcknowledgedAt) {
+    if (changes.platformModes || changes.serverDefaults || changes.encryptedApiKey || changes.dataUseAcknowledgedAt) {
         void reevaluateAllTabs();
     }
     if (changes.dataUseAcknowledgedAt?.newValue) {
@@ -811,6 +873,19 @@ chrome.commands.onCommand.addListener(async (command) => {
 // ---- Alarms: auto-stop and config refresh --------------------------------
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === ALARMS.uploadRetry) {
+        const state = await getState();
+        if (state.sessionId && state.state === STATE.finalizing && state.jobId) {
+            const settings = await getSettings();
+            await reconcileServerSession(state.sessionId, {
+                serverUrl: settings.serverUrl,
+                apiKey: await readToken(),
+            }).catch(() => chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 }));
+        } else {
+            await pumpUploads();
+        }
+        return;
+    }
     if (alarm.name === ALARMS.configRefresh) {
         await refreshServerConfig().catch(() => {});
         return;
@@ -852,7 +927,8 @@ async function pingStatus() {
     return {
         installed: true,
         version: chrome.runtime.getManifest().version,
-        paired: consented && Boolean(settings.serverUrl && settings.apiKey),
+        installationId: consented ? await getInstallationId() : undefined,
+        paired: consented && Boolean(settings.serverUrl && settings.hasApiKey),
         pairedTo: consented && settings.serverUrl ? originOf(settings.serverUrl) : null,
         autoMode: consented && anyPlatformAuto(settings),
     };
@@ -919,13 +995,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case "retry-upload":
-            pumpUploads()
+            retryUpload()
                 .then(() => sendResponse({ ok: true }))
-                .catch(() => sendResponse({ ok: false }));
+                .catch((error) =>
+                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                );
+            return true;
+
+        case "save-prefix":
+            savePlayablePrefix(message.chunkCount)
+                .then(() => sendResponse({ ok: true }))
+                .catch((error) => sendResponse({ ok: false, error: error?.message ?? String(error) }));
             return true;
 
         case "discard-session":
             discardSession(message.sessionId)
+                .then(() => sendResponse({ ok: true }))
+                .catch((error) =>
+                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                );
+            return true;
+
+        case "discard-buffer":
+            discardBuffer(message.bufferId)
                 .then(() => sendResponse({ ok: true }))
                 .catch((error) =>
                     sendResponse({ ok: false, error: error?.message ?? String(error) }),
@@ -992,8 +1084,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
 
         case "capture-error":
-            setState({ state: STATE.error, error: message.message });
-            closeOffscreen();
+            void stopRecording("error").then(() =>
+                setState({ state: STATE.error, blocked: true, error: message.message }),
+            );
             return false;
 
         default:
@@ -1015,20 +1108,116 @@ async function handleRecordingStopped(message) {
         return;
     }
 
-    await setState({ stopped: true, chunkCount: message.chunkCount });
+    const stored = await listChunkIndices(state.bufferId ?? message.sessionId);
+    const available = new Set([...stored, ...state.uploaded]);
+    const firstMissing = Array.from(
+        { length: message.chunkCount },
+        (_, index) => index,
+    ).find((index) => !available.has(index));
+    await setState({
+        stopped: true,
+        chunkCount: message.chunkCount,
+        recoverablePrefix: firstMissing && firstMissing > 0 ? firstMissing : null,
+    });
+    await pumpUploads();
+}
+
+async function savePlayablePrefix(chunkCount) {
+    const state = await getState();
+    if (
+        !state.stopped ||
+        !state.sessionId ||
+        !Number.isInteger(chunkCount) ||
+        chunkCount < 1 ||
+        chunkCount >= state.chunkCount ||
+        chunkCount !== state.recoverablePrefix
+    ) {
+        throw new Error("No verified playable prefix is available");
+    }
+    await setState({ blocked: false });
+    await finalize(chunkCount);
+}
+
+async function retryUpload() {
+    const state = await getState();
+    if (!state.sessionId) return;
+    const settings = await getSettings();
+    const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+    let remote = await getSession(auth, state.sessionId);
+    if (remote.status === "completed" || remote.status === "completing") {
+        await reconcileServerSession(state.sessionId, auth);
+        return;
+    }
+    if (remote.status === "aborted" || remote.status === "failed") {
+        remote = await recoverSession(auth, state.sessionId);
+        const bufferId = state.bufferId ?? state.sessionId;
+        const meta = await readLocalMeta(bufferId);
+        if (meta) {
+            await createLocalSession(bufferId, {
+                ...meta,
+                serverSessionId: remote.id,
+            });
+        }
+    }
+    if (remote.status !== "open") throw new Error("Recording cannot be retried");
+    await setState({
+        sessionId: remote.id,
+        uploaded: remote.received_chunks ?? [],
+        blocked: false,
+        recoverablePrefix: null,
+        state: STATE.error,
+    });
+    const bufferId = state.bufferId ?? state.sessionId;
+    const meta = await readLocalMeta(bufferId);
+    if (meta) {
+        await createLocalSession(bufferId, {
+            ...meta,
+            retryAttempt: 0,
+            nextRetryAt: null,
+        });
+    }
     await pumpUploads();
 }
 
 async function discardSession(sessionId) {
     const settings = await getSettings();
-    if (sessionId && settings.serverUrl && settings.apiKey) {
+    const state = await getState();
+    if (sessionId && settings.serverUrl && settings.hasApiKey) {
         await abortSession(
-            { serverUrl: settings.serverUrl, apiKey: settings.apiKey },
+            { serverUrl: settings.serverUrl, apiKey: await readToken() },
             sessionId,
         ).catch(() => {});
     }
-    if (sessionId) await deleteLocalSession(sessionId);
+    if (sessionId) await deleteLocalSession(state.bufferId ?? sessionId);
     await resetState();
+}
+
+async function discardBuffer(bufferId) {
+    const state = await getState();
+    if (state.bufferId === bufferId && state.state === STATE.recording) {
+        throw new Error("Stop recording before discarding its buffer");
+    }
+    const meta = await readLocalMeta(bufferId);
+    if (!meta) return;
+    const settings = await getSettings();
+    if (meta.serverUrl === settings.serverUrl && settings.hasApiKey) {
+        const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
+        try {
+            const remote = await getSession(auth, meta.serverSessionId ?? bufferId);
+            if (remote.status === "completing") {
+                throw new Error("Wait for server finalization before discarding");
+            }
+            if (remote.status === "open" || remote.status === "failed") {
+                await abortSession(auth, meta.serverSessionId ?? bufferId);
+            }
+        } catch (error) {
+            if (error?.status !== 401 && error?.status !== 403 && error?.status !== 404) {
+                throw error;
+            }
+        }
+    }
+    await deleteLocalSession(bufferId);
+    if (state.bufferId === bufferId) await resetState();
 }
 
 // ---- Startup ---------------------------------------------------------------
@@ -1039,39 +1228,89 @@ async function reconcileOnStartup() {
     await reevaluateAllTabs();
 
     const settings = await getSettings();
-    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.apiKey) return;
-    const auth = { serverUrl: settings.serverUrl, apiKey: settings.apiKey };
+    if (!settings.dataUseAcknowledgedAt || !settings.serverUrl || !settings.hasApiKey) return;
+    let token;
+    try {
+        token = await readToken();
+    } catch (error) {
+        const [bufferId] = await listLocalSessions();
+        if (bufferId) {
+            await setState({
+                state: STATE.error,
+                sessionId: bufferId,
+                bufferId,
+                stopped: true,
+                blocked: true,
+                error: error?.message ?? t("keyRejected"),
+            });
+        }
+        return;
+    }
+    const auth = { serverUrl: settings.serverUrl, apiKey: token };
 
     const state = await getState();
     if (state.state === STATE.recording && (await hasOffscreen())) {
         pumpUploads();
         return;
     }
+    if (state.state === STATE.finalizing && state.sessionId) {
+        await reconcileServerSession(state.sessionId, auth).catch(() =>
+            chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 }),
+        );
+        return;
+    }
 
     for (const sessionId of await listLocalSessions()) {
         const meta = await readLocalMeta(sessionId);
-        if (!meta || meta.done) {
-            await deleteLocalSession(sessionId);
-            continue;
-        }
+        if (!meta || meta.serverUrl !== settings.serverUrl) continue;
+        let serverSessionId = meta.serverSessionId ?? sessionId;
         let session;
         try {
-            session = await getSession(auth, sessionId);
-        } catch {
+            session = await getSession(auth, serverSessionId);
+        } catch (error) {
+            await setState({
+                state: STATE.error,
+                sessionId: serverSessionId,
+                bufferId: sessionId,
+                stopped: true,
+                blocked: true,
+                error: error?.message ?? t("recoveryUnavailable"),
+            });
             continue;
         }
-        if (session.status !== "open") {
-            await deleteLocalSession(sessionId);
+        if (session.status === "completed") {
+            await setState({ sessionId: serverSessionId, bufferId: sessionId });
+            await reconcileServerSession(serverSessionId, auth);
             continue;
         }
+        if (session.status === "completing") {
+            await setState({ state: STATE.finalizing, sessionId: serverSessionId, bufferId: sessionId, jobId: session.job_id });
+            await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 });
+            break;
+        }
+        if (session.status === "aborted" || session.status === "failed") {
+            try {
+                session = await recoverSession(auth, serverSessionId);
+                serverSessionId = session.id;
+                await createLocalSession(sessionId, {
+                    ...meta,
+                    serverSessionId,
+                });
+            } catch (error) {
+                await setState({
+                    state: STATE.error,
+                    sessionId: serverSessionId,
+                    bufferId: sessionId,
+                    stopped: true,
+                    blocked: true,
+                    error: error?.message ?? t("recoveryUnavailable"),
+                });
+                continue;
+            }
+        }
+        if (session.status !== "open") continue;
         const stored = await listChunkIndices(sessionId);
-        if (stored.length === 0) {
-            // Interrupted before any audio was captured; there is nothing to
-            // finalize, so abort it rather than completing an empty session.
-            await abortSession(auth, sessionId).catch(() => {});
-            await deleteLocalSession(sessionId);
-            continue;
-        }
+        if (stored.length === 0) continue;
         // Only resume into a recording state when nothing else is active.
         const live = await getState();
         if (live.state !== STATE.idle && live.state !== STATE.error) break;
@@ -1079,15 +1318,23 @@ async function reconcileOnStartup() {
             [STATE_KEY]: {
                 ...live,
                 state: STATE.recording,
-                sessionId,
+                sessionId: serverSessionId,
+                bufferId: sessionId,
                 startedAt: meta.startedAt ?? null,
                 platformHint: meta.platformHint ?? null,
-                chunkCount: stored.length,
+                chunkCount: Math.max(...stored) + 1,
                 stopped: true,
                 stopReason: "browser-closed",
-                uploaded: [],
+                uploaded: session.received_chunks ?? [],
+                blocked: false,
             },
         });
+        if (meta.nextRetryAt && Date.parse(meta.nextRetryAt) > Date.now()) {
+            await chrome.alarms.create(ALARMS.uploadRetry, {
+                when: Date.parse(meta.nextRetryAt),
+            });
+            break;
+        }
         await pumpUploads();
         break;
     }

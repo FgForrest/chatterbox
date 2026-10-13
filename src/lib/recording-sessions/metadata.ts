@@ -21,6 +21,7 @@ export interface RecordingSessionMetadata {
 }
 
 export interface CreateRecordingSessionInput {
+    clientRecordingId: string;
     mimeType: string;
     metadata: RecordingSessionMetadata;
     startedAt: Date;
@@ -29,6 +30,7 @@ export interface CreateRecordingSessionInput {
 
 export interface CompleteRecordingSessionInput {
     chunkCount: number;
+    truncatedAtChunk: number | null;
     endedAt: Date;
     stopReason: string;
 }
@@ -89,6 +91,13 @@ export function parseCreateRecordingSessionBody(
     body: unknown,
 ): CreateRecordingSessionInput {
     const raw = (body ?? {}) as Record<string, unknown>;
+
+    if (
+        typeof raw.clientRecordingId !== "string" ||
+        !/^[0-9a-f-]{36}$/i.test(raw.clientRecordingId)
+    ) {
+        throw invalid("clientRecordingId must be a UUID", "clientRecordingId");
+    }
 
     if (typeof raw.mimeType !== "string" || raw.mimeType.trim() === "") {
         throw new AppError(
@@ -168,6 +177,7 @@ export function parseCreateRecordingSessionBody(
     }
 
     return {
+        clientRecordingId: raw.clientRecordingId,
         mimeType,
         metadata,
         startedAt: parseDate(raw.startedAt, "startedAt", true),
@@ -211,8 +221,25 @@ export function parseCompleteRecordingSessionBody(
         stopReason = raw.stopReason;
     }
 
+    let truncatedAtChunk: number | null = null;
+    if (raw.truncatedAtChunk != null) {
+        if (
+            typeof raw.truncatedAtChunk !== "number" ||
+            !Number.isInteger(raw.truncatedAtChunk) ||
+            raw.truncatedAtChunk < 1 ||
+            raw.truncatedAtChunk >= chunkCount
+        ) {
+            throw invalid(
+                "truncatedAtChunk must be a positive index below chunkCount",
+                "truncatedAtChunk",
+            );
+        }
+        truncatedAtChunk = raw.truncatedAtChunk;
+    }
+
     return {
         chunkCount,
+        truncatedAtChunk,
         endedAt: parseDate(raw.endedAt, "endedAt", false) ?? new Date(),
         stopReason,
     };

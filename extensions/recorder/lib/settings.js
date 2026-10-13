@@ -4,8 +4,6 @@
 import {
     DEFAULT_AUTO_STOP_QUIET_SECONDS,
     DEFAULT_CHANNEL_MODE,
-    DEFAULT_DOWNLOAD_FOLDER,
-    DEFAULT_LOCAL_COPY_POLICY,
     DEFAULT_NOTICE_TEXT,
     DEFAULT_PLATFORM_MODE,
     PLATFORM_MODES,
@@ -27,11 +25,9 @@ import { t } from "./i18n.js";
 /**
  * @typedef {Object} RecorderSettings
  * @property {string} serverUrl
- * @property {string} apiKey
+ * @property {boolean} hasApiKey
  * @property {string} microphoneId
- * @property {"always"|"never"|"ask"} localCopyPolicy
  * @property {string|null} noticeText         user override, null = server/default
- * @property {string} downloadFolder
  * @property {"mixed"|"split"} channelMode
  * @property {Record<string, "off"|"prompt"|"auto">} platformModes
  * @property {ServerDefaults|null} serverDefaults
@@ -46,16 +42,9 @@ export async function getSettings() {
     const raw = await chrome.storage.local.get(Object.values(STORAGE_KEYS));
     return {
         serverUrl: (raw[STORAGE_KEYS.serverUrl] ?? "").replace(/\/+$/, ""),
-        apiKey: raw[STORAGE_KEYS.apiKey] ?? "",
+        hasApiKey: Boolean(raw[STORAGE_KEYS.encryptedApiKey]),
         microphoneId: raw[STORAGE_KEYS.microphoneId] ?? "",
-        localCopyPolicy:
-            raw[STORAGE_KEYS.localCopyPolicy] ?? DEFAULT_LOCAL_COPY_POLICY,
         noticeText: raw[STORAGE_KEYS.noticeText] ?? null,
-        downloadFolder:
-            raw[STORAGE_KEYS.downloadFolder] ??
-            (t("appName") === "appName"
-                ? DEFAULT_DOWNLOAD_FOLDER
-                : t("appName")),
         channelMode: raw[STORAGE_KEYS.channelMode] ?? DEFAULT_CHANNEL_MODE,
         platformModes: raw[STORAGE_KEYS.platformModes] ?? {},
         serverDefaults: raw[STORAGE_KEYS.serverDefaults] ?? null,
@@ -77,8 +66,8 @@ export async function saveSettings(patch) {
 
 /** Whether pairing (server URL + key) is complete. */
 export async function isPaired() {
-    const { serverUrl, apiKey } = await getSettings();
-    return Boolean(serverUrl && apiKey);
+    const { serverUrl, hasApiKey } = await getSettings();
+    return Boolean(serverUrl && hasApiKey);
 }
 
 /** @param {RecorderSettings} settings */

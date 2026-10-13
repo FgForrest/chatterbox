@@ -38,7 +38,13 @@ export const POST = apiHandler(async (request: Request) => {
 
     const body = (await request.json().catch(() => ({}))) as {
         label?: unknown;
+        installationId?: unknown;
     };
+    const installationId =
+        typeof body.installationId === "string" &&
+        /^[0-9a-f-]{36}$/i.test(body.installationId)
+            ? body.installationId
+            : null;
     const label =
         typeof body.label === "string" && body.label.trim() !== ""
             ? body.label.trim().slice(0, 80)
@@ -53,6 +59,7 @@ export const POST = apiHandler(async (request: Request) => {
             keyHash: hashApiKey(rawKey),
             keyPrefix: getApiKeyPrefix(rawKey),
             source: "recorder",
+            installationId,
             scopes: ["recordings:write"],
         })
         .returning({ id: apiKeys.id });

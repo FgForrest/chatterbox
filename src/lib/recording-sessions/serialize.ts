@@ -23,11 +23,13 @@ export function serializeRecordingSession(
         stop_reason: session.stopReason,
         notice_acknowledged_at: session.noticeAcknowledgedAt,
         expected_chunk_count: session.expectedChunkCount,
+        truncated_at_chunk: session.truncatedAtChunk,
         received_chunks: indices,
         received_bytes: receivedBytes,
         recording_id: session.recordingId,
         job_id: session.jobId,
         error: session.lastError,
+        terminal_code: session.terminalCode,
         created_at: session.createdAt,
         updated_at: session.updatedAt,
         links: {
