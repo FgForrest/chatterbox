@@ -58,6 +58,7 @@ describe("getRecorderServerConfig", () => {
         ]);
         expect(config.defaults.autoStopQuietSeconds).toBe(240);
         expect(config.defaults.noticeText).toBe(DEFAULT_RECORDER_NOTICE_TEXT);
+        expect(config.defaults.noticeTextIsDefault).toBe(true);
         expect(config.defaults.lockDefaults).toBe(true);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining("bogus"));
         warn.mockRestore();
@@ -72,6 +73,7 @@ describe("getRecorderServerConfig", () => {
             "zoom",
         ]);
         expect(wire.defaults.lock_defaults).toBe(true);
+        expect(wire.defaults.notice_text_is_default).toBe(true);
         expect(wire.platforms.map((p) => p.id)).toEqual([
             ...RECORDER_PLATFORM_IDS,
         ]);

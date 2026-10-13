@@ -14,14 +14,12 @@ import {
 import { PLATFORM_IDS } from "./platforms.js";
 import { t } from "./i18n.js";
 
-const LEGACY_SERVER_NOTICE =
-    "Meetings I record with Riffado are transcribed and summarized. I will inform the other participants before recording.";
-
 /**
  * @typedef {Object} ServerDefaults
  * @property {string[]} autoRecordPlatforms
  * @property {number} autoStopQuietSeconds
  * @property {string} noticeText
+ * @property {boolean} noticeTextIsDefault
  * @property {boolean} lockDefaults
  * @property {string} fetchedAt
  */
@@ -84,10 +82,12 @@ export async function isPaired() {
 /** @param {RecorderSettings} settings */
 export function effectiveNoticeText(settings) {
     const localizedNotice = t("noticeDefault");
-    const serverNotice = settings.serverDefaults?.noticeText;
+    const serverNotice = settings.serverDefaults?.noticeTextIsDefault
+        ? ""
+        : settings.serverDefaults?.noticeText;
     return (
         settings.noticeText ||
-        (serverNotice === LEGACY_SERVER_NOTICE ? "" : serverNotice) ||
+        serverNotice ||
         (localizedNotice === "noticeDefault"
             ? DEFAULT_NOTICE_TEXT
             : localizedNotice)

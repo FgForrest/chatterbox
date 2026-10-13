@@ -10,7 +10,7 @@ import {
 export const DEFAULT_RECORDER_EXTENSION_ID = "hiipabbdnlhdkgldhkdndmohejoaecnh";
 
 export const DEFAULT_RECORDER_NOTICE_TEXT =
-    "Meetings I record with Riffado are transcribed and summarized. I will inform the other participants before recording.";
+    "Meetings I record with Chatterbox are transcribed and summarized. I will inform the other participants before recording.";
 
 export interface RecorderServerConfig {
     extensionId: string;
@@ -20,6 +20,7 @@ export interface RecorderServerConfig {
         autoRecordPlatforms: RecorderPlatformId[];
         autoStopQuietSeconds: number;
         noticeText: string;
+        noticeTextIsDefault: boolean;
         lockDefaults: boolean;
     };
     platforms: typeof RECORDER_PLATFORMS;
@@ -69,6 +70,7 @@ export function getRecorderServerConfig(): RecorderServerConfig {
             autoStopQuietSeconds: env.RECORDER_AUTO_STOP_QUIET_SECONDS,
             noticeText:
                 env.RECORDER_NOTICE_TEXT ?? DEFAULT_RECORDER_NOTICE_TEXT,
+            noticeTextIsDefault: env.RECORDER_NOTICE_TEXT === undefined,
             lockDefaults: env.RECORDER_LOCK_DEFAULTS === true,
         },
         platforms: RECORDER_PLATFORMS,
@@ -84,6 +86,7 @@ export function serializeRecorderServerConfig(config: RecorderServerConfig) {
             auto_record_platforms: config.defaults.autoRecordPlatforms,
             auto_stop_quiet_seconds: config.defaults.autoStopQuietSeconds,
             notice_text: config.defaults.noticeText,
+            notice_text_is_default: config.defaults.noticeTextIsDefault,
             lock_defaults: config.defaults.lockDefaults,
         },
         platforms: config.platforms.map((platform) => ({

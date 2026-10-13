@@ -9,7 +9,7 @@ import {
     Trash2,
     Video,
 } from "lucide-react";
-import { useLocale } from "next-intl";
+import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
@@ -45,8 +45,12 @@ type RecorderStatus = {
 
 type PairResponse = RecorderStatus & { key_id: string; api_key: string };
 
-function formatDate(value: string | null, locale: string): string {
-    if (!value) return locale.startsWith("cs") ? "Nikdy" : "Never";
+function formatDate(
+    value: string | null,
+    locale: string,
+    never: string,
+): string {
+    if (!value) return never;
     return new Date(value).toLocaleString(locale);
 }
 
@@ -61,11 +65,7 @@ function formatDate(value: string | null, locale: string): string {
  */
 export function RecorderSection() {
     const locale = useLocale();
-    const t = useCallback(
-        (english: string, czech: string) =>
-            locale.startsWith("cs") ? czech : english,
-        [locale],
-    );
+    const i18n = useExtracted();
     const [extension, setExtension] = useState<RecorderExtensionState | null>(
         null,
     );
@@ -93,10 +93,7 @@ export function RecorderSection() {
                 throw new Error(
                     await getApiErrorMessage(
                         response,
-                        t(
-                            "Failed to load recorder status",
-                            "Nelze načíst stav nahrávání",
-                        ),
+                        i18n("Failed to load recorder status"),
                     ),
                 );
             }
@@ -105,13 +102,10 @@ export function RecorderSection() {
             toast.error(
                 error instanceof Error
                     ? error.message
-                    : t(
-                          "Failed to load recorder status",
-                          "Nelze načíst stav nahrávání",
-                      ),
+                    : i18n("Failed to load recorder status"),
             );
         }
-    }, [t]);
+    }, [i18n]);
 
     useEffect(() => {
         void detect();
@@ -138,15 +132,12 @@ export function RecorderSection() {
             throw new Error(
                 await getApiErrorMessage(
                     response,
-                    t(
-                        "Failed to create recorder key",
-                        "Nelze vytvořit klíč pro nahrávání",
-                    ),
+                    i18n("Failed to create recorder key"),
                 ),
             );
         }
         return (await response.json()) as PairResponse;
-    }, [t]);
+    }, [i18n]);
 
     const setUp = useCallback(async () => {
         if (
@@ -167,32 +158,23 @@ export function RecorderSection() {
             );
             if (!result.ok) {
                 throw new Error(
-                    result.error ??
-                        t(
-                            "The extension refused pairing",
-                            "Rozšíření odmítlo propojení",
-                        ),
+                    result.error ?? i18n("The extension refused pairing"),
                 );
             }
             toast.success(
                 result.pending
-                    ? t(
-                          "Confirm the server in the extension's options page",
-                          "Potvrďte server v možnostech rozšíření",
-                      )
-                    : t("Recorder connected", "Nahrávání propojeno"),
+                    ? i18n("Confirm the server in the extension's options page")
+                    : i18n("Recorder connected"),
             );
             await Promise.all([detect(), loadStatus()]);
         } catch (error) {
             toast.error(
-                error instanceof Error
-                    ? error.message
-                    : t("Pairing failed", "Propojení se nepodařilo"),
+                error instanceof Error ? error.message : i18n("Pairing failed"),
             );
         } finally {
             setBusy(false);
         }
-    }, [detect, extension, loadStatus, mintKey, t]);
+    }, [detect, extension, loadStatus, mintKey, i18n]);
 
     const generateManual = useCallback(async () => {
         setBusy(true);
@@ -204,12 +186,12 @@ export function RecorderSection() {
             toast.error(
                 error instanceof Error
                     ? error.message
-                    : t("Failed to create key", "Klíč nelze vytvořit"),
+                    : i18n("Failed to create key"),
             );
         } finally {
             setBusy(false);
         }
-    }, [loadStatus, mintKey, t]);
+    }, [loadStatus, mintKey, i18n]);
 
     const copyManual = useCallback(async () => {
         if (!manualKey) return;
@@ -228,23 +210,21 @@ export function RecorderSection() {
                     throw new Error(
                         await getApiErrorMessage(
                             response,
-                            t("Failed to revoke", "Klíč nelze zrušit"),
+                            i18n("Failed to revoke"),
                         ),
                     );
                 }
-                toast.success(
-                    t("Recorder key revoked", "Klíč pro nahrávání zrušen"),
-                );
+                toast.success(i18n("Recorder key revoked"));
                 await loadStatus();
             } catch (error) {
                 toast.error(
                     error instanceof Error
                         ? error.message
-                        : t("Failed to revoke", "Klíč nelze zrušit"),
+                        : i18n("Failed to revoke"),
                 );
             }
         },
-        [loadStatus, t],
+        [loadStatus, i18n],
     );
 
     const autoPlatformNames = status
@@ -260,10 +240,9 @@ export function RecorderSection() {
     return (
         <div className="space-y-6">
             <SettingsSectionHeader
-                title={t("Meeting Recorder", "Nahrávání schůzek")}
-                description={t(
+                title={i18n("Meeting Recorder")}
+                description={i18n(
                     "Record meeting audio in your browser and send it straight to Chatterbox for transcription.",
-                    "Nahrávejte zvuk schůzek v prohlížeči a posílejte ho do Klepny k přepisu.",
                 )}
                 icon={Video}
                 action={
@@ -271,52 +250,36 @@ export function RecorderSection() {
                         size="sm"
                         variant="outline"
                         onClick={() => void detect()}
-                        aria-label={t(
-                            "Re-check extension",
-                            "Znovu zkontrolovat rozšíření",
-                        )}
+                        aria-label={i18n("Re-check extension")}
                     >
                         <RefreshCw className="size-4" />
-                        {t("Re-check", "Zkontrolovat")}
+                        {i18n("Re-check")}
                     </Button>
                 }
             />
 
-            <SettingsCard
-                title={t("Browser extension", "Rozšíření prohlížeče")}
-                icon={Plug}
-            >
+            <SettingsCard title={i18n("Browser extension")} icon={Plug}>
                 {extension === null && (
                     <p className="text-sm text-muted-foreground">
-                        {t("Looking for the extension…", "Hledá se rozšíření…")}
+                        {i18n("Looking for the extension…")}
                     </p>
                 )}
 
                 {extension?.kind === "not-installed" && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            {t(
+                            {i18n(
                                 "The Chatterbox Meeting Recorder extension is not installed in this browser.",
-                                "Rozšíření Klepna pro nahrávání schůzek není v tomto prohlížeči nainstalované.",
                             )}
                         </p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                             <li>
-                                {t(
-                                    "Install the extension: load the",
-                                    "Nainstalujte rozšíření: načtěte složku",
-                                )}{" "}
+                                {i18n("Install the extension: load the")}{" "}
                                 <code>extensions/recorder</code>{" "}
-                                {t(
-                                    "unpacked, or use the packaged build.",
-                                    "jako rozbalené rozšíření nebo použijte zabalenou verzi.",
-                                )}
+                                {i18n("unpacked, or use the packaged build.")}
                             </li>
                             <li>
-                                {t(
-                                    "Come back here and click Re-check.",
-                                    "Vraťte se sem a klikněte na Zkontrolovat.",
-                                )}
+                                {i18n("Come back here and click Re-check.")}
                             </li>
                         </ol>
                     </div>
@@ -325,30 +288,27 @@ export function RecorderSection() {
                 {extension?.kind === "installed-unreachable" && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            {t(
+                            {i18n(
                                 "The extension is installed but cannot reach this Chatterbox yet. Chrome requires one permission grant.",
-                                "Rozšíření je nainstalované, ale zatím se s Klepnou nespojí. Chrome vyžaduje jednorázové povolení.",
                             )}
                         </p>
                         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
                             <li>
-                                {t(
+                                {i18n(
                                     "Click the Chatterbox Recorder icon in the toolbar.",
-                                    "Klikněte na ikonu Klepny na liště.",
                                 )}
                             </li>
                             <li>
-                                {t("Choose", "Zvolte")}{" "}
+                                {i18n("Choose")}{" "}
                                 <strong>
-                                    {t("Connect to", "Propojit s")}{" "}
+                                    {i18n("Connect to")}{" "}
                                     {window.location.origin}
                                 </strong>
                                 .
                             </li>
                             <li>
-                                {t(
+                                {i18n(
                                     "This page will update automatically. Then click Set up recorder.",
-                                    "Stránka se sama aktualizuje. Potom klikněte na Nastavit nahrávání.",
                                 )}
                             </li>
                         </ol>
@@ -358,18 +318,17 @@ export function RecorderSection() {
                 {extension?.kind === "reachable" && !extension.paired && (
                     <div className="space-y-3">
                         <p className="text-sm">
-                            {t("Extension found", "Rozšíření nalezeno")}
+                            {i18n("Extension found")}
                             {extension.version
                                 ? ` (v${extension.version})`
                                 : ""}
-                            {t(
+                            {i18n(
                                 ". Select Set up recorder, then confirm the server in the extension's options page.",
-                                ". Zvolte Nastavit nahrávání a potom potvrďte server v možnostech rozšíření.",
                             )}
                         </p>
                         <Button onClick={() => void setUp()} disabled={busy}>
                             <Plug className="size-4" />
-                            {t("Set up recorder", "Nastavit nahrávání")}
+                            {i18n("Set up recorder")}
                         </Button>
                     </div>
                 )}
@@ -379,10 +338,7 @@ export function RecorderSection() {
                     extension.pairedHere && (
                         <p className="text-sm">
                             <Check className="mr-1 inline size-4 text-green-600" />
-                            {t(
-                                "Connected to this Chatterbox",
-                                "Propojeno s touto Klepnou",
-                            )}
+                            {i18n("Connected to this Chatterbox")}
                             {extension.version
                                 ? ` (extension v${extension.version})`
                                 : ""}
@@ -395,9 +351,8 @@ export function RecorderSection() {
                     !extension.pairedHere && (
                         <div className="space-y-3">
                             <p className="text-sm">
-                                {t(
+                                {i18n(
                                     "The extension is connected to another Chatterbox",
-                                    "Rozšíření je propojené s jinou Klepnou",
                                 )}
                                 {extension.pairedTo
                                     ? ` (${extension.pairedTo})`
@@ -409,10 +364,7 @@ export function RecorderSection() {
                                 disabled={busy}
                             >
                                 <Plug className="size-4" />
-                                {t(
-                                    "Switch it to this Chatterbox",
-                                    "Přepojit na tuto Klepnu",
-                                )}
+                                {i18n("Switch it to this Chatterbox")}
                             </Button>
                         </div>
                     )}
@@ -420,13 +372,9 @@ export function RecorderSection() {
 
             {status && status.keys.length > 0 && (
                 <SettingsCard
-                    title={t(
-                        "Connected recorders",
-                        "Propojená nahrávací zařízení",
-                    )}
-                    description={t(
+                    title={i18n("Connected recorders")}
+                    description={i18n(
                         "Each key is write-only: it can create recordings but cannot read your library.",
-                        "Každý klíč slouží jen k zápisu: může vytvářet nahrávky, ale nemůže číst knihovnu.",
                     )}
                 >
                     <div className="space-y-2">
@@ -445,17 +393,27 @@ export function RecorderSection() {
                                         </span>
                                     </div>
                                     <div className="text-xs text-muted-foreground">
-                                        {t("Created", "Vytvořeno")}{" "}
-                                        {formatDate(key.created_at, locale)} ·{" "}
-                                        {t("Last used", "Naposledy použito")}{" "}
-                                        {formatDate(key.last_used_at, locale)}
+                                        {i18n("Created")}{" "}
+                                        {formatDate(
+                                            key.created_at,
+                                            locale,
+                                            i18n("Never"),
+                                        )}{" "}
+                                        · {i18n("Last used")}{" "}
+                                        {formatDate(
+                                            key.last_used_at,
+                                            locale,
+                                            i18n("Never"),
+                                        )}
                                     </div>
                                 </div>
                                 <Button
                                     variant="outline"
                                     size="icon"
                                     onClick={() => void revoke(key.id)}
-                                    aria-label={`${t("Revoke", "Zrušit")} ${key.name}`}
+                                    aria-label={i18n("Revoke {name}", {
+                                        name: key.name,
+                                    })}
                                 >
                                     <Trash2 className="size-4 text-destructive" />
                                 </Button>
@@ -467,60 +425,48 @@ export function RecorderSection() {
 
             {status && (
                 <SettingsCard
-                    title={t("Automatic recording", "Automatické nahrávání")}
-                    description={t(
+                    title={i18n("Automatic recording")}
+                    description={i18n(
                         "Defaults this server sends to paired extensions. Users can change them in the extension's options unless locked.",
-                        "Výchozí hodnoty, které server posílá propojeným rozšířením. Pokud nejsou uzamčené, lze je změnit v možnostech rozšíření.",
                     )}
                 >
                     <p className="text-sm">
                         {autoPlatformNames
-                            ? t(
-                                  `Automatic recording is on by default for: ${autoPlatformNames}.`,
-                                  `Automatické nahrávání je ve výchozím stavu zapnuté pro: ${autoPlatformNames}.`,
+                            ? i18n(
+                                  "Automatic recording is on by default for: {platforms}.",
+                                  { platforms: autoPlatformNames },
                               )
-                            : t(
+                            : i18n(
                                   "No platform records automatically by default.",
-                                  "Ve výchozím stavu se žádná platforma nenahrává automaticky.",
                               )}{" "}
-                        {t("Recordings stop after", "Nahrávání se zastaví po")}{" "}
+                        {i18n("Recordings stop after")}{" "}
                         {status.defaults.auto_stop_quiet_seconds}{" "}
-                        {t("seconds of silence.", "sekundách ticha.")}
+                        {i18n("seconds of silence.")}
                         {status.defaults.lock_defaults
-                            ? t(
-                                  " These defaults are locked by the server.",
-                                  " Tyto výchozí hodnoty jsou uzamčené serverem.",
-                              )
+                            ? i18n(" These defaults are locked by the server.")
                             : ""}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                        {t("Change with", "Změňte pomocí")}{" "}
+                        {i18n("Change with")}{" "}
                         <code>RECORDER_AUTO_RECORD_PLATFORMS</code>{" "}
-                        {t(
-                            "and related environment variables.",
-                            "a souvisejících proměnných prostředí.",
-                        )}
+                        {i18n("and related environment variables.")}
                     </p>
                 </SettingsCard>
             )}
 
             <details className="rounded-lg border bg-card/40 px-4 py-3.5">
                 <summary className="cursor-pointer text-sm font-medium">
-                    {t("Manual setup", "Ruční nastavení")}
+                    {i18n("Manual setup")}
                 </summary>
                 <div className="mt-3 space-y-3">
                     <p className="text-xs text-muted-foreground">
-                        {t(
+                        {i18n(
                             "If automatic pairing is unavailable, generate a key here and paste it with the server URL",
-                            "Pokud automatické propojení není dostupné, vytvořte zde klíč a vložte ho spolu s adresou serveru",
                         )}{" "}
                         <code>
                             {status?.server_url ?? window.location.origin}
                         </code>
-                        {t(
-                            " into the extension's options.",
-                            " do možností rozšíření.",
-                        )}
+                        {i18n(" into the extension's options.")}
                     </p>
                     {manualKey ? (
                         <div className="space-y-2">
@@ -528,10 +474,7 @@ export function RecorderSection() {
                                 {manualKey}
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                {t(
-                                    "Shown once. Copy it now.",
-                                    "Zobrazí se pouze jednou. Zkopírujte ho nyní.",
-                                )}
+                                {i18n("Shown once. Copy it now.")}
                             </p>
                             <Button
                                 type="button"
@@ -543,7 +486,7 @@ export function RecorderSection() {
                                 ) : (
                                     <Clipboard className="size-4" />
                                 )}
-                                {t("Copy key", "Kopírovat klíč")}
+                                {i18n("Copy key")}
                             </Button>
                         </div>
                     ) : (
@@ -554,10 +497,7 @@ export function RecorderSection() {
                             disabled={busy}
                         >
                             <Download className="size-4" />
-                            {t(
-                                "Generate recorder key",
-                                "Vytvořit klíč pro nahrávání",
-                            )}
+                            {i18n("Generate recorder key")}
                         </Button>
                     )}
                 </div>
