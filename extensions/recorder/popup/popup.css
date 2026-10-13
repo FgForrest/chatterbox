@@ -213,6 +213,35 @@ input[type="checkbox"] {
     transition: width 0.3s ease;
 }
 
+.processing-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.processing-status[hidden] {
+    display: none;
+}
+
+.processing-status p {
+    margin-bottom: 3px;
+}
+
+.processing-spinner {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    border: 3px solid var(--muted);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 #view-completed {
     text-align: center;
     padding: 8px 0 4px;
@@ -261,6 +290,11 @@ input[type="checkbox"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .processing-spinner {
+        animation: none;
+        border-color: var(--primary);
+    }
+
     .completion-ring,
     .completion-tick {
         animation-duration: 0.01ms;
