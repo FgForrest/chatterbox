@@ -48,10 +48,19 @@
         <!-- Finalizing -->
         <section id="view-finalizing" hidden>
             <p id="finalizing-stage" data-i18n="uploadingRecording">Uploading encrypted audio…</p>
-            <div id="finalizing-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress">
-                <div id="finalizing-progress-fill" class="progress-fill"></div>
+            <div id="finalizing-upload">
+                <div id="finalizing-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress">
+                    <div id="finalizing-progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="finalizing-status" class="hint"></p>
             </div>
-            <p id="finalizing-status" class="hint"></p>
+            <div id="finalizing-processing" class="processing-status" hidden role="status">
+                <span class="processing-spinner" aria-hidden="true"></span>
+                <div>
+                    <p id="processing-status"></p>
+                    <p id="processing-elapsed" class="hint" aria-hidden="true"></p>
+                </div>
+            </div>
         </section>
 
         <!-- Server confirmed recording -->

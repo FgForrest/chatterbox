@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCaptureHost } from "../../../extensions/recorder/lib/capture-host.js";
 
 beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
@@ -57,6 +58,16 @@ function setupPicker(chooseDesktopMedia) {
 }
 
 describe("desktop recorder extension window", () => {
+    it("rejects a desktop start without a stream opened in the picker frame", async () => {
+        const getUserMedia = vi.fn();
+        vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
+
+        await expect(
+            createCaptureHost().start({ captureMode: "desktop" }),
+        ).rejects.toThrow("Desktop audio must be opened in the picker window");
+        expect(getUserMedia).not.toHaveBeenCalled();
+    });
+
     it("consumes the stream ID in the picker frame before starting the server session", async () => {
         const chooseDesktopMedia = vi.fn((_sources, callback) => {
             callback("desktop-stream", { canRequestAudioTrack: true });
