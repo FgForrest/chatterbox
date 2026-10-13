@@ -70,6 +70,7 @@ const harness = vi.hoisted(() => {
         readToken: vi.fn(),
         listChunkIndices: vi.fn(),
         createSession: vi.fn(),
+        completeSession: vi.fn(),
         createLocalSession: vi.fn(),
         getSession: vi.fn(),
         deleteLocalSession: vi.fn(),
@@ -101,7 +102,7 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     abortSession: vi.fn(),
-    completeSession: vi.fn(),
+    completeSession: harness.completeSession,
     createSession: harness.createSession,
     getSession: harness.getSession,
     recoverSession: vi.fn(),
@@ -129,6 +130,7 @@ beforeEach(() => {
     harness.readToken.mockReset();
     harness.listChunkIndices.mockReset().mockResolvedValue([]);
     harness.createSession.mockReset();
+    harness.completeSession.mockReset();
     harness.createLocalSession.mockReset();
     harness.getSession.mockReset();
     harness.deleteLocalSession.mockReset();
@@ -342,6 +344,50 @@ describe("recorder token-vault failures", () => {
             sessionId: "desktop-session",
             captureWindowId: 77,
         });
+    });
+
+    it("keeps and focuses the desktop window while its recording is saved", async () => {
+        harness.sessionValues.recordingState = {
+            state: "recording",
+            sessionId: "desktop-session",
+            bufferId: "desktop-session",
+            captureMode: "desktop",
+            captureWindowId: 77,
+            pickerRequestId: "request-1",
+            stopped: false,
+            chunkCount: 0,
+            uploaded: [0],
+            blocked: false,
+            stopReason: "user",
+        };
+        harness.listChunkIndices.mockResolvedValue([0]);
+        harness.readToken.mockResolvedValue("recorder-token");
+        harness.completeSession.mockResolvedValue({ job_id: "job-1" });
+        harness.getSession.mockResolvedValue({ status: "completing" });
+
+        harness.listeners.message(
+            {
+                type: "recording-stopped",
+                sessionId: "desktop-session",
+                chunkCount: 1,
+            },
+            {},
+            () => {},
+        );
+
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.recordingState).toMatchObject({
+                state: "finalizing",
+                stopped: true,
+                chunkCount: 1,
+                captureWindowId: 77,
+            }),
+        );
+        expect(chrome.windows.update).toHaveBeenCalledWith(77, {
+            state: "normal",
+            focused: true,
+        });
+        expect(chrome.windows.remove).not.toHaveBeenCalled();
     });
 
     it("marks a failed desktop start before closing its window", async () => {

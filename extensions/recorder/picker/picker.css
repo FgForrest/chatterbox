@@ -31,3 +31,16 @@ body {
 .meter label {
     width: 55px;
 }
+
+#picker-controls[hidden] {
+    display: none;
+}
+
+#picker-progress,
+#picker-completed {
+    margin: 18px 0 8px;
+}
+
+#picker-completed {
+    text-align: center;
+}
