@@ -1,10 +1,10 @@
-// Pairing relay, injected on the paired Riffado origin (and on hosted origins).
+// Pairing relay, injected on the paired Chatterbox origin (and on hosted origins).
 //
-// Lets the Riffado settings page detect this extension and hand it a recorder
+// Lets the Chatterbox settings page detect this extension and hand it a recorder
 // key without the user touching the extension:
 //   page  -> "riffado-recorder-ping"  -> we answer "riffado-recorder-present"
 //   page  -> "riffado-recorder-pair"  -> relayed to the service worker, which
-//            validates the origin and stores the pair; its answer is relayed
+//            validates the origin and queues confirmation; its answer is relayed
 //            back as "riffado-recorder-pair-result".
 // Only same-window, same-origin messages are honoured.
 

@@ -1,4 +1,4 @@
-// Thin client for Riffado's recording-session API.
+// Thin client for Chatterbox's recording-session API.
 //
 // Every call carries the recorder API key as a Bearer token and targets the
 // paired server URL. Errors surface the server's JSON envelope message when
