@@ -170,21 +170,21 @@ export function RecordingTitle({
     }
 
     return (
-        <span className="inline-flex max-w-full min-w-0 items-center gap-1">
+        <span className="group/title inline-flex max-w-full min-w-0 items-center gap-1">
             <button
                 type="button"
                 onClick={() => setEditing(true)}
                 title={i18n("Rename")}
                 aria-label={i18n("Rename {name}", { name: filename })}
                 className={cn(
-                    "group/title inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left",
+                    "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left",
                     "hover:bg-accent/60 focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
                     "px-1 -mx-1 py-0.5",
                 )}
             >
                 <span className={cn("truncate", className)}>{filename}</span>
                 <Pencil
-                    className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-visible/title:opacity-100"
+                    className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100 [@media(hover:none)]:opacity-100"
                     aria-hidden="true"
                 />
             </button>
@@ -196,7 +196,11 @@ export function RecordingTitle({
                 aria-label={i18n("Regenerate title for {name}", {
                     name: filename,
                 })}
-                className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none disabled:opacity-50"
+                className={cn(
+                    "shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100 [@media(hover:none)]:opacity-100",
+                    "hover:bg-accent/60 hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
+                    regenerating && "opacity-100",
+                )}
             >
                 {regenerating ? (
                     <Loader2 className="size-4 animate-spin" />
