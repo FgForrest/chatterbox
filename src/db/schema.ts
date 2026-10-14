@@ -21,6 +21,7 @@ import {
     varchar,
 } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
+import type { PipelinePhases } from "@/lib/pipeline/types";
 
 export const userPlanEnum = pgEnum("user_plan", [
     "self_host",
@@ -596,10 +597,7 @@ export const itemProcessing = pgTable(
             .notNull(),
         profileId: text("profile_id"),
         profileRevisionId: text("profile_revision_id"),
-        phases: jsonb("phases")
-            .$type<Record<string, unknown>>()
-            .notNull()
-            .default({}),
+        phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
         requestedGeneration: integer("requested_generation")
             .notNull()
             .default(0),
