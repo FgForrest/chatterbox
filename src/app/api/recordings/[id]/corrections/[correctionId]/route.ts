@@ -25,11 +25,11 @@ type CorrectionContext = {
 export const DELETE = apiHandler<CorrectionContext>(
     async (request, context) => {
         const { session, actor } = await requireApiSessionActor(request);
-        const curates = await actsForOrganization(actor);
         const { id, correctionId } = await (context as CorrectionContext)
             .params;
         const view = requestedRecordingView(request);
         const access = await requireRecordingView(session.user.id, id, view);
+        const curates = view === "org" && (await actsForOrganization(actor));
         assertMayChange(access, session.user.id, curates);
         const [row] = await db
             .select({ transcriptionId: transcriptCorrections.transcriptionId })

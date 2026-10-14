@@ -323,6 +323,10 @@ export async function generateTopicsForTranscript(
     // Under the recording lock sharing takes, so a recording shared while
     // the model ran keeps what it was shared with.
     const orgUserId = await sharingOrgUserId();
+    // Before the lock: it may ask the identity provider.
+    const actsForOrganization =
+        ctx.actsForOrganization &&
+        (await userCuratesOrganizationNow(ctx.actorUserId));
     const written = await db.transaction(async (tx) => {
         await tx
             .select({ id: recordings.id })
@@ -339,9 +343,7 @@ export async function generateTopicsForTranscript(
             ownerUserId: userId,
             actorUserId: ctx.actorUserId,
             orgUserId,
-            actsForOrganization:
-                ctx.actsForOrganization &&
-                (await userCuratesOrganizationNow(ctx.actorUserId)),
+            actsForOrganization,
         });
         if (shared) throw writerRefusalError(shared);
         return tx

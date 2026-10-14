@@ -60,10 +60,20 @@ export function accessManagementFor(
     return keycloakAdmin(config, token);
 }
 
-/** The read-only access verifier, or null when none is configured. */
+let verifier: { key: string; port: AccessVerifierPort } | null = null;
+
+/**
+ * The read-only access verifier, or null when none is configured. One per
+ * configuration, so its client-credentials token is reused until it
+ * expires.
+ */
 export function getAccessVerifier(): AccessVerifierPort | null {
     if (!isIdpAuthorization()) return null;
     const config = keycloakConfig();
     if (!config.verifier) return null;
-    return keycloakVerifier(config);
+    const key = JSON.stringify(config);
+    if (verifier?.key !== key) {
+        verifier = { key, port: keycloakVerifier(config) };
+    }
+    return verifier.port;
 }

@@ -116,7 +116,6 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
     const { session, actor } = await requireApiSessionActor(request);
-    const curates = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const body = (await request.json().catch(() => ({}))) as unknown;
     if (
@@ -164,6 +163,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         id,
         requestedRecordingView(request),
     );
+    const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, actorUserId, curates);
     const userId = access.ownerUserId;
     const [recording] = await db

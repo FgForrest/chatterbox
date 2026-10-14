@@ -22,7 +22,7 @@ export enum ErrorCode {
     ACCESS_INHERITED = "ACCESS_INHERITED",
     /** The access changed since the screen was loaded (409). */
     ACCESS_STALE = "ACCESS_STALE",
-    /** The change would lock the administrator or the last administrator out (409). */
+    /** The change would lock the administrator out (409). */
     ACCESS_LOCKOUT = "ACCESS_LOCKOUT",
 
     INVALID_INPUT = "INVALID_INPUT",

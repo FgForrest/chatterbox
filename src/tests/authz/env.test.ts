@@ -41,6 +41,30 @@ describe("AUTHZ_MODE", () => {
         expect(parsed.MCP_SERVICE_CLIENTS).toEqual([]);
     });
 
+    it("takes the empty values compose passes for unset ones as local", () => {
+        const parsed = envSchema.parse({
+            AUTHZ_MODE: "",
+            IDENTITY_PROVIDER: "",
+            KEYCLOAK_ROLES_CLIENT: "",
+            KEYCLOAK_GROUP_USE_ID: "",
+            KEYCLOAK_VERIFIER_CLIENT_ID: "",
+            AUTHZ_VERIFICATION_MAX_AGE: "",
+            AUTHZ_ADMIN_MAX_AUTH_AGE: "",
+            MCP_SERVICE_CLIENTS: "",
+        });
+        expect(parsed.AUTHZ_MODE).toBe("local");
+        expect(parsed.IDENTITY_PROVIDER).toBeUndefined();
+        expect(issuesOf({ ...OIDC, AUTHZ_MODE: " " })).toEqual([]);
+    });
+
+    it("reports an issuer that is no URL as an issue, not a crash", () => {
+        const issues = issuesOf({
+            ...IDP,
+            OIDC_ISSUER_URL: "not a url",
+        });
+        expect(issues).toContain("OIDC_ISSUER_URL must be an http(s) URL");
+    });
+
     it("accepts a complete identity-provider configuration", () => {
         expect(
             issuesOf({

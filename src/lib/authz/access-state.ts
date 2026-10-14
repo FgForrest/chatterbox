@@ -64,9 +64,15 @@ export async function recordAccessState(
     return written.length > 0;
 }
 
-/** Read the version to which an in-flight provider verification belongs. */
-export async function accessStateVersion(userId: string): Promise<Date | null> {
-    const [state] = await db
+/**
+ * Read the version to which an in-flight provider verification belongs.
+ * Inside a transaction pass it, so the read takes no second connection.
+ */
+export async function accessStateVersion(
+    userId: string,
+    executor: Pick<typeof db, "select"> = db,
+): Promise<Date | null> {
+    const [state] = await executor
         .select({ updatedAt: userAccessStates.updatedAt })
         .from(userAccessStates)
         .where(eq(userAccessStates.userId, userId))

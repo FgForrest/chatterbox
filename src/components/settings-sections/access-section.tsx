@@ -110,6 +110,34 @@ export function AccessSection() {
                 return i18n("a composite role");
         }
     };
+    const outcomeName = (outcome: string) => {
+        switch (outcome) {
+            case "pending":
+                return i18n("unfinished");
+            case "applied":
+                return i18n("done");
+            case "noop":
+                return i18n("nothing to change");
+            case "partial":
+                return i18n("partly done");
+            case "inherited":
+                return i18n("still granted elsewhere");
+            case "denied":
+                return i18n("refused: not an administrator");
+            case "provider-denied":
+                return i18n("refused by the identity provider");
+            case "stale":
+                return i18n("refused: changed meanwhile");
+            case "self-lockout":
+                return i18n("refused: your own access");
+            case "reauth-required":
+                return i18n("refused: sign in again");
+            case "error":
+                return i18n("failed");
+            default:
+                return outcome;
+        }
+    };
 
     const explain = useCallback(
         (body: ApiErrorBody): string => {
@@ -306,10 +334,15 @@ export function AccessSection() {
         }
     };
 
-    const pendingRevocation = history.find(
-        (entry) =>
-            entry.revocation === "pending" || entry.revocation === "failed",
+    // The newest entry that ended sessions, or tried to; history is newest first.
+    const lastRevocation = history.find(
+        (entry) => entry.revocation !== "not-needed",
     );
+    const pendingRevocation =
+        (lastRevocation?.revocation === "pending" ||
+            lastRevocation?.revocation === "failed") &&
+        detail !== null &&
+        !detail.effective.includes("use");
 
     return (
         <div className="space-y-4">
@@ -608,7 +641,7 @@ export function AccessSection() {
                                                               `−${capabilityName(c)}`,
                                                       ),
                                                   ].join(", ")}{" "}
-                                            · {entry.outcome}
+                                            · {outcomeName(entry.outcome)}
                                         </li>
                                     ))}
                                 </ul>

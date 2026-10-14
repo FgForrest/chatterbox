@@ -136,7 +136,7 @@ async function renew(
 
         let tokens: ProviderTokens;
         let capabilities: Set<Capability>;
-        const expectedUpdatedAt = await accessStateVersion(userId);
+        const expectedUpdatedAt = await accessStateVersion(userId, tx);
         try {
             tokens = await refreshProviderTokens(refreshToken);
             const { payload } = await verifyWebAccessToken(tokens.accessToken);
@@ -208,6 +208,25 @@ async function renew(
     });
 }
 
+const renewing = new Map<string, Promise<SessionAccess>>();
+
+/**
+ * {@link renew}, joined by the requests of the same session this process
+ * is already renewing: one of them waits on the credential row's lock,
+ * not one per parallel request.
+ */
+function renewOnce(sessionId: string, userId: string): Promise<SessionAccess> {
+    const key = `${sessionId}\u0000${userId}`;
+    let pending = renewing.get(key);
+    if (!pending) {
+        pending = renew(sessionId, userId).finally(() => {
+            renewing.delete(key);
+        });
+        renewing.set(key, pending);
+    }
+    return pending;
+}
+
 /**
  * Whether a signed-in session may be used now, and as whom.
  *
@@ -277,7 +296,7 @@ export async function sessionAccess(session: {
               }
             : { ok: false, reason: "not-granted" };
     } else {
-        access = await renew(session.id, session.userId);
+        access = await renewOnce(session.id, session.userId);
     }
     if (
         !access.ok &&

@@ -61,11 +61,18 @@ async function realm(): Promise<{
     };
 }
 
+/**
+ * Whether a verification failed for want of the realm's keys rather than
+ * for the token. A key id the cached set lacks counts: the realm rotated
+ * its keys and the set is refetched only after a cooldown. These tokens
+ * come straight from the realm's token endpoint, never from a browser.
+ */
 function keysUnavailable(error: unknown): boolean {
     return (
         !(error instanceof errors.JOSEError) ||
         error instanceof errors.JWKSTimeout ||
         error instanceof errors.JWKSInvalid ||
+        error instanceof errors.JWKSNoMatchingKey ||
         error.code === errors.JOSEError.code
     );
 }

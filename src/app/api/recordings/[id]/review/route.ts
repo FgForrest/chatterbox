@@ -30,18 +30,19 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 
 /**
  * Whoever may change the recording in the view asked for: the owner on
- * the private view; while it is shared, the organization account on the
- * Organization view (Learn's unconfirmed suggestions are theirs alone).
+ * the private view; while it is shared, a curator (or the organization
+ * account) on the Organization view, who acts for the Organization there
+ * only (Learn's unconfirmed suggestions are theirs alone).
  */
 async function authorizeLearn(request: Request, recordingId: string) {
     const { session, actor } = await requireApiSessionActor(request);
-    const curates = await actsForOrganization(actor);
     const access = await requireRecordingView(
         session.user.id,
         recordingId,
         requestedRecordingView(request),
         { kinds: ALL_ITEM_KINDS },
     );
+    const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, session.user.id, curates);
     return { access, actorUserId: session.user.id, curates };
 }

@@ -270,12 +270,12 @@ function personNotFound(): AppError {
  */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
     const { session, actor } = await requireApiSessionActor(request);
-    const curates = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
     const change = readChange(await request.json().catch(() => null));
     const orgView = view === "org";
+    const curates = orgView && (await actsForOrganization(actor));
 
     assertMayChange(access, session.user.id, curates);
 

@@ -47,9 +47,22 @@ function json(body: unknown, status = 200) {
     });
 }
 
+const PENDING = {
+    at: "2026-10-13T10:00:00.000Z",
+    correlationId: "c1",
+    action: "change",
+    requested: { remove: ["use"] },
+    outcome: "applied",
+    revocation: "pending",
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
+let effective: string[];
+let history: unknown[];
 
 beforeEach(() => {
+    effective = PAT.effective;
+    history = [PENDING];
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.startsWith("/api/access/subjects?")) {
@@ -59,22 +72,14 @@ beforeEach(() => {
             return json({
                 access: {
                     ...PAT,
+                    effective,
                     inherited: [
                         { capability: "org.curate", sources: ["direct-role"] },
                     ],
                     revision: "rev-1",
                     self: false,
                 },
-                history: [
-                    {
-                        at: "2026-10-13T10:00:00.000Z",
-                        correlationId: "c1",
-                        action: "change",
-                        requested: { remove: ["use"] },
-                        outcome: "applied",
-                        revocation: "pending",
-                    },
-                ],
+                history,
             });
         }
         if (
@@ -112,12 +117,63 @@ describe("AccessSection", () => {
         expect(
             screen.getByText(/Also granted through a role assigned directly/),
         ).toBeTruthy();
+        expect(document.body.innerHTML).not.toMatch(/secret|eyJ/i);
+    });
+
+    it("offers to end sessions while the newest revocation is pending and access is gone", async () => {
+        effective = ["org.curate"];
+        render(<AccessSection />);
+        fireEvent.click(await screen.findByText("Pat Example"));
         expect(
-            screen.getByText(
+            await screen.findByText(
                 /ending the sessions at the identity provider is pending/,
             ),
         ).toBeTruthy();
-        expect(document.body.innerHTML).not.toMatch(/secret|eyJ/i);
+        expect(screen.getByText(/Access to Chatterbox · done$/)).toBeTruthy();
+    });
+
+    it("drops the retry once a later revocation ended the sessions", async () => {
+        effective = ["org.curate"];
+        history = [
+            {
+                at: "2026-10-13T11:00:00.000Z",
+                correlationId: "c2",
+                action: "revoke-sessions",
+                requested: {},
+                outcome: "applied",
+                revocation: "done",
+            },
+            {
+                at: "2026-10-13T10:30:00.000Z",
+                correlationId: "c3",
+                action: "change",
+                requested: { remove: ["access.manage"] },
+                outcome: "self-lockout",
+                revocation: "not-needed",
+            },
+            PENDING,
+        ];
+        render(<AccessSection />);
+        fireEvent.click(await screen.findByText("Pat Example"));
+        expect(
+            await screen.findByText(/refused: your own access$/),
+        ).toBeTruthy();
+        expect(
+            screen.queryByText(
+                /ending the sessions at the identity provider is pending/,
+            ),
+        ).toBeNull();
+    });
+
+    it("drops the retry once access is given back", async () => {
+        render(<AccessSection />);
+        fireEvent.click(await screen.findByText("Pat Example"));
+        await screen.findByText(/Access to Chatterbox · done$/);
+        expect(
+            screen.queryByText(
+                /ending the sessions at the identity provider is pending/,
+            ),
+        ).toBeNull();
     });
 
     it("sends only a capability and the revision, and explains a provider refusal", async () => {

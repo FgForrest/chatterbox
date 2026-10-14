@@ -19,13 +19,13 @@ type IdContext = { params: Promise<{ id: string }> };
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { session, actor } = await requireApiSessionActor(request);
-    const curates = await actsForOrganization(actor);
     const access = await requireRecordingView(
         session.user.id,
         id,
         requestedRecordingView(request),
         { kinds: ALL_ITEM_KINDS },
     );
+    const curates = access.view === "org" && (await actsForOrganization(actor));
     assertMayChange(access, session.user.id, curates);
     return NextResponse.json({ forgotten: await forgetDismissals(access) });
 });

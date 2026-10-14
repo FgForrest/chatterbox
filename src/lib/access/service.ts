@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { lockAccessChange } from "@/db/queries/access-locks";
+import {
+    isAccessLockTimeout,
+    lockAccessChange,
+} from "@/db/queries/access-locks";
 import {
     accessChangeLog,
     accounts,
@@ -26,6 +29,7 @@ import {
 } from "@/lib/identity/factory";
 import {
     type AccessChange,
+    type AccessChangeResult,
     type AccessManagementPort,
     IdentityProviderError,
     type InheritedSource,
@@ -188,11 +192,24 @@ export function providerError(error: IdentityProviderError): AppError {
     }
 }
 
+/**
+ * The local accounts linked to these subjects through the realm's issuer
+ * (or not bound to one yet). Without the issuer nothing is matched: 503,
+ * never an account another issuer vouched for.
+ */
 async function localAccounts(
     subjects: string[],
 ): Promise<Map<string, LocalAccount>> {
     if (subjects.length === 0) return new Map();
     const issuer = await configuredIssuer();
+    if (!issuer) {
+        throw providerError(
+            new IdentityProviderError(
+                "unavailable",
+                "The identity provider's issuer could not be discovered",
+            ),
+        );
+    }
     const rows = await db
         .select({
             subject: accounts.accountId,
@@ -207,9 +224,7 @@ async function localAccounts(
             and(
                 eq(accounts.providerId, SSO_PROVIDER_ID),
                 inArray(accounts.accountId, subjects),
-                issuer
-                    ? or(eq(accounts.issuer, issuer), isNull(accounts.issuer))
-                    : undefined,
+                or(eq(accounts.issuer, issuer), isNull(accounts.issuer)),
             ),
         );
     return new Map(
@@ -341,6 +356,34 @@ export function parseAccessChange(body: unknown): {
     return { change: { add, remove }, revision: input.revision };
 }
 
+function snapshot(access?: SubjectAccess | null) {
+    return access
+        ? {
+              enabled: access.subject.enabled,
+              effective: access.effective,
+              managed: access.managed,
+              inherited: access.inherited,
+          }
+        : null;
+}
+
+function auditFailed(correlationId: string, error: unknown): AppError {
+    console.error(
+        `[access] audit write failed for ${correlationId}:`,
+        error instanceof Error ? error.message : error,
+    );
+    return new AppError(
+        ErrorCode.INTERNAL_ERROR,
+        "The change could not be recorded",
+        500,
+        { correlationId },
+    );
+}
+
+/**
+ * Write an audit entry, outside any transaction so a rolled-back change
+ * keeps it. Returns its id.
+ */
 async function audit(entry: {
     correlationId: string;
     context: AdminContext;
@@ -353,45 +396,86 @@ async function audit(entry: {
     outcome: Outcome;
     revocation?: Revocation;
     error?: string | null;
-}): Promise<void> {
-    const snapshot = (access?: SubjectAccess | null) =>
-        access
-            ? {
-                  enabled: access.subject.enabled,
-                  effective: access.effective,
-                  managed: access.managed,
-                  inherited: access.inherited,
-              }
-            : null;
+}): Promise<string> {
     try {
-        await db.insert(accessChangeLog).values({
-            correlationId: entry.correlationId,
-            actorUserId: entry.context.actor.actorId,
-            actorIssuer: entry.context.actor.issuer,
-            actorSubject: entry.context.actor.subject,
-            targetUserId: entry.targetUserId,
-            targetIssuer: await configuredIssuer(),
-            targetSubject: entry.subject,
-            action: entry.action,
-            requested: entry.requested,
-            before: snapshot(entry.before),
-            after: snapshot(entry.after),
-            outcome: entry.outcome,
-            revocation: entry.revocation ?? "not-needed",
-            error: entry.error ?? null,
-        });
+        const [row] = await db
+            .insert(accessChangeLog)
+            .values({
+                correlationId: entry.correlationId,
+                actorUserId: entry.context.actor.actorId,
+                actorIssuer: entry.context.actor.issuer,
+                actorSubject: entry.context.actor.subject,
+                targetUserId: entry.targetUserId,
+                targetIssuer: await configuredIssuer(),
+                targetSubject: entry.subject,
+                action: entry.action,
+                requested: entry.requested,
+                before: snapshot(entry.before),
+                after: snapshot(entry.after),
+                outcome: entry.outcome,
+                revocation: entry.revocation ?? "not-needed",
+                error: entry.error ?? null,
+            })
+            .returning({ id: accessChangeLog.id });
+        if (!row) throw new Error("no audit row returned");
+        return row.id;
     } catch (error) {
-        console.error(
-            `[access] audit write failed for ${entry.correlationId}:`,
-            error instanceof Error ? error.message : error,
-        );
-        throw new AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "The change could not be recorded",
-            500,
-            { correlationId: entry.correlationId },
-        );
+        throw auditFailed(entry.correlationId, error);
     }
+}
+
+/** Complete a `pending` audit entry with what the change did. */
+async function settleAudit(
+    id: string,
+    correlationId: string,
+    entry: {
+        after: SubjectAccess | null;
+        outcome: Outcome;
+        revocation: Revocation;
+        error: string | null;
+    },
+): Promise<void> {
+    try {
+        await db
+            .update(accessChangeLog)
+            .set({
+                after: snapshot(entry.after),
+                outcome: entry.outcome,
+                revocation: entry.revocation,
+                error: entry.error,
+            })
+            .where(eq(accessChangeLog.id, id));
+    } catch (error) {
+        throw auditFailed(correlationId, error);
+    }
+}
+
+/** Whether the administrator still holds `use` and `access.manage` at the provider. */
+async function stillAdministers(
+    port: AccessManagementPort,
+    context: AdminContext,
+): Promise<boolean> {
+    const actorNow = context.actor.subject
+        ? await port.getAccess(context.actor.subject)
+        : null;
+    return Boolean(
+        actorNow?.subject.enabled &&
+            actorNow.effective.includes("use") &&
+            actorNow.effective.includes("access.manage"),
+    );
+}
+
+function providerOutcome(error: IdentityProviderError): Outcome {
+    return error.kind === "forbidden" ? "provider-denied" : "error";
+}
+
+/** What a change the provider answered is recorded as. */
+function changeOutcome(
+    result: Pick<AccessChangeResult, "status" | "stillEffective">,
+): Outcome {
+    if (result.status === "partial") return "partial";
+    if (result.stillEffective.length > 0) return "inherited";
+    return result.status;
 }
 
 /**
@@ -491,24 +575,21 @@ export async function changeAccess(
         (capability) => capability === "use" || capability === "access.manage",
     );
 
+    let intentId = null as string | null;
+    let after = null as SubjectAccess | null;
+    let revocation = "not-needed" as Revocation;
     try {
         return await db.transaction(async (tx) => {
             await lockAccessChange(tx, subjectId, affectsAdministrators);
 
-            const actorNow = context.actor.subject
-                ? await port.getAccess(context.actor.subject)
-                : null;
-            if (
-                !actorNow?.subject.enabled ||
-                !actorNow.effective.includes("use") ||
-                !actorNow.effective.includes("access.manage")
-            ) {
+            if (!(await stillAdministers(port, context))) {
                 await audit({ ...base, outcome: "denied" });
                 throw forbidden();
             }
 
             const before = await port.getAccess(subjectId);
             if (!before) {
+                await audit({ ...base, outcome: "error", error: "not_found" });
                 throw new AppError(
                     ErrorCode.NOT_FOUND,
                     "Person not found",
@@ -537,22 +618,26 @@ export async function changeAccess(
                 );
             }
 
+            intentId = await audit({ ...base, before, outcome: "pending" });
             const result = await port.changeAccess(subjectId, request.change);
-            const after = result.after;
+            const changedTo = result.after;
+            after = changedTo;
             const lostUse =
                 before.effective.includes("use") &&
-                !after.effective.includes("use");
+                !changedTo.effective.includes("use");
             const changed =
                 result.applied.add.length + result.applied.remove.length > 0;
+            if (lostUse) revocation = "failed";
 
-            let revocation: Revocation = "not-needed";
             if (local) {
                 await recordAccessState({
                     userId: local.userId,
                     issuer: (await configuredIssuer()) ?? "",
                     subject: subjectId,
-                    capabilities: after.subject.enabled ? after.effective : [],
-                    status: after.subject.enabled ? "active" : "disabled",
+                    capabilities: changedTo.subject.enabled
+                        ? changedTo.effective
+                        : [],
+                    status: changedTo.subject.enabled ? "active" : "disabled",
                     source: "access-change",
                 });
             }
@@ -566,16 +651,9 @@ export async function changeAccess(
                 await invalidateSnapshots(local?.userId ?? null);
             }
 
-            await audit({
-                ...base,
-                before,
-                after,
-                outcome:
-                    result.status === "partial"
-                        ? "partial"
-                        : result.stillEffective.length > 0
-                          ? "inherited"
-                          : result.status,
+            const settled = {
+                after: changedTo,
+                outcome: changeOutcome(result),
                 revocation,
                 error:
                     result.failed.length > 0
@@ -583,7 +661,10 @@ export async function changeAccess(
                               .map((f) => `${f.capability}:${f.error}`)
                               .join(", ")
                         : null,
-            });
+            };
+            const id = intentId;
+            intentId = null;
+            await settleAudit(id, correlationId, settled);
             return {
                 status: result.status,
                 correlationId,
@@ -591,54 +672,92 @@ export async function changeAccess(
                 failed: result.failed,
                 stillEffective: result.stillEffective,
                 revocation,
-                access: detailOf(after, local, context),
+                access: detailOf(changedTo, local, context),
             };
         });
     } catch (error) {
-        if (error instanceof IdentityProviderError) {
-            await audit({
-                ...base,
-                outcome:
-                    error.kind === "forbidden" ? "provider-denied" : "error",
-                error: error.kind,
-            });
-            throw providerError(error);
+        const failure =
+            error instanceof IdentityProviderError
+                ? { outcome: providerOutcome(error), error: error.kind }
+                : { outcome: "error" as const, error: "local_failure" };
+        if (intentId) {
+            await settleAudit(intentId, correlationId, {
+                ...failure,
+                after,
+                revocation,
+            }).catch(() => {});
+        } else if (error instanceof IdentityProviderError) {
+            await audit({ ...base, ...failure });
+        }
+        if (error instanceof IdentityProviderError) throw providerError(error);
+        if (isAccessLockTimeout(error)) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Another change of access is in progress. Try again shortly.",
+                409,
+            );
         }
         throw error;
     }
 }
 
-/** End a person's sessions again, here and at the provider (retry). */
+/**
+ * End a person's sessions again, here and at the provider (retry), once
+ * the administrator is re-verified at the provider. Every refusal is
+ * recorded, as for a change.
+ */
 export async function revokeSessions(
     context: AdminContext,
     subjectId: string,
 ): Promise<{ revocation: Revocation; correlationId: string }> {
     assertAccessAdministrator(context);
-    assertFreshAuthentication(context);
+    const correlationId = randomUUID();
+    const local = (await localAccounts([subjectId])).get(subjectId) ?? null;
+    const base = {
+        correlationId,
+        context,
+        subject: subjectId,
+        targetUserId: local?.userId ?? null,
+        action: "revoke-sessions" as const,
+        requested: {},
+    };
+    try {
+        assertFreshAuthentication(context);
+    } catch (error) {
+        await audit({ ...base, outcome: "reauth-required" });
+        throw error;
+    }
     if (subjectId === context.actor.subject) {
+        await audit({ ...base, outcome: "self-lockout" });
         throw new AppError(
             ErrorCode.ACCESS_LOCKOUT,
             "You cannot end your own sessions here",
             409,
         );
     }
-    const correlationId = randomUUID();
-    const local = (await localAccounts([subjectId])).get(subjectId) ?? null;
+    const port = portFor(context);
+    try {
+        if (!(await stillAdministers(port, context))) {
+            await audit({ ...base, outcome: "denied" });
+            throw forbidden();
+        }
+    } catch (error) {
+        if (error instanceof IdentityProviderError) {
+            await audit({
+                ...base,
+                outcome: providerOutcome(error),
+                error: error.kind,
+            });
+            throw providerError(error);
+        }
+        throw error;
+    }
     const revocation = await revokeEverywhere(
-        portFor(context),
+        port,
         subjectId,
         local?.userId ?? null,
     );
-    await audit({
-        correlationId,
-        context,
-        subject: subjectId,
-        targetUserId: local?.userId ?? null,
-        action: "revoke-sessions",
-        requested: {},
-        outcome: "applied",
-        revocation,
-    });
+    await audit({ ...base, outcome: "applied", revocation });
     return { revocation, correlationId };
 }
 

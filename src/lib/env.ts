@@ -95,6 +95,11 @@ function keycloakGroupId(name: string) {
         );
 }
 
+/** An empty value counts as unset, as compose passes `${VAR:-}`. */
+function unsetIfEmpty(val: unknown): unknown {
+    return typeof val === "string" && val.trim() === "" ? undefined : val;
+}
+
 /** A comma-separated list, trimmed, without empty entries. */
 function commaList(val: string | undefined): string[] {
     return (val ?? "")
@@ -296,9 +301,15 @@ const baseEnvSchema = z.object({
      * identity provider grants `use`, `org.curate` and `access.manage`;
      * needs single sign-on and IDENTITY_PROVIDER.
      */
-    AUTHZ_MODE: z.enum(["local", "idp"]).optional().default("local"),
+    AUTHZ_MODE: z.preprocess(
+        unsetIfEmpty,
+        z.enum(["local", "idp"]).optional().default("local"),
+    ),
     /** The identity provider adapter for AUTHZ_MODE=idp. */
-    IDENTITY_PROVIDER: z.enum(["keycloak"]).optional(),
+    IDENTITY_PROVIDER: z.preprocess(
+        unsetIfEmpty,
+        z.enum(["keycloak"]).optional(),
+    ),
     /** Keycloak client whose client roles carry the capabilities; default OIDC_CLIENT_ID. */
     KEYCLOAK_ROLES_CLIENT: z
         .string()
@@ -1249,6 +1260,15 @@ const baseEnvSchema = z.object({
 
 type BaseEnv = z.infer<typeof baseEnvSchema>;
 
+/** The path of a URL; empty when it does not parse (reported by its own check). */
+function urlPath(value: string): string {
+    try {
+        return new URL(value).pathname;
+    } catch {
+        return "";
+    }
+}
+
 /**
  * The combinations of identity-provider authorization: `idp` needs single
  * sign-on and an adapter, and nothing about it may be half-configured; the
@@ -1300,7 +1320,7 @@ function validateAuthorization(
     if (
         parsed.IDENTITY_PROVIDER === "keycloak" &&
         parsed.OIDC_ISSUER_URL &&
-        !KEYCLOAK_ISSUER_PATH.test(new URL(parsed.OIDC_ISSUER_URL).pathname)
+        !KEYCLOAK_ISSUER_PATH.test(urlPath(parsed.OIDC_ISSUER_URL))
     ) {
         issue(
             "OIDC_ISSUER_URL",

@@ -38,11 +38,8 @@ After updating the application code or configuration:
 docker compose -f docker-compose.local-authz.yml up -d --build --wait app
 ```
 
-The English accounts above apply to a fresh import. An existing realm retains
-its previous usernames and passwords until an explicit reset; updating these
-files does not rename existing users. If keeping a stack created with the old
-Organization email, retain that `ORG_ACCOUNT_EMAIL` in your Compose override
-until you reset the test stack.
+The accounts above apply to a fresh import. An existing realm keeps its users
+and passwords until the stack is reset (see below).
 
 ## What to verify
 
@@ -102,10 +99,6 @@ docker compose -f docker-compose.local-authz.yml down
 
 `down` preserves data. On the next `up`, Keycloak does not reimport an existing
 realm: removed permissions and changed passwords remain unchanged.
-
-If the application reports `KEYCLOAK_GROUP_*_ID must be a Keycloak group id (UUID)`,
-you have the older seed with textual group IDs. Update the stack files and reset
-the disposable test stack below; restarting alone does not repair an existing realm.
 
 A full reset **deletes the test database, recordings, and test realm changes**:
 

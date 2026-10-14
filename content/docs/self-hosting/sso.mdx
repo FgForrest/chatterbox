@@ -97,6 +97,23 @@ name and email follow the provider on every sign-in. An email that another
 Chatterbox account already holds is not taken over; the user keeps their
 current one.
 
+The account is also bound to the issuer that vouched for it, whatever
+`AUTHZ_MODE` says. Pointing Chatterbox at another realm does not take over
+accounts: their sign-in is refused with "belongs to a different identity
+provider". The issuer follows the provider's address, so moving the same
+realm to a new hostname, from `http` to `https` or to a new realm name
+refuses everyone the same way. After such a move, unbind the accounts
+once; each binds to the new issuer on its next sign-in:
+
+```sql
+UPDATE accounts SET issuer = NULL WHERE provider_id = 'oidc';
+```
+
+Do this only for the same realm under a new address. To move people to a
+different realm deliberately, delete their old link instead (the
+`accounts` rows with `provider_id = 'oidc'`); they are linked again by
+verified email on their next sign-in.
+
 ## Sessions
 
 - The first start with single sign-on ends **every** existing session, so
@@ -210,12 +227,8 @@ Runtime credentials do not need `manage-clients` or `realm-admin`.
   `AUTHZ_ADMIN_MAX_AUTH_AGE` (8 hours by default). When it expires, the
   access screen offers a new sign-in with `prompt=login` and `max_age=0`,
   returning to access settings. The pending change is not submitted automatically.
-- An account is bound to the issuer that vouched for it. Pointing
-  Chatterbox at another realm does not take over accounts: their sign-in
-  is refused with "belongs to a different identity provider". To move
-  people to a new issuer deliberately, delete their old link (the
-  `accounts` rows with `provider_id = 'oidc'`); they are linked again by
-  verified email on their next sign-in.
+- An account is bound to the issuer that vouched for it; see
+  [Existing accounts](#existing-accounts).
 
 ### API keys and the meeting recorder
 
@@ -250,6 +263,17 @@ includes how long that takes to reach Keycloak.
 Every change and refusal is recorded in the `access_change_log` table:
 who asked, for whom, what was asked, what the provider holds afterwards,
 and whether the person's sessions were ended. Tokens are never recorded.
+A change is recorded as `pending` before the provider is asked and
+completed once it settles, so an entry left `pending` marks a change
+whose outcome was lost (a crash, a database failure); check the person
+at the provider.
+
+Taking `use` away ends the person's Chatterbox sessions at once. When the
+provider cannot end its own sessions of theirs, the entry says `pending`
+or `failed` and the person's access screen offers **End sessions** to
+retry. Nothing retries it automatically: ending them takes an
+administrator's own sign-in, which no background job holds. The person
+is locked out of Chatterbox either way.
 
 ## Trying it locally
 

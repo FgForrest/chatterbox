@@ -99,7 +99,7 @@ import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import {
-    contentWriterRefusal,
+    contentWriterScope,
     sharingOrgUserId,
     writerRefusalError,
 } from "@/lib/sharing/writer";
@@ -780,6 +780,8 @@ interface FactPlace {
  */
 interface ReviewSourceInTx {
     revision: number;
+    /** The knowledge scope the writer rule gives the change under the lock. */
+    scopeUserId: string;
     turns: TranscriptTurn[] | null;
     language: () => Promise<string | null>;
     /** The person a speaker label (or a participant) stands for now. */
@@ -807,13 +809,14 @@ async function transcriptSourceInTx(
     latest: RecordingRun,
     writer: ReviewWriter,
 ): Promise<ReviewSourceInTx> {
-    const { revision, turns } = await lockTranscriptForChange(
+    const { revision, turns, scopeUserId } = await lockTranscriptForChange(
         tx,
         { userId: latest.userId, transcriptionId: latest.transcriptionId },
         writer,
     );
     return {
         revision,
+        scopeUserId,
         turns,
         language: async () =>
             (
@@ -881,7 +884,7 @@ async function mailSourceInTx(
         )
         .for("update");
     if (!item) throw reviewNotFound();
-    const refusal = await contentWriterRefusal(tx, {
+    const { refusal, scopeUserId } = await contentWriterScope(tx, {
         recordingId: latest.itemId,
         ownerUserId: latest.userId,
         actorUserId: writer.actorUserId,
@@ -905,6 +908,7 @@ async function mailSourceInTx(
     if (!content) throw reviewNotFound();
     return {
         revision: content.revision,
+        scopeUserId,
         turns: null,
         language: async () => content.language,
         speakerPerson: async (label) => {
@@ -1030,6 +1034,13 @@ function finishInTx(
             .where(eq(learnRuns.id, latest.id))
             .for("update");
         if (!run || run.status !== "ready") throw reviewNotFound();
+        // Shared or withdrawn since the run began: its records and its
+        // facts would land in different scopes.
+        if (source.scopeUserId !== run.scopeUserId) {
+            throw writerRefusalError(
+                run.view === "org" ? "withdrawn" : "shared",
+            );
+        }
         if (revision !== run.transcriptRevision) {
             await tx
                 .update(learnRuns)

@@ -71,6 +71,14 @@ Pokud poskytovatel adresu neověřil, Chatterbox odmítne propojit s existujíc�
 
 Od této chvíle je účet vázán na uživatelské id poskytovatele (`sub`): jméno i e-mail odpovídají údajům u poskytovatele při každém přihlášení. E-mail, který už používá jiný účet Chatterbox, nebude převzat; uživatel si ponechá svůj stávající.
 
+Účet je navíc vázán na issuer, který za něj ručil, bez ohledu na `AUTHZ_MODE`. Přesměrování Chatterbox na jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením „belongs to a different identity provider“. Issuer se odvíjí od adresy poskytovatele, takže přesun téhož realmu na nový hostname, z `http` na `https` nebo pod nový název realmu odmítne stejně všechny. Po takovém přesunu účty jednou odvažte; každý se při dalším přihlášení naváže na nový issuer:
+
+```sql
+UPDATE accounts SET issuer = NULL WHERE provider_id = 'oidc';
+```
+
+Dělejte to jen pro tentýž realm na nové adrese. Chcete-li lidi záměrně převést do jiného realmu, smažte místo toho jejich staré propojení (řádky `accounts` s `provider_id = 'oidc'`); při dalším přihlášení se znovu propojí podle ověřeného e-mailu.
+
 <span id="sessions" />
 
 ## Relace
@@ -182,12 +190,8 @@ Běhové přihlašovací údaje nepotřebují `manage-clients` ani `realm-admin`
   `AUTHZ_ADMIN_MAX_AUTH_AGE` (výchozí 8 hodin). Po vypršení nabídne obrazovka
   nové přihlášení s `prompt=login` a `max_age=0`, které se vrátí do nastavení
   přístupů. Rozpracovaná změna se automaticky neodešle.
-- Účet je vázán na issuer, který za něj ručil. Přesměrování Chatterbox na
-  jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením
-  „belongs to a different identity provider“. Chcete-li lidi záměrně
-  převést na nový issuer, smažte jejich staré propojení (řádky `accounts`
-  s `provider_id = 'oidc'`); při dalším přihlášení se znovu propojí podle
-  ověřeného e-mailu.
+- Účet je vázán na issuer, který za něj ručil; viz
+  [Stávající účty](#existing-accounts).
 
 ### API klíče a záznamník schůzek
 
@@ -222,7 +226,18 @@ zahrnuje i dobu, než se změna do Keycloaku dostane.
 
 Každá změna i odmítnutí se zaznamená do tabulky `access_change_log`: kdo
 žádal, pro koho, o co žádal, co má poskytovatel poté uloženo a zda byly
-relace osoby ukončeny. Tokeny se nikdy nezaznamenávají.
+relace osoby ukončeny. Tokeny se nikdy nezaznamenávají. Změna se zaznamená
+jako `pending` ještě předtím, než se Chatterbox zeptá poskytovatele, a
+doplní se, jakmile skončí; záznam, který zůstal `pending`, tedy označuje
+změnu, jejíž výsledek se ztratil (pád, chyba databáze). Ověřte osobu u
+poskytovatele.
+
+Odebrání `use` ukončí relace osoby v Chatterbox okamžitě. Když poskytovatel
+nedokáže ukončit své relace této osoby, záznam uvádí `pending` nebo
+`failed` a obrazovka přístupů osoby nabídne **Ukončit relace** k
+opakování. Automaticky se to neopakuje: ukončení vyžaduje vlastní
+přihlášení správce, které žádná úloha na pozadí nemá. Do Chatterbox se
+osoba v obou případech nedostane.
 
 <span id="trying-it-locally" />
 

@@ -178,6 +178,21 @@ async function jobStillRunning(tx: Tx, jobId: string): Promise<boolean> {
     return job?.status === "processing";
 }
 
+/**
+ * Whether the actor acts for the Organization as the write lands: a claim
+ * of `true` is re-checked against their current access. Resolved before
+ * the transaction, since it may ask the identity provider while the
+ * recording would be locked.
+ */
+async function curatesNow(
+    args: { actsForOrganization?: boolean },
+    actorUserId: string,
+): Promise<boolean | undefined> {
+    return args.actsForOrganization === true
+        ? userCuratesOrganizationNow(actorUserId)
+        : args.actsForOrganization;
+}
+
 // Both upserts run inside a transaction that takes a row-level write lock
 // (`FOR UPDATE`) on the recording and re-checks the soft-delete tombstone, so
 // a concurrent DELETE can't be silently undone: either we see `deletedAt` set
@@ -209,6 +224,7 @@ export async function upsertTranscription(
     const producedByUserId = args.producedByUserId ?? actorUserId;
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
+    const actsForOrganization = await curatesNow(args, actorUserId);
 
     try {
         await db.transaction(async (tx) => {
@@ -244,10 +260,7 @@ export async function upsertTranscription(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
-                actsForOrganization:
-                    args.actsForOrganization === true
-                        ? await userCuratesOrganizationNow(actorUserId)
-                        : args.actsForOrganization,
+                actsForOrganization,
             });
             if (refusal) throw new WriterRefused(refusal);
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
@@ -395,6 +408,7 @@ export async function upsertEnhancement(
     const producedByUserId = args.producedByUserId ?? actorUserId;
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
+    const actsForOrganization = await curatesNow(args, actorUserId);
 
     const isMail = args.kind === "mail";
 
@@ -444,10 +458,7 @@ export async function upsertEnhancement(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
-                actsForOrganization:
-                    args.actsForOrganization === true
-                        ? await userCuratesOrganizationNow(actorUserId)
-                        : args.actsForOrganization,
+                actsForOrganization,
             });
             if (refusal) throw new WriterRefused(refusal);
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {

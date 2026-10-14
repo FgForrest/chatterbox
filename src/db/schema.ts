@@ -338,8 +338,11 @@ export const accessChangeLog = pgTable(
         // Effective and managed capabilities before and after, as read back.
         before: jsonb("before"),
         after: jsonb("after"),
+        // `pending` from before the provider is asked until the change
+        // settles; one left pending is a change whose outcome was lost.
         outcome: varchar("outcome", { length: 24 })
             .$type<
+                | "pending"
                 | "applied"
                 | "noop"
                 | "partial"
@@ -348,7 +351,6 @@ export const accessChangeLog = pgTable(
                 | "provider-denied"
                 | "stale"
                 | "self-lockout"
-                | "last-admin"
                 | "reauth-required"
                 | "error"
             >()
