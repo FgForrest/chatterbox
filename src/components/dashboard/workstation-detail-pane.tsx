@@ -125,7 +125,12 @@ export function WorkstationDetailPane({
     const playerRef = useRef<RecordingPlayerHandle>(null);
     const playedLink = useRef<string | null>(null);
     useEffect(() => {
-        if (!currentRecording || currentRecording.audioReaped) return;
+        if (
+            !currentRecording ||
+            currentRecording.kind === "mail" ||
+            currentRecording.audioReaped
+        )
+            return;
         const params = new URLSearchParams(window.location.search);
         if (params.get("recording") !== currentRecording.id) return;
         if (
