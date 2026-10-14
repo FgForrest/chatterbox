@@ -1,11 +1,24 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
+import { type Ref, useImperativeHandle } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { RecordingPlayerHandle } from "@/components/dashboard/recording-player";
 import type { Recording } from "@/types/recording";
 
+const playFrom = vi.hoisted(() => vi.fn());
+
 vi.mock("@/components/dashboard/recording-player", () => ({
-    RecordingPlayer: () => <div data-testid="recording-player" />,
+    RecordingPlayer: ({ ref }: { ref: Ref<RecordingPlayerHandle> }) => {
+        useImperativeHandle(ref, () => ({
+            playFrom,
+            seekTo: vi.fn(),
+            getCurrentTime: () => 0,
+            pause: vi.fn(),
+            subscribe: () => () => {},
+        }));
+        return <div data-testid="recording-player" />;
+    },
     transcriptPlayback: () => undefined,
 }));
 
@@ -61,7 +74,71 @@ const sharedProps = {
 };
 
 describe("recording detail layout", () => {
-    afterEach(cleanup);
+    afterEach(() => {
+        cleanup();
+        playFrom.mockClear();
+        window.history.replaceState({}, "", "/");
+    });
+
+    it("plays a task link once after its recording becomes selected", () => {
+        window.history.replaceState(
+            {},
+            "",
+            "/dashboard?recording=rec-1&playFrom=12500",
+        );
+        const { rerender } = render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{ ...recording, id: "other" }}
+            />,
+        );
+        expect(playFrom).not.toHaveBeenCalled();
+
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledExactlyOnceWith(12.5);
+
+        rerender(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={{ ...recording }}
+            />,
+        );
+        expect(playFrom).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+        ["a different recording", "recording=other&playFrom=12500", recording],
+        [
+            "a different view",
+            "recording=rec-1&view=org&playFrom=12500",
+            recording,
+        ],
+        ["an invalid timestamp", "recording=rec-1&playFrom=12s", recording],
+        [
+            "removed audio",
+            "recording=rec-1&playFrom=12500",
+            { ...recording, audioReaped: true },
+        ],
+        [
+            "mail",
+            "recording=rec-1&playFrom=12500",
+            { ...recording, kind: "mail" as const },
+        ],
+    ])("does not play for %s", (_reason, query, currentRecording) => {
+        window.history.replaceState({}, "", `/dashboard?${query}`);
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={currentRecording}
+            />,
+        );
+        expect(playFrom).not.toHaveBeenCalled();
+    });
 
     it("keeps the recording heading while removing the player for erased audio", () => {
         const { rerender } = render(
