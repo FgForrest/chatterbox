@@ -23,9 +23,13 @@ import {
 } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import {
+    assembleSummaryPrompt,
     SUMMARY_MARKDOWN_DIRECTIVE,
+    SUMMARY_PROMPT_PARTS,
     SUMMARY_SPEAKER_DIRECTIVE,
 } from "@/lib/ai/summary-presets";
+import type { LegacyProfileSettings } from "@/lib/profiles/seed";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
@@ -73,7 +77,18 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, profileLegacy } = vi.hoisted(() => ({
+    createMock: vi.fn(),
+    profileLegacy: {
+        current: {} as Partial<LegacyProfileSettings>,
+    },
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () =>
+        resolvedAudioProfile(profileLegacy.current),
+    ),
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -149,7 +164,12 @@ interface SummarySettings {
     summaryMultiPassRounds?: number;
 }
 
-async function summarize(settings: SummarySettings = {}, presetId?: string) {
+async function summarize(
+    settings: SummarySettings = {},
+    presetId?: string,
+    trigger: "manual" | "auto" = "manual",
+) {
+    profileLegacy.current = settings;
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],
@@ -199,7 +219,7 @@ async function summarize(settings: SummarySettings = {}, presetId?: string) {
         "@/lib/summary/generate-summary"
     );
     return generateSummaryForRecording("user-1", "rec-1", {
-        trigger: "manual",
+        trigger,
         presetId,
     });
 }
@@ -232,6 +252,46 @@ describe("markdown formatting directive", () => {
         await summarize();
         expect(systemMessages()[0]).toContain(SUMMARY_MARKDOWN_DIRECTIVE);
         expect(systemMessages()[0]).toContain(SUMMARY_SPEAKER_DIRECTIVE);
+    });
+
+    it.each([
+        "manual",
+        "auto",
+    ] as const)("keeps the seeded English prompt on the %s path without a template", async (trigger) => {
+        await summarize({}, undefined, trigger);
+        expect(userMessages()[0]).toBe(
+            assembleSummaryPrompt(SUMMARY_PROMPT_PARTS.general, "en").replace(
+                "{transcription}",
+                "a transcript",
+            ),
+        );
+    });
+
+    it("keeps a seeded custom prompt on the manual path without a template", async () => {
+        await summarize({
+            summaryPrompt: {
+                selectedPrompt: "custom-1",
+                customPrompts: [
+                    {
+                        id: "custom-1",
+                        name: "Mine",
+                        prompt: "My exact summary: {transcription}",
+                        createdAt: "2026-01-01T00:00:00.000Z",
+                    },
+                ],
+            },
+        });
+        expect(userMessages()[0]).toBe("My exact summary: a transcript");
+    });
+
+    it("uses the Czech built-in for Czech content without a template", async () => {
+        await summarize({ detectedLanguage: "cs-CZ" });
+        expect(userMessages()[0]).toBe(
+            assembleSummaryPrompt(
+                SUMMARY_PROMPT_PARTS.general,
+                "cs-CZ",
+            ).replace("{transcription}", "a transcript"),
+        );
     });
 
     it("no longer forbids markdown outright", async () => {
@@ -423,6 +483,14 @@ describe("output language under auto", () => {
             "meeting-notes",
         );
         expect(userMessages()[0]).toContain("Účastníci, Účel, Diskuse");
+    });
+
+    it("uses the account language for a profile run when detection returned none", async () => {
+        await summarize({ defaultTranscriptionLanguage: "cs" });
+        expect(systemMessages()[0]).toContain(
+            "Write all natural-language output in Czech",
+        );
+        expect(userMessages()[0]).toContain("Shrňte tento zvukový přepis");
     });
 
     it("recognizes a provider's language name", async () => {

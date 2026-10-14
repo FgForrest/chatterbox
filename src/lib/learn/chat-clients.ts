@@ -19,6 +19,7 @@ import { isRetryableError } from "@/lib/jobs/retryable";
 import type { LearnBridgeChat } from "@/lib/learn/run-bridge";
 import type { LearnChat } from "@/lib/learn/run-fallback";
 import { resolveStepProvider } from "@/lib/profiles/providers";
+import type { ProviderPin } from "@/lib/profiles/settings";
 
 const CALL_RETRY_ATTEMPTS = 3;
 /** A call through the bridge, tools and all; the jobs allow 20 min. */
@@ -30,6 +31,7 @@ export interface LearnChatClients {
     provider: string;
     baseUrl: string | null;
     model: string;
+    payerUserId: string;
 }
 
 /**
@@ -45,11 +47,12 @@ export async function learnChatClients(input: {
     /** The name the bridge's JSON Schema answer goes by. */
     schemaName: string;
     signal: AbortSignal;
+    pin?: ProviderPin | null;
 }): Promise<LearnChatClients> {
     const { actorUserId, signal } = input;
     const resolved = await resolveStepProvider({
         step: "learn",
-        pin: null,
+        pin: input.pin ?? null,
         actorUserId,
     });
     if (resolved.kind !== "credential") {
@@ -85,6 +88,7 @@ export async function learnChatClients(input: {
         provider: credentials.provider,
         baseUrl: credentials.baseUrl,
         model,
+        payerUserId: resolved.payerUserId,
         // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
         // the answer's JSON Schema, and the run's token for Riffado's
         // tools. Unknown fields travel in the body as they are.

@@ -1,18 +1,19 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { userSettings } from "@/db/schema";
+import { transcriptions } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { decryptJsonField } from "@/lib/encryption/fields";
+import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import type { RecordingView } from "@/lib/sharing/view";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import {
-    normalizeTitlePromptConfig,
-    TITLE_TEMPLATE_KIND,
-} from "./prompt-presets";
-import { resolveTemplate } from "./prompt-templates";
-import { getAiOutputLanguageDirective } from "./summary-presets";
+    getAiOutputLanguageDirective,
+    resolveAiOutputLanguage,
+} from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
 export async function generateTitleFromTranscription(
@@ -21,38 +22,53 @@ export async function generateTitleFromTranscription(
     transcriptionText: string,
     source: "summary" | "transcript" = "transcript",
     ownerUserId = userId,
+    view: RecordingView = "private",
 ): Promise<string | null> {
+    const profile = await resolveItemProfile(
+        recordingId,
+        view,
+        ownerUserId,
+        userId,
+    );
+    const settings = profile.settings as AudioProfileSettings;
+    const [transcript] = await db
+        .select({ detectedLanguage: transcriptions.detectedLanguage })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, ownerUserId),
+                eq(transcriptions.source, "riffado"),
+            ),
+        )
+        .limit(1);
+    const outputLanguage = resolveAiOutputLanguage(
+        settings.steps.summary.outputLanguage,
+        transcript?.detectedLanguage,
+    );
+    const promptTemplate = resolveTitlePrompt({
+        settings: settings.steps.title,
+        outputLanguage: settings.steps.summary.outputLanguage,
+        contentLanguage: transcript?.detectedLanguage ?? null,
+        uiLocale: "en",
+    }).text;
+    let resolved: Awaited<ReturnType<typeof resolveStepProvider>>;
     try {
-        // Get user's prompt configuration
-        const [userSettingsRow] = await db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, userId))
-            .limit(1);
-
-        // `titleGenerationPrompt` is jsonb-envelope encrypted at rest;
-        // legacy plaintext rows pass through verbatim. A missing value reads
-        // as the seeded built-ins.
-        const promptConfig = normalizeTitlePromptConfig(
-            userSettingsRow?.titleGenerationPrompt
-                ? decryptJsonField(userSettingsRow.titleGenerationPrompt)
-                : null,
-        );
-        const { prompt: promptTemplate } = resolveTemplate(
-            promptConfig,
-            promptConfig.selectedPrompt,
-            TITLE_TEMPLATE_KIND,
-        );
-
-        const resolved = await resolveStepProvider({
+        resolved = await resolveStepProvider({
             step: "title",
-            pin: null,
+            pin: settings.steps.title.provider,
             actorUserId: userId,
         });
-        if (resolved.kind !== "credential") {
-            console.warn("No AI provider found for title generation");
-            return null;
-        }
+    } catch (error) {
+        if (settings.steps.title.provider) throw error;
+        console.error("Error resolving title provider:", error);
+        return null;
+    }
+    if (resolved.kind !== "credential") {
+        console.warn("No AI provider found for title generation");
+        return null;
+    }
+    try {
         const credentials = resolved.credential;
 
         // Create OpenAI client
@@ -76,9 +92,7 @@ export async function generateTitleFromTranscription(
         // Apply the AI output language directive via the system
         // message rather than the user prompt, so it doesn't compete with
         // the title-format rules in the user prompt.
-        const languageDirective = getAiOutputLanguageDirective(
-            userSettingsRow?.aiOutputLanguage ?? null,
-        );
+        const languageDirective = getAiOutputLanguageDirective(outputLanguage);
 
         // Replacement function so `$` sequences in the transcript are
         // inserted verbatim, not treated as `String.prototype.replace`

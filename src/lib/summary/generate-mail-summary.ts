@@ -9,7 +9,7 @@ import {
     MAIL_SUMMARY_SYSTEM,
     MAIL_TASKS_DIRECTIVE,
 } from "@/lib/ai/mail-summary-prompts";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
+import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
     normalizeSummaryPromptConfig,
@@ -24,7 +24,15 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
 import { captureServerEvent } from "@/lib/posthog-server";
-import { MAIL_SUMMARY_PROMPT_ID } from "@/lib/profiles/settings";
+import {
+    BUILTIN_PROMPTS_VERSION,
+    resolveSummaryPrompt,
+} from "@/lib/profiles/prompts";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import {
+    MAIL_SUMMARY_PROMPT_ID,
+    type MailProfileSettings,
+} from "@/lib/profiles/settings";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import type { ContentRunContext } from "@/lib/sharing/run-context";
 import {
@@ -134,6 +142,17 @@ export async function generateMailSummary(
         return { text: "", refs: new Map<string, string>() };
     });
 
+    const profile = opts.presetId
+        ? null
+        : await resolveItemProfile(
+              itemId,
+              ctx.view,
+              ctx.ownerUserId,
+              ctx.actorUserId,
+          );
+    const profileSettings = profile?.settings as
+        | MailProfileSettings
+        | undefined;
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -152,6 +171,7 @@ export async function generateMailSummary(
     // user's default is written for recordings.
     let usedPromptId: string = MAIL_SUMMARY_PROMPT_ID;
     let promptTemplate = MAIL_SUMMARY_PROMPT;
+    let builtinPromptsVersion: string | null = BUILTIN_PROMPTS_VERSION;
     if (opts.presetId && opts.presetId !== MAIL_SUMMARY_PROMPT_ID) {
         const promptConfig = normalizeSummaryPromptConfig(
             userSettingsRow?.summaryPrompt
@@ -165,18 +185,50 @@ export async function generateMailSummary(
         );
         usedPromptId = resolved.id;
         promptTemplate = resolved.prompt;
+        const selected = promptConfig.templates.find(
+            (template) => template.id === resolved.id,
+        );
+        builtinPromptsVersion =
+            isPresetId(SUMMARY_TEMPLATE_KIND, resolved.id) &&
+            selected?.prompt === null
+                ? BUILTIN_PROMPTS_VERSION
+                : null;
     }
 
-    const summaryModel = await summaryModelFor(ctx.actorUserId);
+    const contentLanguage =
+        content.language ?? userSettingsRow?.defaultTranscriptionLanguage;
+    const outputLanguage = profileSettings
+        ? resolveAiOutputLanguage(
+              profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+          )
+        : resolveAiOutputLanguage(
+              userSettingsRow?.aiOutputLanguage,
+              contentLanguage,
+          );
+    const profilePrompt = profileSettings
+        ? resolveSummaryPrompt({
+              settings: profileSettings.steps.summary,
+              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+              uiLocale: "en",
+          })
+        : null;
+    if (profilePrompt) {
+        usedPromptId = profileSettings?.steps.summary.preset ?? usedPromptId;
+        promptTemplate = profilePrompt.text;
+        builtinPromptsVersion = profilePrompt.builtinVersion;
+    }
+
+    const summaryModel = await summaryModelFor(
+        ctx.actorUserId,
+        profileSettings?.steps.summary.provider ?? null,
+    );
     const { credentials, model } = summaryModel;
 
     const title = decryptText(mail.title);
     const subject = (await secretAddressMasker([title]))(title);
     const mailText = renderMailForModel(content, { subject, sentAt });
-    const outputLanguage = resolveAiOutputLanguage(
-        userSettingsRow?.aiOutputLanguage,
-        content.language ?? userSettingsRow?.defaultTranscriptionLanguage,
-    );
     const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     const mergeLanguageDirective = getAiOutputLanguageDirective(
         outputLanguage,
@@ -203,15 +255,20 @@ export async function generateMailSummary(
         .filter(Boolean)
         .join(" ");
 
-    const multiPassOn =
-        actorSettingsRow?.summaryMultiPass === true &&
-        (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
+    const pinnedMultiPass = profileSettings?.steps.summary.provider
+        ? profileSettings.steps.summary.multiPass
+        : null;
+    const multiPassOn = pinnedMultiPass
+        ? pinnedMultiPass.enabled &&
+          (opts.trigger !== "auto" || pinnedMultiPass.automaticToo)
+        : actorSettingsRow?.summaryMultiPass === true &&
+          (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
             itemId,
             ownerUserId: ctx.ownerUserId,
-            payerUserId: ctx.actorUserId,
+            payerUserId: summaryModel.payerUserId,
         },
         systemContent,
         prompt,
@@ -228,10 +285,19 @@ export async function generateMailSummary(
                 .join("\n\n"),
         multiPass: multiPassOn
             ? {
-                  rounds: actorSettingsRow?.summaryMultiPassRounds ?? null,
-                  mergePrompt: userSettingsRow?.summaryMergePrompt
-                      ? decryptText(userSettingsRow.summaryMergePrompt)
-                      : null,
+                  rounds:
+                      pinnedMultiPass?.rounds ??
+                      actorSettingsRow?.summaryMultiPassRounds ??
+                      null,
+                  mergePrompt: pinnedMultiPass
+                      ? pinnedMultiPass.mergePrompt
+                      : (profile ? actorSettingsRow : userSettingsRow)
+                              ?.summaryMergePrompt
+                        ? (decryptText(
+                              (profile ? actorSettingsRow : userSettingsRow)
+                                  ?.summaryMergePrompt ?? null,
+                          ) ?? null)
+                        : null,
               }
             : null,
         onProgress: opts.onProgress,
@@ -268,6 +334,15 @@ export async function generateMailSummary(
         model,
         multiPass,
         inputFingerprint: createHash("sha256").update(mailText).digest("hex"),
+        profileRevisionId: profile?.revisionId ?? null,
+        builtinPromptsVersion,
+        outputLanguage,
+        outputFormatLocale: profilePrompt?.formatLocale ?? null,
+        payerUserId: summaryModel.payerUserId,
+        inputs: {
+            contentId: stored.sourceId,
+            contentRevision: stored.revision,
+        },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
@@ -316,6 +391,7 @@ export async function generateMailSummary(
         model,
         promptId: usedPromptId,
         promptFallback:
+            !profile &&
             opts.presetId !== undefined &&
             opts.presetId !== MAIL_SUMMARY_PROMPT_ID &&
             usedPromptId !== opts.presetId,

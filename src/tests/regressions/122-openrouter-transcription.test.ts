@@ -13,6 +13,11 @@
  */
 
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
 
 vi.mock("@/db", () => ({
     db: {

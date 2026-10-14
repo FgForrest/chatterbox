@@ -85,6 +85,13 @@ import {
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import {
+    loadItemProfileRevision,
+    type ResolvedItemProfile,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
+import type { ProviderPin } from "@/lib/profiles/settings";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
@@ -158,7 +165,7 @@ async function setStatus(
 }
 
 /** The actor's chat provider, as the Learn pass talks to it. */
-function chatFor(run: AnyRun, signal: AbortSignal) {
+function chatFor(run: AnyRun, signal: AbortSignal, pin: ProviderPin | null) {
     return learnChatClients({
         actorUserId: run.actorUserId ?? "",
         recordingId: run.itemId,
@@ -166,6 +173,7 @@ function chatFor(run: AnyRun, signal: AbortSignal) {
         operation: "learn",
         schemaName: "learn_output",
         signal,
+        pin,
     });
 }
 
@@ -604,14 +612,32 @@ async function runLearnJob({
     if (run.status !== "queued" && run.status !== "running") {
         return { skipped: run.status };
     }
+    const profile = run.profileRevisionId
+        ? await loadItemProfileRevision({
+              itemId: run.itemId,
+              view: run.view,
+              ownerUserId: run.userId,
+              actorUserId: run.actorUserId ?? run.userId,
+              revisionId: run.profileRevisionId,
+          })
+        : await resolveItemProfile(
+              run.itemId,
+              run.view,
+              run.userId,
+              run.actorUserId ?? run.userId,
+          );
     if (!isRecordingRun(run)) {
         if (await isMailItem(run)) {
-            return runMailLearnJob(run, {
-                attempt,
-                maxAttempts,
-                signal,
-                reportProgress,
-            });
+            return runMailLearnJob(
+                run,
+                {
+                    attempt,
+                    maxAttempts,
+                    signal,
+                    reportProgress,
+                },
+                profile,
+            );
         }
         await db
             .update(learnRuns)
@@ -683,10 +709,21 @@ async function runLearnJob({
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
-        const { chat, bridge, provider, baseUrl, model } = await chatFor(
-            run,
-            signal,
-        );
+        const { chat, bridge, provider, baseUrl, model, payerUserId } =
+            await chatFor(run, signal, profile.settings.steps.learn.provider);
+        await db
+            .update(learnRuns)
+            .set({
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                },
+                updatedAt: new Date(),
+            })
+            .where(eq(learnRuns.id, run.id));
         // Path 1: the bridge's CLI looks things up itself over MCP;
         // anything else takes the fallback, which looks up for it.
         const path = chooseLearnPath(
@@ -926,7 +963,11 @@ async function runLearnJob({
                 // Nothing to review: the transcript is read again now.
                 const correcting =
                     status === "finished" &&
-                    (await queueCorrectionPassInTx(tx, run));
+                    (await queueCorrectionPassInTx(
+                        tx,
+                        run,
+                        profile.settings.steps.learn.correctAfterLearn,
+                    ));
                 return { status, items: items.length, correcting };
             });
             if (outcome.status === "stale") continue;
@@ -1022,6 +1063,7 @@ async function runMailLearnJob(
         Parameters<JobHandler<LearnJobPayload>["run"]>[0],
         "attempt" | "maxAttempts" | "signal" | "reportProgress"
     >,
+    profile: ResolvedItemProfile,
 ): Promise<JobResult> {
     const claimed = await db
         .update(learnRuns)
@@ -1108,7 +1150,24 @@ async function runMailLearnJob(
                 (relation) => !relation.adoptedAsKey,
             );
         const entityTypes = newThingTypes(vocabulary);
-        const { chat, provider, model } = await chatFor(run, signal);
+        const { chat, provider, model, payerUserId } = await chatFor(
+            run,
+            signal,
+            profile.settings.steps.learn.provider,
+        );
+        await db
+            .update(learnRuns)
+            .set({
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId,
+                inputs: {
+                    contentId: content.sourceId,
+                    contentRevision: content.revision,
+                },
+                updatedAt: new Date(),
+            })
+            .where(eq(learnRuns.id, run.id));
         reportProgress({ phase: "reading" });
         const pass =
             turns.length > 0

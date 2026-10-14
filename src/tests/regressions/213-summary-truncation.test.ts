@@ -31,6 +31,11 @@ import {
     userSettings,
 } from "@/db/schema";
 import { ErrorCode, mapErrorToAppError } from "@/lib/errors";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.

@@ -12,22 +12,27 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { recordings, transcriptions, userSettings } from "@/db/schema";
+import { recordings, transcriptions } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
-import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
+import {
+    getAiOutputLanguageDirective,
+    resolveAiOutputLanguage,
+} from "@/lib/ai/summary-presets";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
-import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
+import { encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { resolveTopicPrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
 import {
@@ -50,11 +55,7 @@ import {
     splitIntoWindows,
     type TranscriptTopic,
 } from "./timeline";
-import {
-    normalizeTopicPromptConfig,
-    TOPIC_SYSTEM_PROMPT,
-    TOPIC_TEMPLATE_KIND,
-} from "./topic-presets";
+import { TOPIC_SYSTEM_PROMPT } from "./topic-presets";
 
 /** Transcript sources topics can be detected on. */
 export type TopicSource = "plaud" | "riffado";
@@ -160,25 +161,26 @@ export async function generateTopicsForTranscript(
         );
     }
 
-    // The prompt and language follow the view.
-    const [settings] = await db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.settingsUserId))
-        .limit(1);
-    const promptConfig = normalizeTopicPromptConfig(
-        settings?.topicPrompt ? decryptJsonField(settings.topicPrompt) : null,
+    const profile = await resolveItemProfile(
+        recordingId,
+        ctx.view,
+        ctx.ownerUserId,
+        ctx.actorUserId,
     );
-    const { id: templateId, prompt: promptTemplate } = resolveTemplate(
-        promptConfig,
-        promptConfig.selectedPrompt,
-        TOPIC_TEMPLATE_KIND,
-    );
+    const settings = profile.settings as AudioProfileSettings;
+    const resolvedPrompt = resolveTopicPrompt({
+        settings: settings.steps.topics,
+        outputLanguage: settings.steps.summary.outputLanguage,
+        contentLanguage: transcript.detectedLanguage,
+        uiLocale: "en",
+    });
+    const templateId = settings.steps.topics.preset;
+    const promptTemplate = resolvedPrompt.text;
 
     // The provider is the actor's, who pays.
     const resolved = await resolveStepProvider({
         step: "topics",
-        pin: null,
+        pin: settings.steps.topics.provider,
         actorUserId: ctx.actorUserId,
     });
     if (resolved.kind !== "credential") {
@@ -194,11 +196,15 @@ export async function generateTopicsForTranscript(
         baseURL: credentials.baseUrl || undefined,
     });
     const model = enhancementChatModel(credentials);
+    const outputLanguage = resolveAiOutputLanguage(
+        settings.steps.summary.outputLanguage,
+        transcript.detectedLanguage,
+    );
 
     const systemContent = [
         TOPIC_SYSTEM_PROMPT,
         CONTENT_IS_DATA_DIRECTIVE,
-        getAiOutputLanguageDirective(settings?.aiOutputLanguage ?? null),
+        getAiOutputLanguageDirective(outputLanguage),
     ].join("\n\n");
 
     // Read with its corrections applied (same turns, same times), and the
@@ -331,6 +337,13 @@ export async function generateTopicsForTranscript(
             .set({
                 topics: encryptJsonField(stored),
                 topicsInputFingerprint: input.fingerprint,
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: resolvedPrompt.builtinVersion,
+                payerUserId: resolved.payerUserId,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                },
             })
             .where(
                 and(

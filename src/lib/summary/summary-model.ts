@@ -10,6 +10,7 @@ import {
     type DecryptedCredential,
     resolveStepProvider,
 } from "@/lib/profiles/providers";
+import type { ProviderPin } from "@/lib/profiles/settings";
 import {
     clampRounds,
     formatPassOutcomes,
@@ -56,10 +57,11 @@ const PASS_RETRY_MAX_MS = 15_000;
  */
 export async function summaryModelFor(
     actorUserId: string,
+    pin: ProviderPin | null = null,
 ): Promise<SummaryModel> {
     const resolved = await resolveStepProvider({
         step: "summary",
-        pin: null,
+        pin,
         actorUserId,
     });
     if (resolved.kind !== "credential") {

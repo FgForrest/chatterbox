@@ -17,6 +17,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    learnRuns,
     transcriptCorrectionPasses,
     transcriptCorrections,
     transcriptions,
@@ -57,6 +58,10 @@ import { mayStillRun } from "@/lib/learn/learn-job-handler";
 import { chooseLearnPath } from "@/lib/learn/provider";
 import { issueCorrectionPassToken } from "@/lib/learn/run-token";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
+import {
+    loadItemProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
@@ -144,6 +149,37 @@ async function runPass({
     if (pass.status !== "queued" && pass.status !== "running") {
         return { skipped: pass.status, written: 0, pass };
     }
+    if (!pass.learnRunId) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
+    }
+    const [learnRun] = await db
+        .select({ profileRevisionId: learnRuns.profileRevisionId })
+        .from(learnRuns)
+        .where(
+            and(
+                eq(learnRuns.id, pass.learnRunId),
+                eq(learnRuns.userId, pass.userId),
+            ),
+        )
+        .limit(1);
+    if (!learnRun) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
+    }
+    const actorUserId = pass.actorUserId ?? pass.userId;
+    const profile = learnRun.profileRevisionId
+        ? await loadItemProfileRevision({
+              itemId: pass.recordingId,
+              view: pass.view,
+              ownerUserId: pass.userId,
+              actorUserId,
+              revisionId: learnRun.profileRevisionId,
+          })
+        : await resolveItemProfile(
+              pass.recordingId,
+              pass.view,
+              pass.userId,
+              actorUserId,
+          );
     const claimed = await db
         .update(transcriptCorrectionPasses)
         .set({
@@ -233,7 +269,6 @@ async function runPass({
                         : (correction.replacement ?? correction.heard),
             }));
 
-        const actorUserId = pass.actorUserId ?? "";
         const { chat, bridge, provider, baseUrl, model } =
             await learnChatClients({
                 actorUserId,
@@ -242,6 +277,7 @@ async function runPass({
                 operation: "correction",
                 schemaName: "correction_output",
                 signal,
+                pin: profile.settings.steps.learn.provider,
             });
         const path = chooseLearnPath(
             { provider, baseUrl },

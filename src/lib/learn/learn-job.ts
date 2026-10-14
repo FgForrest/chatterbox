@@ -20,10 +20,13 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
-import { isLearnAvailableFor } from "@/lib/knowledge/availability";
+import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { vocabularyVersion } from "@/lib/knowledge/vocabulary";
 import { learnRunDead, learnRunOpen } from "@/lib/learn/learn-open";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
@@ -114,7 +117,7 @@ export async function startLearnRun(input: {
             400,
         );
     }
-    if (!(await isLearnAvailableFor(actorUserId))) {
+    if (!isLearnDeploymentAvailable()) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
             "Learn needs a chat provider. Add an OpenAI-compatible provider to run it.",
@@ -122,6 +125,24 @@ export async function startLearnRun(input: {
         );
     }
     const view: RecordingView = access.view;
+    const profile = await resolveItemProfile(
+        access.recordingId,
+        view,
+        access.ownerUserId,
+        actorUserId,
+    );
+    const provider = await resolveStepProvider({
+        step: "learn",
+        pin: profile.settings.steps.learn.provider,
+        actorUserId,
+    });
+    if (provider.kind !== "credential") {
+        throw new AppError(
+            ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+            "Learn needs a chat provider. Add an OpenAI-compatible provider to run it.",
+            400,
+        );
+    }
     await settleDeadLearnRuns(access.recordingId);
     // The run, under the lock sharing, withdrawal, rewrites and erasure
     // take, with the transcript read and the writer rule checked there: a
@@ -134,6 +155,8 @@ export async function startLearnRun(input: {
                 actorUserId,
                 trigger,
                 actsForOrganization,
+                profileRevisionId: profile.revisionId,
+                payerUserId: provider.payerUserId,
             });
         }
         const [live] = await tx
@@ -221,6 +244,13 @@ export async function startLearnRun(input: {
                 trigger,
                 transcriptRevision: transcript.revision,
                 vocabularyVersion: await vocabularyVersion(tx),
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId: provider.payerUserId,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                },
             })
             .returning({ id: learnRuns.id });
         return {
@@ -336,11 +366,15 @@ async function insertMailRunInTx(
         actorUserId,
         trigger,
         actsForOrganization,
+        profileRevisionId,
+        payerUserId,
     }: {
         access: RecordingViewContext;
         actorUserId: string;
         trigger: "manual" | "auto";
         actsForOrganization?: boolean;
+        profileRevisionId: string;
+        payerUserId: string;
     },
 ): Promise<
     | { open: { id: string; jobId: string | null } }
@@ -380,7 +414,7 @@ async function insertMailRunInTx(
             )
             .limit(1),
         tx
-            .select({ revision: mailContents.revision })
+            .select({ id: mailContents.id, revision: mailContents.revision })
             .from(mailContents)
             .where(
                 and(
@@ -435,6 +469,13 @@ async function insertMailRunInTx(
             // A mail's content revision: a re-parse supersedes the run.
             transcriptRevision: content.revision,
             vocabularyVersion: await vocabularyVersion(tx),
+            profileRevisionId,
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId,
+            inputs: {
+                contentId: content.id,
+                contentRevision: content.revision,
+            },
         })
         .returning({ id: learnRuns.id });
     return { runId: (run as { id: string }).id, transcriptionId: null };

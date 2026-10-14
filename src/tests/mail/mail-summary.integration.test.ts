@@ -117,6 +117,7 @@ import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { parseSummaryJobPayload } from "@/lib/summary/summary-job";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
@@ -409,6 +410,17 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 ),
             );
         expect(stored?.transcriptionId).toBeNull();
+        expect(stored).toMatchObject({
+            profileRevisionId: expect.any(String),
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: "u-jan",
+            inputs: {
+                contentId: expect.any(String),
+                contentRevision: expect.any(Number),
+            },
+            outputLanguage: null,
+            outputFormatLocale: "en",
+        });
         expect(decryptText(stored?.summary ?? "")).toBe(
             "Jan asks Eva for the signed contract by Friday.",
         );
@@ -446,6 +458,50 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 samples?.evidenceCharEnd ?? 0,
             ),
         ).toBe("deliver the samples to your warehouse next week");
+    });
+
+    it("uses the account language for a profile mail summary when detection returned none", async () => {
+        await db()
+            .insert(userSettings)
+            .values({
+                userId: "u-jan",
+                defaultTranscriptionLanguage: "cs",
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultTranscriptionLanguage: "cs" },
+            });
+        const itemId = await deliver(
+            await signMessage(
+                rawMessage(
+                    headers("Czech language"),
+                    "Prosím potvrďte termín.",
+                ),
+                company,
+            ),
+            ["jan@klepna.example"],
+        );
+        createCompletion.mockReset();
+        createCompletion.mockResolvedValueOnce(
+            reply({
+                summary: "Jan žádá o potvrzení termínu.",
+                keyPoints: [],
+                actionItems: [],
+                taskUpdates: [],
+            }),
+        );
+
+        await generateSummaryForRecording("u-jan", itemId);
+
+        const request = createCompletion.mock.calls[0]?.[0] as {
+            messages: { role: string; content: string }[];
+        };
+        const system = request.messages.find(
+            (message) => message.role === "system",
+        );
+        expect(system?.content).toContain(
+            "Write all natural-language output in Czech",
+        );
     });
 
     it("reviews a mail's tasks like a recording's, and backs them up with its summary", async () => {

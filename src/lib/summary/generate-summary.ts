@@ -8,7 +8,7 @@ import {
     userSettings,
 } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
+import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
     localizedSummaryPrompt,
@@ -23,6 +23,12 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
+import {
+    BUILTIN_PROMPTS_VERSION,
+    resolveSummaryPrompt,
+} from "@/lib/profiles/prompts";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -258,8 +264,17 @@ export async function generateSummaryForRecording(
         return { text: "", refs: new Map<string, string>() };
     });
 
-    // Content settings (prompts, language, merge prompt) follow the view;
-    // the engine settings (multi-pass rounds) follow the actor, who pays.
+    const profile = opts.presetId
+        ? null
+        : await resolveItemProfile(
+              recordingId,
+              ctx.view,
+              ctx.ownerUserId,
+              ctx.actorUserId,
+          );
+    const profileSettings = profile?.settings as
+        | AudioProfileSettings
+        | undefined;
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -274,30 +289,62 @@ export async function generateSummaryForRecording(
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
 
-    // `summaryPrompt` is jsonb-envelope encrypted at rest; legacy
-    // plaintext rows pass through verbatim. A missing value reads as the
-    // seeded built-ins.
     const promptConfig = normalizeSummaryPromptConfig(
         userSettingsRow?.summaryPrompt
             ? decryptJsonField(userSettingsRow.summaryPrompt)
             : null,
     );
-
-    // Template resolution: explicit override > user default > built-in.
-    // `usedPromptId` is the template actually used, which differs from the
-    // requested one when that template was since deleted. It is returned to
-    // the caller so it can warn instead of silently generating with a
-    // different template than the one requested.
     const requestedPromptId = opts.presetId || promptConfig.selectedPrompt;
-    const { id: usedPromptId, prompt: promptTemplate } = resolveTemplate(
-        promptConfig,
-        requestedPromptId,
-        SUMMARY_TEMPLATE_KIND,
-    );
+    const legacyPrompt = profile
+        ? null
+        : resolveTemplate(
+              promptConfig,
+              requestedPromptId,
+              SUMMARY_TEMPLATE_KIND,
+          );
+    const usedPromptId =
+        profileSettings?.steps.summary.preset ?? legacyPrompt?.id;
+    if (!usedPromptId) throw new Error("Summary prompt resolution failed");
 
-    // Credentials: prefer the user's enhancement-default provider, fall
-    // back to any configured provider that can actually summarize.
-    const summaryModel = await summaryModelFor(ctx.actorUserId);
+    const contentLanguage =
+        transcription.detectedLanguage ??
+        userSettingsRow?.defaultTranscriptionLanguage;
+    const outputLanguage = profileSettings
+        ? resolveAiOutputLanguage(
+              profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+          )
+        : resolveAiOutputLanguage(
+              userSettingsRow?.aiOutputLanguage,
+              transcription.detectedLanguage ??
+                  userSettingsRow?.defaultTranscriptionLanguage,
+          );
+    const profilePrompt = profileSettings
+        ? resolveSummaryPrompt({
+              settings: profileSettings.steps.summary,
+              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+              uiLocale: "en",
+          })
+        : null;
+    const promptTemplate = profilePrompt?.text ?? legacyPrompt?.prompt;
+    if (!promptTemplate) throw new Error("Summary prompt resolution failed");
+    const selectedTemplate = profile
+        ? undefined
+        : promptConfig.templates.find(
+              (template) => template.id === usedPromptId,
+          );
+    const builtinPromptsVersion = profilePrompt
+        ? profilePrompt.builtinVersion
+        : isPresetId(SUMMARY_TEMPLATE_KIND, usedPromptId) &&
+            selectedTemplate?.prompt === null
+          ? BUILTIN_PROMPTS_VERSION
+          : null;
+
+    const summaryModel = await summaryModelFor(
+        ctx.actorUserId,
+        profileSettings?.steps.summary.provider ?? null,
+    );
     const { credentials, model } = summaryModel;
 
     // Decrypt the transcript before sending it to the LLM. Plaintext is
@@ -312,11 +359,6 @@ export async function generateSummaryForRecording(
     // the JSON-shape contract (English keys), the system message carries the
     // output language. Smaller models tend to honor this split more reliably
     // than a combined prompt where language and JSON-shape rules compete.
-    const outputLanguage = resolveAiOutputLanguage(
-        userSettingsRow?.aiOutputLanguage,
-        transcription.detectedLanguage ??
-            userSettingsRow?.defaultTranscriptionLanguage,
-    );
     const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     // The merge never sees the transcript, so under `auto` it has to take
     // the language from the passes instead.
@@ -332,15 +374,14 @@ export async function generateSummaryForRecording(
     // `String.prototype.replace` special patterns.
     // The task lists are data the user's recordings hold, so they go with
     // the user's message rather than the instructions.
-    const selectedTemplate = promptConfig.templates.find(
-        (template) => template.id === usedPromptId,
-    );
-    const localizedTemplate = localizedSummaryPrompt(
-        usedPromptId,
-        promptTemplate,
-        outputLanguage,
-        selectedTemplate?.prompt === null,
-    );
+    const localizedTemplate = profile
+        ? promptTemplate
+        : localizedSummaryPrompt(
+              usedPromptId,
+              promptTemplate,
+              outputLanguage,
+              selectedTemplate?.prompt === null,
+          );
     const prompt = [
         localizedTemplate.replaceAll("{transcription}", () => transcriptText),
         tasksContext.text,
@@ -364,16 +405,21 @@ export async function generateSummaryForRecording(
     // Multi-pass applies to the auto path only if separately enabled: a manual
     // summary is one recording the user is waiting on, while a sync can fire a
     // dozen, and each one multiplies by `rounds`.
-    const multiPassOn =
-        actorSettingsRow?.summaryMultiPass === true &&
-        (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
+    const pinnedMultiPass = profileSettings?.steps.summary.provider
+        ? profileSettings.steps.summary.multiPass
+        : null;
+    const multiPassOn = pinnedMultiPass
+        ? pinnedMultiPass.enabled &&
+          (opts.trigger !== "auto" || pinnedMultiPass.automaticToo)
+        : actorSettingsRow?.summaryMultiPass === true &&
+          (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
 
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
             itemId: recordingId,
             ownerUserId: ctx.ownerUserId,
-            payerUserId: ctx.actorUserId,
+            payerUserId: summaryModel.payerUserId,
         },
         systemContent,
         prompt,
@@ -390,11 +436,19 @@ export async function generateSummaryForRecording(
                 .join("\n\n"),
         multiPass: multiPassOn
             ? {
-                  rounds: actorSettingsRow?.summaryMultiPassRounds ?? null,
-                  // User-authored, so encrypted at rest like the summary prompts.
-                  mergePrompt: userSettingsRow?.summaryMergePrompt
-                      ? decryptText(userSettingsRow.summaryMergePrompt)
-                      : null,
+                  rounds:
+                      pinnedMultiPass?.rounds ??
+                      actorSettingsRow?.summaryMultiPassRounds ??
+                      null,
+                  mergePrompt: pinnedMultiPass
+                      ? pinnedMultiPass.mergePrompt
+                      : (profile ? actorSettingsRow : userSettingsRow)
+                              ?.summaryMergePrompt
+                        ? (decryptText(
+                              (profile ? actorSettingsRow : userSettingsRow)
+                                  ?.summaryMergePrompt ?? null,
+                          ) ?? null)
+                        : null,
               }
             : null,
         onProgress: opts.onProgress,
@@ -429,6 +483,15 @@ export async function generateSummaryForRecording(
         model,
         multiPass,
         inputFingerprint: input.fingerprint,
+        profileRevisionId: profile?.revisionId ?? null,
+        builtinPromptsVersion,
+        outputLanguage,
+        outputFormatLocale: profilePrompt?.formatLocale ?? null,
+        payerUserId: summaryModel.payerUserId,
+        inputs: {
+            contentId: transcription.id,
+            contentRevision: transcription.revision,
+        },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
@@ -481,7 +544,7 @@ export async function generateSummaryForRecording(
         provider: credentials.provider,
         model,
         promptId: usedPromptId,
-        promptFallback: usedPromptId !== requestedPromptId,
+        promptFallback: profile ? false : usedPromptId !== requestedPromptId,
         multiPass,
     };
 }

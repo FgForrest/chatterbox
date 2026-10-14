@@ -215,6 +215,7 @@ import {
 import { finishReview } from "@/lib/learn/review";
 import { newRecordFingerprint } from "@/lib/learn/validate-new-records";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { requireRecordingView } from "@/lib/sharing/access";
 import type { StorageProvider } from "@/lib/storage/types";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
@@ -494,6 +495,10 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             view: "private",
             status: "queued",
             transcriptionId: transcriptId,
+            profileRevisionId: expect.any(String),
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: OWNER,
+            inputs: { contentId: transcriptId, contentRevision: 0 },
         });
         const jobs = await db()
             .select({
@@ -2080,6 +2085,13 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             });
 
             it("summarizes again after a finish that applied nothing but took back what the summary read", async () => {
+                // Seed this choice into the immutable profile before Learn
+                // records the revision it will use through review finish.
+                await db().insert(userSettings).values({
+                    userId: OWNER,
+                    autoSummarize: true,
+                    correctAfterLearn: false,
+                });
                 await readyRun();
                 const { items } = (await (
                     await route(getReviewRoute, OWNER, "review")
@@ -2104,11 +2116,6 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 await generateSummaryForRecording(OWNER, REC);
                 // No correction pass: it would refresh the summary itself,
                 // once it ends.
-                await db().insert(userSettings).values({
-                    userId: OWNER,
-                    autoSummarize: true,
-                    correctAfterLearn: false,
-                });
                 // Unticked after all, and finished: nothing applied.
                 await route(patchItemRoute, OWNER, `review/items/${id}`, {
                     method: "PATCH",

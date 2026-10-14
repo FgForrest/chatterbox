@@ -1,6 +1,8 @@
 import { APIError, type OpenAI } from "openai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { apiCredentials } from "@/db/schema";
+import { AppError, ErrorCode } from "@/lib/errors";
+import { resolveStepProvider } from "@/lib/profiles/providers";
 
 vi.mock("@/lib/ai/usage-cost", () => ({
     recordChatCompletionUsage: vi.fn().mockResolvedValue(undefined),
@@ -12,7 +14,11 @@ vi.mock("@/lib/profiles/providers", () => ({
     resolveStepProvider: vi.fn(),
 }));
 
-import { runSummary, type SummaryModel } from "@/lib/summary/summary-model";
+import {
+    runSummary,
+    type SummaryModel,
+    summaryModelFor,
+} from "@/lib/summary/summary-model";
 
 function reply() {
     return {
@@ -28,6 +34,10 @@ function reply() {
 }
 
 describe("summary provider call reservations", () => {
+    beforeEach(() => {
+        vi.mocked(resolveStepProvider).mockReset();
+    });
+
     afterEach(() => {
         vi.useRealTimers();
     });
@@ -94,5 +104,78 @@ describe("summary provider call reservations", () => {
 
         expect(create).toHaveBeenCalledTimes(5);
         expect(reserveCall).toHaveBeenCalledTimes(5);
+    });
+
+    it("uses a pinned Organization provider and reserves every multi-pass call", async () => {
+        const create = vi.fn().mockResolvedValue(reply());
+        const reserveCall = vi.fn().mockResolvedValue(undefined);
+        const credential = {
+            id: "org-card",
+            userId: "org-user",
+            provider: "OpenAI",
+            apiKey: "plaintext-at-use",
+            baseUrl: null,
+            defaultModel: "gpt-4o-mini",
+            isDefaultTranscription: false,
+            isDefaultEnhancement: false,
+            isDefaultLearn: false,
+            inputUsdPerMillion: null,
+            outputUsdPerMillion: null,
+            audioUsdPerHour: null,
+            disabledAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        } satisfies typeof apiCredentials.$inferSelect;
+        vi.mocked(resolveStepProvider).mockResolvedValueOnce({
+            kind: "credential",
+            credential,
+            payerUserId: "org-user",
+            reserveCall,
+        });
+        const pin = {
+            credentialId: "org-card",
+            scope: "organization" as const,
+        };
+        const model = await summaryModelFor("actor", pin);
+        model.openai.chat.completions.create = create;
+
+        await runSummary({
+            model,
+            usage: {
+                itemId: "recording",
+                ownerUserId: "owner",
+                payerUserId: model.payerUserId,
+            },
+            systemContent: "system",
+            prompt: "prompt",
+            mergeSystem: (prompt) => prompt,
+            multiPass: { rounds: 2, mergePrompt: null },
+        });
+
+        expect(resolveStepProvider).toHaveBeenCalledWith({
+            step: "summary",
+            pin,
+            actorUserId: "actor",
+        });
+        expect(model.payerUserId).toBe("org-user");
+        expect(create).toHaveBeenCalledTimes(3);
+        expect(reserveCall).toHaveBeenCalledTimes(3);
+    });
+
+    it("does not fall back when a pinned provider is missing", async () => {
+        const missing = new AppError(
+            ErrorCode.NOT_FOUND,
+            "The pinned Organization provider no longer exists",
+            404,
+        );
+        vi.mocked(resolveStepProvider).mockRejectedValueOnce(missing);
+
+        await expect(
+            summaryModelFor("actor", {
+                credentialId: "missing",
+                scope: "organization",
+            }),
+        ).rejects.toBe(missing);
+        expect(resolveStepProvider).toHaveBeenCalledTimes(1);
     });
 });

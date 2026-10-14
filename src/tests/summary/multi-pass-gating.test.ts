@@ -15,7 +15,10 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import type { LegacyProfileSettings } from "@/lib/profiles/seed";
 import { DEFAULT_MERGE_PROMPT } from "@/lib/summary/multi-pass";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
@@ -63,7 +66,18 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, profileLegacy } = vi.hoisted(() => ({
+    createMock: vi.fn(),
+    profileLegacy: {
+        current: {} as Partial<LegacyProfileSettings>,
+    },
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () =>
+        resolvedAudioProfile(profileLegacy.current),
+    ),
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -136,12 +150,21 @@ vi.mock("@/db", () => ({
 type Settings = Record<string, unknown>;
 
 function stage(settings: Settings) {
+    profileLegacy.current = settings;
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
-        [{ recordingId: "rec-1", userId: "user-1", text: "a transcript" }],
+        [
+            {
+                id: "transcription-1",
+                revision: 4,
+                recordingId: "rec-1",
+                userId: "user-1",
+                text: "a transcript",
+            },
+        ],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null, ...settings }],
@@ -270,6 +293,23 @@ describe("multi-pass gating", () => {
         expect(row.multiPassRounds).toBe(3);
         expect(row.multiPassUsed).toBe(3);
         expect(row.multiPassMerged).toBe(true);
+    });
+
+    it("persists the profile, prompt version, payer, and content inputs", async () => {
+        stage({ summaryMultiPass: false });
+        await generate("manual");
+
+        expect(written.at(-1)).toMatchObject({
+            profileRevisionId: "seeded-profile-revision",
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: "user-1",
+            inputs: {
+                contentId: "transcription-1",
+                contentRevision: 4,
+            },
+            outputLanguage: null,
+            outputFormatLocale: "en",
+        });
     });
 
     it("clears provenance when a multi-pass summary is regenerated single-pass", async () => {

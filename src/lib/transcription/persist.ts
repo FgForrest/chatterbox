@@ -38,6 +38,11 @@ export type TranscriptSource = "riffado" | "plaud" | "mixed";
 /** Summary pipeline provenance. One row per source can coexist. */
 export type EnhancementSource = "riffado" | "plaud";
 
+export interface ProcessingRunInputs extends Record<string, unknown> {
+    contentId: string;
+    contentRevision: number | string;
+}
+
 export interface UpsertTranscriptionArgs {
     /** The recording's owner, who owns its content rows. */
     userId: string;
@@ -76,6 +81,11 @@ export interface UpsertTranscriptionArgs {
     actsForOrganization?: boolean;
     /** Account whose provider produced the text; defaults to the actor. */
     producedByUserId?: string;
+    /** Immutable profile and input provenance for this provider run. */
+    profileRevisionId?: string | null;
+    builtinPromptsVersion?: string | null;
+    payerUserId?: string | null;
+    inputs?: ProcessingRunInputs | null;
     /**
      * The job this write finishes. Cancelled meanwhile (the recording was
      * withdrawn, erased or deleted), it writes nothing, even if the
@@ -131,6 +141,13 @@ export interface UpsertEnhancementArgs {
     actsForOrganization?: boolean;
     /** Account whose provider produced the summary; defaults to the actor. */
     producedByUserId?: string;
+    /** Immutable profile, prompt, language and input provenance for this run. */
+    profileRevisionId?: string | null;
+    builtinPromptsVersion?: string | null;
+    outputLanguage?: string | null;
+    outputFormatLocale?: string | null;
+    payerUserId?: string | null;
+    inputs?: ProcessingRunInputs | null;
     /** See `UpsertTranscriptionArgs.jobId`. */
     jobId?: string;
     /**
@@ -289,6 +306,12 @@ export async function upsertTranscription(
             const encryptedTurns = turns?.length
                 ? encryptJsonField(turns)
                 : null;
+            const runRecordColumns = {
+                profileRevisionId: args.profileRevisionId ?? null,
+                builtinPromptsVersion: args.builtinPromptsVersion ?? null,
+                payerUserId: args.payerUserId ?? null,
+                inputs: args.inputs ?? null,
+            };
 
             if (current) {
                 await tx
@@ -305,6 +328,7 @@ export async function upsertTranscription(
                         model,
                         source,
                         producedByUserId,
+                        ...runRecordColumns,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
@@ -349,6 +373,7 @@ export async function upsertTranscription(
                     model,
                     source,
                     producedByUserId,
+                    ...runRecordColumns,
                 });
                 // Which audio it was made from, for a later rewrite.
                 await stampNewTranscriptAudioInTx(tx, {
@@ -484,6 +509,14 @@ export async function upsertEnhancement(
                 multiPassUsed: multiPass?.passesUsed ?? null,
                 multiPassMerged: multiPass?.merged ?? null,
             };
+            const runRecordColumns = {
+                profileRevisionId: args.profileRevisionId ?? null,
+                builtinPromptsVersion: args.builtinPromptsVersion ?? null,
+                outputLanguage: args.outputLanguage ?? null,
+                outputFormatLocale: args.outputFormatLocale ?? null,
+                payerUserId: args.payerUserId ?? null,
+                inputs: args.inputs ?? null,
+            };
 
             const encryptedSummary = encryptText(summary);
             const encryptedKeyPoints = encryptJsonField(keyPoints);
@@ -502,6 +535,7 @@ export async function upsertEnhancement(
                         source,
                         producedByUserId,
                         ...multiPassColumns,
+                        ...runRecordColumns,
                     })
                     .where(
                         and(
@@ -522,6 +556,7 @@ export async function upsertEnhancement(
                     source,
                     producedByUserId,
                     ...multiPassColumns,
+                    ...runRecordColumns,
                 });
             }
             if (args.tasks) {

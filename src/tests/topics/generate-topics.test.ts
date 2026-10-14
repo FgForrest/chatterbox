@@ -14,6 +14,8 @@ import {
     userSettings,
 } from "@/db/schema";
 import { ErrorCode } from "@/lib/errors";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored turns as they are.
 vi.mock("@/lib/learn/llm-input", () => ({
@@ -26,6 +28,9 @@ vi.mock("@/lib/learn/llm-input", () => ({
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
+}));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
 }));
 vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
@@ -154,7 +159,15 @@ const TURNS = [
 function stage(turns: unknown = TURNS) {
     selectResults.set(recordings, [[{ id: "rec-1" }]]);
     selectResults.set(transcriptions, [
-        [{ id: "tr-1", text: "ciphertext", turns }],
+        [
+            {
+                id: "tr-1",
+                revision: 7,
+                text: "ciphertext",
+                turns,
+                detectedLanguage: "cs",
+            },
+        ],
     ]);
     selectResults.set(userSettings, [
         [{ topicPrompt: null, aiOutputLanguage: null }],
@@ -224,6 +237,12 @@ describe("generateTopicsForTranscript", () => {
         expect(writes).toHaveLength(1);
         expect(writes[0].set.topics).toMatchObject({
             encrypted: { topics: result.topics, templateId: "default" },
+        });
+        expect(writes[0].set).toMatchObject({
+            profileRevisionId: "seeded-profile-revision",
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: "user-1",
+            inputs: { contentId: "tr-1", contentRevision: 7 },
         });
     });
 

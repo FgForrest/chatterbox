@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 const mocks = vi.hoisted(() => ({
     dbSelect: vi.fn(),
@@ -73,6 +74,7 @@ vi.mock("@/lib/encryption", () => ({
 
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: vi.fn((value: string) => value),
+    decryptJsonField: vi.fn((value: unknown) => value),
     encryptText: vi.fn((value: string) => value),
 }));
 
@@ -156,6 +158,10 @@ vi.mock("@/lib/pipeline/trigger", () => ({
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
     captureServerException: vi.fn(),
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
 }));
 
 vi.mock("@/lib/rate-limit", () => ({

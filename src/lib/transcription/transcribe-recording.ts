@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { audioItemColumns, recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
-    apiCredentials,
     chatterItems,
     recordings,
     transcriptions,
@@ -15,7 +14,6 @@ import {
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
@@ -42,11 +40,13 @@ import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import {
-    type DecryptedCredential,
     type ResolvedStepProvider,
     resolveStepProvider,
 } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -75,7 +75,6 @@ import {
     parseTranscriptionResponse,
 } from "@/lib/transcription/format";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
-import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import {
     speechmaticsTakesVocabulary,
@@ -143,7 +142,11 @@ export async function storeBrowserTranscription(
     }
 
     const [recording] = await db
-        .select({ id: recordings.id, deletedAt: recordings.deletedAt })
+        .select({
+            id: recordings.id,
+            deletedAt: recordings.deletedAt,
+            fileMd5: recordings.fileMd5,
+        })
         .from(recordings)
         .where(
             and(
@@ -161,6 +164,16 @@ export async function storeBrowserTranscription(
             errorCode: "RECORDING_NOT_FOUND",
         };
     }
+    const profile = await resolveItemProfile(recordingId, "private", userId);
+    const runRecord = {
+        profileRevisionId: profile.revisionId,
+        builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+        payerUserId: userId,
+        inputs: {
+            contentId: recording.id,
+            contentRevision: recording.fileMd5,
+        },
+    };
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
     const RECORDING_REFUSED = Symbol("recording-refused");
@@ -225,6 +238,7 @@ export async function storeBrowserTranscription(
                         topics: null,
                         topicsInputFingerprint: null,
                         producedByUserId: userId,
+                        ...runRecord,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
@@ -260,6 +274,7 @@ export async function storeBrowserTranscription(
                     topics: null,
                     topicsInputFingerprint: null,
                     producedByUserId: userId,
+                    ...runRecord,
                 });
                 // Which audio the browser fetched is not known here; it
                 // has no turns, so no speaker rests on it.
@@ -521,49 +536,59 @@ async function transcribeRecordingInner(
             };
         }
 
-        let resolvedDefault: ResolvedStepProvider | null = null;
-        if (!opts.providerId) {
-            try {
-                resolvedDefault = await resolveStepProvider({
-                    step: "transcription",
-                    pin: null,
-                    actorUserId: ctx.actorUserId,
-                });
-            } catch (error) {
-                if (
-                    error instanceof AppError &&
-                    error.code === ErrorCode.NO_TRANSCRIPTION_PROVIDER
-                ) {
-                    return {
-                        success: false,
-                        error: "No transcription API configured",
-                        errorCode: "NO_TRANSCRIPTION_PROVIDER",
-                    };
-                }
-                throw error;
+        const profile = await resolveItemProfile(
+            recordingId,
+            ctx.view,
+            ctx.ownerUserId,
+            ctx.actorUserId,
+        );
+        const profileSettings = profile.settings as AudioProfileSettings;
+        const transcribeStep = profileSettings.steps.transcribe;
+        let resolved: ResolvedStepProvider;
+        try {
+            resolved = await resolveStepProvider({
+                step: "transcription",
+                pin: opts.providerId
+                    ? { credentialId: opts.providerId, scope: "personal" }
+                    : transcribeStep.provider,
+                actorUserId: ctx.actorUserId,
+            });
+        } catch (error) {
+            if (
+                opts.providerId &&
+                error instanceof AppError &&
+                error.code === ErrorCode.NOT_FOUND
+            ) {
+                return {
+                    success: false,
+                    error: "No transcription API configured",
+                    errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                };
             }
+            if (
+                !opts.providerId &&
+                !transcribeStep.provider &&
+                error instanceof AppError &&
+                error.code === ErrorCode.NO_TRANSCRIPTION_PROVIDER
+            ) {
+                return {
+                    success: false,
+                    error: "No transcription API configured",
+                    errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                };
+            }
+            throw error;
         }
-        // The engine (provider pointer) is the actor's, because the keys are.
-        // What the output should look like (language) follows the view.
-        const [settings] = opts.providerId
-            ? await db
+        const [settings] = resolved.actorSettings
+            ? [resolved.actorSettings]
+            : await db
                   .select()
                   .from(userSettings)
                   .where(eq(userSettings.userId, ctx.actorUserId))
-                  .limit(1)
-            : [resolvedDefault?.actorSettings];
-        const [contentSettings] =
-            ctx.settingsUserId === ctx.actorUserId
-                ? [settings]
-                : await db
-                      .select()
-                      .from(userSettings)
-                      .where(eq(userSettings.userId, ctx.settingsUserId))
-                      .limit(1);
+                  .limit(1);
 
-        const defaultLanguage =
-            contentSettings?.defaultTranscriptionLanguage || undefined;
-        const quality = settings?.transcriptionQuality || "balanced";
+        const defaultLanguage = transcribeStep.language || undefined;
+        const quality = transcribeStep.quality;
         // Title, Plaud and automation side effects act on the owner's
         // recording; a run on the Organization view never triggers them.
         const autoGenerateTitle =
@@ -571,42 +596,11 @@ async function transcribeRecordingInner(
         const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
         void quality;
 
-        let credentials:
-            | typeof apiCredentials.$inferSelect
-            | DecryptedCredential
-            | undefined;
-        let credentialKeyIsDecrypted = false;
-        let useManaged = isRiffadoIncludedProviderId(opts.providerId);
-        let payerUserId = ctx.actorUserId;
-        let reserveCall: () => Promise<void> = () => Promise.resolve();
-        if (opts.providerId && !useManaged) {
-            [credentials] = await db
-                .select()
-                .from(apiCredentials)
-                .where(
-                    and(
-                        eq(apiCredentials.id, opts.providerId),
-                        eq(apiCredentials.userId, ctx.actorUserId),
-                    ),
-                )
-                .limit(1);
-            if (credentials?.disabledAt) {
-                throw new AppError(
-                    ErrorCode.CONFLICT,
-                    `The selected provider ${credentials.provider} is disabled. Enable it or choose another provider.`,
-                    409,
-                );
-            }
-        } else if (resolvedDefault) {
-            const resolved = resolvedDefault;
-            payerUserId = resolved.payerUserId;
-            reserveCall = resolved.reserveCall;
-            useManaged = resolved.kind === "managed";
-            if (resolved.kind === "credential") {
-                credentials = resolved.credential;
-                credentialKeyIsDecrypted = true;
-            }
-        }
+        const credentials =
+            resolved.kind === "credential" ? resolved.credential : undefined;
+        const useManaged = resolved.kind === "managed";
+        const payerUserId = resolved.payerUserId;
+        const reserveCall = resolved.reserveCall;
 
         const runManagedTranscription = async () => {
             const input = {
@@ -679,9 +673,7 @@ async function transcribeRecordingInner(
             persistProvider = result.provider;
             persistModel = result.model;
         } else if (credentials) {
-            const apiKey = credentialKeyIsDecrypted
-                ? credentials.apiKey
-                : decrypt(credentials.apiKey);
+            const apiKey = credentials.apiKey;
 
             const storage = await createUserStorageProvider(ctx.ownerUserId);
             const audioBuffer = await storage.downloadFile(
@@ -945,6 +937,13 @@ async function transcribeRecordingInner(
             provider: persistProvider,
             model: persistModel,
             turns,
+            profileRevisionId: profile.revisionId,
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId,
+            inputs: {
+                contentId: recording.id,
+                contentRevision: recording.fileMd5,
+            },
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,
             actsForOrganization: ctx.actsForOrganization,

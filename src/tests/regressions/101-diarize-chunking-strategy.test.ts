@@ -25,6 +25,11 @@ import {
     buildTranscriptionParams,
     getResponseFormat,
 } from "@/lib/transcription/format";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
 
 describe("issue #101 — buildTranscriptionParams sends chunking_strategy for diarize", () => {
     const fakeFile = new File([new Uint8Array([1, 2, 3])], "x.mp3", {

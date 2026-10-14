@@ -8,6 +8,7 @@ import {
     storeGeneratedTitle,
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
+import type { RecordingView } from "@/lib/sharing/view";
 
 /**
  * Generate a title from a summary or transcript and make it the recording's name:
@@ -26,6 +27,7 @@ export async function applyGeneratedTitle(input: {
     source?: "summary" | "transcript";
     expectedTitleEditedAt?: Date | null;
     actorUserId?: string;
+    view?: RecordingView;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -35,6 +37,7 @@ export async function applyGeneratedTitle(input: {
         text,
         input.source ?? "transcript",
         userId,
+        input.view ?? "private",
     );
 
     // Not stored when a person has set a title, and then nothing below runs.

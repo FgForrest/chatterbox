@@ -30,7 +30,7 @@ import {
     encryptText,
 } from "@/lib/encryption/fields";
 import { locales } from "@/lib/i18n/config";
-import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { getOrgUserId } from "@/lib/org/config";
 import {
     type AudioProfileSettings,
     defaultProfileSettings,
@@ -367,7 +367,7 @@ function defaultLegacySettings(): LegacyProfileSettings {
 
 /** Lazily seed one owner's legacy settings into immutable profile revisions. */
 export async function ensureProfiles(userId: string): Promise<void> {
-    const orgUserId = isOrgScopeEnabled() ? await getOrgUserId() : null;
+    const orgUserId = await getOrgUserId();
     const scope: ProfileScope =
         orgUserId === userId ? "organization" : "personal";
 
