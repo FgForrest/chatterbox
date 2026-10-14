@@ -527,6 +527,11 @@ async function invalidateSnapshots(localUserId: string | null): Promise<void> {
  * `access.manage`. After the write the access is read back; only that is
  * reported. Losing `use` ends the person's sessions here and at the
  * provider; any other change makes their sessions renew.
+ *
+ * The lock's transaction holds nothing but the lock. Everything written
+ * after the provider's change (the recorded access state, the ended or
+ * renewing sessions, the audit) commits on its own, because the provider's
+ * change cannot be rolled back with it.
  */
 export async function changeAccess(
     context: AdminContext,

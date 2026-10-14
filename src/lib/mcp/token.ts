@@ -81,6 +81,10 @@ function realmUnavailable(error: unknown): boolean {
  * ID token, a refresh token or a token without a type is invalid), then
  * the audience. Throws when the realm cannot be asked: its discovery
  * document (without `options`) or its signing keys out of reach.
+ *
+ * A token naming a key the realm does not publish is invalid, not a sign
+ * of an outage: the token comes from the caller, and the key set is
+ * refetched first (at most every 30 seconds), so a rotated key is found.
  */
 export async function verifyMcpToken(
     token: string,

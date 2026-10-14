@@ -372,6 +372,49 @@ describe("verifyMcpToken with the configured realm", () => {
         );
     });
 
+    it("finds a rotated key once the key set may be refetched", async () => {
+        const rotating = "http://keycloak-rotating:8080/realms/acme";
+        const published: JWK[] = [publicJwk];
+        mockEnv.MCP_AUDIENCE = AUDIENCE;
+        mockEnv.OIDC_ISSUER_URL = rotating;
+        fetchSpy.mockImplementation(async (input) => {
+            const url = String(input);
+            if (url === `${rotating}/.well-known/openid-configuration`) {
+                return Response.json({
+                    issuer: ISSUER,
+                    jwks_uri: `${rotating}/protocol/openid-connect/certs`,
+                });
+            }
+            if (url === `${rotating}/protocol/openid-connect/certs`) {
+                return Response.json({ keys: published });
+            }
+            return new Response(null, { status: 404 });
+        });
+        const rotated = await generateKeyPair("RS256");
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+            expect((await verifyMcpToken(await token())).kind).toBe("valid");
+            published.push({
+                ...(await exportJWK(rotated.publicKey)),
+                kid: "k2",
+                alg: "RS256",
+                use: "sig",
+            });
+            const signedByNewKey = () =>
+                token({}, { kid: "k2", key: rotated.privateKey });
+
+            expect((await verifyMcpToken(await signedByNewKey())).kind).toBe(
+                "invalid",
+            );
+            vi.setSystemTime(Date.now() + 31_000);
+            expect((await verifyMcpToken(await signedByNewKey())).kind).toBe(
+                "valid",
+            );
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("throws when the realm cannot be discovered", async () => {
         mockEnv.MCP_AUDIENCE = AUDIENCE;
         mockEnv.OIDC_ISSUER_URL = "http://keycloak:8080/realms/missing";
