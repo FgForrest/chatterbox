@@ -3,8 +3,15 @@
  * Markdown, content-is-data and language directives. Pure constants.
  */
 
-/** The built-in template a mail is summarized with unless one is chosen. */
-export const MAIL_SUMMARY_PROMPT = `Summarize this mail, then extract key points and action items if any exist.
+import {
+    assembleSummaryPrompt,
+    type SummaryPromptParts,
+} from "./summary-presets";
+
+/** Localized built-in mail summary parts; skeletons remain app-owned. */
+export const MAIL_SUMMARY_PROMPT_PARTS: SummaryPromptParts = {
+    skeleton: {
+        en: `Summarize this mail, then extract key points and action items if any exist.
 
 Respond with a single JSON object and nothing else. Do not wrap it in code fences.
 {
@@ -13,12 +20,45 @@ Respond with a single JSON object and nothing else. Do not wrap it in code fence
   "actionItems": ["action item 1", "action item 2"]
 }
 
-Say who writes to whom and what they ask for, offer, decide or report. Keep it to one tight paragraph unless the mail, with the messages it quotes, moves through several distinct topics; then use a short opening paragraph and a "###" section per topic.
+{focus} {outputFormat}
 
 If there are no key points or action items, return empty arrays.
 
 Mail:
-{transcription}`;
+{transcription}`,
+        "cs-CZ": `Shrňte tento e-mail a poté z něj vyberte hlavní body a případné úkoly.
+
+Odpovězte jediným objektem JSON a ničím jiným. Nevkládejte jej do bloku kódu.
+{
+  "summary": "Shrnutí e-mailu ve formátu Markdown",
+  "keyPoints": ["hlavní bod 1", "hlavní bod 2"],
+  "actionItems": ["úkol 1", "úkol 2"]
+}
+
+{focus} {outputFormat}
+
+Pokud nejsou žádné hlavní body nebo úkoly, vraťte prázdná pole.
+
+E-mail:
+{transcription}`,
+    },
+    focus: {
+        en: "Say who writes to whom and what they ask for, offer, decide or report.",
+        "cs-CZ":
+            "Uveďte, kdo komu píše a o co žádá, co nabízí, o čem rozhoduje nebo co sděluje.",
+    },
+    outputFormat: {
+        en: 'Keep it to one tight paragraph unless the mail, with the messages it quotes, moves through several distinct topics; then use a short opening paragraph and a "###" section per topic.',
+        "cs-CZ":
+            "Shrnutí udržte v jednom výstižném odstavci, pokud e-mail spolu s citovanými zprávami neobsahuje několik odlišných témat; v takovém případě použijte krátký úvodní odstavec a pro každé téma oddíl s nadpisem úrovně „###“.",
+    },
+};
+
+/** The built-in template a mail is summarized with unless one is chosen. */
+export const MAIL_SUMMARY_PROMPT = assembleSummaryPrompt(
+    MAIL_SUMMARY_PROMPT_PARTS,
+    "en",
+);
 
 export const MAIL_SUMMARY_SYSTEM =
     "You are a helpful assistant that summarizes mail. Always respond with one raw JSON object and nothing else: no code fences, and no text before or after it. Markdown inside the JSON string values is expected.";
