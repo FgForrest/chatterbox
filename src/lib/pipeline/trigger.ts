@@ -1,6 +1,9 @@
 import { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import { incrementProcessingRequestInTx } from "@/db/queries/pipeline";
+import {
+    incrementProcessingRequestInTx,
+    wakePendingPipelineAdvanceInTx,
+} from "@/db/queries/pipeline";
 import { nudge } from "@/lib/jobs/nudge";
 import type { PipelineView } from "@/lib/pipeline/types";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -37,10 +40,11 @@ export async function requestAdvanceInTx(
     );
     if (requestedGeneration === null) return null;
 
+    const subjectId = recordingJobSubject(input.itemId, input.view);
     const enqueued = await enqueueJobInTx(tx, {
         userId: input.userId,
         kind: PIPELINE_ADVANCE_JOB_KIND,
-        subjectId: recordingJobSubject(input.itemId, input.view),
+        subjectId,
         maxAttempts: 10,
         payload: {
             itemId: input.itemId,
@@ -48,6 +52,9 @@ export async function requestAdvanceInTx(
             reason: input.reason,
         },
     });
+    if (!enqueued) {
+        await wakePendingPipelineAdvanceInTx(tx, input.userId, subjectId);
+    }
     return { requestedGeneration, enqueued };
 }
 
@@ -56,6 +63,6 @@ export async function requestAdvance(
     input: RequestAdvanceInput,
 ): Promise<RequestAdvanceResult | null> {
     const result = await db.transaction((tx) => requestAdvanceInTx(tx, input));
-    if (result?.enqueued) nudge();
+    if (result) nudge();
     return result;
 }

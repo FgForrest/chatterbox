@@ -53,6 +53,26 @@ export async function incrementProcessingRequestInTx(
     return rows[0]?.requestedGeneration ?? null;
 }
 
+/** Bring one owner-scoped pending pipeline driver out of deferred backoff. */
+export async function wakePendingPipelineAdvanceInTx(
+    tx: Tx,
+    userId: string,
+    subjectId: string,
+): Promise<boolean> {
+    const rows = await tx.execute<{ updated: number }>(sql`
+        update async_jobs
+        set next_attempt_at = now(),
+            updated_at = now()
+        where user_id = ${userId}
+          and kind = 'pipeline.advance'
+          and subject_id = ${subjectId}
+          and status = 'pending'
+          and next_attempt_at > now()
+        returning 1 as updated
+    `);
+    return rows.length > 0;
+}
+
 /** Read one owner-scoped processing row. */
 export async function readProcessingRow(
     itemId: string,
@@ -154,13 +174,8 @@ export async function completeProcessingGenerationInTx(
 
 /** Rows whose requested work lost its active driver wake-up. */
 export async function listStalledPipelineRows(
-    now: Date,
     limit: number,
 ): Promise<StalledPipelineRow[]> {
-    const staleBefore = new Date(now.getTime() - 2 * 60_000).toISOString();
-    const failedSince = new Date(
-        now.getTime() - 24 * 60 * 60_000,
-    ).toISOString();
     const rows = await db.execute<{
         itemId: string;
         userId: string;
@@ -172,7 +187,7 @@ export async function listStalledPipelineRows(
             item_processing.view as "view"
         from item_processing
         where item_processing.processed_generation < item_processing.requested_generation
-          and item_processing.updated_at < ${staleBefore}::timestamp
+          and item_processing.updated_at < now() - interval '2 minutes'
           and not exists (
               select 1
               from async_jobs
@@ -196,7 +211,7 @@ export async function listStalledPipelineRows(
                     else item_processing.item_id
                 end
                 and async_jobs.status = 'failed'
-                and async_jobs.completed_at >= ${failedSince}::timestamp
+                and async_jobs.completed_at >= now() - interval '24 hours'
           ) < 3
         order by item_processing.updated_at asc
         limit ${limit}

@@ -8,11 +8,8 @@ const SWEEP_MS = 60_000;
 let sweeper: ReturnType<typeof setInterval> | undefined;
 
 /** Re-enqueue pipeline work whose active driver wake-up was lost. */
-export async function sweepStalledPipelines(
-    now = new Date(),
-    limit = 500,
-): Promise<number> {
-    const rows = await listStalledPipelineRows(now, limit);
+export async function sweepStalledPipelines(limit = 500): Promise<number> {
+    const rows = await listStalledPipelineRows(limit);
     let enqueued = 0;
     for (const row of rows) {
         const result = await enqueueJob({

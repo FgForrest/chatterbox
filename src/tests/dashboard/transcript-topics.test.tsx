@@ -306,6 +306,50 @@ describe("transcript topics", () => {
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
     });
 
+    it("follows the pipeline driver until its automatic topics job appears", async () => {
+        let topicReads = 0;
+        fetchMock.mockImplementation(async (url: string) => {
+            if (url === "/api/jobs/pipeline-job-1") {
+                return json({
+                    id: "pipeline-job-1",
+                    kind: "pipeline.advance",
+                    status: "completed",
+                });
+            }
+            if (url === "/api/jobs/topics-job-1") {
+                return json({
+                    id: "topics-job-1",
+                    kind: "topics",
+                    status: "completed",
+                });
+            }
+            if (url.includes("/topics")) {
+                topicReads++;
+                if (topicReads === 1) {
+                    return json({
+                        topics: null,
+                        jobId: "pipeline-job-1",
+                        jobKind: "pipeline.advance",
+                    });
+                }
+                if (topicReads === 2) {
+                    return json({
+                        topics: null,
+                        jobId: "topics-job-1",
+                        jobKind: "topics",
+                    });
+                }
+                return json({ topics: TOPICS, jobId: null });
+            }
+            return json({ speakers: [] });
+        });
+
+        renderPanel({ ...PLAUD, source: "riffado" });
+
+        await screen.findByRole("button", { name: "Topics (2)" });
+        expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
+    });
+
     it("says so when a job it picked up fails", async () => {
         const settle = serveRunningJob("failed");
         renderPanel(PLAUD);

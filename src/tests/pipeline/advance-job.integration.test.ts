@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import * as pipelineQueries from "@/db/queries/pipeline";
 import {
+    aiEnhancements,
     apiCredentials,
     asyncJobs,
     itemProcessing,
@@ -18,6 +19,7 @@ import {
     users,
 } from "@/db/schema";
 import { JobDeferredError } from "@/lib/jobs/retryable";
+import * as summaryRefresh from "@/lib/learn/summary-refresh";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import {
     PIPELINE_ADVANCE_JOB_KIND,
@@ -117,7 +119,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         return database.db;
     }
 
-    async function seedAudio(itemId = ITEM_ID): Promise<void> {
+    async function seedAudio(itemId = ITEM_ID, revision = 1): Promise<void> {
         await insertRecordings(db(), {
             id: itemId,
             userId: USER_ID,
@@ -136,6 +138,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         await db()
             .insert(transcriptions)
             .values({
+                id: `transcription-${itemId}`,
                 recordingId: itemId,
                 userId: USER_ID,
                 text: "Transcript",
@@ -143,7 +146,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 provider: "test",
                 model: "test",
                 source: "riffado",
-                revision: 1,
+                revision,
             });
     }
 
@@ -301,6 +304,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 reason: "released",
                 generation: requested?.requestedGeneration ?? 1,
                 inputs: {
+                    contentId: `transcription-${ITEM_ID}`,
                     contentSourceId: "riffado",
                     contentRevision: 1,
                 },
@@ -326,6 +330,206 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             { strict: true },
         );
         expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+    });
+
+    it("queues transcript follow-ups again after the content row is replaced", async () => {
+        await seedAudio(ITEM_ID, 0);
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        await db()
+            .delete(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, ITEM_ID),
+                    eq(transcriptions.userId, USER_ID),
+                ),
+            );
+        await db()
+            .insert(transcriptions)
+            .values({
+                id: "replacement-transcription",
+                recordingId: ITEM_ID,
+                userId: USER_ID,
+                text: "Replacement transcript",
+                turns: [{ speaker: "speaker_0", startMs: 0, endMs: 1_000 }],
+                provider: "test",
+                model: "test",
+                source: "riffado",
+            });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(mocks.queueAutoTopics).toHaveBeenCalledTimes(2);
+        expect(mocks.queueAutoSummary).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a Learn release belonging to an erased content row", async () => {
+        await seedAudio(ITEM_ID, 0);
+        const requested = await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "learn-released",
+        });
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, ITEM_ID, "private", USER_ID, "learn", {
+                state: "done",
+                reason: "released",
+                generation: requested?.requestedGeneration ?? 1,
+                inputs: {
+                    contentId: `transcription-${ITEM_ID}`,
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                },
+                at: new Date().toISOString(),
+            }),
+        );
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        await db()
+            .delete(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, ITEM_ID),
+                    eq(transcriptions.userId, USER_ID),
+                ),
+            );
+        await db()
+            .insert(transcriptions)
+            .values({
+                id: "post-release-transcription",
+                recordingId: ITEM_ID,
+                userId: USER_ID,
+                text: "Replacement transcript",
+                turns: [{ speaker: "speaker_0", startMs: 0, endMs: 1_000 }],
+                provider: "test",
+                model: "test",
+                source: "riffado",
+            });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(mocks.queueAutoTopics).toHaveBeenLastCalledWith(
+            USER_ID,
+            ITEM_ID,
+            "riffado",
+        );
+        expect(mocks.queueAutoSummary).toHaveBeenLastCalledWith(
+            USER_ID,
+            ITEM_ID,
+            "meeting-notes",
+        );
+    });
+
+    it("stops between actions when the worker attempt is aborted", async () => {
+        await seedAudio();
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+        const controller = new AbortController();
+        const abandoned = new Error("worker abandoned");
+        mocks.queueAutoTopics.mockImplementationOnce(async () => {
+            controller.abort(abandoned);
+        });
+
+        await expect(
+            pipelineAdvanceJobHandler.run({
+                ...jobContext(),
+                signal: controller.signal,
+            }),
+        ).rejects.toBe(abandoned);
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+        expect((await processing())?.phases).toEqual({});
+    });
+
+    it("does not check summary staleness outside the Learn release path", async () => {
+        await seedAudio();
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                transcriptionId: `transcription-${ITEM_ID}`,
+                summary: "Existing summary",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+            });
+        const stale = vi
+            .spyOn(summaryRefresh, "isSummaryStale")
+            .mockResolvedValue(true);
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(stale).not.toHaveBeenCalled();
+    });
+
+    it("checks summary staleness for the current released content", async () => {
+        await seedAudio();
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                transcriptionId: `transcription-${ITEM_ID}`,
+                summary: "Existing summary",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+            });
+        const requested = await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "learn-released",
+        });
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, ITEM_ID, "private", USER_ID, "learn", {
+                state: "done",
+                reason: "released",
+                generation: requested?.requestedGeneration ?? 1,
+                inputs: {
+                    contentId: `transcription-${ITEM_ID}`,
+                    contentSourceId: "riffado",
+                    contentRevision: 1,
+                },
+                at: new Date().toISOString(),
+            }),
+        );
+        const stale = vi
+            .spyOn(summaryRefresh, "isSummaryStale")
+            .mockResolvedValue(true);
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(stale).toHaveBeenCalledWith(USER_ID, ITEM_ID);
     });
 
     it("sweeps only old, unclaimed, non-poison stalled rows", async () => {
@@ -408,7 +612,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 })),
             );
 
-        await expect(sweepStalledPipelines(now)).resolves.toBe(1);
+        await expect(sweepStalledPipelines()).resolves.toBe(1);
 
         const activeJobs = await db()
             .select({ subjectId: asyncJobs.subjectId })

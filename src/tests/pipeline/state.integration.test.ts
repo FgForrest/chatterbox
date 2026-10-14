@@ -7,7 +7,7 @@ import {
     it,
     vi,
 } from "vitest";
-import { chatterItems, users } from "@/db/schema";
+import { chatterItems, recordings, transcriptions, users } from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -58,7 +58,11 @@ function record(generation: number, reason: string): PhaseRecord {
         state: "pending",
         reason,
         generation,
-        inputs: { contentSourceId: "riffado", contentRevision: 2 },
+        inputs: {
+            contentId: "transcription-1",
+            contentSourceId: "riffado",
+            contentRevision: 2,
+        },
         at: "2026-10-14T12:00:00.000Z",
     };
 }
@@ -171,11 +175,35 @@ describeWithDatabase("pipeline state (PostgreSQL)", () => {
     });
 
     it("marks a Learn release durably for the content revision", async () => {
+        await db()
+            .insert(recordings)
+            .values({
+                id: ITEM_ID,
+                userId: USER_ID,
+                deviceSn: "pipeline-state-device",
+                plaudFileId: "pipeline-state-plaud",
+                duration: 1_000,
+                endTime: new Date("2026-10-14T00:00:01.000Z"),
+                filesize: 10,
+                fileMd5: "0".repeat(32),
+                storageType: "local",
+                storagePath: `${USER_ID}/${ITEM_ID}.mp3`,
+                plaudVersion: "1",
+            });
+        await db().insert(transcriptions).values({
+            id: "pipeline-state-transcription",
+            recordingId: ITEM_ID,
+            userId: USER_ID,
+            text: "Transcript",
+            provider: "test",
+            model: "test",
+            source: "riffado",
+            revision: 9,
+        });
         const updated = await db().transaction((tx) =>
             markLearnReleasedInTx(tx, {
                 itemId: ITEM_ID,
                 userId: USER_ID,
-                contentRevision: 9,
                 generation: 6,
             }),
         );
@@ -187,7 +215,24 @@ describeWithDatabase("pipeline state (PostgreSQL)", () => {
             state: "done",
             reason: "released",
             generation: 6,
-            inputs: { contentSourceId: "riffado", contentRevision: 9 },
+            inputs: {
+                contentId: "pipeline-state-transcription",
+                contentSourceId: "riffado",
+                contentRevision: 9,
+            },
         });
+    });
+
+    it("does not mark a Learn release when the transcript is gone", async () => {
+        const updated = await db().transaction((tx) =>
+            markLearnReleasedInTx(tx, {
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                generation: 6,
+            }),
+        );
+
+        expect(updated).toBe(false);
+        expect(await readProcessing(ITEM_ID, "private", USER_ID)).toBeNull();
     });
 });

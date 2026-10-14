@@ -93,6 +93,7 @@ export interface SummaryData {
         jobId: string;
         status: "pending" | "processing" | "completed" | "failed";
         progress: JobProgressSnapshot | null;
+        kind?: string;
     };
     /** Prompt id actually used server-side. Only present on POST responses. */
     promptId?: string;
@@ -340,19 +341,32 @@ export function useTranscriptionSummary({
             summaryStartedAtRef.current = Date.now();
 
             try {
-                const snapshot: JobSnapshot | null = await followJob(
-                    job.jobId,
-                    {
-                        signal: followAbortRef.current?.signal,
-                        onProgress: (raw) => {
-                            if (!isCurrent()) return;
-                            const narrowed = toSummaryProgress(raw);
-                            if (narrowed) setSummaryProgress(narrowed);
+                let current = job;
+                while (isCurrent()) {
+                    setSummaryProgress(toSummaryProgress(current.progress));
+                    const snapshot: JobSnapshot | null = await followJob(
+                        current.jobId,
+                        {
+                            signal: followAbortRef.current?.signal,
+                            onProgress: (raw) => {
+                                if (!isCurrent()) return;
+                                const narrowed = toSummaryProgress(raw);
+                                if (narrowed) setSummaryProgress(narrowed);
+                            },
                         },
-                    },
-                );
-                if (!snapshot || !isCurrent()) return;
-                if (snapshot.status === "completed") {
+                    );
+                    if (!snapshot || !isCurrent()) return;
+                    if (snapshot.status !== "completed") {
+                        if (
+                            current.kind !== "pipeline.advance" &&
+                            isCurrent()
+                        ) {
+                            toast.error(
+                                snapshot.error || "Summary generation failed",
+                            );
+                        }
+                        return;
+                    }
                     const response = await fetch(
                         summaryUrl(targetId, "?source=riffado"),
                     );
@@ -363,9 +377,18 @@ export function useTranscriptionSummary({
                         fetchGenerationRef.current += 1;
                         setSummaryFor(targetId, "riffado", data);
                         toast.success("Summary generated");
+                        return;
                     }
-                } else if (isCurrent()) {
-                    toast.error(snapshot.error || "Summary generation failed");
+                    const next = data.activeJob;
+                    if (
+                        !next ||
+                        next.jobId === current.jobId ||
+                        (next.status !== "pending" &&
+                            next.status !== "processing")
+                    ) {
+                        return;
+                    }
+                    current = next;
                 }
             } catch {
                 // Nothing to report: this client only ever observed the job,

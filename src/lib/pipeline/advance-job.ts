@@ -9,7 +9,6 @@ import {
 import { executePipelineAction } from "@/lib/pipeline/execute";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { planAdvance } from "@/lib/pipeline/plan";
-import { readProcessing } from "@/lib/pipeline/state";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
 
@@ -25,18 +24,14 @@ export interface PipelineAdvancePayload {
 async function advancePipeline(
     userId: string,
     payload: PipelineAdvancePayload,
+    signal: AbortSignal,
 ): Promise<JobResult> {
     for (let iteration = 0; iteration < MAX_STABLE_CHECKS; iteration++) {
-        const processing = await readProcessing(
-            payload.itemId,
-            payload.view,
-            userId,
-        );
-        if (!processing) return { skipped: "gone" };
-        const generation = processing.requestedGeneration;
         const facts = await gatherFacts(payload.itemId, payload.view, userId);
-        const plan = planAdvance({ ...facts, generation });
+        const generation = facts.generation;
+        const plan = planAdvance(facts);
         for (const action of plan.actions) {
+            signal.throwIfAborted();
             await executePipelineAction({
                 action,
                 itemId: payload.itemId,
@@ -45,6 +40,7 @@ async function advancePipeline(
                 generation,
             });
         }
+        signal.throwIfAborted();
         const completed = await db.transaction((tx) =>
             completeProcessingGenerationInTx(
                 tx,
@@ -90,5 +86,6 @@ export const pipelineAdvanceJobHandler: JobHandler<PipelineAdvancePayload> = {
             ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
         };
     },
-    run: ({ userId, payload }) => advancePipeline(userId, payload),
+    run: ({ userId, payload, signal }) =>
+        advancePipeline(userId, payload, signal),
 };

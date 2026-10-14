@@ -19,6 +19,7 @@ export type PhaseState =
     | "not_processed";
 
 export interface ContentRevisionInput {
+    contentId: string;
     contentSourceId: string;
     contentRevision: number;
 }
@@ -26,6 +27,7 @@ export interface ContentRevisionInput {
 export type SummaryStepName = "summary" | "topics" | "title";
 
 export interface PhaseStepRecord {
+    contentId: string;
     contentRevision: number;
     generation: number;
 }

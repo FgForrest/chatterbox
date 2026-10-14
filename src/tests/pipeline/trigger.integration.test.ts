@@ -153,6 +153,7 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
     });
 
     it("increments but does not enqueue while the active job is processing", async () => {
+        const deferredUntil = new Date(Date.now() + 60 * 60_000);
         await requestAdvance({
             itemId: ITEM_ID,
             userId: USER_ID,
@@ -161,7 +162,7 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
         });
         await db()
             .update(asyncJobs)
-            .set({ status: "processing" })
+            .set({ status: "processing", nextAttemptAt: deferredUntil })
             .where(
                 and(
                     eq(asyncJobs.userId, USER_ID),
@@ -182,6 +183,44 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
             { requestedGeneration: 2 },
         ]);
         expect(await pipelineJobs()).toHaveLength(1);
+        expect((await pipelineJobs())[0]?.nextAttemptAt).toEqual(deferredUntil);
+    });
+
+    it("brings a deferred pending driver forward when new work is requested", async () => {
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "arrival",
+        });
+        const deferredUntil = new Date(Date.now() + 60 * 60_000);
+        await db()
+            .update(asyncJobs)
+            .set({ nextAttemptAt: deferredUntil })
+            .where(
+                and(
+                    eq(asyncJobs.userId, USER_ID),
+                    eq(asyncJobs.kind, PIPELINE_ADVANCE_JOB_KIND),
+                    eq(asyncJobs.subjectId, ITEM_ID),
+                ),
+            );
+        const requestedAt = new Date();
+
+        const result = await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        expect(result).toEqual({ requestedGeneration: 2, enqueued: false });
+        const [job] = await pipelineJobs();
+        expect(job?.nextAttemptAt.getTime()).toBeGreaterThanOrEqual(
+            requestedAt.getTime(),
+        );
+        expect(job?.nextAttemptAt.getTime()).toBeLessThan(
+            deferredUntil.getTime(),
+        );
     });
 
     it("increments exactly twice across parallel transactions", async () => {

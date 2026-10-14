@@ -35,13 +35,7 @@ import {
     or,
 } from "drizzle-orm";
 import { db } from "@/db";
-import {
-    asyncJobs,
-    chatterItems,
-    learnRuns,
-    transcriptions,
-    userSettings,
-} from "@/db/schema";
+import { asyncJobs, chatterItems, learnRuns, userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
 import {
@@ -243,25 +237,11 @@ async function requestLearnReleaseInTx(
     });
     if (!requested) return null;
 
-    const [transcription] = await tx
-        .select({ revision: transcriptions.revision })
-        .from(transcriptions)
-        .where(
-            and(
-                eq(transcriptions.recordingId, recordingId),
-                eq(transcriptions.userId, userId),
-                eq(transcriptions.source, "riffado"),
-            ),
-        )
-        .limit(1);
-    if (transcription) {
-        await markLearnReleasedInTx(tx, {
-            itemId: recordingId,
-            userId,
-            contentRevision: transcription.revision,
-            generation: requested.requestedGeneration,
-        });
-    }
+    await markLearnReleasedInTx(tx, {
+        itemId: recordingId,
+        userId,
+        generation: requested.requestedGeneration,
+    });
     return requested;
 }
 

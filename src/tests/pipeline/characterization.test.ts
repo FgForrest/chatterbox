@@ -322,6 +322,7 @@ function baseFacts(): PipelineFacts {
         view: "private",
         generation: 1,
         content: {
+            contentId: "transcription-1",
             contentSourceId: "riffado",
             contentRevision: 1,
             timed: true,
@@ -353,11 +354,6 @@ async function transcribeAndAdvance(
 ) {
     const result = await transcribeRecording(USER_ID, ITEM_ID, opts);
     if (opts.view === "org") return result;
-    const holdResult = vi
-        .mocked(autoLearn.holdForAutoLearn)
-        .mock.results.at(-1);
-    const held = holdResult ? await holdResult.value : false;
-    pipelineFacts.summaryDueAt = held ? AT : null;
     await runPipelineAdvance();
     return result;
 }
@@ -427,6 +423,7 @@ function mountTranscription({
     pipelineFacts = {
         ...baseFacts(),
         content: {
+            contentId: "transcription-1",
             contentSourceId: "riffado",
             contentRevision: 1,
             timed,
@@ -463,6 +460,7 @@ function mountMail({
             ownerUserId: USER_ID,
         },
         content: {
+            contentId: "mail-content-1",
             contentSourceId: "mail",
             contentRevision: 1,
             timed: false,
@@ -484,6 +482,8 @@ function mountRelease({
     autoGenerateTitle = false,
     autoSummarize = true,
     madeSummary = false,
+    stale = false,
+    active = false,
     recording = [{ id: ITEM_ID }],
     settings = [
         {
@@ -496,6 +496,8 @@ function mountRelease({
     autoGenerateTitle?: boolean;
     autoSummarize?: boolean;
     madeSummary?: boolean;
+    stale?: boolean;
+    active?: boolean;
     recording?: unknown[];
     settings?: unknown[];
 } = {}) {
@@ -519,8 +521,8 @@ function mountRelease({
                 : null,
         summary: {
             exists: madeSummary,
-            stale: false,
-            jobActive: false,
+            stale,
+            jobActive: active,
         },
         phases: {
             learn: {
@@ -528,6 +530,7 @@ function mountRelease({
                 reason: "released",
                 generation: 1,
                 inputs: {
+                    contentId: "transcription-1",
                     contentSourceId: "riffado",
                     contentRevision: 1,
                 },
@@ -535,22 +538,6 @@ function mountRelease({
             },
         },
     };
-    mocks.gatherFacts.mockImplementationOnce(async () => {
-        const active = await mocks.getActiveJob(
-            "summary",
-            `${ITEM_ID}:private`,
-        );
-        return {
-            ...pipelineFacts,
-            summary: {
-                exists: madeSummary,
-                stale: madeSummary
-                    ? await mocks.isSummaryStale(USER_ID, ITEM_ID)
-                    : false,
-                jobActive: active !== null,
-            },
-        };
-    });
 }
 
 async function runLearnRelease() {
@@ -565,14 +552,7 @@ async function runLearnRelease() {
     } as Parameters<typeof autoLearn.learnReleaseJobHandler.run>[0]);
     if (result && "skipped" in result) return result;
     await runPipelineAdvance();
-    return {
-        queued: [
-            ...(mocks.queueAutoSummary.mock.calls.length > 0
-                ? ["summary"]
-                : []),
-            ...(mocks.enqueueTitleJob.mock.calls.length > 0 ? ["title"] : []),
-        ],
-    };
+    return result;
 }
 
 beforeEach(() => {
@@ -640,10 +620,38 @@ beforeEach(() => {
     vi.spyOn(autoLearn, "holdForAutoLearn").mockResolvedValue(false);
 });
 
+describe("pipeline driver facts", () => {
+    it("uses the generation from the same facts row for marks and completion", async () => {
+        pipelineFacts = {
+            ...baseFacts(),
+            generation: 7,
+            settings: { ...DEFAULT_SETTINGS, autoSummarize: false },
+            content: {
+                contentId: "transcription-1",
+                contentSourceId: "riffado",
+                contentRevision: 1,
+                timed: false,
+            },
+        };
+
+        await runPipelineAdvance();
+
+        expect(mocks.readProcessing).not.toHaveBeenCalled();
+        expect(mocks.completeProcessingGenerationInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            ITEM_ID,
+            "private",
+            USER_ID,
+            7,
+        );
+    });
+});
+
 describe("transcribeRecording post-write triggers", () => {
     it("queues no title, topics, or summary while automatic Learn holds", async () => {
         mountTranscription();
         vi.mocked(autoLearn.holdForAutoLearn).mockResolvedValue(true);
+        pipelineFacts.summaryDueAt = AT;
 
         const result = await transcribeAndAdvance();
 
@@ -747,6 +755,25 @@ describe("transcribeRecording post-write triggers", () => {
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+    });
+
+    it("requests the private pipeline after transcription but not the Organization pipeline", async () => {
+        mountTranscription();
+
+        await transcribeRecording(USER_ID, ITEM_ID);
+
+        expect(mocks.requestAdvance).toHaveBeenCalledWith({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        vi.clearAllMocks();
+        mountTranscription();
+        await transcribeRecording(USER_ID, ITEM_ID, { view: "org" });
+
+        expect(mocks.requestAdvance).not.toHaveBeenCalled();
     });
 
     it("does not queue a summary when automatic summaries are off", async () => {
@@ -970,16 +997,10 @@ describe("learn.release triggers", () => {
         active,
         expected,
     }) => {
-        mountRelease({ madeSummary });
-        mocks.getActiveJob.mockResolvedValue(active ? { id: "job-1" } : null);
-        mocks.isSummaryStale.mockResolvedValue(stale);
+        mountRelease({ madeSummary, stale, active });
 
         await runLearnRelease();
 
-        expect(mocks.getActiveJob).toHaveBeenCalledWith(
-            "summary",
-            `${ITEM_ID}:private`,
-        );
         expect(mocks.queueAutoSummary).toHaveBeenCalledTimes(expected ? 1 : 0);
         if (expected) {
             expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
@@ -1014,12 +1035,14 @@ describe("learn.release triggers", () => {
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("returns the summary and title jobs it queued", async () => {
+    it("returns the pipeline job it queued, then the driver queues summary and title", async () => {
         mountRelease({ autoGenerateTitle: true });
 
         await expect(runLearnRelease()).resolves.toEqual({
-            queued: ["summary", "title"],
+            queued: ["pipeline.advance"],
         });
+        expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
+        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
     });
 
     it.each([

@@ -12,6 +12,8 @@ import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
 import { llmRendering } from "@/lib/learn/llm-input";
+import { pipelineMayQueue } from "@/lib/pipeline/pending";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -338,16 +340,28 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     // that picked the job back up after a restart -- can show that and
     // reattach, instead of an empty panel that gives no sign anything is
     // happening.
-    const active = await getActiveJob(
+    const activeSummary = await getActiveJob(
         SUMMARY_JOB_KIND,
         recordingJobSubject(id, view),
     );
+    const activePipeline =
+        !activeSummary &&
+        view === "private" &&
+        source === "riffado" &&
+        (await pipelineMayQueue(access.ownerUserId, id, "summary"))
+            ? await getActiveJob(
+                  PIPELINE_ADVANCE_JOB_KIND,
+                  recordingJobSubject(id, "private"),
+              )
+            : null;
+    const active = activeSummary ?? activePipeline;
     const activeJob =
-        active && (view === "org" || active.userId === session.user.id)
+        active && (view === "org" || active.userId === access.contentUserId)
             ? {
                   jobId: active.id,
                   status: active.status,
                   progress: active.progress ?? null,
+                  kind: active.kind,
               }
             : undefined;
 

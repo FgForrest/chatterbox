@@ -219,6 +219,7 @@ function mountSelectChain(
         view: "private",
         generation: 1,
         content: {
+            contentId: "transcription-1",
             contentSourceId: "riffado",
             contentRevision: 1,
             timed: false,
@@ -291,16 +292,23 @@ async function transcribeAndAdvance(
     recordingId: string,
     opts: Parameters<typeof transcribeRecording>[2] = {},
 ) {
+    const requestsBefore = pipelineMocks.requestAdvance.mock.calls.length;
     const result = await transcribeRecording(userId, recordingId, opts);
-    await pipelineAdvanceJobHandler.run({
-        jobId: "pipeline-job-1",
-        userId,
-        payload: { itemId: recordingId, view: "private", reason: "transcript" },
-        attempt: 1,
-        maxAttempts: 10,
-        signal: new AbortController().signal,
-        reportProgress: vi.fn(),
-    } as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+    if (pipelineMocks.requestAdvance.mock.calls.length > requestsBefore) {
+        await pipelineAdvanceJobHandler.run({
+            jobId: "pipeline-job-1",
+            userId,
+            payload: {
+                itemId: recordingId,
+                view: "private",
+                reason: "transcript",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        } as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+    }
     return result;
 }
 

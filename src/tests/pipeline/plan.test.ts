@@ -27,6 +27,7 @@ function audioFacts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
         view: "private",
         generation: 4,
         content: {
+            contentId: "transcription-1",
             contentSourceId: "riffado",
             contentRevision: 7,
             timed: true,
@@ -51,6 +52,7 @@ function mailFacts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
             ownerUserId: "user-1",
         },
         content: {
+            contentId: "mail-content-1",
             contentSourceId: "mail",
             contentRevision: 3,
             timed: false,
@@ -72,12 +74,16 @@ function applyMarks(facts: PipelineFacts, actions: PipelineAction[]) {
     return { ...facts, phases };
 }
 
-function releasedLearn(contentRevision = 7, generation = 4): PhaseRecord {
+function releasedLearn(
+    contentRevision = 7,
+    generation = 4,
+    contentId = "transcription-1",
+): PhaseRecord {
     return {
         state: "done",
         reason: "released",
         generation,
-        inputs: { contentSourceId: "riffado", contentRevision },
+        inputs: { contentId, contentSourceId: "riffado", contentRevision },
         at: AT,
     };
 }
@@ -105,6 +111,7 @@ describe("planAdvance audio", () => {
             name: "an untimed transcript",
             facts: audioFacts({
                 content: {
+                    contentId: "transcription-1",
                     contentSourceId: "riffado",
                     contentRevision: 7,
                     timed: false,
@@ -260,6 +267,7 @@ describe("planAdvance audio", () => {
     it("uses the transcript path for a newer transcript than the released one", () => {
         const facts = audioFacts({
             content: {
+                contentId: "transcription-1",
                 contentSourceId: "riffado",
                 contentRevision: 8,
                 timed: true,
@@ -288,6 +296,7 @@ describe("planAdvance audio", () => {
             name: "an audio item with non-Riffado content",
             item: audioFacts().item,
             content: {
+                contentId: "mail-content-1",
                 contentSourceId: "mail",
                 contentRevision: 3,
                 timed: false,
@@ -325,7 +334,11 @@ describe("planAdvance audio", () => {
                 record: expect.objectContaining({
                     generation: 4,
                     steps: {
-                        topics: { contentRevision: 7, generation: 4 },
+                        topics: {
+                            contentId: "transcription-1",
+                            contentRevision: 7,
+                            generation: 4,
+                        },
                     },
                 }),
             },
@@ -340,8 +353,16 @@ describe("planAdvance audio", () => {
                 record: expect.objectContaining({
                     generation: 4,
                     steps: {
-                        topics: { contentRevision: 7, generation: 4 },
-                        summary: { contentRevision: 7, generation: 4 },
+                        topics: {
+                            contentId: "transcription-1",
+                            contentRevision: 7,
+                            generation: 4,
+                        },
+                        summary: {
+                            contentId: "transcription-1",
+                            contentRevision: 7,
+                            generation: 4,
+                        },
                     },
                 }),
             },
@@ -355,6 +376,37 @@ describe("planAdvance audio", () => {
         expect(planAdvance(applyMarks(facts, first.actions)).actions).toEqual(
             [],
         );
+    });
+
+    it("requests summary steps again for a replacement content row at the same revision", () => {
+        const facts = audioFacts();
+        const first = planAdvance(facts);
+        const replaced = applyMarks(facts, first.actions);
+        if (!facts.content) throw new Error("expected audio content");
+        replaced.content = {
+            ...facts.content,
+            contentId: "transcription-2",
+        };
+        expect(actionTypes(planAdvance(replaced).actions)).toEqual([
+            "queueTopics",
+            "markPhase",
+            "queueSummary",
+            "markPhase",
+        ]);
+    });
+
+    it("does not use a stale Learn release from a replaced content row", () => {
+        const facts = audioFacts({
+            phases: {
+                learn: releasedLearn(7, 4, "erased-transcription"),
+            },
+        });
+        expect(actionTypes(planAdvance(facts).actions)).toEqual([
+            "queueTopics",
+            "markPhase",
+            "queueSummary",
+            "markPhase",
+        ]);
     });
 });
 
@@ -449,7 +501,11 @@ describe("planAdvance mail", () => {
         expect(actions[1]).toEqual(
             expect.objectContaining({
                 record: expect.objectContaining({
-                    inputs: { contentSourceId: "mail", contentRevision: 3 },
+                    inputs: {
+                        contentId: "mail-content-1",
+                        contentSourceId: "mail",
+                        contentRevision: 3,
+                    },
                 }),
             }),
         );

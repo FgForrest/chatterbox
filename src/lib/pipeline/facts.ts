@@ -117,12 +117,14 @@ export async function gatherFacts(
     }
 
     const contentPromise: Promise<{
+        id: string;
         revision: number;
         timed: boolean;
     } | null> =
         item.kind === "audio"
             ? db
                   .select({
+                      id: transcriptions.id,
                       revision: transcriptions.revision,
                       turns: transcriptions.turns,
                   })
@@ -138,13 +140,17 @@ export async function gatherFacts(
                   .then(([row]) =>
                       row
                           ? {
+                                id: row.id,
                                 revision: row.revision,
                                 timed: row.turns !== null,
                             }
                           : null,
                   )
             : db
-                  .select({ revision: mailContents.revision })
+                  .select({
+                      id: mailContents.id,
+                      revision: mailContents.revision,
+                  })
                   .from(mailContents)
                   .where(
                       and(
@@ -154,7 +160,13 @@ export async function gatherFacts(
                   )
                   .limit(1)
                   .then(([row]) =>
-                      row ? { revision: row.revision, timed: false } : null,
+                      row
+                          ? {
+                                id: row.id,
+                                revision: row.revision,
+                                timed: false,
+                            }
+                          : null,
                   );
     const mailPromise =
         item.kind === "mail"
@@ -207,6 +219,16 @@ export async function gatherFacts(
                 : Promise.resolve(false),
         ]);
     const summaryExists = summary !== undefined;
+    const learn = processing?.phases.learn;
+    const releasedCurrentContent =
+        item.kind === "audio" &&
+        item.summaryDueAt === null &&
+        content !== null &&
+        learn?.state === "done" &&
+        learn.reason === "released" &&
+        learn.inputs?.contentId === content.id &&
+        learn.inputs.contentSourceId === "riffado" &&
+        learn.inputs.contentRevision === content.revision;
 
     return {
         item: {
@@ -219,6 +241,7 @@ export async function gatherFacts(
         generation: processing?.requestedGeneration ?? 0,
         content: content
             ? {
+                  contentId: content.id,
                   contentSourceId: item.kind === "audio" ? "riffado" : "mail",
                   contentRevision: content.revision,
                   timed: content.timed,
@@ -232,7 +255,10 @@ export async function gatherFacts(
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,
-            stale: summaryExists ? await isSummaryStale(userId, itemId) : false,
+            stale:
+                summaryExists && releasedCurrentContent
+                    ? await isSummaryStale(userId, itemId)
+                    : false,
             jobActive: summaryJob !== undefined,
         },
         phases: processing?.phases ?? {},

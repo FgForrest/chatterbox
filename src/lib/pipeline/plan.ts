@@ -12,7 +12,8 @@ function sameInput(
     input: ContentRevisionInput,
 ): boolean {
     return (
-        record?.inputs?.contentSourceId === input.contentSourceId &&
+        record?.inputs?.contentId === input.contentId &&
+        record.inputs.contentSourceId === input.contentSourceId &&
         record.inputs.contentRevision === input.contentRevision
     );
 }
@@ -20,12 +21,13 @@ function sameInput(
 function stepRequested(
     record: PhaseRecord | undefined,
     step: SummaryStepName,
-    contentRevision: number,
+    input: ContentRevisionInput,
     minimumGeneration?: number,
 ): boolean {
     const requested = record?.steps?.[step];
     return (
-        requested?.contentRevision === contentRevision &&
+        requested?.contentId === input.contentId &&
+        requested.contentRevision === input.contentRevision &&
         (minimumGeneration === undefined ||
             requested.generation >= minimumGeneration)
     );
@@ -39,6 +41,7 @@ function summaryStepMarker(
     reason: string,
 ): PipelineAction {
     steps[step] = {
+        contentId: input.contentId,
         contentRevision: input.contentRevision,
         generation: facts.generation,
     };
@@ -73,9 +76,7 @@ function planMail(
 
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
-    if (
-        !stepRequested(facts.phases.summary, "summary", input.contentRevision)
-    ) {
+    if (!stepRequested(facts.phases.summary, "summary", input)) {
         actions.push({ type: "queueSummary", presetId: null, strict: false });
         actions.push(
             summaryStepMarker(facts, input, "summary", steps, "mail-arrival"),
@@ -107,12 +108,7 @@ function planReleasedAudio(
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
     const notRequested = (step: SummaryStepName) =>
-        !stepRequested(
-            facts.phases.summary,
-            step,
-            input.contentRevision,
-            releaseGeneration,
-        );
+        !stepRequested(facts.phases.summary, step, input, releaseGeneration);
 
     if (
         facts.settings?.autoSummarize &&
@@ -153,10 +149,7 @@ function planTranscriptAudio(
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
 
-    if (
-        input.timed &&
-        !stepRequested(facts.phases.summary, "topics", input.contentRevision)
-    ) {
+    if (input.timed && !stepRequested(facts.phases.summary, "topics", input)) {
         actions.push({ type: "queueTopics", strict: false });
         actions.push(
             summaryStepMarker(facts, input, "topics", steps, "transcript"),
@@ -165,7 +158,7 @@ function planTranscriptAudio(
 
     if (
         facts.settings?.autoSummarize &&
-        !stepRequested(facts.phases.summary, "summary", input.contentRevision)
+        !stepRequested(facts.phases.summary, "summary", input)
     ) {
         actions.push({
             type: "queueSummary",
@@ -193,6 +186,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     }
 
     const input = {
+        contentId: facts.content.contentId,
         contentSourceId: facts.content.contentSourceId,
         contentRevision: facts.content.contentRevision,
     };

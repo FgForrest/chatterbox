@@ -67,6 +67,9 @@ vi.mock("@/lib/summary/read-summary", () => ({
     readStoredSummaries: vi.fn(),
 }));
 vi.mock("@/db/queries/async-jobs", () => ({ getActiveJob: vi.fn() }));
+vi.mock("@/lib/pipeline/pending", () => ({
+    pipelineMayQueue: vi.fn(),
+}));
 
 const { recordingAccess } = vi.hoisted(() => ({
     recordingAccess: { exists: true },
@@ -129,6 +132,7 @@ vi.mock("@/lib/demo/fixtures", () => ({
 import { GET, POST } from "@/app/api/recordings/[id]/summary/route";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { watchJob } from "@/lib/jobs/watch";
+import { pipelineMayQueue } from "@/lib/pipeline/pending";
 import {
     readStoredSummaries,
     readStoredSummary,
@@ -302,6 +306,7 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
         vi.clearAllMocks();
         stubRecordingExists();
         (getActiveJob as Mock).mockResolvedValue(null);
+        (pipelineMayQueue as Mock).mockResolvedValue(true);
         (readStoredSummaries as Mock).mockResolvedValue([
             {
                 summary: "Plaud summary",
@@ -343,5 +348,105 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             model: "plaud-native",
             availableSources: ["plaud", "riffado"],
         });
+    });
+
+    it("reports the private pipeline driver while automatic summary work is pending", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect(await response.json()).toMatchObject({
+            summary: null,
+            activeJob: {
+                jobId: "pipeline-job-1",
+                status: "pending",
+                progress: null,
+                kind: "pipeline.advance",
+            },
+        });
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
+    });
+
+    it("does not report the pipeline driver when automatic summaries are off", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (pipelineMayQueue as Mock).mockResolvedValue(false);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect((await response.json()).activeJob).toBeUndefined();
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
+    });
+
+    it("does not report the pipeline driver while Learn holds the item", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (pipelineMayQueue as Mock).mockResolvedValue(false);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect((await response.json()).activeJob).toBeUndefined();
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
     });
 });
