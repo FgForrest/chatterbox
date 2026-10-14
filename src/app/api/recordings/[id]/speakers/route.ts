@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import {
@@ -30,7 +31,7 @@ function requestedSource(request: Request): string {
 }
 
 export const GET = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
 
@@ -50,7 +51,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             transcriptionId: transcript.id,
             revision: transcript.revision,
             speakers: orgViewSpeakers(speakers, {
-                curator: session.user.id === access.orgUserId,
+                curator: await actsForOrganization(actor),
             }),
         });
     }
@@ -260,21 +261,23 @@ function personNotFound(): AppError {
  * is the only evidence this feature treats as strong enough to reach a
  * summary or an export.
  *
- * A shared recording is one recording, and only the organization account
- * changes its speakers, on the Organization view (403 for anyone else):
- * only Organization people may be picked there, and a new name becomes an
- * Organization person. Its owner withdraws it before changing them (409
+ * A shared recording is one recording, and only a curator of the
+ * Organization (or the organization account) changes its speakers, on the
+ * Organization view (403 for anyone else): only Organization people may
+ * be picked there, and a new name becomes an Organization person, created
+ * by the curator. Its owner withdraws it before changing them (409
  * RECORDING_SHARED); both are checked again under the recording lock.
  */
 export const PUT = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
+    const curates = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
     const change = readChange(await request.json().catch(() => null));
     const orgView = view === "org";
 
-    assertMayChange(access, session.user.id);
+    assertMayChange(access, session.user.id, curates);
 
     const ownerUserId = access.ownerUserId;
     const transcript = await requireTranscript(ownerUserId, id, request);
@@ -303,6 +306,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         answer: answerOf(change, existingPersonId),
         actorUserId: session.user.id,
         orgUserId: access.orgUserId,
+        actsForOrganization: curates,
     });
 
     // A suggestion is never shown outside this panel, so taking one back

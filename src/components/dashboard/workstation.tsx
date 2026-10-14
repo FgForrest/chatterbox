@@ -115,12 +115,16 @@ interface WorkstationProps {
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
+    /** The viewer manages access at the identity provider. */
+    accessManagement?: boolean;
     exportProviders: ExportProvidersAvailability;
     initialFolderOrganization: FolderOrganization;
     /** Null when the Organization scope is not enabled. */
     organizationLibrary?: OrganizationLibrary | null;
     /** The organization account: no private library, only the Organization. */
     isOrgAccount?: boolean;
+    /** The viewer changes the Organization's content (a curator). */
+    canCurate?: boolean;
 }
 
 /**
@@ -149,10 +153,12 @@ export function Workstation({
     plaudNeedsReconnect,
     isHosted,
     mailEnabled = false,
+    accessManagement = false,
     exportProviders,
     initialFolderOrganization,
     organizationLibrary = null,
     isOrgAccount = false,
+    canCurate = false,
 }: WorkstationProps) {
     const i18n = useExtracted();
     const shareRefusal = useShareRefusal();
@@ -283,15 +289,16 @@ export function Workstation({
               (folder) => folder.id === selectedFolderId,
           ) ?? null)
         : null;
-    // A shared recording is the organization account's to change: its
-    // Organization view for anyone else, and its owner's private copy.
+    // A shared recording is changed for the Organization, by its curators
+    // (or the organization account), on the Organization view; read-only
+    // there for anyone else, and in its owner's private copy.
     const sharedIds = useMemo(
         () => sharedRecordingIds(folderOrganization),
         [folderOrganization],
     );
     const selectedTranscriptReadOnly = selectedRecording
         ? currentIsOrgView
-            ? !isOrgAccount
+            ? !(isOrgAccount || canCurate)
             : sharedIds.has(selectedRecording.id)
         : false;
 
@@ -1128,6 +1135,7 @@ export function Workstation({
                                         handleMoveBetweenFolders
                                     }
                                     isOrgAccount={isOrgAccount}
+                                    canCurate={canCurate}
                                 />
                             ) : (
                                 <WorkstationDetailPane
@@ -1251,6 +1259,7 @@ export function Workstation({
                 initialProviders={providers}
                 isHosted={isHosted}
                 mailEnabled={mailEnabled}
+                accessManagement={accessManagement}
                 onReRunOnboarding={() => {
                     setSettingsOpen(false);
                     setOnboardingOpen(true);

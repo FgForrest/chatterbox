@@ -87,7 +87,10 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
-    return {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
         requireApiSession: vi.fn(async (request: Request) => {
             const id = request.headers.get("x-test-user");
             if (!id) {
@@ -99,7 +102,7 @@ vi.mock("@/lib/auth-server", async () => {
             }
             return { user: { id, email: `${id}@example.test` } };
         }),
-    };
+    });
 });
 // Another writer committing between the route's checks and the change.
 vi.mock("@/lib/knowledge/speaker-changes", async () => {

@@ -19,7 +19,8 @@ import {
     transcriptions,
     webhookDeliveries,
 } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
@@ -114,7 +115,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
 });
 
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
+    const curates = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const body = (await request.json().catch(() => ({}))) as unknown;
     if (
@@ -151,8 +153,9 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    // The owner renames it on the private view; while it is shared, the
-    // organization account on the Organization view. Either way the files
+    // The owner renames it on the private view; while it is shared, a
+    // curator of the Organization (or the organization account) on the
+    // Organization view. Either way the files
     // are the owner's and follow the title in the owner's storage; nothing
     // is pushed to the owner's Plaud account.
     const actorUserId = session.user.id;
@@ -161,7 +164,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         id,
         requestedRecordingView(request),
     );
-    assertMayChange(access, actorUserId);
+    assertMayChange(access, actorUserId, curates);
     const userId = access.ownerUserId;
     const [recording] = await db
         .select({
@@ -194,6 +197,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
         ownerUserId: userId,
         actorUserId,
         orgUserId,
+        actsForOrganization: curates,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -232,6 +236,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             ownerUserId: userId,
             actorUserId,
             orgUserId,
+            actsForOrganization: curates,
         });
         if (shared) {
             refused = writerRefusalError(shared);

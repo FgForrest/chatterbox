@@ -176,9 +176,12 @@ function renderUploadStatus(state, elementId = "upload-status") {
     const node = el(elementId);
     if (!node) return;
     const uploaded = state.uploaded?.length ?? 0;
-    node.textContent = state.stopped
+    const progress = state.stopped
         ? t("uploadedOf", [String(uploaded), String(state.chunkCount)])
         : t("segmentsUploaded", String(uploaded));
+    node.textContent = state.uploadNotice
+        ? `${progress} ${state.uploadNotice}`
+        : progress;
 }
 
 function renderFinalizing(state) {

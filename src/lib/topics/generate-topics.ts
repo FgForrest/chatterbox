@@ -28,6 +28,7 @@ import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -137,6 +138,7 @@ export async function generateTopicsForTranscript(
         recordingId,
         ownerUserId: userId,
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -337,6 +339,9 @@ export async function generateTopicsForTranscript(
             ownerUserId: userId,
             actorUserId: ctx.actorUserId,
             orgUserId,
+            actsForOrganization:
+                ctx.actsForOrganization &&
+                (await userCuratesOrganizationNow(ctx.actorUserId)),
         });
         if (shared) throw writerRefusalError(shared);
         return tx

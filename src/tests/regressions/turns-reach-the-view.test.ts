@@ -39,7 +39,11 @@ vi.mock("@/lib/mail/list", () => ({
 
 vi.mock("@/lib/env", () => ({ env: { IS_HOSTED: false } }));
 
+vi.mock("@/lib/access/service", () => ({
+    accessManagementAvailable: () => false,
+}));
 vi.mock("@/lib/auth-server", () => ({
+    getSessionActor: vi.fn().mockResolvedValue(null),
     requireAuth: vi
         .fn()
         .mockResolvedValue({ user: { id: "user-1", email: "a@b.c" } }),

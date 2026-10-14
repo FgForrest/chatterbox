@@ -28,6 +28,24 @@ vi.mock("@/db/schema", () => ({
 vi.mock("@/lib/auth", () => ({
     auth: { api: { getSession: getSessionMock } },
 }));
+// Whether the session's access holds is `sessionAccess`'s (tested with
+// the identity provider); here every session's does.
+vi.mock("@/lib/authz/session-access", () => ({
+    sessionAccess: vi.fn(async (session: { userId: string }) => ({
+        ok: true,
+        authTime: null,
+        actor: {
+            kind: "user",
+            actorId: session.userId,
+            issuer: null,
+            subject: null,
+            capabilities: new Set(["use"]),
+            clientId: null,
+            clientPermissions: new Set(),
+            verifiedAt: null,
+        },
+    })),
+}));
 
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -59,7 +77,10 @@ describe("requireApiSession", () => {
     });
 
     it("returns the session when user is not suspended", async () => {
-        getSessionMock.mockResolvedValue({ user: { id: "u1" } });
+        getSessionMock.mockResolvedValue({
+            session: { id: "session-u1" },
+            user: { id: "u1" },
+        });
         dbMock.select.mockReturnValue(makeChainable([{ suspendedAt: null }]));
         const req = new Request("https://example.com/api/anything");
         const session = await requireApiSession(req);
@@ -67,7 +88,10 @@ describe("requireApiSession", () => {
     });
 
     it("throws ACCOUNT_SUSPENDED (403) when user is suspended", async () => {
-        getSessionMock.mockResolvedValue({ user: { id: "u1" } });
+        getSessionMock.mockResolvedValue({
+            session: { id: "session-u1" },
+            user: { id: "u1" },
+        });
         dbMock.select.mockReturnValue(
             makeChainable([{ suspendedAt: new Date() }]),
         );
@@ -86,7 +110,10 @@ describe("requireApiSession", () => {
         // If users.id row vanished mid-request, we don't crash; absence of a
         // row means no suspension flag, treat as authenticated. The next
         // call that touches user-owned data will 404 naturally.
-        getSessionMock.mockResolvedValue({ user: { id: "u1" } });
+        getSessionMock.mockResolvedValue({
+            session: { id: "session-u1" },
+            user: { id: "u1" },
+        });
         dbMock.select.mockReturnValue(makeChainable([]));
         const req = new Request("https://example.com/api/anything");
         const session = await requireApiSession(req);

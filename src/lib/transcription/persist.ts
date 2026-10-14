@@ -9,6 +9,7 @@ import {
     recordings,
     transcriptions,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
@@ -68,6 +69,11 @@ export interface UpsertTranscriptionArgs {
      * on a shared recording, the owner otherwise (see `writerRefusal`).
      */
     actorUserId?: string;
+    /**
+     * Whether the actor acts for the Organization (a curator, or the
+     * organization account), re-checked by the run that writes.
+     */
+    actsForOrganization?: boolean;
     /** Account whose provider produced the text; defaults to the actor. */
     producedByUserId?: string;
     /**
@@ -121,6 +127,8 @@ export interface UpsertEnhancementArgs {
     allowReaped?: boolean;
     /** Who makes the change; defaults to `userId`. See `UpsertTranscriptionArgs`. */
     actorUserId?: string;
+    /** See `UpsertTranscriptionArgs.actsForOrganization`. */
+    actsForOrganization?: boolean;
     /** Account whose provider produced the summary; defaults to the actor. */
     producedByUserId?: string;
     /** See `UpsertTranscriptionArgs.jobId`. */
@@ -236,6 +244,10 @@ export async function upsertTranscription(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
+                actsForOrganization:
+                    args.actsForOrganization === true
+                        ? await userCuratesOrganizationNow(actorUserId)
+                        : args.actsForOrganization,
             });
             if (refusal) throw new WriterRefused(refusal);
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
@@ -432,6 +444,10 @@ export async function upsertEnhancement(
                 ownerUserId: userId,
                 actorUserId,
                 orgUserId,
+                actsForOrganization:
+                    args.actsForOrganization === true
+                        ? await userCuratesOrganizationNow(actorUserId)
+                        : args.actsForOrganization,
             });
             if (refusal) throw new WriterRefused(refusal);
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {

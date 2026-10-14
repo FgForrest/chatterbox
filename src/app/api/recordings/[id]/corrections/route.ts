@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { listCorrections } from "@/lib/knowledge/corrections";
 import { knowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -23,7 +24,8 @@ type IdContext = { params: Promise<{ id: string }> };
  * viewer may take them back (whoever may change the recording in the view).
  */
 export const GET = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
+    const curates = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
@@ -79,7 +81,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     );
     let canUndo = true;
     try {
-        assertMayChange(access, session.user.id);
+        assertMayChange(access, session.user.id, curates);
     } catch {
         canUndo = false;
     }

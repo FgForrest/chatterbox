@@ -341,6 +341,8 @@ export interface RecordingFactArgs extends FactArgs {
     actorUserId: string;
     /** `sharingOrgUserId()`, resolved before the transaction. */
     orgUserId: string | null;
+    /** Whether the actor acts for the Organization; see `writerRefusal`. */
+    actsForOrganization?: boolean;
     startMs: number;
     endMs: number;
     /**
@@ -356,16 +358,20 @@ export interface RecordingFactArgs extends FactArgs {
  * the words spoken over `startMs`..`endMs`, cut from the transcript here
  * rather than taken from the caller. Under the recording lock and the
  * writer rule, on the revision the person saw; the fact goes into the
- * actor's scope (the owner's on a private recording, the Organization's on
- * a shared one). Returns the fact's id.
+ * scope the writer rule chose (the owner's on a private recording, the
+ * Organization's on a shared one), the actor its author. Returns the
+ * fact's id.
  */
 export async function confirmFactFromRecording(
     args: RecordingFactArgs,
 ): Promise<string> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const factId = await confirmFactFromRecordingInTx(tx, args);
-        await bumpScopeInTx(tx, [args.actorUserId]);
+        const { factId, scopeUserId } = await confirmFromRecordingInTx(
+            tx,
+            args,
+        );
+        await bumpScopeInTx(tx, [scopeUserId]);
         return factId;
     });
 }
@@ -379,14 +385,22 @@ export async function confirmFactFromRecordingInTx(
     tx: Tx,
     args: RecordingFactArgs,
 ): Promise<string> {
+    return (await confirmFromRecordingInTx(tx, args)).factId;
+}
+
+async function confirmFromRecordingInTx(
+    tx: Tx,
+    args: RecordingFactArgs,
+): Promise<{ factId: string; scopeUserId: string }> {
     if (args.startMs < 0 || args.endMs < args.startMs) {
         throw invalid("The time range is not valid", "startMs");
     }
-    const { recordingId, revision, turns } = await lockTranscriptForChange(
-        tx,
-        { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
-        args,
-    );
+    const { recordingId, revision, turns, scopeUserId } =
+        await lockTranscriptForChange(
+            tx,
+            { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
+            args,
+        );
     if (revision !== args.revision) {
         throw new AppError(
             ErrorCode.CONFLICT,
@@ -405,17 +419,17 @@ export async function confirmFactFromRecordingInTx(
         ) {
             throw invalid("No such speaker", "speakerLabel");
         }
-        await assertSpeakerInFact(tx, args, speakerLabel);
+        await assertSpeakerInFact(tx, args, speakerLabel, scopeUserId);
     }
     const factId = await confirmFactInTx(tx, {
         ...args,
-        scopeUserId: args.actorUserId,
+        scopeUserId,
         origin: "recording",
     });
     await tx
         .insert(knowledgeFactEvidence)
         .values({
-            userId: args.actorUserId,
+            userId: scopeUserId,
             factId,
             transcriptionId: args.transcriptionId,
             itemId: recordingId,
@@ -446,7 +460,7 @@ export async function confirmFactFromRecordingInTx(
                 confirmedAt: new Date(),
             },
         });
-    return factId;
+    return { factId, scopeUserId };
 }
 
 export interface MailFactArgs extends FactArgs {
@@ -456,6 +470,12 @@ export interface MailFactArgs extends FactArgs {
     /** The content revision the person was looking at. */
     revision: number;
     actorUserId: string;
+    /**
+     * The scope the fact goes into, as the caller's writer rule chose it:
+     * the owner's, or the Organization's for a shared mail. Default: the
+     * actor's own.
+     */
+    scopeUserId?: string;
     /** Where in the mail's content it was written. */
     text: { segmentIndex: number; charStart: number; charEnd: number };
     /** The participant who wrote it, when the fact is about them. */
@@ -517,15 +537,16 @@ export async function confirmFactFromMailInTx(
             : writer?.authenticated
               ? null
               : ("unverified" as const);
+    const scopeUserId = args.scopeUserId ?? args.actorUserId;
     const factId = await confirmFactInTx(tx, {
         ...args,
-        scopeUserId: args.actorUserId,
+        scopeUserId,
         origin: "mail",
     });
     await tx
         .insert(knowledgeFactEvidence)
         .values({
-            userId: args.actorUserId,
+            userId: scopeUserId,
             factId,
             transcriptionId: null,
             itemId: args.itemId,
@@ -571,6 +592,7 @@ async function assertSpeakerInFact(
     tx: Tx,
     args: RecordingFactArgs,
     speakerLabel: string,
+    scopeUserId: string,
 ): Promise<void> {
     const [speaker] = await tx
         .select({ personId: transcriptSpeakers.personId })
@@ -587,7 +609,7 @@ async function assertSpeakerInFact(
     const people = await Promise.all(
         [args.subject, args.object].map(async (node) =>
             "personId" in node
-                ? await resolveTargetInTx(tx, args.actorUserId, node)
+                ? await resolveTargetInTx(tx, scopeUserId, node)
                 : null,
         ),
     );
@@ -656,9 +678,10 @@ export async function withdrawEvidence(args: {
     evidenceId: string;
     actorUserId: string;
     orgUserId: string | null;
+    actsForOrganization?: boolean;
 }): Promise<void> {
     await db.transaction(async (tx) => {
-        await lockTranscriptForChange(
+        const { scopeUserId } = await lockTranscriptForChange(
             tx,
             { userId: args.ownerUserId, transcriptionId: args.transcriptionId },
             args,
@@ -668,7 +691,7 @@ export async function withdrawEvidence(args: {
             .where(
                 and(
                     eq(knowledgeFactEvidence.id, args.evidenceId),
-                    eq(knowledgeFactEvidence.userId, args.actorUserId),
+                    eq(knowledgeFactEvidence.userId, scopeUserId),
                     eq(
                         knowledgeFactEvidence.transcriptionId,
                         args.transcriptionId,
@@ -680,7 +703,7 @@ export async function withdrawEvidence(args: {
             throw new AppError(ErrorCode.NOT_FOUND, "Evidence not found", 404);
         }
         await pruneUnsupportedFactsInTx(tx, [removed.factId]);
-        await bumpScopeInTx(tx, [args.actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
     });
 }
 

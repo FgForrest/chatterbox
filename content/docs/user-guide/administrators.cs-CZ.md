@@ -9,6 +9,7 @@ Většina funkcí Riffado funguje ihned po spuštění. Některé funkce však v
 | --- | --- | --- |
 | [Organizace](organization.md) | `ORG_ACCOUNT_EMAIL`, `ORG_ACCOUNT_PASSWORD` (min. 12 znaků), volitelně `ORG_ACCOUNT_NAME` | [Organizace](../self-hosting/organization.mdx) |
 | Jednotné přihlašování (Single sign-on) | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, volitelně `OIDC_PROVIDER_NAME`, `OIDC_SCOPES`, `OIDC_SESSION_MAX_AGE` | [Jednotné přihlašování](../self-hosting/sso.mdx) |
+| [Přístup od poskytovatele identity](#access-from-the-identity-provider) | `AUTHZ_MODE=idp`, `IDENTITY_PROVIDER=keycloak`, tři `KEYCLOAK_GROUP_*_ID`, `KEYCLOAK_VERIFIER_CLIENT_*` | [Jednotné přihlašování](../self-hosting/sso.mdx#authorization-from-the-identity-provider) |
 | Uzavřená registrace | `DISABLE_REGISTRATION=true` | |
 | [Export složek na disk](exports-backups-retention.md#to-a-disk) | `FILESYSTEM_EXPORT_HOST_PATH` (Docker) nebo `FILESYSTEM_EXPORT_ROOT` | |
 | [Exporty na Google Drive](exports-backups-retention.md#to-google-drive) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER`, volitelně `GOOGLE_WORKSPACE_DOMAINS` | [Google Drive](../self-hosting/google-drive.mdx) |
@@ -35,6 +36,39 @@ Odebráním těchto dvou proměnných se Organizace nastaví jako pouze pro čte
 Při zadání třech proměnných `OIDC_` nabídne přihlašovací stránka tlačítko **Přihlásit se pomocí …**; zároveň je vypnuto heslové přihlašování, registrace i reset hesla. Jako redirect URI u svého poskytovatele identity zaregistrujte `<APP_URL>/api/auth/oauth2/callback/oidc`. Stávající účty se propojí při prvním přihlášení, pokud poskytovatel ověří e-mailovou adresu.
 
 Pokud přidáte i `DISABLE_REGISTRATION=true`, mohou se přihlásit pouze osoby, které již mají účet. Chcete-li povolit přístup nové osobě, tuto volbu dočasně vypněte, restartujte, nechte ji jednou přihlásit a poté znovu zapněte.
+
+<span id="access-from-the-identity-provider" />
+
+## Přístup od poskytovatele identity
+
+S `AUTHZ_MODE=idp` rozhoduje váš poskytovatel identity o každé osobě tři
+věci:
+
+- **Přístup do Riffado** (`use`): bez něj se nikdo nepřihlásí a jeho API
+  klíče, záznamník schůzek i AI klienti přestanou fungovat.
+- **Spravuje Organizaci** (`org.curate`): mění sdílené nahrávky ve
+  zobrazení Organizace (jména mluvčích, Learn, opravy, názvy, shrnutí,
+  témata, přepisy) pod svým vlastním jménem.
+- **Spravuje přístup** (`access.manage`): vidí **Nastavení → Přístupy** a
+  přepíná tam ostatním tato tři práva.
+
+Práva jsou nezávislá: administrátor není kurátorem Organizace, pokud
+nedostane obě práva, a ani jedno nefunguje bez přístupu. Riffado si
+nevede žádný vlastní seznam: co přepnete v **Nastavení → Přístupy**, se
+zapíše do skupin poskytovatele identity, s vlastním přihlášením
+administrátora, a odtud se také čte zpět. Nikdo si nemůže odebrat vlastní
+přístup ani správu přístupu.
+
+Odebrání přístupu osobu okamžitě odhlásí, zde i u poskytovatele, a
+zablokuje její API klíče a záznamník schůzek, dokud přístup znovu
+nedostane; nahrávky čekající v jejím prohlížeči zůstanou zachovány. Osoba
+deaktivovaná nebo smazaná u poskytovatele ztratí přístup do
+`AUTHZ_VERIFICATION_MAX_AGE` (výchozí 30 minut) poté, co se to Riffado
+dozví; jak rychle se to dozví váš poskytovatel, záleží na vašem IT.
+
+[Jednotné přihlašování](../self-hosting/sso.mdx#authorization-from-the-identity-provider)
+popisuje nastavení včetně příkazu, který připraví realm v Keycloaku a
+prvního administrátora.
 
 <span id="claude-code-and-codex-subscriptions" />
 

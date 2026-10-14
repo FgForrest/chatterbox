@@ -276,8 +276,8 @@ export function validateNewRecords(
      * The one known record of that kind whose name is close to `name` (of
      * the same type, for a thing, when one is): none when several are.
      * Close is a match the lookups make (`MAYBE_REASONS`: a first name
-     * only one person has, a letter off, a thing's word forms: "Forest"
-     * for FG Forrest), a surname or a thing's name a letter or two off, or
+     * only one person has, a letter off, a thing's word forms: "Summitu"
+     * for North Summit), a surname or a thing's name a letter or two off, or
      * one starting the other ("Evita" for evitaDB).
      */
     const maybeOf = (

@@ -58,7 +58,7 @@ function token(
     claims: Record<string, unknown> = {},
     options: TokenOptions = {},
 ): Promise<string> {
-    const jwt = new SignJWT(claims)
+    const jwt = new SignJWT({ typ: "Bearer", ...claims })
         .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "k1" })
         .setIssuer(options.issuer ?? ISSUER)
         .setIssuedAt()
@@ -221,6 +221,8 @@ describe("verifyMcpToken", () => {
         expect(await kindOf(await token({ typ: "Bearer" }))).toBe("valid");
         expect(await kindOf(await token({ typ: "ID" }))).toBe("invalid");
         expect(await kindOf(await token({ typ: "Refresh" }))).toBe("invalid");
+        expect(await kindOf(await token({ typ: undefined }))).toBe("invalid");
+        expect(await kindOf(await token({ typ: "at+jwt" }))).toBe("invalid");
         expect(
             await kindOf(await token({ typ: "ID" }, { audience: "claude" })),
         ).toBe("invalid");

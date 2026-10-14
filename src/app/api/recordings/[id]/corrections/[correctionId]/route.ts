@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { transcriptCorrections, transcriptions } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { revertCorrection } from "@/lib/knowledge/corrections";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
@@ -23,12 +24,13 @@ type CorrectionContext = {
  */
 export const DELETE = apiHandler<CorrectionContext>(
     async (request, context) => {
-        const session = await requireApiSession(request);
+        const { session, actor } = await requireApiSessionActor(request);
+        const curates = await actsForOrganization(actor);
         const { id, correctionId } = await (context as CorrectionContext)
             .params;
         const view = requestedRecordingView(request);
         const access = await requireRecordingView(session.user.id, id, view);
-        assertMayChange(access, session.user.id);
+        assertMayChange(access, session.user.id, curates);
         const [row] = await db
             .select({ transcriptionId: transcriptCorrections.transcriptionId })
             .from(transcriptCorrections)
@@ -56,6 +58,7 @@ export const DELETE = apiHandler<CorrectionContext>(
             transcriptionId: row.transcriptionId,
             actorUserId: session.user.id,
             orgUserId: await sharingOrgUserId(),
+            actsForOrganization: curates,
             correctionId,
         });
         await refreshSummaryAfterCorrections({

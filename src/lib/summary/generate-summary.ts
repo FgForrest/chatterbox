@@ -192,6 +192,7 @@ export async function generateSummaryForRecording(
         recordingId,
         ownerUserId: ctx.ownerUserId,
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -430,6 +431,7 @@ export async function generateSummaryForRecording(
         inputFingerprint: input.fingerprint,
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
         tasks,
     });

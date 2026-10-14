@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { aiEnhancements, chatterItems, recordings } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { DEMO_SUMMARIES, isDemoRecordingId } from "@/lib/demo/fixtures";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
@@ -89,7 +90,7 @@ function toStreamProgress(
  * it always did, because this handler waits for the job on its behalf.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const userId = session.user.id;
 
     const { id } = await (context as IdContext).params;
@@ -103,7 +104,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(userId, id, view, {
         kinds: ALL_ITEM_KINDS,
     });
-    assertMayChange(access, userId);
+    assertMayChange(access, userId, await actsForOrganization(actor));
 
     const { job } = await enqueueSummaryJob({
         userId,

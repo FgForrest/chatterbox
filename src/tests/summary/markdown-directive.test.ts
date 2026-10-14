@@ -50,6 +50,12 @@ vi.mock("@/lib/learn/llm-input", () => ({
     })),
     llmRendering: vi.fn(async () => null),
 }));
+// Organization curation is decided against verified access; these
+// runs are on the private view.
+vi.mock("@/lib/authz/curator", () => ({
+    actsForOrganization: vi.fn().mockResolvedValue(false),
+    userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
+}));
 vi.mock("@/lib/org/config", () => ({
     isOrgScopeVisible: () => false,
     isOrgScopeEnabled: () => false,

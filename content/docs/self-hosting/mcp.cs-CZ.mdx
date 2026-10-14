@@ -1,14 +1,16 @@
 ---
 title: Externí MCP server
-description: Umožněte AI klientům a backendovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle rolí Keycloak.
+description: Umožněte AI klientům a backendovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle oprávnění klienta a jeho držitele.
 ---
 
 Samoobslužný Riffado, který se přihlašuje přes [jednotné přihlášení](./sso),
 může také poskytovat endpoint MCP (Model Context Protocol). Lidé k němu
 připojí svého AI klienta a ptají se na své nahrávky; backendové služby
 čtou, co Organizace ví. Riffado zde funguje jako resource server:
-tokeny vydává realm a role klienta v realmu určují, do jakých oblastí
-se volající dostane.
+tokeny vydává realm a oprávnění tokenu určují, do jakých oblastí
+se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z claimu `scope`
+odděleného mezerami. Režim `AUTHZ_MODE=local` zachovává původní klientské
+role Keycloaku (`resource_access[MCP_AUDIENCE].roles`).
 
 Server je pouze pro čtení, s výjimkou jedné věci: stav a zadání úkolu.
 
@@ -16,12 +18,11 @@ Server je pouze pro čtení, s výjimkou jedné věci: stav a zadání úkolu.
 
 ## Co server poskytuje
 
-Šest klientských rolí na resource klientovi (viz níže `riffado-mcp`) zpřístupňuje
-šest oblastí. Volající vidí pouze nástroje, které jeho role dovolují;
-jakýkoliv jiný nástroj odpoví "Unknown tool" – stejně jako neexistující
-název.
+Šest oprávnění zpřístupňuje šest oblastí. Volající vidí pouze povolené
+nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
+403 `insufficient_scope`; neznámý název vrátí "Unknown tool".
 
-| Role               | Nástroje                                                                                          |
+| Oprávnění          | Nástroje                                                                                          |
 | ------------------ | ------------------------------------------------------------------------------------------------- |
 | `knowledge:read`   | `list_types`, `list_knowledge`, `find_knowledge`, `get_entity`, `get_facts`, `list_mishearings`    |
 | `transcripts:read` | `get_transcript`, `search_transcripts`                                                             |
@@ -50,7 +51,7 @@ název.
   `untrusted: true`: poštu píšou lidé zvenčí. Tajné adresy jsou skryté,
   i pro jejich vlastníka.
 
-Role se kombinují a některá pole vyžadují dvě role:
+Oprávnění se kombinují a některá pole vyžadují dvě:
 
 - Důkaz faktu (až tři citace s nahrávkou a pozicí)
   vyžaduje `transcripts:read` i `knowledge:read`; důkaz v e-mailu
@@ -63,9 +64,9 @@ Role se kombinují a některá pole vyžadují dvě role:
 - Akční položky shrnutí v `get_summary` a v tom, co
   `search_summaries` vyhledává, vyžadují `tasks:read`.
 - Filtr `entity` u nástrojů nad nahrávkami vyžaduje `knowledge:read`.
-- `tasks:write` se započítává jen společně se `tasks:read`.
+- `tasks:write` zahrnuje `tasks:read`.
 
-Role nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla Riffada
+Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla Riffada
 vybírají řádky (viz [Co volající vidí](#what-callers-see)).
 
 <span id="turning-it-on" />
@@ -94,7 +95,7 @@ MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
 - Hosted Riffado jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
 - `docker-compose.yml` předává všechny tyto proměnné dál.
 - Při prázdném `MCP_ALLOWED_CLIENTS` server při startu zapíše do logu
-  varování: volat smí kterýkoliv klient realmu, jehož token nese role.
+  varování: volat smí kterýkoliv klient realmu, jehož token nese potřebná oprávnění.
 
 Riffado načítá `issuer` realmu a podpisové klíče z
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Hodnota `iss`
@@ -105,6 +106,30 @@ stejného issuer pro Riffado i klienty, kteří získávají tokeny.
 <span id="keycloak-setup" />
 
 ## Nastavení Keycloak
+
+Ruční mapování rolí níže popisuje **`AUTHZ_MODE=local`**.
+Pro **`AUTHZ_MODE=idp`** nastavte [role poskytovatele](./sso#authorization-from-the-identity-provider)
+a následující MCP konfiguraci. Statický lokální realm slouží jako funkční příklad:
+
+- Osoba potřebuje `use`, nikoli MCP resource role. Každý dotaz omezuje sdílení dat.
+- Pro každé výše uvedené oprávnění vytvořte OIDC client scope se zapnutým
+  **Include in token scope**. Klientům připojte jen povolená oprávnění.
+  Default scopes se udělují i při požadavku pouze na `openid`; optional scopes
+  musí klient výslovně požadovat. Vynechání default scope jej z tokenu neodebere.
+- Každému MCP klientovi přidejte audience mapper pro ID resource klienta
+  (`MCP_AUDIENCE`), nezávisle na rolích. Pro `MCP_RESOURCE_AUDIENCE=true`
+  zahrňte také `<APP_URL>/api/mcp` jako custom audience.
+- Vypněte Full Scope Allowed a ze scope mappingů MCP klientů vynechte webové
+  a administrátorské role. Servisní klienti v tomto režimu MCP role nepotřebují.
+- Servisní klienti používají jen client credentials, níže popsané označení služby
+  a záznamy v `MCP_SERVICE_CLIENTS` i `MCP_ALLOWED_CLIENTS`.
+- Osobní a organizační konektor mohou mít odlišná ID a secrety, například
+  `claude` a `claude-enterprise`. Oba jednají za přihlášeného člověka a nepatří
+  do `MCP_SERVICE_CLIENTS`.
+
+Při přechodu z MCP rolí na IdP režim nastavte scopes oprávnění a získejte nové
+tokeny. Tokeny s pouhými rolemi v IdP režimu MCP oprávnění neudělují.
+Lokální režim zachovává ruční postup s rolemi níže.
 
 <details>
 <summary>Krok 1: resource klient</summary>
@@ -159,10 +184,13 @@ shrnutích, dostane pouze `summaries:read`, i když uživatel vlastní všech š
    (`private_key_jwt`) místo sdíleného tajemství a
    **Advanced → Access Token Lifespan** na 5 až 15 minut.
 
-Scope `service_account` v Keycloaku přidává claim `client_id`; podle toho Riffado
-pozná servisní účet. Servisní účet vystupuje jako účet Organizace, takže
-je potřeba mít povolenou [Organizaci](./organization)
-(`SELF_HOST_MODE=shared` a `ORG_ACCOUNT_EMAIL`). Jinak jsou volání odmítnuta.
+Uveďte klienta v `MCP_SERVICE_CLIENTS` (a `MCP_ALLOWED_CLIENTS`) a
+přidejte mu mapper **hardcoded claim**: claim `chatterbox_subject_kind`,
+hodnota `service`, pouze do access tokenu. Za službu se považuje jen takový token; samotný claim `client_id`
+z Keycloaku jím po nastavení `MCP_SERVICE_CLIENTS` už token neudělá.
+Servisní účet jedná v datovém kontextu Organizace, takže je potřeba mít
+povolenou [Organizaci](./organization) (`SELF_HOST_MODE=shared` a
+`ORG_ACCOUNT_EMAIL`). Jinak jsou volání odmítnuta.
 
 </details>
 
@@ -219,8 +247,8 @@ o který má klient žádat. Bez uvedeného scope by klient žádal o všechny
 scopes, které realm nabízí, a Keycloak by přihlášení odmítl s
 `invalid_scope`. Tato metadata jsou také dostupná na `<APP_URL>/.well-known/oauth-protected-resource`.
 
-Pravý token realmu, který nebyl vydán pro tento server (dostane ho
-například člověk bez kterékoliv ze šesti rolí), odpoví 403, ne 401: 401
+Pravý token realmu, který nebyl vydán pro tento server (například
+token přihlašovacího webového klienta), odpoví 403, ne 401: 401
 by klienta poslala znovu přihlašovat, pro stejný token.
 
 Každé klientské aplikaci zadejte client id, které jste pro ni
@@ -262,13 +290,13 @@ konektorem i kontrolami.
 | Token                                                   | Volající                                                 |
 | ------------------------------------------------------- | -------------------------------------------------------- |
 | `sub` uživatele, který se přihlásil do Riffado přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
-| Chybí `sub`, ale je claim `client_id`                  | Servisní účet jako účet Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. |
-| Cokoli jiného                                           | Odmítnuto s 403 "Nejprve se přihlaste do Riffado."        |
+| Chybí takový `sub`, klient je v `MCP_SERVICE_CLIENTS` a token nese označení služby | Servisní účet jednající v datovém kontextu Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. Bez `MCP_SERVICE_CLIENTS` v režimu `local` jakýkoli token s `client_id` (zastaralé). |
+| Cokoli jiného                                           | Odmítnuto s 403 "Sign in to Chatterbox once first".       |
 
 Účty nejsou nikdy vytvořeny z tokenu: člověk se musí nejdřív alespoň
 jednou přihlásit do Riffada, než jeho AI klient může server volat.
-Token bez kterékoliv ze šesti rolí dostane 403 "This token carries no
-Riffado MCP role". Pozastavený účet, klient mimo `MCP_ALLOWED_CLIENTS`,
+Token bez kteréhokoliv ze šesti oprávnění dostane 403 "This token carries no
+Chatterbox MCP permission". Pozastavený účet, klient mimo `MCP_ALLOWED_CLIENTS`,
 servisní účet bez zapnuté Organizace, klient, kterého veřejný vstup
 neobsluhuje, a klient bez svého klíče konektoru dostanou 403
 "Forbidden". Důvod uvádí log aplikace (viz
@@ -322,6 +350,36 @@ případnou delší repliku rozsekne do částí se zachováním mluvčího a č
 Popisy nástrojů říkají modelu v klientovi, že vrácený text je to, co lidé
 skutečně řekli, tedy data, nikoliv instrukce.
 
+<span id="with-authorization-from-the-identity-provider" />
+
+## S oprávněním od poskytovatele identity
+
+S [`AUTHZ_MODE=idp`](./sso#authorization-from-the-identity-provider):
+
+- Token osoby funguje jen tak dlouho, dokud osoba má `use`: při každém
+  volání se znovu kontroluje proti jejímu ověřenému přístupu (403 "Your
+  access to Chatterbox has been withdrawn"; 503, dokud ho nelze ověřit).
+- Službou je pouze token klienta uvedeného v `MCP_SERVICE_CLIENTS`, který
+  realm označí jako službu (`chatterbox_subject_kind: service`, nastavuje
+  hardcoded claim mapper u klientů určených jen pro služby). Token nesoucí pouze
+  `client_id` patří osobě a je odmítnut, pokud se tato osoba nepřihlásila.
+  Služba nikdy nespravuje přístup a nikdy není kurátorem Organizace.
+- Tokeny přihlašovacího klienta (`OIDC_CLIENT_ID`) nikdy nejsou MCP
+  přihlašovacími údaji. Administrátorské role ponechte mimo scope
+  všech MCP klientů.
+
+V obou režimech:
+
+- Access tokeny musí uvádět `typ: Bearer` (access tokeny Keycloaku to
+  dělají); ID token, refresh token nebo token bez typu je odmítnut (401).
+- `tasks:write` s sebou přináší `tasks:read`.
+- Volání nástroje, který oprávnění tokenu nepokrývají, odpoví 403 s
+  `WWW-Authenticate: Bearer error="insufficient_scope", scope="<permissions>"`.
+  Metadata resource uvádějí `openid` a šest oprávnění v
+  `scopes_supported`; vytvořte client scope s názvem každého
+  oprávnění, takže klient, který o ně požádá, dostane ta, která mít smí,
+  a zbytek realm odmítne (`invalid_scope`).
+
 <span id="limits-and-audit" />
 
 ## Limity a audit
@@ -366,14 +424,14 @@ tabulku je nutné dotazovat přímo.
 
 `MCP_ALLOWED_CLIENTS` (čárkou oddělené client id) odmítá tokeny, jejichž
 `azp` není v seznamu, jak pro uživatele tak pro servisní účty.
-Pokud není nastaveno, může volat libovolný klient realmů s
-rolími `riffado-mcp` v tokenu.
+Pokud není nastaveno, může volat libovolný klient realmu, jehož token
+projde kontrolou audience a oprávnění.
 
 Tokeny se kontrolují na přesného issuer, `aud` obsahující
 `MCP_AUDIENCE` (nebo URL MCP endpointu při
 `MCP_RESOURCE_AUDIENCE=true`), expiraci (toleruje se 30 sekund rozdílu v čase),
-`RS256`, `PS256` nebo `ES256` podpis a hodnotu `typ`
-jako `Bearer` pokud ji mají: Keycloak access tokeny ji mají, ID token bude odmítnut.
+`RS256`, `PS256` nebo `ES256` podpis a profil access tokenu poskytovatele.
+Adaptér Keycloaku vyžaduje `typ: Bearer`, i v lokálním režimu.
 Riffado je nikdy neposílá dál.
 
 <span id="trying-it-locally" />

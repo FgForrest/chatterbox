@@ -503,10 +503,11 @@ export async function createPrivateType(
 }
 
 /**
- * A new type of the actor's own, inside a caller's transaction, which
- * checked who the actor is and bumps the vocabulary's version and their
- * scope once, last (a finished review): a private type for a member, an
- * Organization type for the organization account. Returns its key.
+ * A new type in a scope, inside a caller's transaction, which checked who
+ * the actor is and bumps the vocabulary's version and the scope once,
+ * last (a finished review): a private type for a member, an Organization
+ * type in the Organization's scope (written by the organization account or
+ * a curator, who is kept as its author). Returns its key.
  *
  * The version is the caller's to bump: held from the first type on, it
  * would be taken before the type rows the next one relates, which a rename
@@ -514,13 +515,13 @@ export async function createPrivateType(
  */
 export async function createOwnTypeInTx(
     tx: Tx,
-    actorUserId: string,
+    { ownerUserId, actorUserId }: { ownerUserId: string; actorUserId: string },
     organization: boolean,
     spec: NewTypeSpec,
 ): Promise<string> {
     return insertTypeInTx(
         tx,
-        actorUserId,
+        ownerUserId,
         actorUserId,
         organization ? "o" : "u",
         spec,

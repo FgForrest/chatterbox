@@ -723,7 +723,13 @@ export async function finishReview(
     {
         versions = {},
         source,
-    }: { versions?: Record<string, number>; source?: ReviewSource } = {},
+        actsForOrganization,
+    }: {
+        versions?: Record<string, number>;
+        source?: ReviewSource;
+        /** Whether the actor acts for the Organization; see `writerRefusal`. */
+        actsForOrganization?: boolean;
+    } = {},
 ): Promise<FinishedReview> {
     const orgUserId = await sharingOrgUserId();
     const latest = await latestRun(access, source);
@@ -739,8 +745,7 @@ export async function finishReview(
     );
     const finished = await finishInTx(
         latest,
-        actorUserId,
-        orgUserId,
+        { actorUserId, orgUserId, actsForOrganization },
         versions,
         readScopes,
     );
@@ -791,10 +796,16 @@ interface ReviewSourceInTx {
     ) => Promise<void>;
 }
 
+interface ReviewWriter {
+    actorUserId: string;
+    orgUserId: string | null;
+    actsForOrganization?: boolean;
+}
+
 async function transcriptSourceInTx(
     tx: Tx,
     latest: RecordingRun,
-    writer: { actorUserId: string; orgUserId: string | null },
+    writer: ReviewWriter,
 ): Promise<ReviewSourceInTx> {
     const { revision, turns } = await lockTranscriptForChange(
         tx,
@@ -856,7 +867,7 @@ async function transcriptSourceInTx(
 async function mailSourceInTx(
     tx: Tx,
     latest: LatestRun,
-    writer: { actorUserId: string; orgUserId: string | null },
+    writer: ReviewWriter,
 ): Promise<ReviewSourceInTx> {
     const [item] = await tx
         .select({ id: chatterItems.id })
@@ -875,6 +886,7 @@ async function mailSourceInTx(
         ownerUserId: latest.userId,
         actorUserId: writer.actorUserId,
         orgUserId: writer.orgUserId,
+        actsForOrganization: writer.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
     const [content] = await tx
@@ -913,6 +925,7 @@ async function mailSourceInTx(
             if (!args.place.text) throw recordMissing();
             await confirmFactFromMailInTx(sp, {
                 actorUserId: writer.actorUserId,
+                scopeUserId: latest.scopeUserId,
                 ownerUserId: latest.userId,
                 itemId: latest.itemId,
                 revision: content.revision,
@@ -1000,19 +1013,16 @@ async function linkParticipantInTx(
 
 function finishInTx(
     latest: LatestRun,
-    actorUserId: string,
-    orgUserId: Awaited<ReturnType<typeof sharingOrgUserId>>,
+    writer: ReviewWriter,
     versions: Record<string, number>,
     readScopes: readonly string[],
 ): Promise<FinishedReview> {
+    const { actorUserId, orgUserId } = writer;
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
         const source = isRecordingRun(latest)
-            ? await transcriptSourceInTx(tx, latest, {
-                  actorUserId,
-                  orgUserId,
-              })
-            : await mailSourceInTx(tx, latest, { actorUserId, orgUserId });
+            ? await transcriptSourceInTx(tx, latest, writer)
+            : await mailSourceInTx(tx, latest, writer);
         const { revision, turns } = source;
         const [run] = await tx
             .select()
@@ -1068,7 +1078,10 @@ function finishInTx(
             >(row.payload),
         }));
 
-        const scopes = new Set<string>([actorUserId]);
+        // Written into the run's scope (the owner's, or the Organization's
+        // on the Organization view); the actor is the author.
+        const scopeUserId = run.scopeUserId;
+        const scopes = new Set<string>([scopeUserId]);
         const skipped: FinishedReview["skipped"] = [];
         let applied = 0;
         /** Apply one item in a savepoint; false when it was skipped. */
@@ -1107,8 +1120,6 @@ function finishInTx(
         const skip = (itemId: string, code: SkipCode, reason: string) => {
             skipped.push({ itemId, code, reason });
         };
-        const writer = { actorUserId, orgUserId };
-
         // New people and things first: the items that refer to one by its
         // ref are applied to the record it became.
         const refs = new Map<string, RecordTarget>();
@@ -1140,7 +1151,7 @@ function finishInTx(
         const personLocks = [
             ...new Set(
                 personNames.flatMap((nameKey) =>
-                    [...new Set([actorUserId, ...readScopes])].map(
+                    [...new Set([scopeUserId, ...readScopes])].map(
                         (scope) =>
                             `riffado:learn-person:${domainLookupHash("learn-person", `${scope}\u0000${nameKey}`)}`,
                     ),
@@ -1170,7 +1181,7 @@ function finishInTx(
                         : { entityId: choice.entityId };
                 const target = await resolveTargetInTx(
                     tx,
-                    actorUserId,
+                    scopeUserId,
                     chosen,
                 ).catch((error: unknown) => {
                     if (error instanceof AppError) return null;
@@ -1198,9 +1209,10 @@ function finishInTx(
                         await tx.transaction(async (sp) => {
                             await addAliasInTx(
                                 sp as Tx,
-                                actorUserId,
+                                scopeUserId,
                                 target,
                                 payload.name,
+                                actorUserId,
                             );
                         });
                     } catch (error) {
@@ -1233,10 +1245,10 @@ function finishInTx(
             }
             const made: { target?: RecordTarget } = {};
             const added = await attempt(item.id, async (sp) => {
-                await assertOwnScopeWritable(actorUserId);
+                await assertOwnScopeWritable(scopeUserId);
                 if (payload.kind === "person" || !typeKey) {
                     const person = await createPersonInTx(sp, {
-                        userId: actorUserId,
+                        userId: scopeUserId,
                         displayName: name,
                         createdByUserId: actorUserId,
                     });
@@ -1245,9 +1257,10 @@ function finishInTx(
                     peopleByName.set(recordNameKey(name), [person.id]);
                 } else {
                     made.target = {
-                        entityId: await createEntityInTx(sp, actorUserId, {
+                        entityId: await createEntityInTx(sp, scopeUserId, {
                             typeKey,
                             name,
+                            createdByUserId: actorUserId,
                         }),
                     };
                 }
@@ -1259,7 +1272,7 @@ function finishInTx(
             // Its name taken meanwhile: that thing is the one.
             const taken =
                 typeKey !== null && payload.kind === "entity"
-                    ? await findEntityByNameInTx(tx, actorUserId, typeKey, name)
+                    ? await findEntityByNameInTx(tx, scopeUserId, typeKey, name)
                     : null;
             if (taken) {
                 refs.set(payload.ref, { entityId: taken });
@@ -1280,7 +1293,7 @@ function finishInTx(
                 ) {
                     continue;
                 }
-                await linkParticipantInTx(tx, latest, actorUserId, {
+                await linkParticipantInTx(tx, latest, scopeUserId, {
                     ref: payload.speakerLabel,
                     personId: target.personId,
                     address: payload.address ?? null,
@@ -1516,7 +1529,7 @@ function finishInTx(
             );
         }
 
-        const organization = orgUserId !== null && actorUserId === orgUserId;
+        const organization = orgUserId !== null && scopeUserId === orgUserId;
         const phrases = items.flatMap((item) => {
             if (item.kind !== "relation_phrase" || !item.accepted) return [];
             const proposed = item.payload as Extract<
@@ -1562,7 +1575,7 @@ function finishInTx(
             await attempt(item.id, async (sp) => {
                 const key = await createOwnTypeInTx(
                     sp,
-                    actorUserId,
+                    { ownerUserId: scopeUserId, actorUserId },
                     organization,
                     choice.spec,
                 );

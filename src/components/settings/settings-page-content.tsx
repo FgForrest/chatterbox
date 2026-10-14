@@ -10,12 +10,14 @@ interface SettingsPageContentProps {
     initialProviders?: Provider[];
     isHosted?: boolean;
     mailEnabled?: boolean;
+    accessManagement?: boolean;
 }
 
 export function SettingsPageContent({
     initialProviders = EMPTY_PROVIDERS,
     isHosted = false,
     mailEnabled = false,
+    accessManagement = false,
 }: SettingsPageContentProps) {
     const { push } = useRouter();
     const [open, setOpen] = useState(true);
@@ -35,6 +37,7 @@ export function SettingsPageContent({
             initialProviders={initialProviders}
             isHosted={isHosted}
             mailEnabled={mailEnabled}
+            accessManagement={accessManagement}
         />
     );
 }

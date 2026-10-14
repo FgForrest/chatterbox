@@ -129,6 +129,8 @@ interface Writer {
      * (`sharingOrgUserId`), or null when this instance shows none.
      */
     orgUserId: string | null;
+    /** Whether the actor acts for the Organization; see `writerRefusal`. */
+    actsForOrganization?: boolean;
 }
 
 export interface AcceptCorrectionArgs extends TranscriptVersion, Writer {
@@ -185,8 +187,8 @@ export async function acceptCorrection(
 ): Promise<string> {
     return db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        const id = await acceptCorrectionInTx(tx, args);
-        await bumpScopeInTx(tx, [args.actorUserId]);
+        const { id, scopeUserId } = await acceptInTx(tx, args);
+        await bumpScopeInTx(tx, [scopeUserId]);
         return id;
     });
 }
@@ -200,9 +202,16 @@ export async function acceptCorrectionInTx(
     tx: Tx,
     args: AcceptCorrectionArgs,
 ): Promise<string> {
+    return (await acceptInTx(tx, args)).id;
+}
+
+async function acceptInTx(
+    tx: Tx,
+    args: AcceptCorrectionArgs,
+): Promise<{ id: string; scopeUserId: string }> {
     const { anchor, kind, actorUserId } = args;
     const replacement = cleanReplacement(kind, args.replacement, anchor.heard);
-    const { revision, turns, language, provider } =
+    const { revision, turns, language, provider, scopeUserId } =
         await lockTranscriptForChange(tx, args, args);
     if (revision !== args.revision) throw transcriptChanged();
     if (!anchorMatches(anchor, turns)) {
@@ -219,10 +228,10 @@ export async function acceptCorrectionInTx(
             and(
                 eq(transcriptCorrections.transcriptionId, args.transcriptionId),
                 eq(transcriptCorrections.turnIndex, anchor.turnIndex),
-                // Only what the actor's view shows, which the writer rule
-                // made the actor's scope: a waiting private correction
-                // neither blocks nor gives itself away.
-                eq(transcriptCorrections.userId, actorUserId),
+                // Only what the actor's view shows, the scope the writer
+                // rule chose: a waiting private correction neither blocks
+                // nor gives itself away.
+                eq(transcriptCorrections.userId, scopeUserId),
             ),
         );
     if (onTurn.some((other) => anchorsOverlap(other, anchor))) {
@@ -232,14 +241,13 @@ export async function acceptCorrectionInTx(
             409,
         );
     }
-    const target = await resolveTargetInTx(tx, actorUserId, args.target);
+    const target = await resolveTargetInTx(tx, scopeUserId, args.target);
     const [row] = await tx
         .insert(transcriptCorrections)
         .values({
-            // The writer rule made the actor the owner on a private
-            // recording and the organization account on a shared one:
-            // the scope.
-            userId: actorUserId,
+            // The owner's scope on a private recording, the
+            // Organization's on a shared one; the actor is the author.
+            userId: scopeUserId,
             transcriptionId: args.transcriptionId,
             transcriptRevision: revision,
             turnIndex: anchor.turnIndex,
@@ -258,7 +266,7 @@ export async function acceptCorrectionInTx(
     const id = (row as { id: string }).id;
     if (kind === "correct" && !args.preTicked) {
         await teachHeardAsInTx(tx, {
-            scopeUserId: actorUserId,
+            scopeUserId,
             target,
             heard: anchor.heard,
             language,
@@ -266,7 +274,7 @@ export async function acceptCorrectionInTx(
             correctionId: id,
         });
     }
-    return id;
+    return { id, scopeUserId };
 }
 
 /**
@@ -280,13 +288,13 @@ export async function revertCorrection(
         Writer & { correctionId: string },
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        await lockTranscriptForChange(tx, args, args);
+        const { scopeUserId } = await lockTranscriptForChange(tx, args, args);
         const deleted = await tx
             .delete(transcriptCorrections)
             .where(
                 and(
                     eq(transcriptCorrections.id, args.correctionId),
-                    eq(transcriptCorrections.userId, args.actorUserId),
+                    eq(transcriptCorrections.userId, scopeUserId),
                     eq(
                         transcriptCorrections.transcriptionId,
                         args.transcriptionId,
@@ -295,7 +303,7 @@ export async function revertCorrection(
             )
             .returning({ id: transcriptCorrections.id });
         if (deleted.length === 0) throw correctionNotFound();
-        await bumpScopeInTx(tx, [args.actorUserId]);
+        await bumpScopeInTx(tx, [scopeUserId]);
     });
 }
 

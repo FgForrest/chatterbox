@@ -58,6 +58,27 @@ samostatnou kryptografickou doménou.
 Smazání složky Organizace nikdy nezpůsobí ztrátu sdílených nahrávek: ty se přesunou
 do kořene Organizace.
 
+<span id="curators" />
+
+## Kurátoři Organizace
+
+S [oprávněním od poskytovatele identity](./sso#authorization-from-the-identity-provider)
+(`AUTHZ_MODE=idp`) se nikdo nepřihlašuje jako účet organizace. Organizaci
+místo něj spravují lidé s oprávněním `org.curate` (a `use`), každý pod
+svým vlastním jménem: ve zobrazení Organizace sdílené nahrávky ji
+přejmenují, přepíšou, shrnou, rozpoznají její témata, pojmenují mluvčí,
+spustí Learn a dokončí její kontrolu a vracejí opravy. Co vytvoří, se
+dostane do Almanachu Organizace a jsou u toho zaznamenáni jako autoři;
+účet organizace zůstává vlastníkem dat, ne jejich autorem.
+
+Server o tom rozhoduje podle ověřeného přístupu kurátora, ne podle
+obrazovky. Práce zahájená před odebráním `org.curate` (shrnutí, přepis,
+běh Learn) se při zápisu znovu ověří a po ztrátě oprávnění nic nezapíše.
+
+Mazání a slučování lidí a věcí Organizace, sdílení a stahování nahrávek
+a nastavení exportů zatím ke správě Organizace nepatří: zůstávají účtu
+organizace a vlastníkovi nahrávky, jak je popsáno výše.
+
 <span id="two-views-of-one-recording" />
 
 ## Dva pohledy na jednu nahrávku

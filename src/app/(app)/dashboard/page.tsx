@@ -11,7 +11,9 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
-import { requireAuth } from "@/lib/auth-server";
+import { accessManagementAvailable } from "@/lib/access/service";
+import { getSessionActor, requireAuth } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { exportProvidersAvailability } from "@/lib/folder-exports/configurations";
@@ -228,6 +230,7 @@ async function loadOrganizationLibrary(
 
 export default async function DashboardPage() {
     const session = await requireAuth();
+    const actor = await getSessionActor();
 
     const [
         userRecordings,
@@ -395,6 +398,8 @@ export default async function DashboardPage() {
             plaudNeedsReconnect={connectionRow?.invalidatedAt != null}
             isHosted={env.IS_HOSTED}
             mailEnabled={isMailEnabled() && !viewerIsOrgAccount}
+            accessManagement={accessManagementAvailable(actor)}
+            canCurate={actor ? await actsForOrganization(actor) : false}
             exportProviders={exportProvidersAvailability()}
             initialFolderOrganization={visibleFolderOrganization}
         />

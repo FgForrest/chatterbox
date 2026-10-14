@@ -124,6 +124,133 @@ sign in as the organization account: it keeps owning the Organization
 tree, but has no interactive login. An identity provider user whose email
 equals `ORG_ACCOUNT_EMAIL` is refused.
 
+## Authorization from the identity provider
+
+By default everyone the provider lets through may use Chatterbox, and
+the [organization account](./organization) curates the Organization.
+With `AUTHZ_MODE=idp` the provider grants three capabilities instead,
+as client roles of the sign-in client (`OIDC_CLIENT_ID`, or
+`KEYCLOAK_ROLES_CLIENT`):
+
+| Capability      | Lets a person                                                   |
+| --------------- | --------------------------------------------------------------- |
+| `use`           | sign in, use API keys, the meeting recorder and MCP clients      |
+| `org.curate`    | [curate the Organization](./organization#curators)              |
+| `access.manage` | change the three capabilities of others in **Settings → Access** |
+
+`org.curate` and `access.manage` need `use` and do not imply each other.
+Only Keycloak is supported (`IDENTITY_PROVIDER=keycloak`).
+
+### Setting up the realm
+
+For a reproducible local example, run `docker compose -f docker-compose.local-authz.yml up -d --build --wait`.
+It imports `e2e/authz/keycloak/chatterbox-local-realm.json` directly, including
+fictional users and public test credentials. See `e2e/authz/README.md` for accounts
+and reset instructions. Do not import these test credentials into production.
+
+For your own provider, configure the confidential web client and its three
+client roles, one group per capability, and a read-only verifier service client.
+Use the standard `basic`, `profile`, `email` and `roles` client scopes: the ID
+token must carry `auth_time` and the access token must carry client roles under
+`resource_access`. Disable Full Scope Allowed and explicitly map the required
+roles as described below. Assign the first administrator both `use` and
+`access.manage` through these groups. Group names are arbitrary; the application
+uses their UUIDs. Configure MCP clients separately using the [MCP guide](./mcp).
+`bun scripts/export-authz.ts` prints the application's authorization catalog.
+
+Then set:
+
+```bash
+AUTHZ_MODE=idp
+IDENTITY_PROVIDER=keycloak
+KEYCLOAK_GROUP_USE_ID=...            # the groups' ids, from Keycloak
+KEYCLOAK_GROUP_CURATE_ID=...
+KEYCLOAK_GROUP_ACCESS_MANAGE_ID=...
+KEYCLOAK_VERIFIER_CLIENT_ID=chatterbox-access-verifier
+KEYCLOAK_VERIFIER_CLIENT_SECRET=...
+```
+
+The local example makes `Users` a default group for new accounts. In your own
+realm, choose this according to your admission policy. Existing users and
+removed memberships are not automatically restored by the application.
+
+### What the provider must allow
+
+Administrators change access with **their own** sign-in, never with a
+shared administrator credential. Configure these realm-management roles:
+
+| Principal | Roles | Purpose |
+| --- | --- | --- |
+| Administrators group | `manage-users`, `view-clients` | Manage memberships and sessions; inspect client role mappings |
+| Access verifier service account | `view-users`, `view-clients` | Read users, memberships and client role mappings |
+
+The sign-in client's role scope mappings include both administrator roles;
+group membership alone is insufficient when Full Scope Allowed is off.
+The verifier's role scope mappings include both read roles as well.
+MCP clients receive no realm-management roles.
+
+`view-clients` is included for deployments that restrict client-role inspection:
+a group-role mapping request can otherwise return an empty result or HTTP 403.
+It grants realm-wide client read access, not permission to modify clients.
+Runtime credentials do not need `manage-clients` or `realm-admin`.
+
+### Sessions
+
+- A sign-in is refused before any account is created unless the provider
+  grants `use`. The ID token and the access token are verified (signature,
+  issuer, audience, expiry, client).
+- The provider's tokens are kept per session, encrypted, on the server
+  only; they never reach the browser and go with the session.
+- A session re-checks its capabilities with the provider every
+  `AUTHZ_VERIFICATION_MAX_AGE` seconds (default 30 minutes). A session
+  the provider ended, or a person who lost `use`, is signed out; while
+  the provider cannot be reached, requests are refused (503), never
+  served with the old capabilities.
+- Changing access requires a sign-in at the provider younger than
+  `AUTHZ_ADMIN_MAX_AUTH_AGE` (8 hours by default). When it expires, the
+  access screen offers a new sign-in with `prompt=login` and `max_age=0`,
+  returning to access settings. The pending change is not submitted automatically.
+- An account is bound to the issuer that vouched for it. Pointing
+  Chatterbox at another realm does not take over accounts: their sign-in
+  is refused with "belongs to a different identity provider". To move
+  people to a new issuer deliberately, delete their old link (the
+  `accounts` rows with `provider_id = 'oidc'`); they are linked again by
+  verified email on their next sign-in.
+
+### API keys and the meeting recorder
+
+A key works only while its holder's access does. The holder's access is
+re-verified with the access verifier at most every
+`AUTHZ_VERIFICATION_MAX_AGE` seconds, without their web sign-in, so a
+recorder keeps uploading for weeks. A holder disabled or deleted at the
+provider is refused (403) at the next verification; while the provider
+or the verifier is unavailable the key answers 503, and the recorder
+keeps its recording and retries. Without a verifier, a key works until
+the last verification grows older than `AUTHZ_VERIFICATION_MAX_AGE`, and
+again after the holder's next web sign-in.
+
+Taking `use` away in **Settings → Access** blocks the holder's keys and
+recorder at once and signs them out everywhere. Giving it back unblocks
+the same keys; the recorder offers to retry what it kept.
+
+### How fast access ends
+
+| Change                                    | Takes effect                                   |
+| ----------------------------------------- | ---------------------------------------------- |
+| `use` taken away in Settings → Access     | at once: sessions, API keys, recorder, MCP     |
+| capability changed in Settings → Access   | at the person's next request                   |
+| person disabled or deleted at the provider | on the first request after the last verification expires (at most `AUTHZ_VERIFICATION_MAX_AGE`) |
+| group changed directly at the provider     | within `AUTHZ_VERIFICATION_MAX_AGE`            |
+
+An access token an AI client already holds stays valid until it expires
+(the realm's lifespan, 15 minutes for human MCP clients in the local example); Chatterbox re-checks the person's `use` on every MCP call. If
+your directory deactivates people upstream of Keycloak, the total delay
+includes how long that takes to reach Keycloak.
+
+Every change and refusal is recorded in the `access_change_log` table:
+who asked, for whom, what was asked, what the provider holds afterwards,
+and whether the person's sessions were ended. Tokens are never recorded.
+
 ## Trying it locally
 
 The repository's end-to-end stack has a Keycloak override with a test

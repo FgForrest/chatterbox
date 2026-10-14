@@ -9,6 +9,7 @@ Most of Riffado works as soon as it runs. A few features need the instance set u
 | --- | --- | --- |
 | [The Organization](organization.md) | `ORG_ACCOUNT_EMAIL`, `ORG_ACCOUNT_PASSWORD` (12+ characters), optionally `ORG_ACCOUNT_NAME` | [Organization](../self-hosting/organization.mdx) |
 | Single sign-on | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, optionally `OIDC_PROVIDER_NAME`, `OIDC_SCOPES`, `OIDC_SESSION_MAX_AGE` | [Single sign-on](../self-hosting/sso.mdx) |
+| [Access from the identity provider](#access-from-the-identity-provider) | `AUTHZ_MODE=idp`, `IDENTITY_PROVIDER=keycloak`, the three `KEYCLOAK_GROUP_*_ID`, `KEYCLOAK_VERIFIER_CLIENT_*` | [Single sign-on](../self-hosting/sso.mdx#authorization-from-the-identity-provider) |
 | Closed registration | `DISABLE_REGISTRATION=true` | |
 | [Folder exports to disk](exports-backups-retention.md#to-a-disk) | `FILESYSTEM_EXPORT_HOST_PATH` (Docker) or `FILESYSTEM_EXPORT_ROOT` | |
 | [Google Drive exports](exports-backups-retention.md#to-google-drive) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER`, optionally `GOOGLE_WORKSPACE_DOMAINS` | [Google Drive](../self-hosting/google-drive.mdx) |
@@ -31,6 +32,37 @@ Removing the two variables makes the Organization read-only: what was shared sta
 With the three `OIDC_` variables set, the sign-in page offers one **Sign in with …** button and password sign-in, registration and password reset are switched off. Register `<APP_URL>/api/auth/oauth2/callback/oidc` as the redirect URI at your identity provider. Existing accounts are linked on first sign-in when the provider confirms the email address.
 
 With `DISABLE_REGISTRATION=true` as well, only people who already have an account can sign in. To let someone new in, unset it, restart, let them sign in once, and set it again.
+
+## Access from the identity provider
+
+With `AUTHZ_MODE=idp` your identity provider decides three things about
+every person:
+
+- **Access to Chatterbox** (`use`): without it nobody signs in, and their
+  API keys, meeting recorder and AI clients stop working.
+- **Curates the Organization** (`org.curate`): changes shared recordings
+  on the Organization view (names of speakers, Learn, corrections,
+  titles, summaries, topics, transcripts) under their own name.
+- **Manages access** (`access.manage`): sees **Settings → Access** and
+  switches the three rights for others there.
+
+The rights are independent: an administrator is not a curator unless
+given both, and neither works without access. Chatterbox keeps no list
+of its own: what you switch in **Settings → Access** is written into the
+identity provider's groups, with the administrator's own sign-in, and
+read back from there. Nobody can take their own access or
+administration away.
+
+Taking access away signs the person out at once, here and at the
+provider, and blocks their API keys and meeting recorder until access is
+given back; recordings waiting in their browser are kept. A person
+disabled or deleted at the provider loses access within
+`AUTHZ_VERIFICATION_MAX_AGE` (30 minutes by default) after Chatterbox
+learns of it; how quickly your provider learns of it is up to your IT.
+
+[Single sign-on](../self-hosting/sso.mdx#authorization-from-the-identity-provider)
+explains the setup, including the command that prepares the Keycloak
+realm and the first administrator.
 
 ## Claude Code and Codex subscriptions
 

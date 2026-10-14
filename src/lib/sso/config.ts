@@ -42,3 +42,14 @@ export const PASSWORD_AUTH_PATHS = [
     "/unlink-account",
     "/oauth2/link",
 ] as const;
+
+/**
+ * better-auth endpoints that hand out or renew the provider's tokens of an
+ * account. Chatterbox keeps those tokens server-side, per session; these
+ * stay switched off.
+ */
+export const PROVIDER_TOKEN_PATHS = [
+    "/get-access-token",
+    "/refresh-token",
+    "/account-info",
+] as const;

@@ -1,5 +1,4 @@
 import { and, eq, isNull, or } from "drizzle-orm";
-import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { PersonDetail } from "@/components/people/person-detail";
 import { db } from "@/db";
@@ -10,7 +9,7 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth-server";
 import { decryptText } from "@/lib/encryption/fields";
 import { listAliases } from "@/lib/knowledge/aliases";
 import { almanacVocabulary } from "@/lib/knowledge/almanac-vocabulary";
@@ -25,10 +24,7 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ id: string }> };
 
 export default async function PersonPage({ params }: Params) {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-        redirect("/login");
-    }
+    const session = await requireAuth();
 
     const { id } = await params;
     const userId = session.user.id;

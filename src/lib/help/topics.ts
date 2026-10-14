@@ -25,6 +25,10 @@ const SETTINGS_TOPICS: Record<SettingsSection, HelpTarget> = {
         anchor: "to-google-drive",
     },
     mail: { page: "mail", anchor: "your-addresses" },
+    access: {
+        page: "administrators",
+        anchor: "access-from-the-identity-provider",
+    },
     billing: { page: "settings", anchor: "the-other-sections" },
     "plaud-account": { page: "settings", anchor: "the-other-sections" },
     sync: { page: "settings", anchor: "the-other-sections" },

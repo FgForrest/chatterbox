@@ -92,6 +92,138 @@ Každé přihlášení přes SSO zaznamená osobu (jméno a e-mail) do Almanachu
 
 Při jednotném přihlášení je `ORG_ACCOUNT_PASSWORD` volitelné a nikdo se nemůže přihlásit jako účet Organizace: zůstává vlastníkem stromu Organizace, ale nelze se k němu interaktivně přihlásit. Uživatel poskytovatele identity, jehož e-mail se shoduje s `ORG_ACCOUNT_EMAIL`, je odmítnut.
 
+<span id="authorization-from-the-identity-provider" />
+
+## Oprávnění od poskytovatele identity
+
+Ve výchozím stavu smí Riffado používat každý, koho poskytovatel propustí,
+a Organizaci spravuje [účet organizace](./organization). S
+`AUTHZ_MODE=idp` místo toho poskytovatel uděluje tři oprávnění jako
+klientské role přihlašovacího klienta (`OIDC_CLIENT_ID`, nebo
+`KEYCLOAK_ROLES_CLIENT`):
+
+| Oprávnění       | Umožňuje osobě                                                  |
+| --------------- | --------------------------------------------------------------- |
+| `use`           | přihlásit se, používat API klíče, záznamník schůzek a MCP klienty |
+| `org.curate`    | [spravovat Organizaci](./organization#curators)                 |
+| `access.manage` | měnit ostatním tato tři oprávnění v **Nastavení → Přístupy**     |
+
+`org.curate` a `access.manage` vyžadují `use` a jedno nezahrnuje druhé.
+Podporován je pouze Keycloak (`IDENTITY_PROVIDER=keycloak`).
+
+### Nastavení realmu
+
+Lokální příklad spustíte příkazem `docker compose -f docker-compose.local-authz.yml up -d --build --wait`.
+Přímo importuje `e2e/authz/keycloak/chatterbox-local-realm.json` s fiktivními
+uživateli a veřejnými testovacími údaji. Účty a reset popisuje
+`e2e/authz/README.md`. Testovací přihlašovací údaje nepatří do produkce.
+
+Ve vlastním realmu nastavte důvěrného webového klienta se třemi klientskými
+rolemi, skupinu pro každé oprávnění a servisního ověřovatele pouze pro čtení.
+Připojte standardní client scopes `basic`, `profile`, `email` a `roles`:
+ID token musí obsahovat `auth_time`, access token klientské role pod
+`resource_access`. Vypněte Full Scope Allowed a explicitně nastavte scope
+mappingy popsané níže. Prvnímu správci přidělte přes skupiny `use` i
+`access.manage`. Názvy skupin jsou libovolné, aplikace používá jejich UUID.
+MCP klienty nastavte podle [MCP dokumentace](./mcp).
+`bun scripts/export-authz.ts` vypíše katalog oprávnění aplikace.
+
+Poté nastavte:
+
+```bash
+AUTHZ_MODE=idp
+IDENTITY_PROVIDER=keycloak
+KEYCLOAK_GROUP_USE_ID=...            # the groups' ids, from Keycloak
+KEYCLOAK_GROUP_CURATE_ID=...
+KEYCLOAK_GROUP_ACCESS_MANAGE_ID=...
+KEYCLOAK_VERIFIER_CLIENT_ID=chatterbox-access-verifier
+KEYCLOAK_VERIFIER_CLIENT_SECRET=...
+```
+
+V lokálním příkladu je `Users` výchozí skupinou nových účtů. Ve vlastním realmu
+tuto volbu nastavte podle své politiky. Aplikace automaticky nepřidává dosavadní
+uživatele ani neobnovuje odebrané členství.
+
+### Co musí poskytovatel povolit
+
+Administrátoři mění přístup **vlastním** přihlášením, nikdy sdíleným
+administrátorským účtem. Změřeno na Keycloaku 26.7.2:
+
+| Operace                                            | Vyžaduje                      |
+| -------------------------------------------------- | ----------------------------- |
+| vypsat osoby, číst jejich skupiny a efektivní role | `realm-management/view-users` a `view-clients` |
+| přidávat do spravovaných skupin a odebírat z nich  | `realm-management/manage-users` |
+| odhlásit osobu u poskytovatele                     | `realm-management/manage-users` |
+
+Správcovské skupině přidělte `manage-users` a `view-clients`
+a obě role zahrňte do scope mappingu přihlašovacího klienta. Při vypnutém
+Full Scope Allowed samotné členství ve skupině nestačí. Ověřovatel má
+`view-users` a `view-clients` jak na service accountu, tak ve scope mappingu.
+MCP klienti nedostávají žádné role `realm-management`.
+
+`view-clients` pokrývá nasazení omezující čtení klientských rolí: požadavek
+na role skupiny jinak může vrátit prázdný výsledek nebo HTTP 403.
+Umožňuje čtení klientů v celém realmu, nikoli jejich úpravy.
+Běhové přihlašovací údaje nepotřebují `manage-clients` ani `realm-admin`.
+
+### Relace
+
+- Přihlášení je odmítnuto dřív, než vznikne jakýkoli účet, pokud
+  poskytovatel neudělí `use`. ID token i access token se ověřují (podpis,
+  issuer, audience, expirace, klient).
+- Tokeny poskytovatele se uchovávají pro každou relaci zvlášť, šifrovaně,
+  pouze na serveru; nikdy se nedostanou do prohlížeče a zanikají s relací.
+- Relace si u poskytovatele znovu ověřuje svá oprávnění každých
+  `AUTHZ_VERIFICATION_MAX_AGE` sekund (výchozí 30 minut). Relace, kterou
+  poskytovatel ukončil, nebo osoba, která ztratila `use`, je odhlášena;
+  dokud poskytovatel není dostupný, požadavky jsou odmítány (503), nikdy
+  obslouženy se starými oprávněními.
+- Změna přístupu vyžaduje přihlášení u poskytovatele mladší než
+  `AUTHZ_ADMIN_MAX_AUTH_AGE` (výchozí 8 hodin). Po vypršení nabídne obrazovka
+  nové přihlášení s `prompt=login` a `max_age=0`, které se vrátí do nastavení
+  přístupů. Rozpracovaná změna se automaticky neodešle.
+- Účet je vázán na issuer, který za něj ručil. Přesměrování Riffado na
+  jiný realm účty nepřevezme: jejich přihlášení je odmítnuto s hlášením
+  „belongs to a different identity provider“. Chcete-li lidi záměrně
+  převést na nový issuer, smažte jejich staré propojení (řádky `accounts`
+  s `provider_id = 'oidc'`); při dalším přihlášení se znovu propojí podle
+  ověřeného e-mailu.
+
+### API klíče a záznamník schůzek
+
+Klíč funguje jen tak dlouho, jako přístup jeho držitele. Přístup držitele
+se znovu ověřuje přes ověřovatele přístupu nejvýše jednou za
+`AUTHZ_VERIFICATION_MAX_AGE` sekund, bez jeho webového přihlášení, takže
+záznamník může nahrávat celé týdny. Držitel deaktivovaný nebo smazaný u
+poskytovatele je při dalším ověření odmítnut (403); dokud poskytovatel
+nebo ověřovatel není dostupný, klíč odpovídá 503 a záznamník si nahrávku
+ponechá a zkusí to znovu. Bez ověřovatele funguje klíč, dokud poslední
+ověření není starší než `AUTHZ_VERIFICATION_MAX_AGE`, a znovu po dalším
+webovém přihlášení držitele.
+
+Odebrání `use` v **Nastavení → Přístupy** okamžitě zablokuje klíče a
+záznamník držitele a odhlásí ho všude. Vrácení přístupu odblokuje tytéž
+klíče; záznamník nabídne opakování toho, co si ponechal.
+
+### Jak rychle přístup končí
+
+| Změna                                       | Projeví se                                     |
+| ------------------------------------------- | ---------------------------------------------- |
+| `use` odebráno v Nastavení → Přístupy       | okamžitě: relace, API klíče, záznamník, MCP    |
+| oprávnění změněno v Nastavení → Přístupy    | při dalším požadavku osoby                     |
+| osoba deaktivována nebo smazána u poskytovatele | při prvním požadavku po vypršení posledního ověření (nejvýše `AUTHZ_VERIFICATION_MAX_AGE`) |
+| skupina změněna přímo u poskytovatele       | do `AUTHZ_VERIFICATION_MAX_AGE`                |
+
+Access token, který už AI klient drží, platí až do své expirace (doba
+platnosti v realmu, 15 minut u uživatelských MCP klientů v lokálním příkladu);
+Riffado při každém volání MCP znovu kontroluje `use` dané osoby. Pokud
+váš adresář deaktivuje lidi ještě před Keycloakem, celkové zpoždění
+zahrnuje i dobu, než se změna do Keycloaku dostane.
+
+Každá změna i odmítnutí se zaznamená do tabulky `access_change_log`: kdo
+žádal, pro koho, o co žádal, co má poskytovatel poté uloženo a zda byly
+relace osoby ukončeny. Tokeny se nikdy nezaznamenávají.
+
 <span id="trying-it-locally" />
 
 ## Vyzkoušení lokálně

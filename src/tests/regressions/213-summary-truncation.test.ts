@@ -99,9 +99,18 @@ vi.mock("@/lib/encryption/fields", () => ({
     encryptJsonField: <T>(v: T) => v,
 }));
 
-vi.mock("@/lib/auth-server", () => ({
-    requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
+vi.mock("@/lib/authz/curator", () => ({
+    actsForOrganization: vi.fn().mockResolvedValue(false),
+    userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
 }));
+vi.mock("@/lib/auth-server", async () => {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
+        requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
+    });
+});
 
 // Sidecar export runs after a successful summary and reaches storage,
 // which pulls the validated env. Out of scope for this regression.

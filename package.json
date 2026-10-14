@@ -36,7 +36,8 @@
         "format-and-lint:fix": "biome check . --write",
         "db:generate": "drizzle-kit generate",
         "db:migrate": "bun src/db/migrate.ts",
-        "db:studio": "drizzle-kit studio"
+        "db:studio": "drizzle-kit studio",
+        "authz:export": "bun scripts/export-authz.ts"
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.1083.0",

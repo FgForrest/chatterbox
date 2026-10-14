@@ -3,8 +3,12 @@ import { and, eq, gt, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { apiKeys, users } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { sessionRefusalError } from "@/lib/auth-server";
+import { holderAccess } from "@/lib/authz/access-state";
+import { sessionAccess } from "@/lib/authz/session-access";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 
 export type AuthenticatedRequest = {
     user: { id: string };
@@ -200,6 +204,31 @@ async function assertUserNotSuspended(userId: string): Promise<void> {
     }
 }
 
+/**
+ * With identity-provider authorization an API key is only as good as its
+ * holder's verified access: `use`, renewed by the access verifier at most
+ * AUTHZ_VERIFICATION_MAX_AGE after the last verification, independently of
+ * the holder's web sign-ins. Refusals are 403 (access withdrawn) or 503
+ * (cannot be verified now: the client keeps its data and retries).
+ */
+async function assertHolderAccess(userId: string): Promise<void> {
+    if (!isIdpAuthorization()) return;
+    const access = await holderAccess(userId);
+    if (access.ok) return;
+    if (access.reason === "not-granted" || access.reason === "disabled") {
+        throw new AppError(
+            ErrorCode.ACCESS_NOT_GRANTED,
+            "The key's holder no longer has access to this application",
+            403,
+        );
+    }
+    throw new AppError(
+        ErrorCode.ACCESS_UNVERIFIABLE,
+        "The key holder's access could not be verified right now",
+        503,
+    );
+}
+
 export async function authenticateRequest(
     request: Request,
 ): Promise<AuthenticatedRequest | null> {
@@ -223,6 +252,7 @@ export async function authenticateRequest(
 
         if (!apiKey) return null;
         await assertUserNotSuspended(apiKey.userId);
+        await assertHolderAccess(apiKey.userId);
 
         void db
             .update(apiKeys)
@@ -250,6 +280,11 @@ export async function authenticateRequest(
     });
 
     if (!session?.user) return null;
+    const access = await sessionAccess({
+        id: session.session.id,
+        userId: session.user.id,
+    });
+    if (!access.ok) throw sessionRefusalError(access.reason);
     await assertUserNotSuspended(session.user.id);
 
     return {

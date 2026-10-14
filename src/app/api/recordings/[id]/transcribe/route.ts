@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getActiveJob } from "@/db/queries/async-jobs";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { apiHandler } from "@/lib/errors";
 import {
     recordingJobSubject,
@@ -31,12 +32,12 @@ type IdContext = { params: Promise<{ id: string }> };
  *   - `model`: override the provider's default model for this call.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(session.user.id, id, view);
     // The run checks again when it starts, and when it writes.
-    assertMayChange(access, session.user.id);
+    assertMayChange(access, session.user.id, await actsForOrganization(actor));
 
     const body = (await request.json().catch(() => ({}))) as Record<
         string,

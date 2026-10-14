@@ -114,6 +114,25 @@ the public entrance and connector variables.
 | `MCP_CONNECTOR_KEYS`       | —       | Comma-separated `client=key` pairs (keys of 32+ characters): a token of a listed client is served only with `X-API-Key: <key>`, a Claude connector's request header. Secret. |
 | `MCP_RESOURCE_AUDIENCE`    | `false` | When `true`, also accept tokens whose `aud` is `<APP_URL>/api/mcp` (Keycloak's resource indicators). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Days a row of the `mcp_access_log` table is kept (1 to 3650).                                         |
+| `MCP_SERVICE_CLIENTS`      | —       | Comma-separated service-only clients whose marked tokens act in the Organization's data context. Each must be in `MCP_ALLOWED_CLIENTS` when that is set. With it set (or with `AUTHZ_MODE=idp`), a token is a service only when its client is listed and the realm marked it; unset in `local` mode, a token with `client_id` is still taken for a service (deprecated). |
+
+## Authorization from the identity provider
+
+Self-host with single sign-on only. Off unless `AUTHZ_MODE=idp`. See
+[Single sign-on](./sso#authorization-from-the-identity-provider).
+
+| Variable                          | Default    | Effect |
+| --------------------------------- | ---------- | ------ |
+| `AUTHZ_MODE`                      | `local`    | `local`: everyone who signs in may use the application and the organization account curates. `idp`: the identity provider grants `use`, `org.curate` and `access.manage`. |
+| `IDENTITY_PROVIDER`               | —          | Required with `AUTHZ_MODE=idp`. Only `keycloak` today; any other value stops the server. |
+| `KEYCLOAK_ROLES_CLIENT`           | `OIDC_CLIENT_ID` | Keycloak client whose client roles carry the capabilities. |
+| `KEYCLOAK_GROUP_USE_ID`           | —          | Id of the group that grants `use`. The three group ids are set together and each must differ. With them, administrators manage access in **Settings → Access**. |
+| `KEYCLOAK_GROUP_CURATE_ID`        | —          | Id of the group that grants `org.curate`. |
+| `KEYCLOAK_GROUP_ACCESS_MANAGE_ID` | —          | Id of the group that grants `access.manage`. |
+| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Read-only service client (`realm-management/view-users`) that re-verifies the access of API key and MCP holders. Set with its secret; must not be the web client or an MCP client. |
+| `KEYCLOAK_VERIFIER_CLIENT_SECRET` | —          | Its secret. |
+| `AUTHZ_VERIFICATION_MAX_AGE`      | `1800`     | Seconds a verified access is used before the provider is asked again (at most 3600). |
+| `AUTHZ_ADMIN_MAX_AUTH_AGE`        | `28800`    | Seconds since the administrator last signed in at the provider within which they may change access. |
 
 ## Learn (knowledge from recordings)
 

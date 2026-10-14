@@ -6,12 +6,12 @@ import {
     jwtVerify,
 } from "jose";
 import { env } from "@/lib/env";
+import { getClaimsProvider } from "@/lib/identity/factory";
 import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
 import { mcpResourceUrl } from "@/lib/mcp/metadata";
 
 const ALGORITHMS = ["RS256", "PS256", "ES256"];
 const CLOCK_TOLERANCE_SECONDS = 30;
-const ACCESS_TOKEN_TYPE = "Bearer";
 
 /** The claims of a verified MCP bearer token. */
 export interface McpTokenClaims extends JWTPayload {
@@ -63,10 +63,7 @@ async function configuredOptions(): Promise<McpTokenVerifyOptions | null> {
 
 /** The client a token was issued to: `azp`, else `client_id`. */
 export function tokenClient(claims: JWTPayload): string | null {
-    for (const value of [claims.azp, claims.client_id]) {
-        if (typeof value === "string" && value) return value;
-    }
-    return null;
+    return getClaimsProvider().tokenClient(claims);
 }
 
 function realmUnavailable(error: unknown): boolean {
@@ -79,8 +76,9 @@ function realmUnavailable(error: unknown): boolean {
 }
 
 /**
- * Check an access token against the realm: signature, exact issuer, expiry,
- * `sub`, a `typ` of `Bearer` when it has one (an ID token is invalid), then
+ * Check an access token against the realm (the Keycloak profile):
+ * signature, exact issuer, expiry, `sub`, a `typ` of exactly `Bearer` (an
+ * ID token, a refresh token or a token without a type is invalid), then
  * the audience. Throws when the realm cannot be asked: its discovery
  * document (without `options`) or its signing keys out of reach.
  */
@@ -102,9 +100,7 @@ export async function verifyMcpToken(
         if (realmUnavailable(error)) throw error;
         return INVALID;
     }
-    if (payload.typ !== undefined && payload.typ !== ACCESS_TOKEN_TYPE) {
-        return INVALID;
-    }
+    if (!getClaimsProvider().acceptsAccessToken(payload)) return INVALID;
     if (typeof payload.sub !== "string" || !payload.sub) return INVALID;
     const claims = payload as McpTokenClaims;
     const audience = [payload.aud ?? []].flat();

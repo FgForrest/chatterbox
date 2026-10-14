@@ -15,6 +15,9 @@ vi.mock("@/lib/encryption/fields", () => ({
 }));
 
 vi.mock("@/db", () => ({ db: { transaction: vi.fn() } }));
+vi.mock("@/lib/authz/curator", () => ({
+    userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
+}));
 
 // Carrying speaker rows and corrections over is tested against a real
 // database (`attribution-remap`, `corrections` integration tests); here
