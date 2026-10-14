@@ -21,14 +21,22 @@ export async function executePipelineAction(
     const { action, itemId, userId, view, generation } = input;
     switch (action.type) {
         case "queueSummary":
-            await queueAutoSummary(userId, itemId, action.presetId, {
-                strict: action.strict,
-            });
+            if (action.strict) {
+                await queueAutoSummary(userId, itemId, action.presetId, {
+                    strict: true,
+                });
+            } else {
+                await queueAutoSummary(userId, itemId, action.presetId);
+            }
             return;
         case "queueTopics":
-            await queueAutoTopics(userId, itemId, "riffado", {
-                strict: action.strict,
-            });
+            if (action.strict) {
+                await queueAutoTopics(userId, itemId, "riffado", {
+                    strict: true,
+                });
+            } else {
+                await queueAutoTopics(userId, itemId, "riffado");
+            }
             return;
         case "queueTitleJob":
             await enqueueTitleJob(userId, itemId);

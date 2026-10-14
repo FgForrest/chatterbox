@@ -36,6 +36,7 @@ import {
 } from "@/lib/knowledge/transcript-rewrite";
 import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import {
     captureServerEvent,
     captureServerException,
@@ -51,8 +52,6 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { queueAutoSummary } from "@/lib/summary/auto-summary";
-import { queueAutoTopics } from "@/lib/topics/topics-job";
 import {
     type AlmanacTerm,
     almanacTermsFor,
@@ -553,8 +552,6 @@ async function transcribeRecordingInner(
         const autoGenerateTitle =
             !orgView && (settings?.autoGenerateTitle ?? true);
         const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
-        const autoSummarize = !orgView && (settings?.autoSummarize ?? false);
-        const autoSummarizePreset = settings?.autoSummarizePreset ?? null;
         const pointer = settings?.defaultTranscriptionProviderId ?? null;
         const requested = opts.providerId || pointer || null;
         const useManaged = isRiffadoIncludedProviderId(requested);
@@ -1016,15 +1013,20 @@ async function transcribeRecordingInner(
             },
         });
 
-        // Topics need the timings only some providers report. Queued like the
-        // summary, and like it not after a run on the Organization view,
-        // where the organization account detects them by hand.
-        if (!heldForLearn && !orgView && turns?.length) {
-            await queueAutoTopics(userId, recordingId, "riffado");
-        }
-
-        if (!heldForLearn && autoSummarize) {
-            await queueAutoSummary(userId, recordingId, autoSummarizePreset);
+        if (!orgView) {
+            try {
+                await requestAdvance({
+                    itemId: recordingId,
+                    userId,
+                    view: "private",
+                    reason: "transcript",
+                });
+            } catch (error) {
+                console.error(
+                    `Failed to queue transcript follow-ups for recording ${recordingId}:`,
+                    error,
+                );
+            }
         }
 
         return {

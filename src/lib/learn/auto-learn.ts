@@ -17,12 +17,10 @@
  * summary and topics, or holds them again. Erasing the transcript or
  * deleting the recording clears it too.
  *
- * Releasing clears the hold and queues one `learn.release` job in the same
- * transaction, so what waited is never lost to a crash between the two;
- * that job queues the title job, topics and the automatic summary as the
- * person's settings ask then, retried until it has. The jobs it queues
- * check again that no newer hold began (`isHeldForLearn`). With automatic
- * Learn off, nothing here runs: the title follows the transcription.
+ * Releasing clears the hold and requests the processing pipeline in the same
+ * transaction, so what waited is never lost to a crash between the two. The
+ * jobs it queues check again that no newer hold began (`isHeldForLearn`). With
+ * automatic Learn off, nothing here runs: the title follows the transcription.
  */
 
 import {
@@ -37,12 +35,11 @@ import {
     or,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { enqueueJobInTx, getActiveJob } from "@/db/queries/async-jobs";
 import {
-    aiEnhancements,
     asyncJobs,
     chatterItems,
     learnRuns,
+    transcriptions,
     userSettings,
 } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -56,14 +53,10 @@ import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
 import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunOpen } from "@/lib/learn/learn-open";
-import { isSummaryStale } from "@/lib/learn/summary-refresh";
+import { markLearnReleasedInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
-import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
-import { recordingJobSubject } from "@/lib/sharing/view";
-import { queueAutoSummary } from "@/lib/summary/auto-summary";
-import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
-import { queueAutoTopics } from "@/lib/topics/topics-job";
 
 /** How long the title, summary and topics wait for Learn's review. */
 export const AUTO_LEARN_HOLD_MS = 72 * 60 * 60 * 1000;
@@ -169,7 +162,7 @@ function correctionPending(
  * Release a recording's hold when no run on its private view is open and
  * no correction pass is still to run (`expired`: when its time is up,
  * whatever is open). Exactly once: the hold is cleared by the statement
- * that checks it, and the release job is queued in the same transaction.
+ * that checks it, and the pipeline driver is requested in the same transaction.
  * Returns whether it released. Never throws.
  */
 export async function releaseAutoLearnHold(
@@ -221,13 +214,7 @@ export async function releaseAutoLearnHold(
                 )
                 .returning({ userId: chatterItems.userId });
             if (!row) return false;
-            await enqueueJobInTx(tx, {
-                userId: row.userId,
-                kind: LEARN_RELEASE_JOB_KIND,
-                subjectId: recordingId,
-                maxAttempts: 5,
-                payload: { recordingId },
-            });
+            await requestLearnReleaseInTx(tx, recordingId, row.userId);
             return true;
         });
         if (released) nudge();
@@ -241,79 +228,51 @@ export async function releaseAutoLearnHold(
     }
 }
 
-/** What the transcription held back, as the person's settings ask now. */
-async function queueReleased(
-    userId: string,
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function requestLearnReleaseInTx(
+    tx: Tx,
     recordingId: string,
-): Promise<JobResult> {
-    const [recording] = await db
-        .select({ id: chatterItems.id })
-        .from(chatterItems)
+    userId: string,
+): Promise<Awaited<ReturnType<typeof requestAdvanceInTx>>> {
+    const requested = await requestAdvanceInTx(tx, {
+        itemId: recordingId,
+        userId,
+        view: "private",
+        reason: "learn-released",
+    });
+    if (!requested) return null;
+
+    const [transcription] = await tx
+        .select({ revision: transcriptions.revision })
+        .from(transcriptions)
         .where(
             and(
-                eq(chatterItems.id, recordingId),
-                eq(chatterItems.userId, userId),
-                isNull(chatterItems.deletedAt),
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, userId),
+                eq(transcriptions.source, "riffado"),
             ),
         )
         .limit(1);
-    if (!recording) return { skipped: "gone" };
-    const [settings] = await db
-        .select({
-            autoGenerateTitle: userSettings.autoGenerateTitle,
-            autoSummarize: userSettings.autoSummarize,
-            autoSummarizePreset: userSettings.autoSummarizePreset,
-        })
-        .from(userSettings)
-        .where(eq(userSettings.userId, userId))
-        .limit(1);
-    const queued: string[] = [];
-    // A failure here fails the job, which is retried: nothing is lost. The
-    // summary first, and only while no summary of the transcript as it
-    // reads now exists, so a retry does not pay for one twice. A summary a
-    // person made while it waited is kept; one made from an older reading
-    // (an automatic job that ran before a newer hold) is not. One already
-    // queued (a retry, or a release put off behind the other transcript's
-    // topics) reads the transcript when it runs; queueing it again would
-    // only spend the hourly cap.
-    const queuedSummary = await getActiveJob(
-        SUMMARY_JOB_KIND,
-        recordingJobSubject(recordingId, "private"),
-    );
-    if (settings?.autoSummarize && !queuedSummary) {
-        const [made] = await db
-            .select({ id: aiEnhancements.id })
-            .from(aiEnhancements)
-            .where(
-                and(
-                    eq(aiEnhancements.itemId, recordingId),
-                    eq(aiEnhancements.userId, userId),
-                    eq(aiEnhancements.source, "riffado"),
-                ),
-            )
-            .limit(1);
-        if (!made || (await isSummaryStale(userId, recordingId))) {
-            await queueAutoSummary(
-                userId,
-                recordingId,
-                settings.autoSummarizePreset ?? null,
-                { strict: true },
-            );
-            queued.push("summary");
-        }
+    if (transcription) {
+        await markLearnReleasedInTx(tx, {
+            itemId: recordingId,
+            userId,
+            contentRevision: transcription.revision,
+            generation: requested.requestedGeneration,
+        });
     }
-    await queueAutoTopics(userId, recordingId, "riffado", { strict: true });
-    if (settings?.autoGenerateTitle ?? true) {
-        await enqueueTitleJob(userId, recordingId);
-        queued.push("title");
-    }
-    return { queued };
+    return requested;
 }
 
 export interface LearnReleasePayload {
     recordingId: string;
 }
 
+/**
+ * Only drains `learn.release` jobs queued before the processing pipeline
+ * deployed. Remove this delegate one release after that deployment.
+ */
 export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
     kind: LEARN_RELEASE_JOB_KIND,
     concurrency: 2,
@@ -329,7 +288,14 @@ export const learnReleaseJobHandler: JobHandler<LearnReleasePayload> = {
         }
         return { recordingId: raw.recordingId };
     },
-    run: ({ userId, payload }) => queueReleased(userId, payload.recordingId),
+    async run({ userId, payload }): Promise<JobResult> {
+        const requested = await db.transaction((tx) =>
+            requestLearnReleaseInTx(tx, payload.recordingId, userId),
+        );
+        if (!requested) return { skipped: "gone" };
+        nudge();
+        return { queued: ["pipeline.advance"] };
+    },
 };
 
 /**

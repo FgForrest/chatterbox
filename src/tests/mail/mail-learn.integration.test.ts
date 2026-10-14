@@ -129,6 +129,7 @@ import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { deleteMail } from "@/lib/mail/manage";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { requireRecordingView } from "@/lib/sharing/access";
 import {
     rawMessage,
@@ -235,6 +236,17 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
         });
         return { runId, result };
     }
+
+    const runAdvance = (itemId: string) =>
+        pipelineAdvanceJobHandler.run({
+            jobId: `pipeline-${itemId}`,
+            userId: "u-jan",
+            payload: { itemId, view: "private", reason: "arrival" },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: () => undefined,
+        });
 
     beforeAll(async () => {
         storageDir = mkdtempSync(join(tmpdir(), "riffado-mail-learn-"));
@@ -671,6 +683,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             });
         try {
             const itemId = await deliver("Automatic", "Please call Petra.");
+            await runAdvance(itemId);
             const [run] = await db()
                 .select({
                     trigger: learnRuns.trigger,

@@ -102,9 +102,14 @@ import {
     sweepAutoLearnHolds,
 } from "@/lib/learn/auto-learn";
 import { recordingFollowUps } from "@/lib/learn/follow-ups";
+import * as learnJob from "@/lib/learn/learn-job";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
+import * as titleQueue from "@/lib/recordings/title-job";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
+import * as autoSummary from "@/lib/summary/auto-summary";
+import * as topicsQueue from "@/lib/topics/topics-job";
 import { enqueueTopicsJob } from "@/lib/topics/topics-job";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { emitEvent } from "@/lib/webhooks/emit";
@@ -140,6 +145,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
     }, 30_000);
 
     beforeEach(async () => {
+        vi.restoreAllMocks();
         await db().delete(users);
         await db().delete(asyncJobs);
         await db().insert(users).values({ id: OWNER, email: "o@example.test" });
@@ -239,8 +245,8 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             .then((rows) => rows[0]?.id ?? "");
     }
 
-    /** Run the queued release job, as the worker would. */
-    const runRelease = async () => {
+    /** Drain a release job queued before the processing pipeline deployed. */
+    const runLegacyRelease = async () => {
         await learnReleaseJobHandler.run({
             jobId: "job-release",
             userId: OWNER,
@@ -251,6 +257,26 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             reportProgress: vi.fn(),
         } as unknown as Parameters<typeof learnReleaseJobHandler.run>[0]);
         await db().delete(asyncJobs).where(eq(asyncJobs.kind, "learn.release"));
+    };
+
+    /** Run the queued pipeline driver, as the worker would. */
+    const runAdvance = async () => {
+        await pipelineAdvanceJobHandler.run({
+            jobId: "job-advance",
+            userId: OWNER,
+            payload: {
+                itemId: REC,
+                view: "private",
+                reason: "learn-released",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        } as unknown as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+        await db()
+            .delete(asyncJobs)
+            .where(eq(asyncJobs.kind, "pipeline.advance"));
     };
 
     const setStatus = (id: string, status: "finished" | "failed") =>
@@ -311,13 +337,13 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await releaseAutoLearnHold(REC)).toBe(true);
         expect(await dueAt()).toBeNull();
         // Cleared and queued in one transaction: one durable job.
-        expect(await kinds()).toEqual(["learn.release"]);
+        expect(await kinds()).toEqual(["pipeline.advance"]);
 
         // Released already: nothing is queued twice.
         expect(await releaseAutoLearnHold(REC)).toBe(false);
-        expect(await kinds()).toEqual(["learn.release"]);
+        expect(await kinds()).toEqual(["pipeline.advance"]);
 
-        await runRelease();
+        await runAdvance();
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
     });
 
@@ -333,10 +359,10 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await releaseAutoLearnHold(REC);
         expect(await recordingFollowUps(OWNER, REC)).toEqual({
             held: false,
-            pending: ["learn.release"],
+            pending: ["pipeline.advance"],
         });
 
-        await runRelease();
+        await runAdvance();
         expect(await recordingFollowUps(OWNER, REC)).toEqual({
             held: false,
             pending: ["summary", "title.generate", "topics"],
@@ -387,7 +413,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             ),
         ).toBe(1);
         expect(await dueAt()).toBeNull();
-        expect(await kinds()).toEqual(["learn.release"]);
+        expect(await kinds()).toEqual(["pipeline.advance"]);
     });
 
     it("does not let holds still waiting for their review crowd out one to release", async () => {
@@ -524,7 +550,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             });
 
         expect(await releaseAutoLearnHold(REC)).toBe(true);
-        await runRelease();
+        await runAdvance();
 
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
     });
@@ -539,7 +565,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         await hold();
 
         expect(await releaseAutoLearnHold(REC)).toBe(true);
-        await runRelease();
+        await runAdvance();
 
         const [summary] = await db()
             .select({ nextAttemptAt: asyncJobs.nextAttemptAt })
@@ -562,10 +588,10 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await releaseAutoLearnHold(REC)).toBe(true);
 
         // Put off while the Plaud topics are detected, twice.
-        await expect(runRelease()).rejects.toBeInstanceOf(JobDeferredError);
-        await expect(runRelease()).rejects.toBeInstanceOf(JobDeferredError);
+        await expect(runAdvance()).rejects.toBeInstanceOf(JobDeferredError);
+        await expect(runAdvance()).rejects.toBeInstanceOf(JobDeferredError);
         await db().delete(asyncJobs).where(eq(asyncJobs.kind, "topics"));
-        await runRelease();
+        await runAdvance();
 
         expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
         const [topics] = await db()
@@ -597,7 +623,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             });
 
         expect(await releaseAutoLearnHold(REC)).toBe(true);
-        await runRelease();
+        await runAdvance();
 
         expect(await kinds()).toEqual(["title.generate", "topics"]);
         const summaries = await db()
@@ -610,6 +636,58 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 ),
             );
         expect(summaries).toHaveLength(1);
+    });
+
+    it("takes the release path when Learn settles before the hold is set", async () => {
+        vi.spyOn(learnJob, "startLearnRun").mockResolvedValueOnce({
+            runId: "settled-before-hold",
+            jobId: null,
+            created: true,
+        });
+        const summary = vi.spyOn(autoSummary, "queueAutoSummary");
+        const topics = vi.spyOn(topicsQueue, "queueAutoTopics");
+        const title = vi.spyOn(titleQueue, "enqueueTitleJob");
+
+        expect(
+            await holdForAutoLearn({
+                userId: OWNER,
+                recordingId: REC,
+                timed: true,
+            }),
+        ).toBe(true);
+        expect(await dueAt()).toBeNull();
+        expect(await kinds()).toEqual(["pipeline.advance"]);
+
+        await runAdvance();
+
+        expect(summary).toHaveBeenCalledOnce();
+        expect(summary).toHaveBeenCalledWith(OWNER, REC, null, {
+            strict: true,
+        });
+        expect(topics).toHaveBeenCalledOnce();
+        expect(topics).toHaveBeenCalledWith(OWNER, REC, "riffado", {
+            strict: true,
+        });
+        expect(title).toHaveBeenCalledOnce();
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
+    });
+
+    it("drains a learn.release job queued before the pipeline deploy", async () => {
+        await db()
+            .insert(asyncJobs)
+            .values({
+                userId: OWNER,
+                kind: "learn.release",
+                subjectId: REC,
+                payload: { recordingId: REC },
+                maxAttempts: 5,
+            });
+
+        await runLegacyRelease();
+        expect(await kinds()).toEqual(["pipeline.advance"]);
+
+        await runAdvance();
+        expect(await kinds()).toEqual(["summary", "title.generate", "topics"]);
     });
 
     describe("the title job", () => {

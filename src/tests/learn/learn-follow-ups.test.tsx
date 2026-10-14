@@ -70,7 +70,7 @@ describe("useLearnFollowUps", () => {
     it("follows the jobs a finished review queued until none is left", async () => {
         const fetchMock = answering(
             { held: true, pending: [] },
-            { held: false, pending: ["learn.release"] },
+            { held: false, pending: ["pipeline.advance"] },
             { held: false, pending: ["summary", "title.generate", "topics"] },
             { held: false, pending: ["summary"] },
             { held: false, pending: [] },

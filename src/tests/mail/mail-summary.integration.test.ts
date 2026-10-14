@@ -116,6 +116,7 @@ import { collectArchivedMail } from "@/lib/mail/archive";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { parseSummaryJobPayload } from "@/lib/summary/summary-job";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
@@ -190,6 +191,17 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         if (!message) throw new Error("mail not stored");
         return message.id;
     }
+
+    const runAdvance = (itemId: string) =>
+        pipelineAdvanceJobHandler.run({
+            jobId: `pipeline-${itemId}`,
+            userId: "u-jan",
+            payload: { itemId, view: "private", reason: "arrival" },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: () => undefined,
+        });
 
     function headers(subject: string, extra: string[] = []) {
         return [
@@ -617,6 +629,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(plain);
         expect(await queued(plain)).toHaveLength(1);
         const machine = await deliver(
             await signMessage(
@@ -625,6 +638,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(machine);
         expect(await queued(machine)).toHaveLength(0);
         await db()
             .insert(userSettings)
@@ -640,6 +654,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(off);
         expect(await queued(off)).toHaveLength(0);
     });
 
@@ -655,6 +670,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(itemId);
         const [job] = (
             await db()
                 .select()
