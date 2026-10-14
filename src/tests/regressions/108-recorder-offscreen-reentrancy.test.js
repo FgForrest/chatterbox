@@ -37,7 +37,11 @@ describe("offscreen capture setup", () => {
                     rejectFirst = reject;
                 }),
         );
-        const payload = { sessionId: "session-1", captureKey: "key" };
+        const payload = {
+            sessionId: "session-1",
+            captureKey: "key",
+            captureMode: "tab",
+        };
         const first = new Promise((resolve) => {
             harness.message(
                 { target: "offscreen", type: "start", payload },

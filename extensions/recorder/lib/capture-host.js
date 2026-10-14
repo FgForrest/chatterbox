@@ -121,6 +121,9 @@ async function startCapture({
     systemStream: providedSystemStream,
     microphoneId,
 }, pending) {
+    if (captureMode !== "tab" && !providedSystemStream) {
+        throw new Error("Desktop audio must be opened in the picker window");
+    }
     const key = await importCaptureKey(captureKey);
 
     const isTab = captureMode === "tab";
@@ -132,9 +135,7 @@ async function startCapture({
     let systemStream = providedSystemStream;
     try {
         if (!systemStream) {
-            systemStream = isTab
-                ? await openTabAudio(streamId)
-                : await openSystemAudio(streamId);
+            systemStream = await openTabAudio(streamId);
         }
     } catch (error) {
         throw new Error(

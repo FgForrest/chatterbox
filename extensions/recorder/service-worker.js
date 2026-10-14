@@ -59,7 +59,7 @@ const DEFAULT_TITLE = t("extensionName");
 const OPFS_WARN_BYTES = 1024 * 1024 * 1024; // 1 GiB of unsent audio.
 const NUDGE_PREFIX = "nudge:";
 const COMPLETION_PREFIX = "completed:";
-const COMPLETION_DISPLAY_MS = 2400;
+const COMPLETION_DISPLAY_MS = 3500;
 
 chrome.storage.local
     .setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })
@@ -107,6 +107,7 @@ const IDLE_STATE = Object.freeze({
     blocked: false,
     recoverablePrefix: null,
     jobId: null,
+    finalizingAt: null,
     recordingUrl: null,
     partial: false,
     error: null,
@@ -442,6 +443,7 @@ async function startCapturedRecording({
             stopReason: "user",
             uploaded: [],
             jobId: null,
+            finalizingAt: null,
             captureMode,
             captureWindowId,
             pickerRequestId,
@@ -666,7 +668,10 @@ async function finalize(truncatedAtChunk = null) {
     if (!state.sessionId || !state.stopped) return;
     if (state.state === STATE.finalizing && state.jobId) return;
 
-    await setState({ state: STATE.finalizing });
+    await setState({
+        state: STATE.finalizing,
+        finalizingAt: new Date().toISOString(),
+    });
     try {
         const settings = await getSettings();
         const auth = { serverUrl: settings.serverUrl, apiKey: await readToken() };
@@ -706,10 +711,26 @@ async function scheduleUploadRetry(sessionId, error) {
     });
 }
 
+const pendingReconciliations = new Map();
+
 async function reconcileServerSession(sessionId, auth) {
+    const pending = pendingReconciliations.get(sessionId);
+    if (pending) return pending;
+    const work = reconcileServerSessionOnce(sessionId, auth);
+    pendingReconciliations.set(sessionId, work);
+    try {
+        return await work;
+    } finally {
+        if (pendingReconciliations.get(sessionId) === work) {
+            pendingReconciliations.delete(sessionId);
+        }
+    }
+}
+
+async function reconcileServerSessionOnce(sessionId, auth) {
     const remote = await getSession(auth, sessionId);
     if (remote.status === "completing") {
-        await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 });
+        await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 0.5 });
         return;
     }
     if (remote.status === "completed") {
@@ -722,14 +743,13 @@ async function reconcileServerSession(sessionId, auth) {
         }
         const state = await getState();
         if (state.sessionId !== sessionId || state.state === STATE.completed) return;
-        const url = new URL(
-            `/recordings/${encodeURIComponent(remote.recording_id)}`,
-            auth.serverUrl,
-        ).href;
+        const url = new URL("/dashboard", auth.serverUrl);
+        url.searchParams.set("recording", remote.recording_id);
+        const recordingUrl = url.href;
         await deleteLocalSession(state.bufferId ?? sessionId);
         await setState({
             state: STATE.completed,
-            recordingUrl: url,
+            recordingUrl,
             partial: Boolean(remote.truncated_at_chunk),
         });
         await notify(
@@ -737,7 +757,7 @@ async function reconcileServerSession(sessionId, auth) {
             remote.truncated_at_chunk
                 ? t("partialRecordingSent")
                 : t("recordingSentBody"),
-            { id: `${COMPLETION_PREFIX}${encodeURIComponent(url)}` },
+            { id: `${COMPLETION_PREFIX}${encodeURIComponent(recordingUrl)}` },
         );
         await new Promise((resolve) => setTimeout(resolve, COMPLETION_DISPLAY_MS));
         const shown = await getState();
@@ -745,7 +765,7 @@ async function reconcileServerSession(sessionId, auth) {
         await resetState();
         await new Promise((resolve) => setTimeout(resolve, 400));
         if ((await getState()).state === STATE.idle) {
-            await navigateToRecording(auth.serverUrl, url, state.tabId).catch(() => {});
+            await navigateToRecording(auth.serverUrl, recordingUrl, state.tabId).catch(() => {});
         }
         return;
     }
@@ -1261,6 +1281,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 );
             return true;
 
+        case "check-finalization":
+            getState()
+                .then(async (state) => {
+                    if (state.state !== STATE.finalizing || !state.sessionId || !state.jobId) {
+                        return;
+                    }
+                    const settings = await getSettings();
+                    await reconcileServerSession(state.sessionId, {
+                        serverUrl: settings.serverUrl,
+                        apiKey: await readToken(),
+                    });
+                })
+                .then(() => sendResponse({ ok: true }))
+                .catch((error) =>
+                    sendResponse({ ok: false, error: error?.message ?? String(error) }),
+                );
+            return true;
+
         case "save-prefix":
             savePlayablePrefix(message.chunkCount)
                 .then(() => sendResponse({ ok: true }))
@@ -1358,15 +1396,15 @@ async function handleRecordingStopped(message) {
     if (state.sessionId !== message.sessionId) return;
     if (state.captureMode === "desktop") {
         await setState({ stopped: true });
-        if (state.captureWindowId != null) {
-            await chrome.windows.remove(state.captureWindowId).catch(() => {});
-        }
     } else {
         await closeOffscreen();
     }
 
     if (!message.chunkCount || message.chunkCount < 1) {
         await discardSession(message.sessionId);
+        if (state.captureMode === "desktop" && state.captureWindowId != null) {
+            await chrome.windows.remove(state.captureWindowId).catch(() => {});
+        }
         await notify(
             t("nothingRecorded"),
             t("nothingRecordedBody"),
@@ -1385,6 +1423,12 @@ async function handleRecordingStopped(message) {
         chunkCount: message.chunkCount,
         recoverablePrefix: firstMissing && firstMissing > 0 ? firstMissing : null,
     });
+    if (state.captureMode === "desktop" && state.captureWindowId != null) {
+        await chrome.windows.update(state.captureWindowId, {
+            state: "normal",
+            focused: true,
+        }).catch(() => {});
+    }
     await pumpUploads();
 }
 
@@ -1555,8 +1599,14 @@ async function reconcileOnStartup() {
             continue;
         }
         if (session.status === "completing") {
-            await setState({ state: STATE.finalizing, sessionId: serverSessionId, bufferId: sessionId, jobId: session.job_id });
-            await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 1 });
+            await setState({
+                state: STATE.finalizing,
+                sessionId: serverSessionId,
+                bufferId: sessionId,
+                jobId: session.job_id,
+                finalizingAt: new Date().toISOString(),
+            });
+            await chrome.alarms.create(ALARMS.uploadRetry, { delayInMinutes: 0.5 });
             break;
         }
         if (session.status === "aborted" || session.status === "failed") {

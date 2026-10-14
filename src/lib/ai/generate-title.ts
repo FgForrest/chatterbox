@@ -1,8 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
+import {
+    enhancementChatModel,
+    pickEnhancementCredential,
+} from "@/lib/ai/enhancement-provider";
+import { titleProviderId } from "@/lib/ai/title-provider";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField } from "@/lib/encryption/fields";
 import { buildChatCompletionParams } from "./chat-completion-params";
@@ -18,6 +23,8 @@ export async function generateTitleFromTranscription(
     userId: string,
     recordingId: string,
     transcriptionText: string,
+    source: "summary" | "transcript" = "transcript",
+    ownerUserId = userId,
 ): Promise<string | null> {
     try {
         // Get user's prompt configuration
@@ -41,27 +48,17 @@ export async function generateTitleFromTranscription(
             TITLE_TEMPLATE_KIND,
         );
 
-        // Get user's AI credentials (prefer enhancement provider, fallback to any configured provider)
-        const [enhancementCredentials] = await db
-            .select()
-            .from(apiCredentials)
-            .where(
-                and(
-                    eq(apiCredentials.userId, userId),
-                    eq(apiCredentials.isDefaultEnhancement, true),
-                ),
-            )
-            .limit(1);
-
-        const [fallbackCredentials] = await db
+        const configuredCredentials = await db
             .select()
             .from(apiCredentials)
             .where(eq(apiCredentials.userId, userId))
-            .orderBy(apiCredentials.createdAt)
-            .limit(1);
+            .orderBy(apiCredentials.createdAt, apiCredentials.id);
 
-        // Prefer enhancement provider, fallback to any configured provider
-        const credentials = enhancementCredentials || fallbackCredentials;
+        const selectedId = titleProviderId(userSettingsRow?.defaultProviders);
+        const credentials =
+            configuredCredentials.find(
+                (candidate) => candidate.id === selectedId,
+            ) ?? pickEnhancementCredential(configuredCredentials);
 
         if (!credentials) {
             console.warn("No AI provider found for title generation");
@@ -80,15 +77,10 @@ export async function generateTitleFromTranscription(
         // Use a lightweight model for title generation
         // Prefer chat models (gpt-4o-mini, gpt-3.5-turbo) over Whisper models
         // Fallback to default model if no specific model is set
-        let model = credentials.defaultModel || "gpt-4o-mini";
-
-        // If the model is a Whisper model (for transcription), use a chat model instead
-        if (model.includes("whisper") || model.includes("whisper-")) {
-            model = "gpt-4o-mini";
-        }
+        const model = enhancementChatModel(credentials);
 
         // Truncate transcription if too long (to save tokens)
-        const maxTranscriptionLength = 2000;
+        const maxTranscriptionLength = source === "summary" ? 6000 : 2000;
         const truncatedTranscription =
             transcriptionText.length > maxTranscriptionLength
                 ? `${transcriptionText.substring(0, maxTranscriptionLength)}...`
@@ -110,7 +102,9 @@ export async function generateTitleFromTranscription(
         );
 
         const baseSystem =
-            "You are a helpful assistant that generates concise, descriptive titles for audio recordings based on transcriptions. Always follow the rules strictly.";
+            source === "summary"
+                ? "You are a helpful assistant that generates concise, descriptive titles for audio recordings. The supplied text is a summary of the complete recording; title the recording by its main subject. Always follow the rules strictly."
+                : "You are a helpful assistant that generates concise, descriptive titles for audio recordings based on transcriptions. Always follow the rules strictly.";
         const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective}`;
 
         const response = await openai.chat.completions.create(
@@ -133,7 +127,7 @@ export async function generateTitleFromTranscription(
         await recordChatCompletionUsage(
             {
                 recordingId,
-                ownerUserId: userId,
+                ownerUserId,
                 payerUserId: userId,
                 operation: "title",
                 provider: credentials.provider,

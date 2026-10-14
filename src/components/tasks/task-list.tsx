@@ -253,7 +253,9 @@ export function TaskList({ organization }: { organization: boolean }) {
                         <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="open">{i18n("Open")}</SelectItem>
+                        <SelectItem value="open">
+                            {i18n("Open tasks")}
+                        </SelectItem>
                         <SelectItem value="done">{i18n("Done")}</SelectItem>
                         <SelectItem value="dropped">
                             {i18n("Dropped")}

@@ -109,7 +109,7 @@ export function TaskRow({
                     {recording && (
                         <>
                             <Link
-                                href={`/dashboard?recording=${encodeURIComponent(recording.id)}${recording.view === "org" ? "&view=org" : ""}`}
+                                href={`/dashboard?recording=${encodeURIComponent(recording.id)}${recording.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && recording.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                 className="truncate hover:text-primary hover:underline"
                             >
                                 {recording.title}

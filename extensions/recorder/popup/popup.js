@@ -36,6 +36,8 @@ localizeDocument();
 const el = (id) => document.getElementById(id);
 
 let elapsedTimer;
+let finalizationTimer;
+let renderVersion = 0;
 let currentSessionId = null;
 let currentRecoverablePrefix = null;
 let currentTab = null;
@@ -188,17 +190,33 @@ function renderFinalizing(state) {
     const total = Math.max(0, state.chunkCount ?? 0);
     const uploaded = Math.min(total, state.uploaded?.length ?? 0);
     const percent = total > 0 ? Math.round((uploaded / total) * 100) : 0;
+    const processing = state.state === STATE.finalizing;
     el("finalizing-stage").textContent = t(
-        state.state === STATE.finalizing ? "processingRecording" : "uploadingRecording",
+        processing ? "processingRecording" : "uploadingRecording",
     );
+    el("finalizing-upload").hidden = processing;
+    el("finalizing-processing").hidden = !processing;
     el("finalizing-progress").setAttribute("aria-valuenow", String(percent));
     el("finalizing-progress").setAttribute("aria-label", t("uploadProgress"));
     el("finalizing-progress-fill").style.width = `${percent}%`;
     renderUploadStatus(state, "finalizing-status");
+    if (processing) {
+        el("processing-status").textContent = t("uploadComplete", String(total));
+        const startedAt = state.finalizingAt ?? new Date().toISOString();
+        const tick = () => {
+            el("processing-elapsed").textContent = t(
+                "processingElapsed",
+                formatElapsed(startedAt),
+            );
+        };
+        tick();
+        elapsedTimer = setInterval(tick, 1000);
+    }
     show("finalizing");
 }
 
 async function render(state) {
+    const version = ++renderVersion;
     currentSessionId = state.sessionId;
     currentRecoverablePrefix = state.recoverablePrefix;
     if (elapsedTimer) {
@@ -206,9 +224,20 @@ async function render(state) {
         elapsedTimer = undefined;
     }
 
-    if (!(await isPaired())) {
+    const paired = await isPaired();
+    if (version !== renderVersion) return;
+    if (!paired) {
         await renderUnpaired();
         return;
+    }
+
+    if (state.state === STATE.finalizing && !finalizationTimer) {
+        finalizationTimer = setInterval(() => {
+            void sendMessage({ type: "check-finalization" }).catch(() => {});
+        }, 5000);
+    } else if (state.state !== STATE.finalizing && finalizationTimer) {
+        clearInterval(finalizationTimer);
+        finalizationTimer = undefined;
     }
 
     switch (state.state) {

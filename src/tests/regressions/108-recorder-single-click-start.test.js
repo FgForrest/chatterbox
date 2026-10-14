@@ -144,6 +144,8 @@ describe("manual recorder start", () => {
             expect(node("view-finalizing").hidden).toBe(false),
         );
         expect(node("finalizing-progress-fill").style.width).toBe("50%");
+        expect(node("finalizing-upload").hidden).toBe(false);
+        expect(node("finalizing-processing").hidden).toBe(true);
         expect(
             node("finalizing-progress").attributes.get("aria-valuenow"),
         ).toBe("50");
@@ -161,6 +163,12 @@ describe("manual recorder start", () => {
             ),
         );
         expect(node("finalizing-progress-fill").style.width).toBe("100%");
+        expect(node("finalizing-upload").hidden).toBe(true);
+        expect(node("finalizing-processing").hidden).toBe(false);
+        expect(node("processing-status").textContent).toBe("uploadComplete");
+        expect(node("processing-elapsed").textContent).toBe(
+            "processingElapsed",
+        );
         expect(node("view-completed").hidden).toBe(true);
 
         dispatchState({ state: "completed", partial: false });
@@ -187,5 +195,43 @@ describe("manual recorder start", () => {
         expect(node("completion-message").textContent).toBe(
             "partialRecordingSent",
         );
+    });
+
+    it("checks the server while saving and stops checking after completion", async () => {
+        const { node, sendMessage, dispatchState } = setupPopup(
+            "https://example.com",
+        );
+        await import("../../../extensions/recorder/popup/popup.js");
+        await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
+
+        vi.useFakeTimers();
+        try {
+            dispatchState({
+                state: "finalizing",
+                chunkCount: 4,
+                uploaded: [0, 1, 2, 3],
+                finalizingAt: new Date().toISOString(),
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(node("finalizing-processing").hidden).toBe(false);
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(sendMessage).toHaveBeenCalledWith({
+                type: "check-finalization",
+            });
+
+            dispatchState({ state: "completed", partial: false });
+            await vi.advanceTimersByTimeAsync(0);
+            const checks = sendMessage.mock.calls.filter(
+                ([message]) => message.type === "check-finalization",
+            ).length;
+            await vi.advanceTimersByTimeAsync(5000);
+            expect(
+                sendMessage.mock.calls.filter(
+                    ([message]) => message.type === "check-finalization",
+                ),
+            ).toHaveLength(checks);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

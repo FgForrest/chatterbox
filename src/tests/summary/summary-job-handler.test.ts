@@ -31,6 +31,9 @@ vi.mock("@/lib/summary/generate-summary", () => ({
 vi.mock("@/lib/recordings/erase", () => ({
     allowManualArtifactGeneration: vi.fn().mockResolvedValue(true),
 }));
+vi.mock("@/lib/recordings/title-after-summary", () => ({
+    updateTitleAfterSummary: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
@@ -49,6 +52,7 @@ import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
 import { emitEvent } from "@/lib/webhooks/emit";
@@ -133,6 +137,12 @@ describe("summaryJobHandler", () => {
         const generation = (generateSummaryForRecording as Mock).mock
             .invocationCallOrder[0];
         expect(order).toBeGreaterThan(generation);
+        expect(updateTitleAfterSummary).toHaveBeenCalledWith({
+            userId: "user-1",
+            recordingId: "rec-1",
+            summary: generated.summary,
+            keyPoints: generated.keyPoints,
+        });
     });
 
     it("forwards the preset and trigger it was queued with", async () => {
@@ -235,6 +245,7 @@ describe("summaryJobHandler", () => {
 
         expect(summaryRefreshDue).not.toHaveBeenCalled();
         expect(generateSummaryForRecording).toHaveBeenCalledTimes(1);
+        expect(updateTitleAfterSummary).not.toHaveBeenCalled();
     });
 
     it("puts off a summary the hourly cap put off while the cap is still full", async () => {

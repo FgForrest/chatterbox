@@ -40,7 +40,7 @@ const harness = vi.hoisted(() => {
             setBadgeBackgroundColor: vi.fn(async () => {}),
         },
         commands: { onCommand: event("command") },
-        alarms: { onAlarm: event("alarm") },
+        alarms: { onAlarm: event("alarm"), create: vi.fn(async () => {}) },
         notifications: {
             onClicked: event("notificationClicked"),
             clear: vi.fn(async () => {}),
@@ -70,6 +70,7 @@ const harness = vi.hoisted(() => {
         readToken: vi.fn(),
         listChunkIndices: vi.fn(),
         createSession: vi.fn(),
+        completeSession: vi.fn(),
         createLocalSession: vi.fn(),
         getSession: vi.fn(),
         deleteLocalSession: vi.fn(),
@@ -101,7 +102,7 @@ vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
 }));
 vi.mock("../../../extensions/recorder/lib/api.js", () => ({
     abortSession: vi.fn(),
-    completeSession: vi.fn(),
+    completeSession: harness.completeSession,
     createSession: harness.createSession,
     getSession: harness.getSession,
     recoverSession: vi.fn(),
@@ -129,6 +130,7 @@ beforeEach(() => {
     harness.readToken.mockReset();
     harness.listChunkIndices.mockReset().mockResolvedValue([]);
     harness.createSession.mockReset();
+    harness.completeSession.mockReset();
     harness.createLocalSession.mockReset();
     harness.getSession.mockReset();
     harness.deleteLocalSession.mockReset();
@@ -142,6 +144,7 @@ beforeEach(() => {
     chrome.tabs.update.mockReset().mockResolvedValue(undefined);
     chrome.tabs.create.mockReset().mockResolvedValue(undefined);
     chrome.notifications.create.mockReset().mockResolvedValue("notice");
+    chrome.alarms.create.mockReset().mockResolvedValue(undefined);
     chrome.runtime.sendMessage.mockReset().mockResolvedValue({ ok: true });
     chrome.tabCapture.getMediaStreamId.mockReset();
 });
@@ -343,6 +346,50 @@ describe("recorder token-vault failures", () => {
         });
     });
 
+    it("keeps and focuses the desktop window while its recording is saved", async () => {
+        harness.sessionValues.recordingState = {
+            state: "recording",
+            sessionId: "desktop-session",
+            bufferId: "desktop-session",
+            captureMode: "desktop",
+            captureWindowId: 77,
+            pickerRequestId: "request-1",
+            stopped: false,
+            chunkCount: 0,
+            uploaded: [0],
+            blocked: false,
+            stopReason: "user",
+        };
+        harness.listChunkIndices.mockResolvedValue([0]);
+        harness.readToken.mockResolvedValue("recorder-token");
+        harness.completeSession.mockResolvedValue({ job_id: "job-1" });
+        harness.getSession.mockResolvedValue({ status: "completing" });
+
+        harness.listeners.message(
+            {
+                type: "recording-stopped",
+                sessionId: "desktop-session",
+                chunkCount: 1,
+            },
+            {},
+            () => {},
+        );
+
+        await vi.waitFor(() =>
+            expect(harness.sessionValues.recordingState).toMatchObject({
+                state: "finalizing",
+                stopped: true,
+                chunkCount: 1,
+                captureWindowId: 77,
+            }),
+        );
+        expect(chrome.windows.update).toHaveBeenCalledWith(77, {
+            state: "normal",
+            focused: true,
+        });
+        expect(chrome.windows.remove).not.toHaveBeenCalled();
+    });
+
     it("marks a failed desktop start before closing its window", async () => {
         harness.readToken.mockResolvedValue("recorder-token");
         harness.createSession.mockResolvedValue({
@@ -464,20 +511,39 @@ describe("recorder token-vault failures", () => {
                 chunkCount: 2,
                 uploaded: [0, 1],
                 blocked: false,
+                jobId: "job-4",
             };
             harness.readToken.mockResolvedValue("recorder-token");
-            harness.getSession.mockResolvedValue({
-                status: "completed",
-                recording_id: "recording-4",
-            });
+            harness.getSession
+                .mockResolvedValueOnce({ status: "completing" })
+                .mockResolvedValueOnce({
+                    status: "completed",
+                    recording_id: "recording-4",
+                });
             chrome.tabs.query.mockResolvedValue([
                 { id: 3, url: "https://other.example/home", active: true },
                 { id: 7, url: "https://example.com/settings", windowId: 9 },
             ]);
 
+            const waiting = new Promise((resolve) => {
+                harness.listeners.message(
+                    { type: "check-finalization" },
+                    {},
+                    resolve,
+                );
+            });
+            expect(await waiting).toEqual({ ok: true });
+            expect(chrome.alarms.create).toHaveBeenCalledWith(
+                expect.any(String),
+                { delayInMinutes: 0.5 },
+            );
+            expect(harness.sessionValues.recordingState.state).toBe(
+                "finalizing",
+            );
+
             const finished = new Promise((resolve) => {
                 harness.listeners.message(
-                    { type: "retry-upload" },
+                    { type: "check-finalization" },
                     {},
                     resolve,
                 );
@@ -485,7 +551,8 @@ describe("recorder token-vault failures", () => {
             await vi.advanceTimersByTimeAsync(0);
             expect(harness.sessionValues.recordingState).toMatchObject({
                 state: "completed",
-                recordingUrl: "https://example.com/recordings/recording-4",
+                recordingUrl:
+                    "https://example.com/dashboard?recording=recording-4",
                 partial: false,
             });
             expect(harness.deleteLocalSession).toHaveBeenCalledWith(
@@ -493,10 +560,10 @@ describe("recorder token-vault failures", () => {
             );
             expect(chrome.tabs.update).not.toHaveBeenCalled();
 
-            await vi.advanceTimersByTimeAsync(2800);
+            await vi.advanceTimersByTimeAsync(3900);
             expect(await finished).toEqual({ ok: true });
             expect(chrome.tabs.update).toHaveBeenCalledWith(7, {
-                url: "https://example.com/recordings/recording-4",
+                url: "https://example.com/dashboard?recording=recording-4",
                 active: true,
             });
             expect(harness.sessionValues.recordingState).toBeUndefined();
