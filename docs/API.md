@@ -1,6 +1,6 @@
 # API Documentation
 
-Riffado API reference for all endpoints.
+Chatterbox API reference for all endpoints.
 
 ## Base URL
 
@@ -137,7 +137,7 @@ Get current Plaud connection status.
 
 #### DELETE `/plaud/connection`
 
-Disconnect the current Plaud account. Deletes the stored connection and device records; synced recordings are preserved in Riffado storage.
+Disconnect the current Plaud account. Deletes the stored connection and device records; synced recordings are preserved in Chatterbox storage.
 
 **Response:**
 ```json
@@ -526,7 +526,7 @@ Forwarding headers such as `X-Forwarded-For` are ignored unless
 `RATE_LIMIT_TRUST_PROXY_HEADERS=true`; only enable it behind a trusted reverse
 proxy that strips or overwrites client-supplied forwarding headers.
 
-When `RATE_LIMIT_TRUST_PROXY_HEADERS=false` or unset, Riffado cannot derive a
+When `RATE_LIMIT_TRUST_PROXY_HEADERS=false` or unset, Chatterbox cannot derive a
 trusted client IP from the request. The unauthenticated IP limiter therefore
 uses one shared `"unknown"` bucket of 1,200 requests per minute for the whole
 instance. Authenticated identity limits still apply per API key/session at 600
@@ -555,7 +555,7 @@ With automatic Learn on, `transcription.completed` fires before the title is
 generated: the title, summary and topics wait for Learn's review (72 hours at
 most), and the new title follows as `recording.updated`.
 
-Riffado signs each request with HMAC-SHA256:
+Chatterbox signs each request with HMAC-SHA256:
 
 ```http
 X-Riffado-Event: transcription.completed
@@ -600,7 +600,7 @@ Webhook transcript payloads include a bounded preview instead of the full text:
     "created_at": "2026-05-06T12:05:00.000Z"
   },
   "links": {
-    "transcript": "https://riffado.example/api/v1/recordings/abc123/transcript"
+    "transcript": "https://chatterbox.example/api/v1/recordings/abc123/transcript"
   }
 }
 ```

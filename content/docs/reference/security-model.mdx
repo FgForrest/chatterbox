@@ -10,7 +10,7 @@ column-level details.
 
 ## Authentication
 
-Three ways to authenticate to Riffado's HTTP surface:
+Three ways to authenticate to Chatterbox's HTTP surface:
 
 1. **Browser session** (Better Auth). Email + password, or single
    sign-on, with the session cookie signed by `BETTER_AUTH_SECRET`.
@@ -98,7 +98,7 @@ a reference Node implementation.
 ## Webhook target hardening
 
 By default, webhook URLs may use `http://` or `https://` and may point
-at anything the Riffado container can reach (Docker-bridge service
+at anything the Chatterbox container can reach (Docker-bridge service
 names, RFC1918 IPs, public hosts). Credentials embedded in the URL are
 rejected.
 
@@ -124,8 +124,8 @@ the same userId-scoped queries run.
 
 ## External MCP server
 
-Riffado is a resource server here: Keycloak signs people in and issues
-the tokens, Riffado only checks them.
+Chatterbox is a resource server here: Keycloak signs people in and issues
+the tokens, Chatterbox only checks them.
 
 - **Which tokens.** The realm's signature (`RS256`, `PS256` or `ES256`,
   keys from its discovery document), the exact issuer, an expiry, a
@@ -133,7 +133,7 @@ the tokens, Riffado only checks them.
   refused. `aud` must contain `MCP_AUDIENCE` (or the endpoint's URL with
   `MCP_RESOURCE_AUDIENCE=true`). Tokens come from the single sign-on
   realm only: a second realm could issue a `sub` equal to a real user's.
-- **Who.** A `sub` linked to a Riffado account through single sign-on is
+- **Who.** A `sub` linked to a Chatterbox account through single sign-on is
   that user; a service account (`client_id` claim) acts as the
   Organization account. Accounts are never created from a token.
 - **What.** The six client roles open areas; they never widen what the
@@ -170,7 +170,9 @@ Suspended users (`users.suspendedAt` is non-null) are rejected
 The check sits next to the auth lookup, not behind a per-route
 middleware, so it can't be forgotten on a new route.
 
-## Trust boundaries Riffado does *not* own
+<span id="trust-boundaries-riffado-does-not-own" />
+
+## Trust boundaries Chatterbox does *not* own
 
 Some risks live outside the app entirely and we name them rather than
 pretending we cover them:
@@ -179,7 +181,7 @@ pretending we cover them:
   to whichever provider you configured. The privacy of that data
   depends on the provider's policy and infrastructure. If you don't
   trust them, run a local provider (Ollama / LM Studio) on the same
-  machine as your Riffado instance.
+  machine as your Chatterbox instance.
 - **A compromised application server.** The server holds
   `ENCRYPTION_KEY` and decrypts data on demand. At-rest encryption
   protects DB breaches, not RCE.
@@ -193,18 +195,18 @@ pretending we cover them:
   passwords in the realm decides who reads through the MCP server, and
   realm administrators can sign in as anyone.
 - **Prompt injection.** Transcripts are what people said, and an AI
-  client acting on its own may follow text in them. Riffado labels tool
+  client acting on its own may follow text in them. Chatterbox labels tool
   results as data and lets a client change only a task's status or
   assignee (`tasks:write`).
 
 ## Compliance claims
 
-Riffado does not claim HIPAA, SOC2, or attorney-client privilege.
+Chatterbox does not claim HIPAA, SOC2, or attorney-client privilege.
 Those claims belong to your AI provider (which may itself be
 HIPAA-eligible) and your own self-host setup, which you fully
 control.
 
 ## Reporting a vulnerability
 
-See [SECURITY.md](https://github.com/riffado/riffado/blob/main/SECURITY.md)
+See [SECURITY.md](https://github.com/FgForrest/chatterbox/blob/main/SECURITY.md)
 in the repository for disclosure instructions.

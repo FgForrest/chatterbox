@@ -26,7 +26,7 @@ Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví
 
 ### Šablony
 
-Šablona je instrukce, kterou dostane AI. Riffado obsahuje **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body** – tyto šablony můžete upravit nebo napsat vlastní v Nastavení → Shrnutí. Podrobnosti najdete v [nastavení shrnutí](settings.md#summary).
+Šablona je instrukce, kterou dostane AI. Chatterbox obsahuje **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body** – tyto šablony můžete upravit nebo napsat vlastní v Nastavení → Shrnutí. Podrobnosti najdete v [nastavení shrnutí](settings.md#summary).
 
 <span id="multi-pass-summaries" />
 
@@ -34,7 +34,7 @@ Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
-S aktivovanou funkcí **Vícekrokové shrnutí** (Nastavení → Shrnutí) Riffado přepis shrnuje vícekrát a výsledky slučuje, takže i body zachycené jen jedním krokem se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik kroků nastavíte.
+S aktivovanou funkcí **Vícekrokové shrnutí** (Nastavení → Shrnutí) Chatterbox přepis shrnuje vícekrát a výsledky slučuje, takže i body zachycené jen jedním krokem se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik kroků nastavíte.
 
 Zápatí takového shrnutí uvádí **vícekrokové · 3**. Pokud některý krok selže a shrnutí je z méně kroků, odznak zežloutne, například **vícekrokové · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
 
@@ -66,7 +66,7 @@ Přijaté úkoly jsou vypsané na kartě shrnutí. Zaškrtněte je po dokončen�
 
 ![Úkoly přiřazené vám](images/tasks-mine.png)
 
-- **Moje**: úkoly přiřazené vám. Riffado určí vaše záznamy v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se vám zde úkoly nezobrazují.
+- **Moje**: úkoly přiřazené vám. Chatterbox určí vaše záznamy v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se vám zde úkoly nezobrazují.
 - **Sledované**: ostatní úkoly z vašich nahrávek, přiřazené jiným osobám nebo zatím nikomu.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)

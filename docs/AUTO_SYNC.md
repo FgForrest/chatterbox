@@ -1,6 +1,6 @@
 # Auto-Sync Documentation
 
-Riffado syncs recordings from your Plaud device through two independent mechanisms: a client-side poller that runs while a browser tab is open, and a server-side worker that runs regardless of whether anyone has the app open. Both call the same underlying sync routine (`syncRecordingsForUser` in `src/lib/sync/sync-recordings.ts`).
+Chatterbox syncs recordings from your Plaud device through two independent mechanisms: a client-side poller that runs while a browser tab is open, and a server-side worker that runs regardless of whether anyone has the app open. Both call the same underlying sync routine (`syncRecordingsForUser` in `src/lib/sync/sync-recordings.ts`).
 
 ## How It Works
 
@@ -339,5 +339,5 @@ function setAutoSyncEnabled(enabled: boolean): void;
 
 ## License
 
-This auto-sync implementation is part of Riffado and follows the same license.
+This auto-sync implementation is part of Chatterbox and follows the same license.
 

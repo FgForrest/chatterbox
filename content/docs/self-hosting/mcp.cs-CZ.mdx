@@ -3,10 +3,10 @@ title: Externí MCP server
 description: Umožněte AI klientům a backendovým službám číst Almanach, přepisy, shrnutí a úkoly přes Model Context Protocol, s přístupem podle oprávnění klienta a jeho držitele.
 ---
 
-Samoobslužný Riffado, který se přihlašuje přes [jednotné přihlášení](./sso),
+Samoobslužný Chatterbox, který se přihlašuje přes [jednotné přihlášení](./sso),
 může také poskytovat endpoint MCP (Model Context Protocol). Lidé k němu
 připojí svého AI klienta a ptají se na své nahrávky; backendové služby
-čtou, co Organizace ví. Riffado zde funguje jako resource server:
+čtou, co Organizace ví. Chatterbox zde funguje jako resource server:
 tokeny vydává realm a oprávnění tokenu určují, do jakých oblastí
 se volající dostane. V režimu `AUTHZ_MODE=idp` se čtou z claimu `scope`
 odděleného mezerami. Režim `AUTHZ_MODE=local` zachovává původní klientské
@@ -39,7 +39,7 @@ nástroje. Volání známého nástroje bez potřebného oprávnění vrátí
   fakta a špatně rozpoznaná slova (tvary zadané jako slyšené, slova
   uživatelsky opravená v přepisech – s korekcí).
 - **Přepisy** (`transcripts:read`): přepis, jak jej lidé vidí v
-  Riffado, aplikované potvrzené opravy, jménem označení mluvčí tam, kde
+  Chatterbox, aplikované potvrzené opravy, jménem označení mluvčí tam, kde
   byli potvrzeni, časované repliky.
 - **Shrnutí** (`summaries:read`): text shrnutí a klíčové body.
 - **Úkoly** (`tasks:read`): otevřené, dokončené a zrušené úkoly.
@@ -66,7 +66,7 @@ Oprávnění se kombinují a některá pole vyžadují dvě:
 - Filtr `entity` u nástrojů nad nahrávkami vyžaduje `knowledge:read`.
 - `tasks:write` zahrnuje `tasks:read`.
 
-Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla Riffada
+Oprávnění nikdy nerozšiřuje rozsah již viděných dat: běžná pravidla aplikace Chatterbox
 vybírají řádky (viz [Co volající vidí](#what-callers-see)).
 
 <span id="turning-it-on" />
@@ -74,7 +74,7 @@ vybírají řádky (viz [Co volající vidí](#what-callers-see)).
 ## Zapnutí serveru
 
 ```bash
-MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
+MCP_AUDIENCE=chatterbox-mcp          # client id of the resource client below
 # MCP_ALLOWED_CLIENTS=claude,claude-code,acme-reports
 # MCP_AUDIT_RETENTION_DAYS=90
 # For Claude from the internet, see the Claude and Claude Code page:
@@ -92,16 +92,16 @@ MCP_AUDIENCE=riffado-mcp          # client id of the resource client below
   nastavení issueru není: druhý realm by mohl vydat token, jehož `sub`
   se bude shodovat se skutečným uživatelem.
 - Při nezadané hodnotě `MCP_AUDIENCE` odpovídá `/api/mcp` a jeho metadata 404.
-- Hosted Riffado jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
+- Hosted Chatterbox jednotné přihlášení ignoruje, takže server zde zůstává vypnutý.
 - `docker-compose.yml` předává všechny tyto proměnné dál.
 - Při prázdném `MCP_ALLOWED_CLIENTS` server při startu zapíše do logu
   varování: volat smí kterýkoliv klient realmu, jehož token nese potřebná oprávnění.
 
-Riffado načítá `issuer` realmu a podpisové klíče z
+Chatterbox načítá `issuer` realmu a podpisové klíče z
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. Hodnota `iss`
 tokenu musí být přesně stejně jako `issuer`. Když je `OIDC_ISSUER_URL`
 interní adresa (například služba v compose), opravte veřejný hostname v Keycloaku (`KC_HOSTNAME`), ať realm uvádí
-stejného issuer pro Riffado i klienty, kteří získávají tokeny.
+stejného issuer pro Chatterbox i klienty, kteří získávají tokeny.
 
 <span id="keycloak-setup" />
 
@@ -135,7 +135,7 @@ Lokální režim zachovává ruční postup s rolemi níže.
 <summary>Krok 1: resource klient</summary>
 
 1. **Clients → Create client**, typ **OpenID Connect**, client id
-   `riffado-mcp` (hodnota `MCP_AUDIENCE`).
+   `chatterbox-mcp` (hodnota `MCP_AUDIENCE`).
 2. **Client authentication:** vypnuto. Vypněte veškeré autentizační toky:
    do tohoto klienta se nikdo nepřihlašuje; nese pouze role.
 3. **Roles → Create role**, šestkrát: `knowledge:read`,
@@ -145,9 +145,9 @@ Lokální režim zachovává ruční postup s rolemi níže.
    (**Role mapping → Assign role → Filter by clients**).
 
 Není třeba žádný audience mapper. Výchozí scope klienta `roles` v realmu
-nese audience-resolve mapper, který přidává `riffado-mcp` do `aud`
+nese audience-resolve mapper, který přidává `chatterbox-mcp` do `aud`
 vždy, když některá jeho role je obsažena v tokenu, a ukládá role pod
-`resource_access.riffado-mcp.roles`, odkud je čte Riffado. Riffado ověřuje, že v
+`resource_access.chatterbox-mcp.roles`, odkud je čte Chatterbox. Chatterbox ověřuje, že v
 `aud` je `MCP_AUDIENCE`.
 
 </details>
@@ -164,7 +164,7 @@ přístupovém logu.
 3. **Advanced → Proof Key for Code Exchange Code Challenge Method:**
    `S256`.
 4. **Client scopes → `<client>-dedicated` → Scope:** vypněte **Full scope
-   allowed**, poté **Assign role** a vyberte role `riffado-mcp`,
+   allowed**, poté **Assign role** a vyberte role `chatterbox-mcp`,
    které aplikace smí mít.
 
 Token pak obsahuje role, které má uživatel **a zároveň** které povoluje účel klienta.
@@ -178,7 +178,7 @@ shrnutích, dostane pouze `summaries:read`, i když uživatel vlastní všech š
 
 1. **Create client**, typ **OpenID Connect**. **Client authentication:**
    zapnuto. **Authentication flow:** pouze Service accounts roles.
-2. **Service accounts roles → Assign role:** role `riffado-mcp`, které backend
+2. **Service accounts roles → Assign role:** role `chatterbox-mcp`, které backend
    potřebuje.
 3. Doporučeno: **Credentials → Client Authenticator:** Signed JWT
    (`private_key_jwt`) místo sdíleného tajemství a
@@ -198,9 +198,9 @@ povolenou [Organizaci](./organization) (`SELF_HOST_MODE=shared` a
 <summary>Krok 4: výměna tokenu</summary>
 
 Backend, který už drží token uživatele, jej může vyměnit za token pro
-Riffado pomocí **standard token exchange** v Keycloaku (V2,
+Chatterbox pomocí **standard token exchange** v Keycloaku (V2,
 Keycloak 26.2 a vyšší): zapněte **Standard token exchange** u klienta
-backendu a požadujte `audience=riffado-mcp`. Token uživatele
+backendu a požadujte `audience=chatterbox-mcp`. Token uživatele
 musí být vydán pro tento backend (klient v `aud`). Výsledkem je
 stále uživatel, s rolemi, které nový token nese.
 
@@ -211,7 +211,7 @@ tokenem, který dostane. Ověřte si nastavení pro svou verzi Keycloak.
 **Legacy token exchange (V1) s impersonací není podporováno** a musí
 zůstat vypnuto. Klient oprávněný k impersonaci může totiž vytvořit
 token pro libovolného uživatele (`requested_subject`) bez jeho tokenu, přihlášení,
-MFA nebo souhlasu. Riffado určuje volajícího podle `sub`, a takový
+MFA nebo souhlasu. Chatterbox určuje volajícího podle `sub`, a takový
 token by četl soukromé nahrávky a znalosti uživatele, změny úkolů by
 byly zaznamenány jako jeho. Token nelze odlišit od skutečného
 přihlášení; odlišit ho lze pouze podle `azp` (klient) v
@@ -220,7 +220,7 @@ přístupovém logu.
 - Nechte vypnutou preview funkcionalitu `token-exchange` (výchozí od
   Keycloak 26.2); žádnému klientovi nepřidělujte oprávnění *impersonate*.
 - Omezte roli správce `impersonation`. Správci realmů se mohou vždy
-  přihlásit jako jakýkoliv uživatel; Riffado je považuje za plně důvěryhodné.
+  přihlásit jako jakýkoliv uživatel; Chatterbox je považuje za plně důvěryhodné.
 - Nastavte `MCP_ALLOWED_CLIENTS` na klienty, které jste nakonfigurovali, jako
   druhou obrannou linii proti špatně nastavenému realmu.
 
@@ -265,7 +265,7 @@ TOKEN=$(curl -s https://sso.example.com/realms/acme/protocol/openid-connect/toke
   -d grant_type=client_credentials -d client_id=acme-reports -d client_secret=... \
   | jq -r .access_token)
 
-curl -s https://riffado.example.com/api/mcp \
+curl -s https://chatterbox.example.com/api/mcp \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -280,7 +280,7 @@ Claude (claude.ai, Claude Desktop, mobilní aplikace a Cowork) a Claude
 Code se připojují přes přihlášení realmu. Claude na server přistupuje z
 cloudu Anthropicu, takže potřebuje úzký veřejný vstup a důvěrného
 klienta v Keycloaku. Stránka [Claude a Claude Code](./claude) vás
-provede klienty v Keycloaku, nastavením Riffada, reverzní proxy,
+provede klienty v Keycloaku, nastavením aplikace Chatterbox, reverzní proxy,
 konektorem i kontrolami.
 
 <span id="what-callers-see" />
@@ -289,12 +289,12 @@ konektorem i kontrolami.
 
 | Token                                                   | Volající                                                 |
 | ------------------------------------------------------- | -------------------------------------------------------- |
-| `sub` uživatele, který se přihlásil do Riffado přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
+| `sub` uživatele, který se přihlásil do Chatterbox přes SSO | Tento uživatel. Almanach: jeho a Organizace. Nahrávky: jeho a ty sdílené Organizací, jak je vidí v seznamu nahrávek. |
 | Chybí takový `sub`, klient je v `MCP_SERVICE_CLIENTS` a token nese označení služby | Servisní účet jednající v datovém kontextu Organizace. Almanach: pouze Organizace. Nahrávky: pouze sdílené Organizací. Bez `MCP_SERVICE_CLIENTS` v režimu `local` jakýkoli token s `client_id` (zastaralé). |
 | Cokoli jiného                                           | Odmítnuto s 403 "Sign in to Chatterbox once first".       |
 
 Účty nejsou nikdy vytvořeny z tokenu: člověk se musí nejdřív alespoň
-jednou přihlásit do Riffada, než jeho AI klient může server volat.
+jednou přihlásit do aplikace Chatterbox, než jeho AI klient může server volat.
 Token bez kteréhokoliv ze šesti oprávnění dostane 403 "This token carries no
 Chatterbox MCP permission". Pozastavený účet, klient mimo `MCP_ALLOWED_CLIENTS`,
 servisní účet bez zapnuté Organizace, klient, kterého veřejný vstup
@@ -409,7 +409,7 @@ zapisuje jeden řádek do tabulky `mcp_access_log`:
 | -------------- | --------------------------------------------------------------- |
 | `at`          | Kdy                                                          |
 | `caller_kind` | `user` nebo `service`; prázdné, pokud token neměl volajícího     |
-| `user_id`     | Uživatel v Riffadu (prázdné, pokud je účet smazán)               |
+| `user_id`     | Uživatel v aplikaci Chatterbox (prázdné, pokud je účet smazán)               |
 | `subject`     | `sub` tokenu                                                |
 | `client_id`   | `azp` tokenu, jinak `client_id`                                |
 | `tool`        | Nástroj, který byl volán                                      |
@@ -432,7 +432,7 @@ Tokeny se kontrolují na přesného issuer, `aud` obsahující
 `MCP_RESOURCE_AUDIENCE=true`), expiraci (toleruje se 30 sekund rozdílu v čase),
 `RS256`, `PS256` nebo `ES256` podpis a profil access tokenu poskytovatele.
 Adaptér Keycloaku vyžaduje `typ: Bearer`, i v lokálním režimu.
-Riffado je nikdy neposílá dál.
+Chatterbox je nikdy neposílá dál.
 
 <span id="trying-it-locally" />
 

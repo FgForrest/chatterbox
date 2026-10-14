@@ -1,6 +1,6 @@
 # User guide demo data
 
-The screenshots in [`content/docs/user-guide/images`](../../../content/docs/user-guide/images) are taken from a Riffado stack filled with invented demo data. Everything needed to rebuild that stack and retake every screenshot lives here, so a changed screen means one re-run, not starting over.
+The screenshots in [`content/docs/user-guide/images`](../../../content/docs/user-guide/images) are taken from a Chatterbox stack filled with invented demo data. Everything needed to rebuild that stack and retake every screenshot lives here, so a changed screen means one re-run, not starting over.
 
 | File | What it is |
 | --- | --- |

@@ -3,7 +3,7 @@ title: Organization
 description: Share recordings with everyone on your instance through one Organization folder tree.
 ---
 
-A self-hosted Riffado can give its users a shared **Organization** next to
+A self-hosted Chatterbox can give its users a shared **Organization** next to
 their private library. Owners share a recording by filing it into the
 Organization tree; everyone on the instance can then open it, play it,
 and generate transcripts and summaries for it. Nothing is copied: the
@@ -12,7 +12,7 @@ exactly where they were.
 
 ## Turning it on
 
-Set both variables and restart. On start, Riffado creates (or updates) one
+Set both variables and restart. On start, Chatterbox creates (or updates) one
 **organization account** with these credentials.
 
 ```bash
@@ -22,7 +22,7 @@ ORG_ACCOUNT_PASSWORD=...          # 12+ characters, re-applied on every start
 ORG_ACCOUNT_NAME=Acme             # optional, defaults to "Organization"
 ```
 
-The email must not belong to an existing user; Riffado refuses to turn a
+The email must not belong to an existing user; Chatterbox refuses to turn a
 person's account into the organization account and logs why.
 
 With [single sign-on](./sso), `ORG_ACCOUNT_PASSWORD` is optional: nobody

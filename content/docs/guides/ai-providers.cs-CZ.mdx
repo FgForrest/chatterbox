@@ -3,7 +3,7 @@ title: Poskytovatelé AI
 description: Nakonfigurujte poskytovatele přepisu a sumarizace kompatibilní s OpenAI.
 ---
 
-Riffado využívá OpenAI SDK s konfigurovatelnou `baseURL`. Jakýkoliv poskytovatel,
+Chatterbox využívá OpenAI SDK s konfigurovatelnou `baseURL`. Jakýkoliv poskytovatel,
 který nabízí OpenAI-kompatibilní API, funguje: samotné OpenAI, Groq,
 OpenRouter, Together, Azure OpenAI, LM Studio, Ollama a další řešení,
 která podporují stejný wire protokol.
@@ -60,7 +60,7 @@ Předvolby LM Studio a Ollama ve výchozím stavu používají `http://localhost
 kontejneru Docker je `localhost` samotný kontejner, ne hostitelský
 stroj — použijte `http://host.docker.internal:<port>` na Mac/Windows, nebo
 Docker bridge IP na Linuxu, abyste se dostali na AI server běžící na
-hostiteli. Pokud provozujete Ollamu ve stejné síti Docker jako Riffado, použijte
+hostiteli. Pokud provozujete Ollamu ve stejné síti Docker jako Chatterbox, použijte
 název služby (`http://ollama:11434/v1`).
 
 <span id="choosing-models" />
@@ -86,7 +86,7 @@ Předvolba nabízí `scribe_v2` (výchozí), `scribe_v2_medical` a
 legacy `scribe_v1`. Diarizace je volba při požadavku, nikoli samostatný model,
 takže v nabídce je možnost **scribe_v2 (speaker labels)**,
 uložená jako `scribe_v2+diarize`. Při aktivní volbě budou přepisy
-ve formě `speaker_0: …` řádků, což je stejná struktura, jakou Riffado ukládá
+ve formě `speaker_0: …` řádků, což je stejná struktura, jakou Chatterbox ukládá
 u diarizovaného modelu OpenAI, a pracovní stanice zobrazí tyto přepisy
 jako dialog místo souvislého textu. Viz [Jak se přepisy a souhrny zobrazují](#how-transcripts-and-summaries-are-displayed).
 
@@ -126,7 +126,7 @@ Stejná jména z Almanachu jsou do Speechmatics posílána jako vlastní
 slovník, a to včetně tvarů, pod kterými byla dříve špatně rozpoznána.
 
 Vaše **Výchozí jazyk pro přepis** je předáván jako jazykový kód. Pokud jej
-nemáte nastavený, Riffado požádá o `auto` a nechá Speechmatics
+nemáte nastavený, Chatterbox požádá o `auto` a nechá Speechmatics
 jazyk rozpoznat. Výjimkou je `melia-1`: přijímá pouze `multi`,
 takže nastavení jazyka se při jejím výběru ignoruje.
 
@@ -136,7 +136,7 @@ nastavte místo toho regionálního hostitele — `https://eu2.asr.api.speechmat
 `https://us1.asr.api.speechmatics.com`, `https://au1.asr.api.speechmatics.com`
 atd. Koncová `/v2` je volitelná.
 
-Batch je asynchronní API: Riffado nahraje audio jako úlohu, poté se
+Batch je asynchronní API: Chatterbox nahraje audio jako úlohu, poté se
 každé 3 sekundy dotazuje na stav, stáhne přepis při dosažení `done`
 a následně úlohu smaže, aby audio a přepis nezůstaly na serverech
 Speechmatics čekající na vypršení retenční lhůty. Celé čekání
@@ -168,7 +168,7 @@ které mu byly přiřazeny; u sdílené nahrávky úkoly organizace. Jsou zasíl
 poskytovateli uživatele, který o souhrn požádal.
 
 Hraniční bod důvěry je právě vámi zvolený poskytovatel.
-Šifrování uložených dat u Riffada chrání databázi, nikoliv síťový přenos
+Šifrování uložených dat u aplikace Chatterbox chrání databázi, nikoliv síťový přenos
 směrem k AI poskytovateli — viz
 [Šifrování uložených dat](../reference/encryption-at-rest) pro přesný
 seznam toho, na co se tato vrstva vztahuje a na co nikoliv.
@@ -283,7 +283,7 @@ nebo přechod na dražší modely může vyústit ve vyšší náklady. Dva mant
 
 Pokud je nahrávka **znovu přepsána**, je předchozí souhrn navázán na starý text
 přepisu. Aby se zabránilo zobrazení nového přepisu společně se zastaralým
-souhrnem, Riffado v rámci téže transakce, která přepis přepisuje (pro přepis
+souhrnem, Chatterbox v rámci téže transakce, která přepis přepisuje (pro přepis
 uživatele typu „riffado“), smaže i existující souhrn. Pokud je automatické
 souhrnování zapnuté, je souhrn vytvořen automaticky. Je-li vypnuté,
 nahrávka zobrazuje souhrn až po ručním kliknutí na „Vygenerovat souhrn“.

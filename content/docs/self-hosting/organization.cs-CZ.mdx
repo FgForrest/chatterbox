@@ -3,7 +3,7 @@ title: Organizace
 description: Sdílejte nahrávky se všemi na své instanci prostřednictvím jedné stromové složky Organizace.
 ---
 
-Vlastní hosting Riffado může svým uživatelům poskytnout sdílenou **Organizaci** vedle
+Vlastní hosting Chatterbox může svým uživatelům poskytnout sdílenou **Organizaci** vedle
 jejich soukromé knihovny. Vlastníci sdílí nahrávku tím, že ji zařadí do stromu
 Organizace; každý v instanci ji pak může otevřít, přehrát a generovat k ní přepisy
 a shrnutí. Nic se nekopíruje: nahrávka, její zvuk a soukromý přepis a shrnutí
@@ -13,7 +13,7 @@ vlastníka zůstávají přesně tam, kde byly.
 
 ## Zapnutí funkce
 
-Nastavte obě proměnné a restartujte. Při startu Riffado vytvoří (nebo aktualizuje)
+Nastavte obě proměnné a restartujte. Při startu Chatterbox vytvoří (nebo aktualizuje)
 jeden **účet organizace** s těmito údaji.
 
 ```bash
@@ -23,7 +23,7 @@ ORG_ACCOUNT_PASSWORD=...          # 12+ characters, re-applied on every start
 ORG_ACCOUNT_NAME=Acme             # optional, defaults to "Organization"
 ```
 
-E-mail nesmí patřit žádnému existujícímu uživateli; Riffado odmítne
+E-mail nesmí patřit žádnému existujícímu uživateli; Chatterbox odmítne
 proměnit osobní účet na účet organizace a zapíše důvod do logu.
 
 Při použití [jednotného přihlášení](./sso) je `ORG_ACCOUNT_PASSWORD` volitelné:

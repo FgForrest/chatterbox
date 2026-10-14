@@ -1,6 +1,6 @@
 ---
 title: Učení
-description: Nechte Riffado navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
+description: Nechte Chatterbox navrhnout jména mluvčích, opravy a fakta a poté je zkontrolujte.
 ---
 
 Funkce Učení porovnává přepis s vaším [Almanachem](almanac.md) a navrhuje nalezené položky:
@@ -74,7 +74,7 @@ Při zapnutí **Opravit přepis po Učení** (Nastavení → Učení, ve výchoz
 
 - Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
 - Mluvčí označený pouze křestním jménem je podle toho označen. Křestní jméno, které sdílí dvě osoby v Almanachu, nepřiřadí žádné z nich.
-- Zařazení nového záznamu jako toho, který už máte, naučí Riffado nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
+- Zařazení nového záznamu jako toho, který už máte, naučí Chatterbox nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
 - Učení může používat vlastního poskytovatele a model, například výkonnější než ten pro souhrny: Nastavení → Učení → **Poskytovatel učení**.
 
 Pokračujte zde: [Organizace](organization.md)

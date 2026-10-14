@@ -14,13 +14,13 @@ Mail needs single sign-on: you get addresses once you sign in with your organiza
 - Your **mailbox** (`jan@…`) files mail into your pile, unfiled.
 - Every folder has an address (`jan+weekly@…`) that files mail straight into it.
 
-Only mail you send yourself, from the account you sign in with, is accepted on these addresses: forward a mail to one, or put it in **To**, **Cc** or **Bcc** when you write. Riffado checks the mail's signature, so nobody can send in your name.
+Only mail you send yourself, from the account you sign in with, is accepted on these addresses: forward a mail to one, or put it in **To**, **Cc** or **Bcc** when you write. Chatterbox checks the mail's signature, so nobody can send in your name.
 
 ## Folder addresses
 
 A folder's header shows its address. Copy it, or give the folder an address of your own: the old one keeps working as a secondary address until you remove it. An address that was ever given out is never given to anyone else.
 
-Deleting a folder stops its addresses, and its subfolders', for good. Riffado shows when each last received mail before you confirm.
+Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox shows when each last received mail before you confirm.
 
 ## Organization folders
 

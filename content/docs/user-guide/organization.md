@@ -20,7 +20,7 @@ Before a recording can be shared it has to be ready for others to read:
 - no [Learn](learn.md) review is waiting,
 - the [proposed tasks](summaries-and-tasks.md#tasks-from-a-summary) are reviewed.
 
-If something is missing, Riffado says what.
+If something is missing, Chatterbox says what.
 
 ## A shared recording
 
@@ -34,7 +34,7 @@ People named in shared recordings become **Organization people**, visible in eve
 
 ## Taking a recording back
 
-Remove the recording from its last Organization folder (the **×** on its folder chip) to take it out of the Organization. Riffado asks you to confirm first and tells you what happens to it under the retention rules. After that the recording is yours alone again, and the Organization's version of it is gone for everyone.
+Remove the recording from its last Organization folder (the **×** on its folder chip) to take it out of the Organization. Chatterbox asks you to confirm first and tells you what happens to it under the retention rules. After that the recording is yours alone again, and the Organization's version of it is gone for everyone.
 
 Erasing a shared recording, or any part of it, takes it out of the Organization first.
 

@@ -1,9 +1,9 @@
 ---
 title: Environment variables
-description: Every env var that Riffado reads, what it does, and what it defaults to.
+description: Every env var that Chatterbox reads, what it does, and what it defaults to.
 ---
 
-Riffado validates every environment variable through a Zod schema in
+Chatterbox validates every environment variable through a Zod schema in
 `src/lib/env.ts` at process start. A misconfigured env crashes the
 server with a precise error message rather than booting into a broken
 state — that's intentional. Read this page as the source of truth for
@@ -19,7 +19,7 @@ on production secrets.
 | --------------------------- | -------- | ---------------------------------------------------------------------- |
 | `DATABASE_URL`              | string   | Postgres connection string                                             |
 | `BETTER_AUTH_SECRET`        | string   | At least 32 chars; signs session cookies                               |
-| `APP_URL`                   | URL      | Public origin (e.g. `https://riffado.example.com`)                   |
+| `APP_URL`                   | URL      | Public origin (e.g. `https://chatterbox.example.com`)                   |
 | `ENCRYPTION_KEY`            | hex(64)  | Exactly 64 hex chars (32 bytes); see [Encryption](../reference/encryption-at-rest)|
 
 ## Optional knobs
@@ -107,7 +107,7 @@ the public entrance and connector variables.
 
 | Variable                   | Default | Effect                                                                                               |
 | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `riffado-mcp`). Unset, `/api/mcp` answers 404. |
+| `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `chatterbox-mcp`). Unset, `/api/mcp` answers 404. |
 | `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Required when `MCP_PUBLIC_CLIENTS` is set; otherwise, unset admits any client of the realm whose token carries the roles (logged as a warning at start). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Header the public reverse proxy sets on what it forwards (e.g. `X-MCP-Ingress`); the internal route removes it. A request carrying it is served only for `MCP_PUBLIC_CLIENTS`. |
 | `MCP_PUBLIC_CLIENTS`       | —       | Comma-separated client ids served through the public entrance (e.g. `claude`). Needs `MCP_PUBLIC_INGRESS_HEADER`. |
@@ -143,7 +143,7 @@ Self-host only; ignored when `IS_HOSTED=true`. All optional.
 | `EMBEDDING_BASE_URL` | —        | An OpenAI-compatible `embeddings` endpoint. Unset, Learn matches names by their words only, and says so. |
 | `EMBEDDING_MODEL`    | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
 | `EMBEDDING_API_KEY`  | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
-| `LEARN_MCP_URL`      | —        | The one URL of Riffado's read-only knowledge tools the Learn bridge may call back.                       |
+| `LEARN_MCP_URL`      | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                       |
 | `LEARN_BRIDGE_URL`   | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
 | `KNOWLEDGE_MEMORY_MB`| `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.     |
 

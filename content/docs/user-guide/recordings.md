@@ -19,8 +19,8 @@ The list on the left of **Recordings** shows your newest recordings first, group
 
 Recordings arrive in two ways:
 
-- **From your recorder.** Riffado fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
-- **By upload.** Click **Upload** and pick an audio or a video file. For a video, Riffado keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time. Uploaded recordings are transcribed automatically when **Auto-transcribe new recordings** is on (Settings → Transcription).
+- **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
+- **By upload.** Click **Upload** and pick an audio or a video file. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time. Uploaded recordings are transcribed automatically when **Auto-transcribe new recordings** is on (Settings → Transcription).
 
 Recording a meeting held in the browser on Linux? Your administrator can give you **meetrec**, a small command-line recorder that captures both your microphone and the other participants into one file, ready to upload. See [For administrators](administrators.md#meeting-recorder-meetrec).
 
@@ -56,9 +56,9 @@ Click **Estimated AI spend** to see what each step cost on this recording: trans
 
 **Erase** removes parts of a recording and keeps the rest:
 
-- **Erase local audio** removes Riffado's copy of the sound. The transcript and summary stay. While the original is still on your recorder's cloud, **Restore audio from Plaud** brings it back.
+- **Erase local audio** removes Chatterbox's copy of the sound. The transcript and summary stay. While the original is still on your recorder's cloud, **Restore audio from Plaud** brings it back.
 - **Erase transcripts** and **Erase summaries** remove just those.
-- **Delete all local data** removes the recording from Riffado but leaves the original on your recorder's cloud.
+- **Delete all local data** removes the recording from Chatterbox but leaves the original on your recorder's cloud.
 - **Move Plaud original to Trash** moves the original to the Trash of your recorder's cloud.
 - **Delete everywhere** does both. You confirm by typing the recording's title.
 

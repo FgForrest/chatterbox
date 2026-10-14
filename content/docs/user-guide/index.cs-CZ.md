@@ -1,9 +1,9 @@
 ---
 title: Uživatelská příručka
-description: Každá obrazovka aplikace Riffado, kapitolu po kapitole, s obrázky.
+description: Každá obrazovka aplikace Chatterbox, kapitolu po kapitole, s obrázky.
 ---
 
-Riffado uchovává Vaše hlasové nahrávky, převádí je na přepisy a shrnutí pomocí AI poskytovatele, kterého si vyberete, a pamatuje si osoby a věci, o kterých se v nich mluví. Tato příručka Vás krok za krokem provede vším, co můžete v aplikaci dělat, a to po jednotlivých obrazovkách.
+Chatterbox uchovává Vaše hlasové nahrávky, převádí je na přepisy a shrnutí pomocí AI poskytovatele, kterého si vyberete, a pamatuje si osoby a věci, o kterých se v nich mluví. Tato příručka Vás krok za krokem provede vším, co můžete v aplikaci dělat, a to po jednotlivých obrazovkách.
 
 ![Obrazovka Nahrávky](images/dashboard.png)
 
@@ -17,12 +17,12 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 2. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
 3. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
 4. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, šablony, vícekrokové zpracování a úkoly nalezené ve shrnutí.
-5. [Almanach](almanac.md): osoby a věci, které Riffado zná, jejich přezdívky a fakta.
-6. [Učení](learn.md): nechte Riffado navrhnout jména mluvčích, opravy a fakta, a zkontrolujte je.
+5. [Almanach](almanac.md): osoby a věci, které Chatterbox zná, jejich přezdívky a fakta.
+6. [Učení](learn.md): nechte Chatterbox navrhnout jména mluvčích, opravy a fakta, a zkontrolujte je.
 7. [Organizace](organization.md): sdílení nahrávek s kolegy.
 8. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
 9. [Nastavení](settings.md): poskytovatelé AI a ceny, přepis, témata, Učení, shrnutí, jazyk a další.
-10. [Riffado v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
+10. [Chatterbox v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
 11. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
 
 <span id="where-a-feature-comes-from" />
@@ -35,7 +35,7 @@ Některé funkce závisí na tom, jak je Vaše instance nastavena. Pokud kapitol
 - **Organizace** se objeví, pokud správce vytvořil organizační účet.
 - **Export složek** na disk nebo Google Drive je dostupný, pokud je správce povolil.
 - **Jednotné přihlašování (Single sign-on)** nahrazuje přihlašování e-mailem a heslem, pokud správce napojil poskytovatele identity.
-- **Riffado v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
+- **Chatterbox v Claude** funguje, pokud správce zapnul MCP server a nastavil konektor pro Claude.
 
 [Pro administrátory](administrators.md) uvádí všechna nastavení.
 

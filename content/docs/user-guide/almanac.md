@@ -1,9 +1,9 @@
 ---
 title: The Almanac
-description: The people and things Riffado knows, their nicknames and facts.
+description: The people and things Chatterbox knows, their nicknames and facts.
 ---
 
-The Almanac is what Riffado knows about the people and things your recordings talk about: who someone is, what they work on, what a project is called and what it is often misheard as. Transcription, Learn, summaries and tasks all use it.
+The Almanac is what Chatterbox knows about the people and things your recordings talk about: who someone is, what they work on, what a project is called and what it is often misheard as. Transcription, Learn, summaries and tasks all use it.
 
 It has four tabs: **People**, **Things**, **Vocabulary** and **Review**.
 
@@ -19,9 +19,9 @@ Click a person to open their page:
 
 - **Also known as**: nicknames and other spellings. Search finds a person by any of them, and Learn recognizes them in transcripts.
 - **Notes**: anything you want to remember. On Organization people, your notes are your own.
-- **What is known**: facts such as *works for Bluefin Logistics* or *has the role Operations director*. **Add a fact** picks a relation and the other side from the Almanac, or takes plain text. Riffado refuses facts about health, family, personality, performance or demographics.
+- **What is known**: facts such as *works for Bluefin Logistics* or *has the role Operations director*. **Add a fact** picks a relation and the other side from the Almanac, or takes plain text. Chatterbox refuses facts about health, family, personality, performance or demographics.
 - **Recordings**: where this person speaks.
-- **This is me** tells Riffado which person is you. Learn then knows who made the recording, and your tasks show under **Mine**.
+- **This is me** tells Chatterbox which person is you. Learn then knows who made the recording, and your tasks show under **Mine**.
 - **Rename**, **Merge into…** (when two entries are the same person) and **Erase**.
 
 ## Things
