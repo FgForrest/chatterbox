@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
 import { type AiRate, hasRate, storedRate } from "@/lib/ai/published-rates";
+import { titleProviderId } from "@/lib/ai/title-provider";
 import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import {
@@ -17,6 +18,7 @@ export interface ProviderListItem {
     isDefaultTranscription: boolean;
     isDefaultEnhancement: boolean;
     isDefaultTopics?: boolean;
+    isDefaultTitle?: boolean;
     /**
      * Whether Learn runs on it; absent where this instance has no Learn,
      * so the list offers the choice only where it means something.
@@ -56,6 +58,7 @@ export async function listUserProviders(
         .limit(1);
     const pointer = settings?.pointer ?? null;
     const topicsPointer = topicsProviderId(settings?.defaultProviders);
+    const titlePointer = titleProviderId(settings?.defaultProviders);
 
     const rows = await db
         .select({
@@ -98,6 +101,7 @@ export async function listUserProviders(
                 rate: hasRate(rate) ? rate : null,
                 isDefaultTranscription: row.id === pointer,
                 isDefaultTopics: row.id === topicsPointer,
+                isDefaultTitle: row.id === titlePointer,
                 ...(learn ? { isDefaultLearn } : {}),
             };
         },
