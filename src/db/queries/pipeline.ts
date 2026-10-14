@@ -9,6 +9,14 @@ import type {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
+export type ProcessingGenerationResult = "stable" | "changed" | "missing";
+
+export interface StalledPipelineRow {
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+}
+
 /** Increment one owner-scoped processing request, creating its row if needed. */
 export async function incrementProcessingRequestInTx(
     tx: Tx,
@@ -110,4 +118,88 @@ export async function updateProcessingPhaseInTx(
         returning 1 as updated
     `);
     return rows.length > 0;
+}
+
+/** Lock one owner-scoped row and finish the generation only if it stayed current. */
+export async function completeProcessingGenerationInTx(
+    tx: Tx,
+    itemId: string,
+    view: PipelineView,
+    userId: string,
+    generation: number,
+): Promise<ProcessingGenerationResult> {
+    const rows = await tx.execute<{ requestedGeneration: number }>(sql`
+        select requested_generation as "requestedGeneration"
+        from item_processing
+        where item_id = ${itemId}
+          and view = ${view}
+          and user_id = ${userId}
+        for update
+    `);
+    const row = rows[0];
+    if (!row) return "missing";
+    if (row.requestedGeneration !== generation) return "changed";
+
+    await tx.execute(sql`
+        update item_processing
+        set processed_generation = ${generation},
+            updated_at = now()
+        where item_id = ${itemId}
+          and view = ${view}
+          and user_id = ${userId}
+          and requested_generation = ${generation}
+    `);
+    return "stable";
+}
+
+/** Rows whose requested work lost its active driver wake-up. */
+export async function listStalledPipelineRows(
+    now: Date,
+    limit: number,
+): Promise<StalledPipelineRow[]> {
+    const staleBefore = new Date(now.getTime() - 2 * 60_000).toISOString();
+    const failedSince = new Date(
+        now.getTime() - 24 * 60 * 60_000,
+    ).toISOString();
+    const rows = await db.execute<{
+        itemId: string;
+        userId: string;
+        view: PipelineView;
+    }>(sql`
+        select
+            item_processing.item_id as "itemId",
+            item_processing.user_id as "userId",
+            item_processing.view as "view"
+        from item_processing
+        where item_processing.processed_generation < item_processing.requested_generation
+          and item_processing.updated_at < ${staleBefore}::timestamp
+          and not exists (
+              select 1
+              from async_jobs
+              where async_jobs.user_id = item_processing.user_id
+                and async_jobs.kind = 'pipeline.advance'
+                and async_jobs.subject_id = case
+                    when item_processing.view = 'org'
+                        then 'org:' || item_processing.item_id
+                    else item_processing.item_id
+                end
+                and async_jobs.status in ('pending', 'processing')
+          )
+          and (
+              select count(*)
+              from async_jobs
+              where async_jobs.user_id = item_processing.user_id
+                and async_jobs.kind = 'pipeline.advance'
+                and async_jobs.subject_id = case
+                    when item_processing.view = 'org'
+                        then 'org:' || item_processing.item_id
+                    else item_processing.item_id
+                end
+                and async_jobs.status = 'failed'
+                and async_jobs.completed_at >= ${failedSince}::timestamp
+          ) < 3
+        order by item_processing.updated_at asc
+        limit ${limit}
+    `);
+    return rows;
 }

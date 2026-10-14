@@ -1,0 +1,94 @@
+import { db } from "@/db";
+import { completeProcessingGenerationInTx } from "@/db/queries/pipeline";
+import { JobDeferredError } from "@/lib/jobs/retryable";
+import {
+    InvalidJobPayloadError,
+    type JobHandler,
+    type JobResult,
+} from "@/lib/jobs/types";
+import { executePipelineAction } from "@/lib/pipeline/execute";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { planAdvance } from "@/lib/pipeline/plan";
+import { readProcessing } from "@/lib/pipeline/state";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import type { PipelineView } from "@/lib/pipeline/types";
+
+const MAX_STABLE_CHECKS = 10;
+const UNSTABLE_RETRY_MS = 5_000;
+
+export interface PipelineAdvancePayload {
+    itemId: string;
+    view: PipelineView;
+    reason?: string;
+}
+
+async function advancePipeline(
+    userId: string,
+    payload: PipelineAdvancePayload,
+): Promise<JobResult> {
+    for (let iteration = 0; iteration < MAX_STABLE_CHECKS; iteration++) {
+        const processing = await readProcessing(
+            payload.itemId,
+            payload.view,
+            userId,
+        );
+        if (!processing) return { skipped: "gone" };
+        const generation = processing.requestedGeneration;
+        const facts = await gatherFacts(payload.itemId, payload.view, userId);
+        const plan = planAdvance({ ...facts, generation });
+        for (const action of plan.actions) {
+            await executePipelineAction({
+                action,
+                itemId: payload.itemId,
+                userId,
+                view: payload.view,
+                generation,
+            });
+        }
+        const completed = await db.transaction((tx) =>
+            completeProcessingGenerationInTx(
+                tx,
+                payload.itemId,
+                payload.view,
+                userId,
+                generation,
+            ),
+        );
+        if (completed === "missing") return { skipped: "gone" };
+        if (completed === "stable") {
+            return { processedGeneration: generation };
+        }
+    }
+    throw new JobDeferredError(
+        UNSTABLE_RETRY_MS,
+        "Pipeline requests kept changing while the driver ran",
+    );
+}
+
+export const pipelineAdvanceJobHandler: JobHandler<PipelineAdvancePayload> = {
+    kind: PIPELINE_ADVANCE_JOB_KIND,
+    concurrency: 2,
+    maxAttempts: 10,
+    timeoutMs: 60_000,
+    backoff: { baseMs: 10_000, maxMs: 5 * 60_000, jitter: 0.3 },
+    parsePayload(raw) {
+        if (typeof raw.itemId !== "string" || !raw.itemId) {
+            throw new InvalidJobPayloadError(
+                PIPELINE_ADVANCE_JOB_KIND,
+                "itemId",
+            );
+        }
+        if (raw.view !== "private" && raw.view !== "org") {
+            throw new InvalidJobPayloadError(
+                PIPELINE_ADVANCE_JOB_KIND,
+                'view must be "private" or "org"',
+            );
+        }
+        return {
+            itemId: raw.itemId,
+            view: raw.view,
+            ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
+        };
+    },
+    run: ({ userId, payload }) => advancePipeline(userId, payload),
+};

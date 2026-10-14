@@ -1,0 +1,47 @@
+import { db } from "@/db";
+import { autoLearnMail } from "@/lib/mail/auto-process";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
+import { enqueueTitleJob } from "@/lib/recordings/title-job";
+import { queueAutoSummary } from "@/lib/summary/auto-summary";
+import { queueAutoTopics } from "@/lib/topics/topics-job";
+
+export interface ExecutePipelineActionInput {
+    action: PipelineAction;
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+    generation: number;
+}
+
+/** Execute one planner action and persist marks in their own transaction. */
+export async function executePipelineAction(
+    input: ExecutePipelineActionInput,
+): Promise<void> {
+    const { action, itemId, userId, view, generation } = input;
+    switch (action.type) {
+        case "queueSummary":
+            await queueAutoSummary(userId, itemId, action.presetId, {
+                strict: action.strict,
+            });
+            return;
+        case "queueTopics":
+            await queueAutoTopics(userId, itemId, "riffado", {
+                strict: action.strict,
+            });
+            return;
+        case "queueTitleJob":
+            await enqueueTitleJob(userId, itemId);
+            return;
+        case "startAutoLearnMail":
+            await autoLearnMail(userId, itemId);
+            return;
+        case "markPhase":
+            await db.transaction((tx) =>
+                updatePhaseInTx(tx, itemId, view, userId, action.phase, {
+                    ...action.record,
+                    generation,
+                }),
+            );
+    }
+}

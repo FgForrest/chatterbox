@@ -64,7 +64,7 @@ export async function processNewMail(
 }
 
 /** Automatic Learn on a new mail, under automatic Learn's hourly cap. */
-async function autoLearnMail(
+export async function autoLearnMail(
     ownerUserId: string,
     itemId: string,
 ): Promise<void> {
