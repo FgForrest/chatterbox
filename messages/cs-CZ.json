@@ -1943,11 +1943,9 @@
   "utFkj5": "Kvalita přepisu",
   "TagjtG": "Vyvážení mezi rychlostí a přesností přepisu",
   "URhZDv": "Automaticky generovat názvy",
-  "K3laHm": "Automaticky generovat popisné názvy z přepisů pomocí AI",
   "qZWvyu": "Synchronizovat názvy do Plaud",
   "ojvD8b": "Aktualizovat název souboru ve vašem zařízení Plaud, když jsou názvy generovány",
   "1924tE": "Šablony názvů",
-  "GPz4Ty": "na místě, kam patří přepis. Model musí odpovědět pouze samotným názvem jako prostým textem. U dlouhého přepisu se odesílá jen jeho začátek.",
   "gMT6YX": "Poskytovatel a API klíč jsou povinné",
   "uxTSfX": "Zadejte obě ceny za tokeny, nebo žádnou.",
   "hmVLbY": "AI poskytovatel úspěšně přidán",
@@ -2406,5 +2404,13 @@
   "1vOcIB": " do možností rozšíření.",
   "OW6avW": "Zobrazí se pouze jednou. Zkopírujte ho nyní.",
   "E_3uwL": "Kopírovat klíč",
-  "DsvIdh": "Vytvořit klíč pro nahrávání"
+  "DsvIdh": "Vytvořit klíč pro nahrávání",
+  "HGfMeP": "Nepodařilo se znovu vygenerovat název",
+  "dbkKZH": "Název byl znovu vygenerován",
+  "meZZHM": "Znovu vygenerovat název",
+  "x0XvF4": "Znovu vygenerovat název pro {name}",
+  "hQED5B": "Poskytovatel pro názvy",
+  "FGPI_7": "Generovat názvy ze shrnutí, pokud je k dispozici, nebo z opravených přepisů",
+  "eosDhy": "Vyberte poskytovatele pro názvy nebo použijte poskytovatele pro shrnutí. Ruční opětovné generování funguje i při vypnutém automatickém generování názvů.",
+  "THaGXh": "na místě, kam patří shrnutí nebo opravený přepis. Model musí odpovědět pouze samotným názvem jako prostým textem. Dlouhý vstup se zkrátí."
 }

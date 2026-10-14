@@ -1943,11 +1943,9 @@
   "utFkj5": "Transcription quality",
   "TagjtG": "Balance between transcription speed and accuracy",
   "URhZDv": "Auto-generate titles",
-  "K3laHm": "Automatically generate descriptive titles from transcriptions using AI",
   "qZWvyu": "Sync titles to Plaud",
   "ojvD8b": "Update the filename in your Plaud device when titles are generated",
   "1924tE": "Title templates",
-  "GPz4Ty": "where the transcript goes. The model must reply with the title alone, as plain text. Only the beginning of a long transcript is sent.",
   "gMT6YX": "Provider and API key are required",
   "uxTSfX": "Enter both token prices, or neither.",
   "hmVLbY": "AI provider added successfully",
@@ -2406,5 +2404,13 @@
   "1vOcIB": " into the extension's options.",
   "OW6avW": "Shown once. Copy it now.",
   "E_3uwL": "Copy key",
-  "DsvIdh": "Generate recorder key"
+  "DsvIdh": "Generate recorder key",
+  "HGfMeP": "Failed to regenerate title",
+  "dbkKZH": "Title regenerated",
+  "meZZHM": "Regenerate title",
+  "x0XvF4": "Regenerate title for {name}",
+  "hQED5B": "Title provider",
+  "FGPI_7": "Generate titles from summaries when available, or from corrected transcripts",
+  "eosDhy": "Choose a provider for titles, or use the summary provider. Manual regeneration works even when automatic titles are off.",
+  "THaGXh": "where the summary or corrected transcript goes. The model must reply with the title alone, as plain text. Long input is shortened."
 }

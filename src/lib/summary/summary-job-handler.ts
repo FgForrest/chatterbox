@@ -23,6 +23,7 @@ import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
+import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { generateSummaryForRecording } from "./generate-summary";
@@ -108,6 +109,20 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                 });
                 if (due)
                     result = await generate(payload.presetId ?? due.presetId);
+            }
+
+            if (!orgView) {
+                await updateTitleAfterSummary({
+                    userId: result.ownerUserId,
+                    recordingId: payload.recordingId,
+                    summary: result.summary,
+                    keyPoints: result.keyPoints,
+                }).catch((error: unknown) => {
+                    console.error(
+                        "Failed to update title from summary:",
+                        error,
+                    );
+                });
             }
 
             // Emitted here rather than in the transcription pipeline, so the
