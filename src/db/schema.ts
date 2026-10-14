@@ -580,6 +580,51 @@ export const chatterItems = pgTable(
     }),
 );
 
+// `phases` holds only state names, reason codes, generations and input
+// fingerprints, never user content, so nothing in this table is encrypted.
+export const itemProcessing = pgTable(
+    "item_processing",
+    {
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 8 })
+            .$type<"private" | "org">()
+            .notNull(),
+        profileId: text("profile_id"),
+        profileRevisionId: text("profile_revision_id"),
+        phases: jsonb("phases")
+            .$type<Record<string, unknown>>()
+            .notNull()
+            .default({}),
+        requestedGeneration: integer("requested_generation")
+            .notNull()
+            .default(0),
+        processedGeneration: integer("processed_generation")
+            .notNull()
+            .default(0),
+        waitingSince: timestamp("waiting_since"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.itemId, table.view] }),
+        userIdIdx: index("item_processing_user_id_idx").on(table.userId),
+        stalledIdx: index("item_processing_stalled_idx")
+            .on(table.updatedAt)
+            .where(
+                sql`${table.processedGeneration} < ${table.requestedGeneration}`,
+            ),
+        viewCheck: check(
+            "item_processing_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+    }),
+);
+
 // Recordings
 export const recordings = pgTable(
     "recordings",
