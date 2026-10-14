@@ -46,7 +46,7 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
             )
             .limit(1);
         if (!recording) return { skipped: "gone" };
-        if (recording.titleEditedAt) return { skipped: "manual title" };
+        if (recording.titleEditedAt) return { retitled: false };
         const [settings] = await db
             .select({
                 autoGenerateTitle: userSettings.autoGenerateTitle,
