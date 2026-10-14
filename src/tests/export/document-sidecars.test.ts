@@ -187,9 +187,9 @@ describe("buildSummaryMarkdown", () => {
 
         expect(md).toContain("## Summary\n\nWe agreed the budget.");
         expect(md).toContain(
-            "## Key points\n\n- Budget approved\n- Hiring paused",
+            "## Key Points\n\n- Budget approved\n- Hiring paused",
         );
-        expect(md).toContain("## Action items\n\n- Send the deck");
+        expect(md).toContain("## Action Items\n\n- Send the deck");
         expect(md).toContain(
             'participants:\n  - "Jana Novak"\n  - "Speaker 1"',
         );
@@ -225,7 +225,7 @@ describe("buildSummaryMarkdown", () => {
         expect(md).toContain(
             "## Tasks\n\n- [x] Send the deck (Jana Novak, due 2026-10-16)\n- [ ] Book a room",
         );
-        expect(md).not.toContain("## Action items");
+        expect(md).not.toContain("## Action Items");
     });
 
     it("omits empty sections", () => {
@@ -243,9 +243,60 @@ describe("buildSummaryMarkdown", () => {
         });
 
         expect(md).toContain("## Summary");
-        expect(md).not.toContain("## Key points");
-        expect(md).not.toContain("## Action items");
+        expect(md).not.toContain("## Key Points");
+        expect(md).not.toContain("## Action Items");
         expect(md).toContain("participants: []");
+    });
+
+    it("uses Czech section labels while preserving the generated headings", () => {
+        const md = buildSummaryMarkdown({
+            title: "Porada",
+            recordedAt: RECORDED_AT,
+            provider: "OpenAI",
+            model: "gpt-4o-mini",
+            source: "riffado",
+            transcriptSource: "riffado",
+            language: "cs-CZ",
+            summary:
+                "### Účastníci\n\nJan a Jana.\n\n### Průběh schůzky\n\nPlán.",
+            keyPoints: ["Rozpočet schválen"],
+            actionItems: ["Poslat podklady"],
+            participants: ["Jan", "Jana"],
+        });
+
+        expect(md).toContain("## Shrnutí\n\n### Účastníci");
+        expect(md).toContain("### Průběh schůzky\n\nPlán.");
+        expect(md).toContain("## Klíčové body\n\n- Rozpočet schválen");
+        expect(md).toContain("## Úkoly\n\n- Poslat podklady");
+        expect(md).not.toContain("## Summary");
+    });
+
+    it("localizes the task section and due date label", () => {
+        const md = buildSummaryMarkdown({
+            title: "Porada",
+            recordedAt: RECORDED_AT,
+            provider: "OpenAI",
+            model: "gpt-4o-mini",
+            source: "riffado",
+            transcriptSource: "riffado",
+            language: "cs",
+            summary: "Dohoda.",
+            keyPoints: [],
+            actionItems: [],
+            tasks: [
+                {
+                    text: "Poslat podklady",
+                    done: false,
+                    assignee: "Jan",
+                    dueDate: "2026-10-16",
+                },
+            ],
+            participants: [],
+        });
+
+        expect(md).toContain(
+            "## Úkoly\n\n- [ ] Poslat podklady (Jan, termín 2026-10-16)",
+        );
     });
 });
 
@@ -464,10 +515,15 @@ describe("exportRecordingSidecars", () => {
                         id: "tr-1",
                         source: "riffado",
                         text: "Speaker 0: Hello.",
+                        detectedLanguage: "cs",
                     },
                 ]) as never,
             )
-            .mockReturnValueOnce(rows([{ preferred: "riffado" }]) as never)
+            .mockReturnValueOnce(
+                rows([
+                    { preferred: "riffado", aiOutputLanguage: "auto" },
+                ]) as never,
+            )
             .mockReturnValueOnce(
                 rows([
                     { label: "Speaker 0", displayName: "Jane Doe" },
@@ -490,6 +546,9 @@ describe("exportRecordingSidecars", () => {
         expect(body).toContain("Jane Doe approved Speaker 1.");
         expect(body).toContain("Decision by Jane Doe");
         expect(body).toContain("Follow up with Speaker 1");
+        expect(body).toContain("## Shrnutí");
+        expect(body).toContain("## Klíčové body");
+        expect(body).toContain("## Úkoly");
         expect(body).not.toContain("](#speaker-");
         expect(body).toContain('participants:\n  - "Jane Doe"');
     });
