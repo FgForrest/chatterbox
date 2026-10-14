@@ -55,8 +55,10 @@ administration away.
 
 Taking access away signs the person out at once, here and at the
 provider, and blocks their API keys and meeting recorder until access is
-given back; recordings waiting in their browser are kept. A person
-disabled or deleted at the provider loses access within
+given back; recordings waiting in their browser are kept. If the
+provider cannot sign them out, **Settings → Access** names the person at
+the top until an administrator ends their sessions with **End
+sessions**. A person disabled or deleted at the provider loses access within
 `AUTHZ_VERIFICATION_MAX_AGE` (30 minutes by default) after Chatterbox
 learns of it; how quickly your provider learns of it is up to your IT.
 

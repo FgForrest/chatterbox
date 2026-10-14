@@ -61,8 +61,10 @@ přístup ani správu přístupu.
 
 Odebrání přístupu osobu okamžitě odhlásí, zde i u poskytovatele, a
 zablokuje její API klíče a záznamník schůzek, dokud přístup znovu
-nedostane; nahrávky čekající v jejím prohlížeči zůstanou zachovány. Osoba
-deaktivovaná nebo smazaná u poskytovatele ztratí přístup do
+nedostane; nahrávky čekající v jejím prohlížeči zůstanou zachovány. Pokud
+ji poskytovatel odhlásit nedokáže, **Nastavení → Přístupy** osobu uvede
+nahoře, dokud jí administrátor relace neukončí tlačítkem **Ukončit
+relace**. Osoba deaktivovaná nebo smazaná u poskytovatele ztratí přístup do
 `AUTHZ_VERIFICATION_MAX_AGE` (výchozí 30 minut) poté, co se to Chatterbox
 dozví; jak rychle se to dozví váš poskytovatel, záleží na vašem IT.
 

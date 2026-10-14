@@ -51,6 +51,11 @@ interface HistoryEntry {
     revocation: "not-needed" | "done" | "pending" | "failed";
 }
 
+type PendingRevocation = Pick<
+    AccessRow,
+    "subject" | "username" | "email" | "name"
+>;
+
 interface ChangeOutcome {
     status: "applied" | "partial" | "noop";
     failed: { capability: Capability; error: string }[];
@@ -84,6 +89,7 @@ export function AccessSection() {
     const [selected, setSelected] = useState<string | null>(null);
     const [detail, setDetail] = useState<AccessDetail | null>(null);
     const [history, setHistory] = useState<HistoryEntry[]>([]);
+    const [unfinished, setUnfinished] = useState<PendingRevocation[]>([]);
     const [busy, setBusy] = useState(false);
     const [reauthenticationRequired, setReauthenticationRequired] =
         useState(false);
@@ -214,9 +220,22 @@ export function AccessSection() {
         [explain],
     );
 
+    const loadUnfinished = useCallback(async () => {
+        const response = await fetch("/api/access/pending-revocations");
+        if (!response.ok) return;
+        const body = (await response.json()) as {
+            people: PendingRevocation[];
+        };
+        setUnfinished(body.people);
+    }, []);
+
     useEffect(() => {
         void loadList();
     }, [loadList]);
+
+    useEffect(() => {
+        void loadUnfinished();
+    }, [loadUnfinished]);
 
     useEffect(() => {
         if (selected) void loadDetail(selected);
@@ -278,7 +297,11 @@ export function AccessSection() {
                 toast.success(i18n("Access changed"));
             }
             reportRevocation(outcome.revocation);
-            await Promise.all([loadDetail(current.subject), loadList()]);
+            await Promise.all([
+                loadDetail(current.subject),
+                loadList(),
+                loadUnfinished(),
+            ]);
         } finally {
             setBusy(false);
         }
@@ -328,7 +351,7 @@ export function AccessSection() {
             } else {
                 reportRevocation(body.revocation);
             }
-            await loadDetail(current.subject);
+            await Promise.all([loadDetail(current.subject), loadUnfinished()]);
         } finally {
             setBusy(false);
         }
@@ -343,6 +366,7 @@ export function AccessSection() {
             lastRevocation?.revocation === "failed") &&
         detail !== null &&
         !detail.effective.includes("use");
+    const sessionsOpen = new Set(unfinished.map((person) => person.subject));
 
     return (
         <div className="space-y-4">
@@ -385,6 +409,27 @@ export function AccessSection() {
                 >
                     {i18n("Sign in again to manage access.")}
                 </Button>
+            )}
+            {unfinished.length > 0 && (
+                <div className="space-y-2 rounded-md border border-amber-500/40 px-3 py-2">
+                    <p className="text-sm">
+                        {i18n(
+                            "Access was taken away, but these people's sessions at the identity provider are still open. Open a person to end them.",
+                        )}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                        {unfinished.map((person) => (
+                            <Button
+                                key={person.subject}
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setSelected(person.subject)}
+                            >
+                                {personLabel(person)}
+                            </Button>
+                        ))}
+                    </div>
+                </div>
             )}
             <form
                 className="flex gap-2"
@@ -452,6 +497,11 @@ export function AccessSection() {
                                         </span>
                                     </span>
                                     <span className="flex shrink-0 flex-wrap justify-end gap-1">
+                                        {sessionsOpen.has(row.subject) && (
+                                            <span className="rounded border border-amber-500/40 px-1.5 py-0.5 text-xs">
+                                                {i18n("Sessions still open")}
+                                            </span>
+                                        )}
                                         {row.effective.map((capability) => (
                                             <span
                                                 key={capability}

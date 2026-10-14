@@ -10,7 +10,9 @@
  * - the provider refusing the delegated change is its own error;
  * - two administrators removing each other end with one of them;
  * - losing `use` blocks the person's API keys at once, regaining it
- *   unblocks them.
+ *   unblocks them;
+ * - someone whose sessions at the provider are still open is named until
+ *   they are ended or the person has `use` again.
  *
  * Opt-in: `TEST_DATABASE_URL` and `KEYCLOAK_TEST_ISSUER`.
  */
@@ -121,6 +123,7 @@ vi.mock("@/lib/notifications/email", () => ({
     sendVerifyEmail: vi.fn(),
 }));
 
+import { GET as pendingRoute } from "@/app/api/access/pending-revocations/route";
 import { POST as revokeRoute } from "@/app/api/access/subjects/[subject]/revoke-sessions/route";
 import {
     PATCH as changeRoute,
@@ -266,6 +269,7 @@ describeWithKeycloak("access management (Keycloak)", () => {
                 ada: ["use", "access.manage"],
                 abe: ["use", "access.manage"],
                 pam: ["use"],
+                lia: ["use"],
             },
             {
                 realmName: REALM,
@@ -638,22 +642,26 @@ describeWithKeycloak("access management (Keycloak)", () => {
         }
     });
 
-    it("ends someone's sessions on request and records it", async () => {
-        const response = await revokeRoute(
+    function revoke(as: string, target: string) {
+        return revokeRoute(
             new Request(
-                `${TEST_APP_URL}/api/access/subjects/${subject("cora")}/revoke-sessions`,
+                `${TEST_APP_URL}/api/access/subjects/${target}/revoke-sessions`,
                 {
                     method: "POST",
                     headers: {
-                        cookie: cookies.second ?? "",
+                        cookie: cookies[as] ?? "",
                         origin: TEST_APP_URL,
                         "content-type": "application/json",
                     },
                     body: "{}",
                 },
             ),
-            context(subject("cora")),
+            context(target),
         );
+    }
+
+    it("ends someone's sessions on request and records it", async () => {
+        const response = await revoke("second", subject("cora"));
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ revocation: "done" });
         expect(
@@ -673,5 +681,54 @@ describeWithKeycloak("access management (Keycloak)", () => {
                     ),
                 ),
         ).toHaveLength(1);
+    });
+
+    it("names someone whose sessions at the provider are still open until they end or access is back", async () => {
+        const lia = subject("lia");
+        async function named(): Promise<string[]> {
+            const response = await pendingRoute(
+                get("root", "/api/access/pending-revocations"),
+            );
+            expect(response.status).toBe(200);
+            const body = (await response.json()) as {
+                people: { subject: string }[];
+            };
+            return body.people.map((person) => person.subject);
+        }
+        async function providerRefusedLastRevocation() {
+            const last = await lastAudit(lia);
+            await db()
+                .update(accessChangeLog)
+                .set({ revocation: "pending" })
+                .where(eq(accessChangeLog.id, last?.id ?? ""));
+        }
+
+        const before = await detail("root", lia);
+        const removed = await patch("root", lia, {
+            remove: ["use"],
+            revision: before.revision,
+        });
+        expect(removed.status).toBe(200);
+        expect(await named()).not.toContain(lia);
+
+        await providerRefusedLastRevocation();
+        expect(await named()).toContain(lia);
+        const user = await pendingRoute(
+            get("pat", "/api/access/pending-revocations"),
+        );
+        expect(user.status).toBe(403);
+
+        expect((await revoke("root", lia)).status).toBe(200);
+        expect(await named()).not.toContain(lia);
+
+        await providerRefusedLastRevocation();
+        expect(await named()).toContain(lia);
+        const current = await detail("root", lia);
+        const restored = await patch("root", lia, {
+            add: ["use"],
+            revision: current.revision,
+        });
+        expect(restored.status).toBe(200);
+        expect(await named()).not.toContain(lia);
     });
 });

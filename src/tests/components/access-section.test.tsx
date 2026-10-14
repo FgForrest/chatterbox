@@ -56,17 +56,47 @@ const PENDING = {
     revocation: "pending",
 };
 
+const PAT_SESSIONS_OPEN = {
+    subject: "pat-sub",
+    username: "pat",
+    email: "pat@example.test",
+    name: "Pat Example",
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 let effective: string[];
 let history: unknown[];
+let unfinished: unknown[];
 
 beforeEach(() => {
     effective = PAT.effective;
     history = [PENDING];
+    unfinished = [];
     fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         if (url.startsWith("/api/access/subjects?")) {
-            return json({ rows: [PAT], hasMore: false });
+            return json({ rows: [{ ...PAT, effective }], hasMore: false });
+        }
+        if (url === "/api/access/pending-revocations") {
+            return json({ people: unfinished });
+        }
+        if (
+            url === "/api/access/subjects/pat-sub/revoke-sessions" &&
+            init?.method === "POST"
+        ) {
+            unfinished = [];
+            history = [
+                {
+                    at: "2026-10-13T12:00:00.000Z",
+                    correlationId: "c9",
+                    action: "revoke-sessions",
+                    requested: {},
+                    outcome: "applied",
+                    revocation: "done",
+                },
+                PENDING,
+            ];
+            return json({ revocation: "done", correlationId: "c9" });
         }
         if (url === "/api/access/subjects/pat-sub" && !init?.method) {
             return json({
@@ -118,6 +148,40 @@ describe("AccessSection", () => {
             screen.getByText(/Also granted through a role assigned directly/),
         ).toBeTruthy();
         expect(document.body.innerHTML).not.toMatch(/secret|eyJ/i);
+        expect(screen.queryByText("Sessions still open")).toBeNull();
+    });
+
+    it("names the people whose provider sessions are still open until they are ended", async () => {
+        effective = ["org.curate"];
+        unfinished = [PAT_SESSIONS_OPEN];
+        render(<AccessSection />);
+        expect(
+            await screen.findByText(
+                /these people's sessions at the identity provider are still open/,
+            ),
+        ).toBeTruthy();
+        expect(await screen.findByText("Sessions still open")).toBeTruthy();
+
+        fireEvent.click(screen.getByRole("button", { name: "Pat Example" }));
+        fireEvent.click(
+            await screen.findByRole("button", { name: "End sessions" }),
+        );
+        await waitFor(() =>
+            expect(toast.success).toHaveBeenCalledWith("Sessions ended"),
+        );
+        await waitFor(() =>
+            expect(
+                screen.queryByText(
+                    /these people's sessions at the identity provider are still open/,
+                ),
+            ).toBeNull(),
+        );
+        expect(screen.queryByText("Sessions still open")).toBeNull();
+        expect(
+            screen.queryByText(
+                /ending the sessions at the identity provider is pending/,
+            ),
+        ).toBeNull();
     });
 
     it("offers to end sessions while the newest revocation is pending and access is gone", async () => {

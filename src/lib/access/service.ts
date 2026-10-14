@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
     isAccessLockTimeout,
@@ -94,7 +94,16 @@ export interface AccessChangeOutcome {
     access: AccessDetail;
 }
 
+/** Someone who lost `use` whose sessions at the provider are still open. */
+export interface PendingRevocation {
+    subject: string;
+    username: string | null;
+    email: string | null;
+    name: string | null;
+}
+
 const MAX_PAGE = 50;
+const MAX_PENDING_CHECKS = 20;
 
 function forbidden(): AppError {
     return new AppError(
@@ -788,4 +797,51 @@ export async function accessHistory(
         .where(eq(accessChangeLog.targetSubject, subjectId))
         .orderBy(desc(accessChangeLog.at))
         .limit(Math.min(Math.max(limit, 1), 100));
+}
+
+/**
+ * The people whose sessions at the provider are still to be ended: the
+ * newest attempt to end them is `pending` or `failed`, and the provider
+ * still holds no `use` for them. Newest first; only the newest 20
+ * attempts are checked at the provider.
+ */
+export async function pendingRevocations(
+    context: AdminContext,
+): Promise<PendingRevocation[]> {
+    assertAccessAdministrator(context);
+    const port = portFor(context);
+    const newest = db
+        .selectDistinctOn([accessChangeLog.targetSubject], {
+            subject: accessChangeLog.targetSubject,
+            revocation: accessChangeLog.revocation,
+            at: accessChangeLog.at,
+        })
+        .from(accessChangeLog)
+        .where(ne(accessChangeLog.revocation, "not-needed"))
+        .orderBy(accessChangeLog.targetSubject, desc(accessChangeLog.at))
+        .as("newest");
+    const unfinished = await db
+        .select()
+        .from(newest)
+        .where(inArray(newest.revocation, ["pending", "failed"]))
+        .orderBy(desc(newest.at))
+        .limit(MAX_PENDING_CHECKS);
+    const people = await guarded(() =>
+        Promise.all(
+            unfinished
+                .filter((entry) => entry.subject !== context.actor.subject)
+                .map((entry) => port.getAccess(entry.subject)),
+        ),
+    );
+    return people
+        .filter(
+            (access): access is SubjectAccess =>
+                access !== null && !access.effective.includes("use"),
+        )
+        .map(({ subject }) => ({
+            subject: subject.id,
+            username: subject.username,
+            email: subject.email,
+            name: subject.name,
+        }));
 }

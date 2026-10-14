@@ -1533,6 +1533,8 @@
   "ffRuGD": "refused: your own access",
   "Qtj-Ab": "refused: sign in again",
   "7ATNns": "failed",
+  "R5E_mt": "Access was taken away, but these people's sessions at the identity provider are still open. Open a person to end them.",
+  "_c3-UE": "Sessions still open",
   "M-PtvW": "You are not an administrator of access to Chatterbox.",
   "dkEWa4": "The identity provider refused this change for your account. Ask your IT department to grant the delegated administration.",
   "qQQpMK": "Sign in again to manage access.",
