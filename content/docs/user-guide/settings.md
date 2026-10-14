@@ -13,13 +13,13 @@ Open Settings from the account menu (the round button with your initial), or pre
 
 ![AI providers](images/settings-providers.png)
 
-**Settings → Providers** lists the services that do the AI work. Click **Add Provider**, choose the service, paste its API key, and pick a model. Riffado comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
+**Settings → Providers** lists the services that do the AI work. Click **Add Provider**, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
 
 Each provider shows its model, its price, and which jobs use it: **Transcription**, **Summaries**, **Learn** or **Topics**. You choose those jobs in the sections below, each of which lists only the providers able to do that job.
 
 ![Editing a provider](images/settings-provider-edit.png)
 
-- **Price.** Riffado knows the published prices of common models. For any other model, or if you pay a different price, enter it here: dollars per million input and output tokens, or per audio hour. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
+- **Price.** Chatterbox knows the published prices of common models. For any other model, or if you pay a different price, enter it here: dollars per million input and output tokens, or per audio hour. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
 - **Duplicate** (the copy icon) makes a second provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
 - **Claude Code** and **Codex** run on a Claude or ChatGPT subscription instead of an API key, through a bridge your administrator sets up. See [For administrators](administrators.md#claude-code-and-codex-subscriptions).
 
@@ -57,7 +57,7 @@ Shown where [Learn](learn.md) is available.
 
 - **Summary provider** and **AI output language**. **Auto (match transcript)** writes in the recording's language.
 - **Auto-generate summary after transcription**.
-- **Summary templates**: the built-in templates and your own. Edit any of them; the **⋯** menu makes one the **Default** or the one used for automatic summaries. **New template** writes your own; put `{transcription}` where the transcript goes. A built-in template you have not edited keeps improving with new versions of Riffado; **Add built-in templates back** restores ones you deleted.
+- **Summary templates**: the built-in templates and your own. Edit any of them; the **⋯** menu makes one the **Default** or the one used for automatic summaries. **New template** writes your own; put `{transcription}` where the transcript goes. A built-in template you have not edited keeps improving with new versions of Chatterbox; **Add built-in templates back** restores ones you deleted.
 
 ![Multi-pass summarization](images/settings-multi-pass.png)
 
@@ -77,7 +77,7 @@ Shown where [Learn](learn.md) is available.
 - **Notifications**: browser, email and Bark notifications for new recordings.
 - **Storage**: space used, and [Auto-delete old data](exports-backups-retention.md#deleting-old-data-automatically).
 - **Export/Backup**: [exports and backups](exports-backups-retention.md#backups).
-- **API Keys** and **Webhooks**: connect Riffado to other tools.
+- **API Keys** and **Webhooks**: connect Chatterbox to other tools.
 - **Google Account**: connect the Google account used for [Google Drive exports](exports-backups-retention.md#to-google-drive).
 
-Next: [Riffado in Claude](claude.md)
+Next: [Chatterbox in Claude](claude.md)

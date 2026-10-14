@@ -294,7 +294,10 @@ export async function createEntity(
 
 /**
  * `createEntity` inside a caller's transaction, which holds the
- * Organization-people lock and bumps the actor's scope. Returns the id.
+ * Organization-people lock and bumps the scope. The entity goes into
+ * `actorUserId`'s scope; `createdByUserId` names its author when that is
+ * someone else (a curator writing into the Organization's). Returns the
+ * id.
  */
 export async function createEntityInTx(
     tx: Tx,
@@ -303,7 +306,13 @@ export async function createEntityInTx(
         typeKey,
         name,
         description = null,
-    }: { typeKey: string; name: string; description?: string | null },
+        createdByUserId = actorUserId,
+    }: {
+        typeKey: string;
+        name: string;
+        description?: string | null;
+        createdByUserId?: string;
+    },
 ): Promise<string> {
     const clean = cleanName(name);
     const cleanText = cleanDescription(description);
@@ -319,7 +328,7 @@ export async function createEntityInTx(
             name: encryptText(clean),
             nameHmac,
             description: cleanText ? encryptText(cleanText) : null,
-            createdByUserId: actorUserId,
+            createdByUserId,
         })
         .returning({ id: knowledgeEntities.id });
     return (created as { id: string }).id;

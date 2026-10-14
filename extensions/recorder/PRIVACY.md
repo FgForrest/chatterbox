@@ -1,6 +1,6 @@
 # Chatterbox Meeting Recorder privacy policy
 
-Last updated: 13 October 2026
+Last updated: 14 October 2026
 
 This policy describes the **Chatterbox Meeting Recorder browser extension**. It does not replace the privacy policy for a Chatterbox server or another service you choose to use.
 
@@ -28,4 +28,4 @@ You can stop a recording, change the destination server, revoke the recorder key
 
 ## Policy updates and contact
 
-We will update this policy when the extension's data handling changes and ask for renewed agreement when required. For questions about this extension, email [application_development@fg.cz](mailto:application_development@fg.cz). For questions about a self-hosted server's handling of recordings, contact that server's operator.
+We will update this policy when the extension's data handling changes and ask for renewed agreement when required. For questions about this extension, contact the publisher from whom you obtained it. For questions about a self-hosted server's handling of recordings, contact that server's operator.

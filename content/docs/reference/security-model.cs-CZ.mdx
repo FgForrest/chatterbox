@@ -10,7 +10,7 @@ Tato stránka nabízí kompletní pohled. Podrobnější rozbor šifrování dat
 
 ## Autentizace
 
-Riffado podporuje tři způsoby autentizace na HTTP rozhraní:
+Chatterbox podporuje tři způsoby autentizace na HTTP rozhraní:
 
 1. **Relace prohlížeče** (lepší autentizace). E-mail + heslo nebo jednotné přihlášení, přičemž relace je potvrzena cookie podepsanou pomocí `BETTER_AUTH_SECRET`. Používají ji všechny stránky pod `(app)`, dashboard a interní trasy `/api/*`.
 2. **Osobní API klíč** (`op_<24 chars>`). Určeno pro externí integrace na rozhraní `/api/v1/*`. Posílá se jako Bearer token. Má pouze práva pro čtení.
@@ -76,7 +76,7 @@ Příjemci musí ověřovat podpis konstantním časem (ochrana proti time-based
 
 ## Zpřísnění cílových URL webhooků
 
-Ve výchozím nastavení mohou webhook URL používat `http://` nebo `https://` a směřovat na libovolné místo, které je dosažitelné z kontejneru Riffado (jména služeb na Docker bridge, RFC1918 IP adresy, veřejné servery). URL s embedovanými přihlašovacími údaji jsou odmítnuty.
+Ve výchozím nastavení mohou webhook URL používat `http://` nebo `https://` a směřovat na libovolné místo, které je dosažitelné z kontejneru Chatterbox (jména služeb na Docker bridge, RFC1918 IP adresy, veřejné servery). URL s embedovanými přihlašovacími údaji jsou odmítnuty.
 
 Pokud je vaše instance dostupná více lidem – například při víceuživatelském vlastním hostování, nebo pokud povolujete registraci komukoliv, komu zcela nedůvěřujete – nastavte `WEBHOOKS_REQUIRE_PUBLIC_TARGETS=true`. S tímto příznakem musí webhook URL používat HTTPS, resolvovat na veřejnou IP adresu a nesmí obsahovat embedované přihlašovací údaje. Loopback, RFC1918, link-local, ULA, multicast a rozsahy vyhrazené pro dokumentaci IPv6 jsou všechny odmítnuty. Tím zabráníte použití vaší instance jako SSRF relé vůči interní síti.
 
@@ -92,10 +92,10 @@ Trasy `/api/v1/*` získávají user id z osobního API klíče po ověření; in
 
 ## Externí MCP server
 
-Riffado zde funguje jako resource server: Keycloak lidi přihlašuje a vydává tokeny, Riffado je jen ověřuje.
+Chatterbox zde funguje jako resource server: Keycloak lidi přihlašuje a vydává tokeny, Chatterbox je jen ověřuje.
 
 - **Jaké tokeny.** Podpis realmu (`RS256`, `PS256` nebo `ES256`, klíče z jeho discovery dokumentu), přesný issuer, expirace, `sub` a `typ` rovný `Bearer`, pokud ho token má, takže ID token je odmítnut. `aud` musí obsahovat `MCP_AUDIENCE` (nebo URL endpointu při `MCP_RESOURCE_AUDIENCE=true`). Tokeny pocházejí jen z realmu jednotného přihlášení: druhý realm by mohl vydat `sub` shodné se skutečným uživatelem.
-- **Kdo.** `sub` propojené s účtem v Riffadu přes jednotné přihlášení je tento uživatel; servisní účet (claim `client_id`) vystupuje jako účet Organizace. Účty se z tokenu nikdy nevytvářejí.
+- **Kdo.** `sub` propojené s účtem v aplikaci Chatterbox přes jednotné přihlášení je tento uživatel; servisní účet (claim `client_id`) vystupuje jako účet Organizace. Účty se z tokenu nikdy nevytvářejí.
 - **Co.** Šest klientských rolí otevírá oblasti; nikdy nerozšíří, co stejný uživatel vidí v aplikaci. Běží stejné dotazy omezené na uživatele.
 - **Odkud.** `MCP_ALLOWED_CLIENTS` vyjmenovává klienty (`azp`), kteří smějí volat. Požadavky přes veřejný vstup, které reverzní proxy označí hlavičkou `MCP_PUBLIC_INGRESS_HEADER`, se obslouží jen pro `MCP_PUBLIC_CLIENTS`, takže token veřejného klienta (Claude Code) nebo servisního účtu je z internetu odmítnut. Klient uvedený v `MCP_CONNECTOR_KEYS` musí navíc poslat svůj klíč v `X-API-Key`, který se porovnává v konstantním čase. Hostovaný Claude používá důvěrného klienta, takže přihlášení pro něj umí dokončit jen konektor, který zná jeho tajemství. Viz [Claude a Claude Code](../self-hosting/claude#why-it-is-built-this-way).
 - **Odebrání přístupu.** Tokeny se ověřují lokálně proti klíčům realmu. Vypnutý uživatel nebo odebraná role se projeví po vypršení access tokenu (10 až 15 minut u klientů Claude); každé obnovení načte role znovu.
@@ -113,27 +113,28 @@ Pozastavení uživatelé (`users.suspendedAt` není null) jsou odmítnuti **ješ
 Tato kontrola je hned vedle ověřování, ne zařazena jako middleware pro konkrétní trasy, takže na ni nelze zapomenout u nové trasy.
 
 <span id="trust-boundaries-riffado-does-not-own" />
+<span id="trust-boundaries-chatterbox-does-not-own" />
 
-## Hranice důvěry, které Riffado *nevlastní*
+## Hranice důvěry, které Chatterbox *nevlastní*
 
 Některá rizika spadají zcela mimo samotnou aplikaci, pojmenováváme je explicitně, abychom netvrdili opak:
 
-- **Váš AI poskytovatel.** Surová audio data i přepisy ve formátu prostého textu jsou přenášeny poskytovateli, kterého jste si nakonfigurovali. Ochrana těchto dat je závislá na politice a infrastruktuře vašeho poskytovatele. Pokud jim nedůvěřujete, provozujte lokálního poskytovatele (Ollama / LM Studio) na stejném stroji jako je vaše instance Riffado.
+- **Váš AI poskytovatel.** Surová audio data i přepisy ve formátu prostého textu jsou přenášeny poskytovateli, kterého jste si nakonfigurovali. Ochrana těchto dat je závislá na politice a infrastruktuře vašeho poskytovatele. Pokud jim nedůvěřujete, provozujte lokálního poskytovatele (Ollama / LM Studio) na stejném stroji jako je vaše instance Chatterbox.
 - **Kompromitovaný aplikační server.** Server drží `ENCRYPTION_KEY` a dešifruje data na požádání. Šifrování uložených dat chrání před únikem databáze, ne před vzdáleným spuštěním kódu (RCE).
 - **Kompromitovaný `ENCRYPTION_KEY`.** S klíčem zacházejte jako s hlavním přístupovým údajem k databázi. Jeho ztráta znamená neobnovitelnost zašifrovaného obsahu.
 - **Dodavatel vašeho AI klienta.** AI klient připojený k MCP serveru dostává, co přečte, a hostovaný klient jako Claude ukládá tokeny lidí na straně svého dodavatele. Platí podmínky zpracování dat tohoto dodavatele.
 - **Váš poskytovatel identity.** Kdo může v realmu měnit role, klienty nebo hesla, rozhoduje, kdo čte přes MCP server, a administrátoři realmu se mohou přihlásit jako kdokoliv.
-- **Prompt injection.** Přepisy jsou to, co lidé řekli, a AI klient jednající sám může text v nich následovat. Riffado výsledky nástrojů označuje jako data a klientovi dovoluje změnit jen stav nebo přiřazení úkolu (`tasks:write`).
+- **Prompt injection.** Přepisy jsou to, co lidé řekli, a AI klient jednající sám může text v nich následovat. Chatterbox výsledky nástrojů označuje jako data a klientovi dovoluje změnit jen stav nebo přiřazení úkolu (`tasks:write`).
 
 <span id="compliance-claims" />
 
 ## Soulad s předpisy
 
-Riffado neprohlašuje shodu s HIPAA, SOC2 ani s právní výsadou mezi advokátem a klientem. Tyto nároky náleží vašemu AI poskytovateli (který certifikaci HIPAA může mít, ale nemusí) a vaší vlastní instalaci s vlastním hostingem, kterou plně ovládáte.
+Chatterbox neprohlašuje shodu s HIPAA, SOC2 ani s právní výsadou mezi advokátem a klientem. Tyto nároky náleží vašemu AI poskytovateli (který certifikaci HIPAA může mít, ale nemusí) a vaší vlastní instalaci s vlastním hostingem, kterou plně ovládáte.
 
 <span id="reporting-a-vulnerability" />
 
 ## Hlášení zranitelnosti
 
-Pokyny k nahlášení naleznete v souboru [SECURITY.md](https://github.com/riffado/riffado/blob/main/SECURITY.md)
+Pokyny k nahlášení naleznete v souboru [SECURITY.md](https://github.com/FgForrest/chatterbox/blob/main/SECURITY.md)
 v repozitáři.

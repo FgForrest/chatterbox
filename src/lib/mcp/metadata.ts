@@ -1,9 +1,13 @@
+import { MCP_PERMISSIONS } from "@/lib/authz/catalog";
 import { env } from "@/lib/env";
 import { isMcpEnabled, issuerMetadata } from "@/lib/mcp/config";
 
 const RESOURCE_PATH = "/api/mcp";
 const METADATA_PATH = `/.well-known/oauth-protected-resource${RESOURCE_PATH}`;
-const SCOPES = ["openid"];
+/** The scope a 401 asks for: sign-in only; the realm decides the permissions. */
+const CHALLENGE_SCOPES = ["openid"];
+/** Every scope the resource understands: sign-in and the catalog's permissions. */
+const SUPPORTED_SCOPES = ["openid", ...MCP_PERMISSIONS];
 
 function appUrl(): string {
     return (env.APP_URL ?? "").replace(/\/+$/, "");
@@ -31,9 +35,9 @@ export async function protectedResourceMetadata(): Promise<Response> {
             {
                 resource: mcpResourceUrl(),
                 authorization_servers: [issuer],
-                scopes_supported: SCOPES,
+                scopes_supported: SUPPORTED_SCOPES,
                 bearer_methods_supported: ["header"],
-                resource_name: "Riffado",
+                resource_name: "Chatterbox",
             },
             { headers: { "Cache-Control": "public, max-age=300" } },
         );
@@ -51,12 +55,32 @@ export function unauthorized(invalidToken = false): Response {
     const params = [
         ...(invalidToken ? ['error="invalid_token"'] : []),
         `resource_metadata="${resourceMetadataUrl()}"`,
-        `scope="${SCOPES.join(" ")}"`,
+        `scope="${CHALLENGE_SCOPES.join(" ")}"`,
     ];
     return Response.json(
         { error: "Unauthorized" },
         {
             status: 401,
+            headers: { "WWW-Authenticate": `Bearer ${params.join(", ")}` },
+        },
+    );
+}
+
+/**
+ * 403 for a tool the token's permissions do not cover (RFC 6750
+ * `insufficient_scope`), naming the permissions any of which would do.
+ * A token with the same permissions always gets the same answer.
+ */
+export function insufficientScope(scopes: readonly string[]): Response {
+    const params = [
+        'error="insufficient_scope"',
+        `scope="${scopes.join(" ")}"`,
+        `resource_metadata="${resourceMetadataUrl()}"`,
+    ];
+    return Response.json(
+        { error: "This token does not permit this tool" },
+        {
+            status: 403,
             headers: { "WWW-Authenticate": `Bearer ${params.join(", ")}` },
         },
     );

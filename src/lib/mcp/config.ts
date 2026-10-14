@@ -45,6 +45,8 @@ export interface IssuerMetadata {
     issuer: string;
     /** Where the realm publishes its signing keys. */
     jwksUri: string;
+    /** The realm's token endpoint, when the document names one. */
+    tokenEndpoint?: string;
 }
 
 let discovery: { url: string; promise: Promise<IssuerMetadata> } | null = null;
@@ -66,6 +68,7 @@ async function discover(url: string): Promise<IssuerMetadata> {
     const body = (await response.json()) as {
         issuer?: unknown;
         jwks_uri?: unknown;
+        token_endpoint?: unknown;
     };
     if (
         typeof body.issuer !== "string" ||
@@ -75,7 +78,14 @@ async function discover(url: string): Promise<IssuerMetadata> {
     ) {
         throw new Error("discovery document lacks issuer or jwks_uri");
     }
-    return { issuer: body.issuer, jwksUri: body.jwks_uri };
+    return {
+        issuer: body.issuer,
+        jwksUri: body.jwks_uri,
+        ...(typeof body.token_endpoint === "string" &&
+        isHttpUrl(body.token_endpoint)
+            ? { tokenEndpoint: body.token_endpoint }
+            : {}),
+    };
 }
 
 /**

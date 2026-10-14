@@ -78,9 +78,9 @@ export interface StartedLearnRun {
 /**
  * Start a Learn run on one transcript of a recording in a view, or return
  * the one already queued or running there. The caller authorized the view
- * and the change (`assertMayChange`): the owner on the private view, the
- * organization account on the Organization's. The actor's chat provider
- * pays, as for summaries.
+ * and the change (`assertMayChange`): the owner on the private view, a
+ * curator (or the organization account) on the Organization's. The
+ * actor's chat provider pays, as for summaries.
  *
  * Refused: Learn not available to the actor (no chat provider, or a hosted
  * instance), no such transcript, or one without timed turns.
@@ -91,8 +91,10 @@ export async function startLearnRun(input: {
     source: LearnSource;
     trigger: "manual" | "auto";
     calendarEventId?: string;
+    /** Whether the actor acts for the Organization; see `writerRefusal`. */
+    actsForOrganization?: boolean;
 }): Promise<StartedLearnRun> {
-    const { access, actorUserId, source, trigger } = input;
+    const { access, actorUserId, source, trigger, actsForOrganization } = input;
     if (input.calendarEventId && input.calendarEventId.length > 1024) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -127,7 +129,12 @@ export async function startLearnRun(input: {
     // authorized the actor is seen.
     const inserted = await db.transaction(async (tx) => {
         if (access.kind === "mail") {
-            return insertMailRunInTx(tx, { access, actorUserId, trigger });
+            return insertMailRunInTx(tx, {
+                access,
+                actorUserId,
+                trigger,
+                actsForOrganization,
+            });
         }
         const [live] = await tx
             .select({ id: recordings.id })
@@ -181,6 +188,7 @@ export async function startLearnRun(input: {
             ownerUserId: access.ownerUserId,
             actorUserId,
             orgUserId: access.orgUserId,
+            actsForOrganization,
         });
         if (refusal) throw writerRefusalError(refusal);
         // One open run per transcript and view: one learning, or one whose
@@ -327,10 +335,12 @@ async function insertMailRunInTx(
         access,
         actorUserId,
         trigger,
+        actsForOrganization,
     }: {
         access: RecordingViewContext;
         actorUserId: string;
         trigger: "manual" | "auto";
+        actsForOrganization?: boolean;
     },
 ): Promise<
     | { open: { id: string; jobId: string | null } }
@@ -392,6 +402,7 @@ async function insertMailRunInTx(
         ownerUserId: access.ownerUserId,
         actorUserId,
         orgUserId: access.orgUserId,
+        actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
     const [open] = await tx

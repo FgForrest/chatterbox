@@ -56,9 +56,17 @@ describe("protected-resource metadata", () => {
         await expect(response.json()).resolves.toEqual({
             resource: "https://riffado.example.com/api/mcp",
             authorization_servers: [ISSUER],
-            scopes_supported: ["openid"],
+            scopes_supported: [
+                "openid",
+                "knowledge:read",
+                "transcripts:read",
+                "summaries:read",
+                "tasks:read",
+                "tasks:write",
+                "mail:read",
+            ],
             bearer_methods_supported: ["header"],
-            resource_name: "Riffado",
+            resource_name: "Chatterbox",
         });
     });
 

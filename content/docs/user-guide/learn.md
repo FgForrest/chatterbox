@@ -1,6 +1,6 @@
 ---
 title: Learn
-description: Let Riffado propose speaker names, corrections and facts, and review them.
+description: Let Chatterbox propose speaker names, corrections and facts, and review them.
 ---
 
 Learn reads a transcript against your [Almanac](almanac.md) and proposes what it found:
@@ -63,7 +63,7 @@ With **Correct the transcript after Learn** on (Settings → Learning, on by def
 
 - Names are recognized in their inflected forms in the transcript's language, with or without accents: "Šimákem" finds Šimák.
 - A speaker named only by a first name is marked as such. A first name two people in your Almanac share names neither of them.
-- Saying a new record is one you already have teaches Riffado the misheard form as a nickname, so the next run recognizes it.
+- Saying a new record is one you already have teaches Chatterbox the misheard form as a nickname, so the next run recognizes it.
 - Learn can use its own provider and model, for example a stronger one than summaries use: Settings → Learning → **Learning provider**.
 
 Next: [The Organization](organization.md)

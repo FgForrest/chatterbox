@@ -22,7 +22,7 @@ Než je možné nahrávku sdílet, musí být připravena pro čtení ostatními
 - žádná [Learn](learn.md) revize nečeká,
 - [navržené úkoly](summaries-and-tasks.md#tasks-from-a-summary) jsou zkontrolovány.
 
-Pokud něco chybí, Riffado Vás na to upozorní.
+Pokud něco chybí, Chatterbox Vás na to upozorní.
 
 <span id="a-shared-recording" />
 
@@ -40,7 +40,7 @@ Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, 
 
 ## Vzetí nahrávky zpět
 
-Chcete-li nahrávku odebrat z Organizace, odeberte ji z poslední složky Organizace (ikona **×** na štítku složky). Riffado Vás nejprve požádá o potvrzení a sdělí, co se s nahrávkou stane podle retenčních pravidel. Poté bude nahrávka opět pouze Vaše a její verze v Organizaci zmizí pro všechny.
+Chcete-li nahrávku odebrat z Organizace, odeberte ji z poslední složky Organizace (ikona **×** na štítku složky). Chatterbox Vás nejprve požádá o potvrzení a sdělí, co se s nahrávkou stane podle retenčních pravidel. Poté bude nahrávka opět pouze Vaše a její verze v Organizaci zmizí pro všechny.
 
 Smazání sdílené nahrávky nebo její části ji nejprve odebere z Organizace.
 

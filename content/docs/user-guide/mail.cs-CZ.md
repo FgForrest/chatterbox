@@ -14,13 +14,13 @@ Najdete je v **Nastavení → Pošta**.
 - Vaše **schránka** (`jan@…`) ukládá poštu do Klepů, bez složky.
 - Každá složka má adresu (`jan+weekly@…`), která poštu uloží rovnou do ní.
 
-Na tyto adresy se přijímá jen pošta, kterou posíláte sami z účtu, kterým se přihlašujete: přepošlete na ni e-mail, nebo ji při psaní dejte do **Komu**, **Kopie** nebo **Skrytá kopie**. Riffado kontroluje podpis e-mailu, takže nikdo nemůže psát vaším jménem.
+Na tyto adresy se přijímá jen pošta, kterou posíláte sami z účtu, kterým se přihlašujete: přepošlete na ni e-mail, nebo ji při psaní dejte do **Komu**, **Kopie** nebo **Skrytá kopie**. Chatterbox kontroluje podpis e-mailu, takže nikdo nemůže psát vaším jménem.
 
 ## Adresy složek
 
 Záhlaví složky ukazuje její adresu. Zkopírujte ji, nebo složce dejte vlastní: stará dál funguje jako vedlejší adresa, dokud ji neodeberete. Adresa, která už jednou byla přidělena, se nikdy nepřidělí nikomu jinému.
 
-Smazání složky natrvalo zastaví její adresy i adresy podsložek. Riffado před potvrzením ukáže, kdy na každou naposledy přišla pošta.
+Smazání složky natrvalo zastaví její adresy i adresy podsložek. Chatterbox před potvrzením ukáže, kdy na každou naposledy přišla pošta.
 
 ## Složky Organizace
 

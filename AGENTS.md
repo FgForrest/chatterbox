@@ -1,4 +1,4 @@
-# Riffado — Agent Guidelines
+# Chatterbox — Agent Guidelines
 
 ## First task
 
@@ -6,7 +6,7 @@ If the user did not give you a concrete task, read this file + `README.md` + `BR
 
 ## The One Rule
 
-Understand what you're changing. Riffado is live and in use — people depend on it to access their recordings, transcripts, and storage. If you can't explain what your change does and how it interacts with the rest of the system, don't ship it.
+Understand what you're changing. Chatterbox is live and in use — people depend on it to access their recordings, transcripts, and storage. If you can't explain what your change does and how it interacts with the rest of the system, don't ship it.
 
 Using AI to write code is fine. Submitting AI-generated code you don't understand is not.
 
@@ -14,6 +14,7 @@ Using AI to write code is fine. Submitting AI-generated code you don't understan
 
 - Keep answers short and concise
 - No emojis in commits, issues, PR comments, or code
+- Preserve upstream Riffado attribution, author names, copyright notices, license text, and historical issue/PR links when renaming product copy.
 - No fluff or cheerful filler text
 - Technical prose only, be kind but direct (e.g., "Thanks @user" not "Thanks so much @user!")
 - Avoid overusing spaced em dashes (` — `), especially in user-facing copy. Prefer a period, comma, colon, parenthetical, or a shorter sentence unless the dash is clearly the best punctuation.
@@ -171,7 +172,7 @@ Hosted production runbooks live in the private `riffado/ops` repository, not in 
 
 ## Don't break existing deployments
 
-Riffado ships in **two production modes from the same codebase**:
+Chatterbox ships in **two production modes from the same codebase**:
 
 1. **Self-host** (`IS_HOSTED` unset/false) — AGPL, `docker compose up`, single-tenant in practice, owned by the user.
 2. **Hosted** (`IS_HOSTED=true`) — multi-tenant SaaS we operate. Live, paying users, profit-bearing.
@@ -189,18 +190,18 @@ Ask: *"If this goes wrong, how many users notice, and how fast can they recover?
 
 ## Product context
 
-Riffado is AGPL-3.0, an open-source companion app for AI voice recorders. Currently supports the Plaud Note family (Note, Note Pro, NotePin); more device support is planned.
+Chatterbox is AGPL-3.0, an open-source companion app for AI voice recorders. Currently supports the Plaud Note family (Note, Note Pro, NotePin); more device support is planned.
 
 ### Positioning rules (marketing-facing)
 
-Riffado is **not** positioned as a Plaud competitor or a "subscription killer." Even though Plaud is the only device family supported today, marketing copy stays vendor-agnostic and forward-looking:
+Chatterbox is **not** positioned as a Plaud competitor or a "subscription killer." Even though Plaud is the only device family supported today, marketing copy stays vendor-agnostic and forward-looking:
 
-- Frame Riffado as a **multi-device transcription layer**, not a Plaud alternative.
+- Frame Chatterbox as a **multi-device transcription layer**, not a Plaud alternative.
 - Use the category noun **"voice recorders"** (not "Plaud devices") wherever possible.
 - Plaud references are factual / interoperability only ("currently supports the Plaud Note family"). No "replace", "subscription", "cheaper than", "$X/mo", or "skip the subscription" framing.
 - When pricing context is needed, present it survey-style across 3+ vendors (Plaud Pro, Otter Business, Rev AI Pro — not just Plaud) with each vendor's published number. No qualitative claims.
 - Do not republish disparaging third-party quotes about Plaud (the previous `reddit-quotes.tsx` was removed for commercial-disparagement risk — do not reinstate without legal review).
-- A future Riffado-branded device is on the roadmap but **must not be announced** in any user-facing copy until product confirms.
+- A future Chatterbox-branded device is on the roadmap but **must not be announced** in any user-facing copy until product confirms.
 - **Write marketing copy for the non-technical user.** The hosted product exists for people who don't want to think about infrastructure — that's the audience for landing, FAQ, pricing, emails, and any in-app marketing surface. Name real vendors and outcomes ("OpenAI, Anthropic, Groq", "your recordings, your transcripts"), not categories or implementation details ("OpenAI-compatible providers", "S3-compatible object storage", "JWT bearer tokens"). Technical / self-host readers parse plain-user language fine; the reverse isn't true. Implementation-detail language belongs in `README.md`, `CHANGELOG.md`, docs, and code comments — not marketing surfaces. Per-vendor escape hatches ("+ any OpenAI-compatible endpoint") stay as tail clauses for the technical reader, never as the lead.
 
 ### Audience slices
@@ -219,9 +220,9 @@ Riffado is **not** positioned as a Plaud competitor or a "subscription killer." 
 
 - **Self-host is first-class.** If it won't run in `docker compose up`, it doesn't ship. Slice 2 literally cannot use it otherwise.
 - **Local-AI path must keep working.** Transformers.js (browser) and Ollama/LM Studio (local server) are the privacy-critical path. Don't regress them for "better" cloud-provider features.
-- **No vendor lock-in inside Riffado either.** Storage pluggable (local / S3-compatible). AI providers pluggable (any OpenAI-compatible). Don't hardcode to one; don't add a "default cloud" fallback that silently leaks data.
+- **No vendor lock-in inside Chatterbox either.** Storage pluggable (local / S3-compatible). AI providers pluggable (any OpenAI-compatible). Don't hardcode to one; don't add a "default cloud" fallback that silently leaks data.
 - **Export parity is non-negotiable.** Full backup (one-archive export → restore elsewhere) is the proof users can leave. Every recording, transcript, summary must round-trip. Do not ship features that can't be backed up.
-- **Never claim compliance we don't own.** HIPAA, SOC2, attorney-client privilege — the claim belongs to the user's AI provider + their self-host setup, not to Riffado. Marketing and product copy both stay honest here.
+- **Never claim compliance we don't own.** HIPAA, SOC2, attorney-client privilege — the claim belongs to the user's AI provider + their self-host setup, not to Chatterbox. Marketing and product copy both stay honest here.
 
 ### Hosted mode invariants (`IS_HOSTED=true`)
 
@@ -237,7 +238,7 @@ When designing or reviewing any feature, assume hosted is real and check both mo
 
 ### Mynah — hosted included transcription
 
-**Mynah** is a real Riffado product (`mynah.riffado.com`), not an internal codename — the hosted transcription backend included with a paid plan. Surface it as **"Mynah"** in user-facing copy; only the underlying model name (`parakeet`) stays internal.
+**Mynah** is a real upstream Riffado product (`mynah.riffado.com`), not an internal codename — the hosted transcription backend included with a paid plan. Surface it as **"Mynah"** in user-facing copy; only the underlying model name (`parakeet`) stays internal.
 
 - **First-class managed provider, not a hidden fallback.** Instance-configured via env (`MYNAH_BASE_URL`, `MYNAH_SERVICE_TOKEN`); `isMynahConfigured()` requires `IS_HOSTED`, so self-host never sees it. It is **never** a row in `api_credentials` — it's surfaced as a synthetic managed provider with id `RIFFADO_INCLUDED_PROVIDER_ID` (`"riffado-included"`) and label from `RIFFADO_INCLUDED_PROVIDER_LABEL`, both in `src/lib/transcription/included-provider.ts`. `listUserProviders()` (`src/lib/ai/list-providers.ts`) prepends it for the Providers UI + SSR seed.
 - **Authoritative transcription default is `userSettings.defaultTranscriptionProviderId`** (a credential id, the `"riffado-included"` sentinel, or null). The per-row `apiCredentials.isDefaultTranscription` boolean is now a **derived mirror** — do not read it as the source of truth for transcription selection. All writes go through `setDefaultTranscriptionProvider()` (`src/lib/ai/set-default-transcription.ts`), which keeps pointer + mirror consistent. (`isDefaultEnhancement` is unchanged and still authoritative for enhancement.)
@@ -247,14 +248,14 @@ When designing or reviewing any feature, assume hosted is real and check both mo
 
 ### Marketing-vs-product gap
 
-Riffado has "marketing ahead of code" in some places. **Always cross-check landing / pricing / changelog claims against actual code before designing features that depend on them.** Known gaps:
+Chatterbox has "marketing ahead of code" in some places. **Always cross-check landing / pricing / changelog claims against actual code before designing features that depend on them.** Known gaps:
 
 - Plaud refresh-token handling was removed in `bed9cd3` — Plaud issues only long-lived access tokens (~300 day JWT). Do not re-add refresh-token plumbing.
 
 ### Target UX comparisons
 
 - **Yes:** Plaud's own web app (the thing we're replacing), Linear, Vercel dashboards.
-- **No:** generic self-host transcription stacks (Whisper + a script). Riffado must feel like a product, not a pile of utilities.
+- **No:** generic self-host transcription stacks (Whisper + a script). Chatterbox must feel like a product, not a pile of utilities.
 
 ## Product principles
 
@@ -312,7 +313,7 @@ If drizzle-kit generates SQL that re-adds columns that already exist, meta snaps
 Non-obvious facts about Plaud's server:
 
 - **No refresh tokens.** The OTP login flow returns only `access_token` — a long-lived JWT (~300 day expiry observed). Do not re-add refresh-token plumbing. When access tokens expire, users re-auth via the reconnect UI.
-- **Two token types: UT vs WT.** Plaud issues a long-lived **user token (UT, ~300 days)** AND short-lived **workspace tokens (WT, ~24h)**. The UT is what Riffado stores in `plaudConnections.bearerToken`; `PlaudClient` mints a fresh WT from it per request (`/user-app/auth/workspace/token/<id>`). Tell them apart by JWT claims: a WT carries `ut_ref`/`wid`/`wtype` (and ~24h lifetime); a UT does not. This holds for SSO (Google/Apple) accounts too — verified via HAR (issue #203). **Gotcha:** web.plaud.ai puts the WT on the data requests users inspect (`/device/list`, `/file/simple/web`) and the UT in `localStorage.pld_tokenstr` plus identity endpoints (`/user/me`, `/team-app/workspaces/list`), so paste-flow users grab the WT by mistake. A pasted WT validates against `/device/list` (connect *looks* fine) but cannot mint a fresh WT, so the connection dies within a day. `isPlaudWorkspaceToken()` (`src/lib/plaud/auth.ts`) guards the connect-token + verify routes against this. Paste instructions should recommend the connector first, then `pld_tokenstr` if the user insists on manual paste; never point users at `/device/list` or `/file/simple/web`.
+- **Two token types: UT vs WT.** Plaud issues a long-lived **user token (UT, ~300 days)** AND short-lived **workspace tokens (WT, ~24h)**. The UT is what Chatterbox stores in `plaudConnections.bearerToken`; `PlaudClient` mints a fresh WT from it per request (`/user-app/auth/workspace/token/<id>`). Tell them apart by JWT claims: a WT carries `ut_ref`/`wid`/`wtype` (and ~24h lifetime); a UT does not. This holds for SSO (Google/Apple) accounts too — verified via HAR (issue #203). **Gotcha:** web.plaud.ai puts the WT on the data requests users inspect (`/device/list`, `/file/simple/web`) and the UT in `localStorage.pld_tokenstr` plus identity endpoints (`/user/me`, `/team-app/workspaces/list`), so paste-flow users grab the WT by mistake. A pasted WT validates against `/device/list` (connect *looks* fine) but cannot mint a fresh WT, so the connection dies within a day. `isPlaudWorkspaceToken()` (`src/lib/plaud/auth.ts`) guards the connect-token + verify routes against this. Paste instructions should recommend the connector first, then `pld_tokenstr` if the user insists on manual paste; never point users at `/device/list` or `/file/simple/web`.
 - **Regional servers.** `api.plaud.ai` is global; accounts may live on `api-euc1.plaud.ai` (EU) or `api-apse1.plaud.ai` (APAC). `/auth/otp-send-code` returns `status: -302` with `data.domains.api` when the account is on a different region. `plaudSendCode` handles the redirect.
 - **Rate limiting.** `PlaudClient` has built-in retry-with-backoff on 429 + 5xx (`src/lib/plaud/client.ts`). Respect `Retry-After`.
 - **Bearer tokens are encrypted at rest** in `plaudConnections.bearerToken` — see Encryption block above. Decrypt only when constructing the HTTP request.
@@ -335,7 +336,7 @@ Don't branch on storage type anywhere outside `factory.ts`.
 
 ### Adding an AI provider
 
-Riffado doesn't have a per-provider abstraction — it uses the OpenAI SDK with a custom `baseURL`. "Adding a provider" is usually configuration, not code:
+Chatterbox doesn't have a per-provider abstraction — it uses the OpenAI SDK with a custom `baseURL`. "Adding a provider" is usually configuration, not code:
 
 1. If the provider is OpenAI-compatible (OpenAI, Groq, Together, OpenRouter, LM Studio, Ollama, Azure, …): no code change. Users add it via the settings UI — `baseURL` + API key + model names. Document it in `README.md` under the AI Provider Setup section.
 2. If the provider's transcription API is not OpenAI-compatible (Google Gemini, ElevenLabs Scribe, …): add a `transcriptionStyle` value in `src/lib/ai/provider-presets.ts`, write the adapter as `src/lib/transcription/<provider>-transcribe.ts` exporting a single `<provider>Transcribe()` function, and branch on the **style** in `transcribeRecording`. Never branch on provider name in feature code. Alternatively front the provider behind an OpenAI-compatible proxy and use option 1.

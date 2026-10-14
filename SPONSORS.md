@@ -1,7 +1,7 @@
 # Sponsors
 
-Riffado is free, AGPL-3.0, and self-hostable forever. It's kept alive by people
-who chip in.
+Chatterbox builds on the upstream [Riffado](https://github.com/riffado/riffado)
+project. The sponsorship below supports upstream development.
 
 [**Become a sponsor →**](https://github.com/sponsors/riffado)
 

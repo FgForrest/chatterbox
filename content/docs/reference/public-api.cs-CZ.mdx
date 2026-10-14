@@ -3,7 +3,7 @@ title: Veřejné API
 description: Veřejné rozhraní /api/v1/* pro čtení — ověřování, koncové body, chyby a limity.
 ---
 
-Rozhraní `/api/v1/*` je veřejné a stabilní API služby Riffado, určené pouze ke čtení.
+Rozhraní `/api/v1/*` je veřejné a stabilní API služby Chatterbox, určené pouze ke čtení.
 Ověření probíhá pomocí osobních API klíčů; integrace jako Zapier, n8n,
 a vaše vlastní skripty jej mohou používat.
 
@@ -14,7 +14,7 @@ Pro vytváření klíčů a konfiguraci webhooků viz
 
 ## Základní URL
 
-`https://<your-riffado-host>/api/v1`
+`https://<your-chatterbox-host>/api/v1`
 
 To je hodnota, kterou nastavíte pro `APP_URL` ve vašem `.env`.
 
@@ -263,7 +263,7 @@ curl -L -H "Authorization: Bearer op_..." \
 - Pro nahrávky v **S3 úložišti** je odpovědí přesměrování `302`
   na předem podepsané URL platné 5 minut. Řiďte se přesměrováním (`curl -L`);
   Váš HTTP klient následně stáhne audio přímo ze S3 – bez dalšího
-  přenášení přes Riffado.
+  přenášení přes Chatterbox.
 
 `416` s hlavičkou `Content-Range: bytes */<size>` je vrácen pouze
 pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné hodnoty
@@ -275,7 +275,7 @@ pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné h
 
 Nejsou k dispozici žádné veřejné endpointy pro zápis. Povrch `/api/v1/*` je
 záměrně pouze pro čtení. Pokud potřebujete data *zapsat*, spusťte
-uživatelské rozhraní Riffado nebo synchronizujte zdrojový účet Plaud
+uživatelské rozhraní Chatterbox nebo synchronizujte zdrojový účet Plaud
 pomocí nastaveného synchronizačního cyklu.
 
 <span id="stability" />

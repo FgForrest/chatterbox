@@ -3,7 +3,7 @@ title: Architecture
 description: How the pieces fit together — Next.js app, Postgres, sync worker, pluggable storage and AI.
 ---
 
-Riffado is a single Next.js application backed by Postgres. There's
+Chatterbox is a single Next.js application backed by Postgres. There's
 no separate API service, no separate worker container, no message
 broker. Everything runs in one process; horizontal scaling means
 running more copies of that process behind a load balancer. Work that
@@ -40,7 +40,7 @@ Postgres rather than in a broker — see [Durable jobs](#durable-jobs).
 
 ## Sync is pull-based
 
-Plaud has no push API. Riffado's sync worker
+Plaud has no push API. Chatterbox's sync worker
 (`src/lib/sync/sync-recordings.ts`) is a pull loop:
 
 1. List recordings from the connected Plaud account (paginated).
@@ -71,7 +71,7 @@ exact checklist.
 
 ## Pluggable AI
 
-Riffado doesn't have a per-provider abstraction class. Instead, the
+Chatterbox doesn't have a per-provider abstraction class. Instead, the
 OpenAI SDK is configured with a per-user `baseURL` and the same SDK
 calls work against OpenAI, Groq, OpenRouter, Ollama, LM Studio, and
 anything else that speaks the OpenAI wire protocol.
@@ -162,7 +162,7 @@ ended instead of reporting an interruption.
 
 ## Multi-process safety
 
-Background workers are safe to run with multiple Riffado processes
+Background workers are safe to run with multiple Chatterbox processes
 against the same database, but not all for the same reason. The
 in-memory `running` flags are advisory only in every case; what makes
 each worker safe is below. The default Docker Compose deployment runs a

@@ -610,6 +610,7 @@ async function pumpUploads() {
                     const now = await getState();
                     await setState({
                         uploaded: [...new Set([...now.uploaded, index])],
+                        uploadNotice: null,
                     });
                     if (meta?.nextRetryAt) {
                         await createLocalSession(bufferId, {
@@ -628,9 +629,12 @@ async function pumpUploads() {
                                 [409, 413, 422].includes(error.status) && index > 0
                                     ? index
                                     : null,
-                            error: error?.message ?? t("keyRejected"),
+                            error: accessErrorMessage(error) ?? error?.message ?? t("keyRejected"),
                         });
                     } else {
+                        if (error?.code === "ACCESS_UNVERIFIABLE") {
+                            await setState({ uploadNotice: t("accessUnverifiable") });
+                        }
                         await scheduleUploadRetry(state.bufferId ?? state.sessionId, error);
                     }
                     break;
@@ -647,6 +651,16 @@ async function pumpUploads() {
     } finally {
         pumping = false;
     }
+}
+
+/**
+ * What to tell the person when the server refused the recorder's key for
+ * access reasons. The encrypted recording stays in this browser either way.
+ */
+function accessErrorMessage(error) {
+    if (error?.code === "ACCESS_NOT_GRANTED") return t("accessWithdrawn");
+    if (error?.status === 401) return t("keyRejected");
+    return null;
 }
 
 async function finalize(truncatedAtChunk = null) {
@@ -674,6 +688,7 @@ async function finalize(truncatedAtChunk = null) {
         await setState({
             state: STATE.error,
             error:
+                accessErrorMessage(error) ??
                 error?.message ??
                 t("finalizeFailed"),
         });

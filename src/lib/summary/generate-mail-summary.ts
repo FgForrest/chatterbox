@@ -65,6 +65,7 @@ export async function generateMailSummary(
         recordingId: itemId,
         ownerUserId: ctx.ownerUserId,
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -269,6 +270,7 @@ export async function generateMailSummary(
         inputFingerprint: createHash("sha256").update(mailText).digest("hex"),
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
         tasks,
     });

@@ -151,5 +151,7 @@
   "connectFirst": {"message": "Connect the extension to Chatterbox first (open the options page)."},
   "couldNotCapture": {"message": "Could not start audio capture"},
   "keyRejected": {"message": "The recorder key was rejected. Reconnect in options."},
+  "accessWithdrawn": {"message": "Your access to Chatterbox was withdrawn. The recording is kept encrypted in this browser: once your access is restored, choose Retry upload, or sign in again and pair the recorder."},
+  "accessUnverifiable": {"message": "The server cannot verify your access right now; the recording is kept and uploads resume automatically."},
   "finalizeFailed": {"message": "Could not finalize the recording. Encrypted chunks remain in this browser for recovery."}
 }

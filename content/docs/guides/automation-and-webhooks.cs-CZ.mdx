@@ -3,7 +3,7 @@ title: Automatizační API a webhooky
 description: Osobní API klíče, podepsané doručování webhooků a použití rozhraní /api/v1 z externích nástrojů.
 ---
 
-Riffado zpřístupňuje malou, stabilní automatizační plochu pro externí
+Chatterbox zpřístupňuje malou, stabilní automatizační plochu pro externí
 nástroje – integrace ve stylu Zapieru, n8n toky, vlastní skripty. Dva
 hlavní prvky:
 
@@ -31,10 +31,10 @@ Ověření probíhá zasláním klíče jako Bearer tokenu:
 
 ```bash
 curl -H "Authorization: Bearer op_K7vR8x..." \
-  https://your-riffado-host/api/v1/recordings
+  https://your-chatterbox-host/api/v1/recordings
 ```
 
-Interně Riffado ukládá HMAC-SHA256 hash klíče (s použitím
+Interně Chatterbox ukládá HMAC-SHA256 hash klíče (s použitím
 `API_TOKEN_HASH_SECRET`, v případě nedostupnosti `BETTER_AUTH_SECRET`) namísto samotného klíče. Případný průnik
 do databáze tedy neohrozí platné tokeny. Prefix klíče (prvních 12 znaků) je uložen v nezašifrované podobě,
 aby uživatelské rozhraní mohlo zobrazit „který klíč to byl?“, aniž by bylo možné jej zpětně získat.
@@ -133,14 +133,14 @@ Stejný algoritmus je použit také v `src/lib/webhooks/signature.ts`.
 ### Povolené URL adresy
 
 Výchozí nastavení povoluje webhook URL s protokolem `http://` nebo `https://` a směrování
-na jakýkoli hostitelský stroj, který kontejner Riffado dokáže kontaktovat.
+na jakýkoli hostitelský stroj, který kontejner Chatterbox dokáže kontaktovat.
 Fungují Docker bridge hostname (`http://n8n:5678/...`), i privátní síťové IP adresy.
 URL s vloženými přihlašovacími údaji jsou odmítány.
 
 Pokud požadujete přísnější kontrolu – pouze HTTPS URL, povoleny jen veřejné IP adresy,
 výslovně zakázané RFC1918/loopback/link-local/ULA – nastavte
 `WEBHOOKS_REQUIRE_PUBLIC_TARGETS=true` v souboru `.env`. To je užitečné, pokud
-je Vaše Riffado instance přístupná dalším osobám a nechcete,
+je Vaše Chatterbox instance přístupná dalším osobám a nechcete,
 aby se dala zneužít jako SSRF relay proti vaší privátní síti.
 
 <span id="retry-behaviour" />
@@ -157,4 +157,4 @@ které se zobrazí v **Nastavení → Vývojář → Webhooky → Poslední doru
 
 Zatím neexistují žádné veřejné endpointy pro zápis. Aktuální rozhraní `/api/v1/*`
 je záměrně pouze pro čtení: seznam nahrávek, detail nahrávky, její přepis, stream jejího audia. Pokud potřebujete data zasílat *dovnitř*,
-spusťte uživatelské rozhraní Riffado nebo synchronizujte zdrojový účet Plaud.
+spusťte uživatelské rozhraní Chatterbox nebo synchronizujte zdrojový účet Plaud.

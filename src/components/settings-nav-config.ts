@@ -15,6 +15,7 @@ import {
     Monitor,
     Play,
     RefreshCw,
+    ShieldCheck,
     Video,
     Webhook,
     Wrench,
@@ -97,12 +98,14 @@ export interface SettingsNavOptions {
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
+    /** The viewer manages access at the identity provider (`access.manage`). */
+    accessManagement?: boolean;
 }
 
 /**
  * Build the settings nav. `isHosted` toggles the Billing group, which
  * is meaningless on self-host, and the Google account, which exists
- * only there; `mailEnabled` adds Mail.
+ * only there; `mailEnabled` adds Mail; `accessManagement` adds Access.
  */
 export function buildSettingsNavGroups(
     opts: SettingsNavOptions,
@@ -136,6 +139,20 @@ export function buildSettingsNavGroups(
             : group,
     );
     return [
+        ...(opts.accessManagement
+            ? [
+                  {
+                      label: "Administration",
+                      items: [
+                          {
+                              name: "Access",
+                              id: "access" as SettingsSection,
+                              icon: ShieldCheck,
+                          },
+                      ],
+                  },
+              ]
+            : []),
         ...(opts.isHosted
             ? [
                   {

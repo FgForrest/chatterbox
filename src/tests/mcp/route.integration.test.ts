@@ -70,6 +70,7 @@ const { dbProxy, dbRef, mockEnv, baseEnv, verify, fakeTools } = vi.hoisted(
             OIDC_CLIENT_SECRET: "secret",
             MCP_AUDIENCE: "riffado-mcp" as string | undefined,
             MCP_ALLOWED_CLIENTS: [] as string[],
+            MCP_SERVICE_CLIENTS: [] as string[],
             MCP_PUBLIC_INGRESS_HEADER: undefined as string | undefined,
             MCP_PUBLIC_CLIENTS: [] as string[],
             MCP_CONNECTOR_KEYS: [] as { client: string; key: string }[],
@@ -348,7 +349,7 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         expect(response.status).toBe(403);
         expect(response.headers.get("WWW-Authenticate")).toBeNull();
         await expect(response.json()).resolves.toEqual({
-            error: "This token carries no Riffado MCP role",
+            error: "This token carries no Chatterbox MCP permission",
         });
         expect(await auditRows()).toEqual([
             expect.objectContaining({
@@ -397,7 +398,7 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         const response = await POST(post({}, { token: "stranger" }));
         expect(response.status).toBe(403);
         await expect(response.json()).resolves.toEqual({
-            error: "Sign in to Riffado once first",
+            error: "Sign in to Chatterbox once first",
         });
         expect(await auditRows()).toEqual([
             expect.objectContaining({
@@ -416,7 +417,7 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         const noRoles = await POST(post({}, { token: "alice-no-roles" }));
         expect(noRoles.status).toBe(403);
         await expect(noRoles.json()).resolves.toEqual({
-            error: "This token carries no Riffado MCP role",
+            error: "This token carries no Chatterbox MCP permission",
         });
 
         mockEnv.MCP_ALLOWED_CLIENTS = ["intranet-bot"];
@@ -676,18 +677,27 @@ describeWithDatabase("POST /api/mcp (PostgreSQL)", () => {
         ]);
     });
 
-    it("answers a tool outside the caller's roles as unknown", async () => {
-        const hidden = await (await POST(post(call(5, "task_peek")))).json();
+    it("answers a tool outside the caller's permissions with insufficient_scope, an unknown one as unknown", async () => {
+        const hidden = await POST(post(call(5, "task_peek")));
+        expect(hidden.status).toBe(403);
+        expect(hidden.headers.get("WWW-Authenticate")).toBe(
+            'Bearer error="insufficient_scope", scope="tasks:read", resource_metadata="https://riffado.example.com/.well-known/oauth-protected-resource/api/mcp"',
+        );
+        expect(await hidden.json()).toEqual({
+            error: "This token does not permit this tool",
+        });
+        const again = await POST(post(call(6, "task_peek")));
+        expect(again.status).toBe(403);
         const missing = await (
             await POST(post(call(5, "no_such_tool")))
         ).json();
-        expect(hidden).toEqual(missing);
-        expect(hidden.result).toEqual({
+        expect(missing.result).toEqual({
             content: [{ type: "text", text: '{"error":"Unknown tool"}' }],
             isError: true,
         });
         const rows = await auditRows();
         expect(rows.map((row) => [row.tool, row.outcome])).toEqual([
+            ["task_peek", "denied"],
             ["task_peek", "denied"],
             [null, "invalid"],
         ]);

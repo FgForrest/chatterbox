@@ -1,26 +1,26 @@
 ---
 title: Single sign-on (OpenID Connect)
-description: Let people sign in through your identity provider (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) instead of a Riffado password.
+description: Let people sign in through your identity provider (Keycloak, Microsoft Entra ID, Okta, Authentik, Google) instead of a Chatterbox password.
 ---
 
-A self-hosted Riffado can hand sign-in to an OpenID Connect identity
+A self-hosted Chatterbox can hand sign-in to an OpenID Connect identity
 provider. Once it is configured, the provider is the **only** way in:
 
 - the sign-in page shows a single **Sign in with &lt;provider&gt;** button;
 - email/password sign-in, registration and password reset are switched off
   on the server, not just hidden;
-- everyone the provider lets through gets a Riffado account on their first
-  sign-in. Who may use Riffado is decided at the provider (for example by
+- everyone the provider lets through gets a Chatterbox account on their first
+  sign-in. Who may use Chatterbox is decided at the provider (for example by
   assigning users or groups to the client).
 
 With `DISABLE_REGISTRATION=true` the instance stays closed: only people
-who already have a Riffado account can sign in, and their account is
-linked on the first SSO sign-in as described below. Anyone else sees
-"This Riffado instance does not accept new accounts". To let a new
+who already have a Chatterbox account can sign in, and their account is
+linked on the first SSO sign-in as described below. Anyone else is told
+that the instance does not accept new accounts. To let a new
 colleague in, unset the variable, restart, let them sign in once, and set
 it again.
 
-Hosted Riffado ignores these variables.
+Hosted Chatterbox ignores these variables.
 
 ## Provider setup
 
@@ -28,15 +28,15 @@ Create a confidential OpenID Connect client (authorization code flow) with:
 
 - **Redirect URI:** `<APP_URL>/api/auth/oauth2/callback/oidc`
 - **Scopes:** `openid`, `profile`, `email`
-- **PKCE:** `S256` (Riffado always sends a code challenge)
+- **PKCE:** `S256` (Chatterbox always sends a code challenge)
 
-Riffado needs the `sub`, `email`, `name` and `email_verified` claims.
+Chatterbox needs the `sub`, `email`, `name` and `email_verified` claims.
 
 <details>
 <summary>Keycloak</summary>
 
 1. In your realm, **Clients → Create client**, type **OpenID Connect**,
-   client id `riffado`.
+   client id `chatterbox`.
 2. **Client authentication:** on. **Authentication flow:** Standard flow
    only.
 3. **Valid redirect URIs:** `<APP_URL>/api/auth/oauth2/callback/oidc`.
@@ -61,16 +61,16 @@ Then set:
 
 ```bash
 OIDC_ISSUER_URL=https://sso.example.com/realms/acme
-OIDC_CLIENT_ID=riffado
+OIDC_CLIENT_ID=chatterbox
 OIDC_CLIENT_SECRET=...
 OIDC_PROVIDER_NAME="Acme SSO"     # the button label; defaults to "SSO"
 # OIDC_SCOPES="openid profile email"
 # OIDC_SESSION_MAX_AGE=86400       # seconds, see Sessions below
 ```
 
-Riffado reads the provider's endpoints from
+Chatterbox reads the provider's endpoints from
 `<OIDC_ISSUER_URL>/.well-known/openid-configuration`. The issuer must be
-`https`: Riffado trusts the ID token it receives directly from the
+`https`: Chatterbox trusts the ID token it receives directly from the
 provider's token endpoint, so that channel has to be TLS. Plain `http` is
 accepted only for internal hosts (`localhost`, private IP addresses,
 single-label names such as a compose service `keycloak`, and `.local` /
@@ -86,7 +86,7 @@ accounts, a person's first SSO sign-in attaches to their existing account
 (recordings, settings and all) **if the email matches and the provider
 marks it verified** (`email_verified: true`).
 
-If the provider has not verified the address, Riffado refuses to attach it
+If the provider has not verified the address, Chatterbox refuses to attach it
 to the existing account and the sign-in page says why. Verify the email at
 the provider (in Keycloak: the user's **Email verified** switch) and sign
 in again. An unverified email nobody uses yet simply creates a new
@@ -94,8 +94,25 @@ account.
 
 From then on the account is bound to the provider's user id (`sub`): the
 name and email follow the provider on every sign-in. An email that another
-Riffado account already holds is not taken over; the user keeps their
+Chatterbox account already holds is not taken over; the user keeps their
 current one.
+
+The account is also bound to the issuer that vouched for it, whatever
+`AUTHZ_MODE` says. Pointing Chatterbox at another realm does not take over
+accounts: their sign-in is refused with "belongs to a different identity
+provider". The issuer follows the provider's address, so moving the same
+realm to a new hostname, from `http` to `https` or to a new realm name
+refuses everyone the same way. After such a move, unbind the accounts
+once; each binds to the new issuer on its next sign-in:
+
+```sql
+UPDATE accounts SET issuer = NULL WHERE provider_id = 'oidc';
+```
+
+Do this only for the same realm under a new address. To move people to a
+different realm deliberately, delete their old link instead (the
+`accounts` rows with `provider_id = 'oidc'`); they are linked again by
+verified email on their next sign-in.
 
 ## Sessions
 
@@ -104,8 +121,8 @@ current one.
   does it again.
 - A session lasts `OIDC_SESSION_MAX_AGE` seconds (default 24 hours) and is
   not extended by use. A user disabled at the provider loses access to
-  Riffado within that window.
-- **Sign out** ends the Riffado session only. The provider's own session
+  Chatterbox within that window.
+- **Sign out** ends the Chatterbox session only. The provider's own session
   stays, so the next **Sign in** may go straight through without a prompt.
 - Personal API tokens are not sessions and keep working.
 
@@ -115,7 +132,7 @@ Every SSO sign-in records the person (name and email) in the
 Organization's Almanac, or in their own when the
 [Organization](./organization) is not enabled. A known person is matched
 by email and takes the provider's current name; nicknames, notes and facts
-added in Riffado are kept.
+added in Chatterbox are kept.
 
 ## The organization account
 
@@ -123,6 +140,141 @@ With single sign-on, `ORG_ACCOUNT_PASSWORD` is optional and nobody can
 sign in as the organization account: it keeps owning the Organization
 tree, but has no interactive login. An identity provider user whose email
 equals `ORG_ACCOUNT_EMAIL` is refused.
+
+## Authorization from the identity provider
+
+By default everyone the provider lets through may use Chatterbox, and
+the [organization account](./organization) curates the Organization.
+With `AUTHZ_MODE=idp` the provider grants three capabilities instead,
+as client roles of the sign-in client (`OIDC_CLIENT_ID`, or
+`KEYCLOAK_ROLES_CLIENT`):
+
+| Capability      | Lets a person                                                   |
+| --------------- | --------------------------------------------------------------- |
+| `use`           | sign in, use API keys, the meeting recorder and MCP clients      |
+| `org.curate`    | [curate the Organization](./organization#curators)              |
+| `access.manage` | change the three capabilities of others in **Settings → Access** |
+
+`org.curate` and `access.manage` need `use` and do not imply each other.
+Only Keycloak is supported (`IDENTITY_PROVIDER=keycloak`).
+
+### Setting up the realm
+
+For a reproducible local example, run `docker compose -f docker-compose.local-authz.yml up -d --build --wait`.
+It imports `e2e/authz/keycloak/chatterbox-local-realm.json` directly, including
+fictional users and public test credentials. See `e2e/authz/README.md` for accounts
+and reset instructions. Do not import these test credentials into production.
+
+For your own provider, configure the confidential web client and its three
+client roles, one group per capability, and a read-only verifier service client.
+Use the standard `basic`, `profile`, `email` and `roles` client scopes: the ID
+token must carry `auth_time` and the access token must carry client roles under
+`resource_access`. Disable Full Scope Allowed and explicitly map the required
+roles as described below. Assign the first administrator both `use` and
+`access.manage` through these groups. Group names are arbitrary; the application
+uses their UUIDs. Configure MCP clients separately using the [MCP guide](./mcp).
+`bun scripts/export-authz.ts` prints the application's authorization catalog.
+
+Then set:
+
+```bash
+AUTHZ_MODE=idp
+IDENTITY_PROVIDER=keycloak
+KEYCLOAK_GROUP_USE_ID=...            # the groups' ids, from Keycloak
+KEYCLOAK_GROUP_CURATE_ID=...
+KEYCLOAK_GROUP_ACCESS_MANAGE_ID=...
+KEYCLOAK_VERIFIER_CLIENT_ID=chatterbox-access-verifier
+KEYCLOAK_VERIFIER_CLIENT_SECRET=...
+```
+
+The local example makes `Users` a default group for new accounts. In your own
+realm, choose this according to your admission policy. Existing users and
+removed memberships are not automatically restored by the application.
+
+### What the provider must allow
+
+Administrators change access with **their own** sign-in, never with a
+shared administrator credential. Configure these realm-management roles:
+
+| Principal | Roles | Purpose |
+| --- | --- | --- |
+| Administrators group | `manage-users`, `view-clients` | Manage memberships and sessions; inspect client role mappings |
+| Access verifier service account | `view-users`, `view-clients` | Read users, memberships and client role mappings |
+
+The sign-in client's role scope mappings include both administrator roles;
+group membership alone is insufficient when Full Scope Allowed is off.
+The verifier's role scope mappings include both read roles as well.
+MCP clients receive no realm-management roles.
+
+`view-clients` is included for deployments that restrict client-role inspection:
+a group-role mapping request can otherwise return an empty result or HTTP 403.
+It grants realm-wide client read access, not permission to modify clients.
+Runtime credentials do not need `manage-clients` or `realm-admin`.
+
+### Sessions
+
+- A sign-in is refused before any account is created unless the provider
+  grants `use`. The ID token and the access token are verified (signature,
+  issuer, audience, expiry, client).
+- The provider's tokens are kept per session, encrypted, on the server
+  only; they never reach the browser and go with the session.
+- A session re-checks its capabilities with the provider every
+  `AUTHZ_VERIFICATION_MAX_AGE` seconds (default 30 minutes). A session
+  the provider ended, or a person who lost `use`, is signed out; while
+  the provider cannot be reached, requests are refused (503), never
+  served with the old capabilities.
+- Changing access requires a sign-in at the provider younger than
+  `AUTHZ_ADMIN_MAX_AUTH_AGE` (8 hours by default). When it expires, the
+  access screen offers a new sign-in with `prompt=login` and `max_age=0`,
+  returning to access settings. The pending change is not submitted automatically.
+- An account is bound to the issuer that vouched for it; see
+  [Existing accounts](#existing-accounts).
+
+### API keys and the meeting recorder
+
+A key works only while its holder's access does. The holder's access is
+re-verified with the access verifier at most every
+`AUTHZ_VERIFICATION_MAX_AGE` seconds, without their web sign-in, so a
+recorder keeps uploading for weeks. A holder disabled or deleted at the
+provider is refused (403) at the next verification; while the provider
+or the verifier is unavailable the key answers 503, and the recorder
+keeps its recording and retries. Without a verifier, a key works until
+the last verification grows older than `AUTHZ_VERIFICATION_MAX_AGE`, and
+again after the holder's next web sign-in.
+
+Taking `use` away in **Settings → Access** blocks the holder's keys and
+recorder at once and signs them out everywhere. Giving it back unblocks
+the same keys; the recorder offers to retry what it kept.
+
+### How fast access ends
+
+| Change                                    | Takes effect                                   |
+| ----------------------------------------- | ---------------------------------------------- |
+| `use` taken away in Settings → Access     | at once: sessions, API keys, recorder, MCP     |
+| capability changed in Settings → Access   | at the person's next request                   |
+| person disabled or deleted at the provider | on the first request after the last verification expires (at most `AUTHZ_VERIFICATION_MAX_AGE`) |
+| group changed directly at the provider     | within `AUTHZ_VERIFICATION_MAX_AGE`            |
+
+An access token an AI client already holds stays valid until it expires
+(the realm's lifespan, 15 minutes for human MCP clients in the local example); Chatterbox re-checks the person's `use` on every MCP call. If
+your directory deactivates people upstream of Keycloak, the total delay
+includes how long that takes to reach Keycloak.
+
+Every change and refusal is recorded in the `access_change_log` table:
+who asked, for whom, what was asked, what the provider holds afterwards,
+and whether the person's sessions were ended. Tokens are never recorded.
+A change is recorded as `pending` before the provider is asked and
+completed once it settles, so an entry left `pending` marks a change
+whose outcome was lost (a crash, a database failure); check the person
+at the provider.
+
+Taking `use` away ends the person's Chatterbox sessions at once. When the
+provider cannot end its own sessions of theirs, the entry says `pending`
+or `failed`. **Settings → Access** names such people at the top and marks
+them in the list, and the person's access screen offers **End sessions**
+to retry. Nothing retries it automatically: ending them takes an
+administrator's own sign-in, which no background job holds. The person
+is locked out of Chatterbox either way.
 
 ## Trying it locally
 
@@ -135,6 +287,6 @@ RIFFADO_E2E_APP_URL=http://localhost:3310 \
 docker compose -f docker-compose.e2e.yml -f docker-compose.e2e.sso.yml up -d --build
 ```
 
-Riffado is then on `http://localhost:3310` and Keycloak on
+Chatterbox is then on `http://localhost:3310` and Keycloak on
 `http://localhost:8180`, bound to loopback. The realm is for testing only:
 its admin is `admin/admin` and every password is public.

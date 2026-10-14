@@ -230,6 +230,11 @@ export const accounts = pgTable(
         scope: text("scope"),
         idToken: text("id_token"),
         password: text("password"),
+        // The issuer that vouched for `accountId` (single sign-on only). A
+        // subject is only unique within its issuer: an account bound to one
+        // issuer never signs in through another. Null on rows from before
+        // this column, bound on their next sign-in.
+        issuer: text("issuer"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -240,6 +245,133 @@ export const accounts = pgTable(
             table.providerId,
             table.accountId,
         ),
+    }),
+);
+
+// The identity provider's credential of one web session (AUTHZ_MODE=idp):
+// the authorization snapshot it was granted with and the tokens that renew
+// it. One row per session, so concurrent logins never share a credential;
+// it goes with the session. Tokens are encrypted and never leave the server.
+export const sessionIdpCredentials = pgTable(
+    "session_idp_credentials",
+    {
+        sessionId: text("session_id")
+            .primaryKey()
+            .references(() => sessions.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        issuer: text("issuer").notNull(),
+        subject: text("subject").notNull(),
+        // Catalog capabilities the provider granted, as last verified.
+        capabilities: jsonb("capabilities").$type<string[]>().notNull(),
+        // When the person last authenticated at the provider (`auth_time`).
+        authTime: timestamp("auth_time"),
+        // When the provider last confirmed `capabilities`.
+        verifiedAt: timestamp("verified_at").notNull(),
+        // Encrypted.
+        accessToken: text("access_token").notNull(),
+        accessTokenExpiresAt: timestamp("access_token_expires_at").notNull(),
+        // Encrypted; null when the provider issued none.
+        refreshToken: text("refresh_token"),
+        refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        userIdIdx: index("session_idp_credentials_user_id_idx").on(
+            table.userId,
+        ),
+    }),
+);
+
+// The last verified access of a person, whatever renewed it: a web login or
+// refresh, the access verifier, or a change made through access management.
+// A technical cache of the identity provider's answer, never edited as a
+// second source of roles: API keys and MCP calls of the holder check it.
+export const userAccessStates = pgTable("user_access_states", {
+    userId: text("user_id")
+        .primaryKey()
+        .references(() => users.id, { onDelete: "cascade" }),
+    issuer: text("issuer").notNull(),
+    subject: text("subject").notNull(),
+    capabilities: jsonb("capabilities").$type<string[]>().notNull(),
+    // `active`, or what the provider last said instead.
+    status: varchar("status", { length: 16 })
+        .$type<"active" | "disabled" | "missing">()
+        .notNull()
+        .default("active"),
+    verifiedAt: timestamp("verified_at").notNull(),
+    source: varchar("source", { length: 16 })
+        .$type<"login" | "refresh" | "verifier" | "access-change">()
+        .notNull(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Every change of access made through Chatterbox's access management, and
+// every refused attempt: who asked, for whom, what was asked, what the
+// identity provider really holds afterwards, and whether the person's
+// sessions were ended. Never a token.
+export const accessChangeLog = pgTable(
+    "access_change_log",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        at: timestamp("at").notNull().defaultNow(),
+        correlationId: text("correlation_id").notNull(),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        actorIssuer: text("actor_issuer"),
+        actorSubject: text("actor_subject"),
+        targetUserId: text("target_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        targetIssuer: text("target_issuer"),
+        targetSubject: text("target_subject").notNull(),
+        action: varchar("action", { length: 24 })
+            .$type<"change" | "revoke-sessions">()
+            .notNull(),
+        // `{ add: [...], remove: [...] }` as asked.
+        requested: jsonb("requested").notNull(),
+        // Effective and managed capabilities before and after, as read back.
+        before: jsonb("before"),
+        after: jsonb("after"),
+        // `pending` from before the provider is asked until the change
+        // settles; one left pending is a change whose outcome was lost.
+        outcome: varchar("outcome", { length: 24 })
+            .$type<
+                | "pending"
+                | "applied"
+                | "noop"
+                | "partial"
+                | "inherited"
+                | "denied"
+                | "provider-denied"
+                | "stale"
+                | "self-lockout"
+                | "reauth-required"
+                | "error"
+            >()
+            .notNull(),
+        // Sessions of the person after the change: not needed, ended, or
+        // still to end (the provider refused or failed).
+        revocation: varchar("revocation", { length: 16 })
+            .$type<"not-needed" | "done" | "pending" | "failed">()
+            .notNull()
+            .default("not-needed"),
+        error: text("error"),
+    },
+    (table) => ({
+        atIdx: index("access_change_log_at_idx").on(table.at),
+        targetSubjectIdx: index("access_change_log_target_subject_idx").on(
+            table.targetSubject,
+            table.at,
+        ),
+        pendingIdx: index("access_change_log_pending_idx")
+            .on(table.at)
+            .where(sql`${table.revocation} = 'pending'`),
     }),
 );
 

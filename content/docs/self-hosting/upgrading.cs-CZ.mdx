@@ -3,7 +3,7 @@ title: Aktualizace
 description: Stáhněte nový image, restartujte stack a vyberte správný tag podle vaší míry tolerance rizika.
 ---
 
-Riffado je distribuován jako jeden Docker image na GitHub Container Registry.
+Chatterbox je distribuován jako jeden Docker image na GitHub Container Registry.
 Aktualizace probíhá stažením image a restartem; migrace databáze se spouští
 automaticky při startu kontejneru.
 
@@ -38,7 +38,7 @@ kontejner“ — pokud migrace selže, selže i start kontejneru, což je
 `main` je **průběžná integrační větev** a může být rozbitá v libovolném
 commitu. Stabilní nasazení vychází z vydaných tagovaných verzí. Nikdy
 nedeployujte pouhým klonováním repozitáře a sestavením z `main`;
-používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/riffado/riffado/blob/main/BRANCHING.md)
+používejte výše uvedené image s tagy. Podrobnosti naleznete v [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 v sekci o větvení.
 
 <span id="update-badge" />
@@ -69,7 +69,7 @@ RIFFADO_VERSION=0.4.1
 docker compose pull && docker compose up -d
 ```
 
-Toto funguje, protože databázové migrace Riffado jsou
+Toto funguje, protože databázové migrace Chatterbox jsou
 **ve výchozím nastavení aditivní** — odstranění sloupců je považováno za záměrnou
 narušující změnu s poznámkou v migraci v CHANGELOG. Pokud se vracíte zpět přes
 verzi, ve které bylo explicitně odstraněno nějaké uložené stavové nastavení (vzácné,

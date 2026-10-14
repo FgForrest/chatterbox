@@ -1,0 +1,92 @@
+name: chatterbox-local-authz
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: chatterbox
+      POSTGRES_PASSWORD: local-test-password
+      POSTGRES_DB: chatterbox
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatterbox -d chatterbox"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8181
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:8181:8080"
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+      - ./e2e/authz/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 24
+
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:3310:3000"
+    environment:
+      DATABASE_URL: postgresql://chatterbox:local-test-password@db:5432/chatterbox
+      BETTER_AUTH_SECRET: chatterbox-local-test-secret-at-least-32-characters
+      ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      APP_URL: http://localhost:3310
+      HOSTNAME: 0.0.0.0
+      IS_HOSTED: "false"
+      DISABLE_REGISTRATION: "false"
+      DISABLE_UPDATE_CHECK: "true"
+      SELF_HOST_MODE: shared
+      ORG_ACCOUNT_EMAIL: organization@example.test
+      ORG_ACCOUNT_NAME: Organization
+      DEFAULT_STORAGE_TYPE: local
+      LOCAL_STORAGE_PATH: /app/audio
+      OIDC_ISSUER_URL: http://keycloak:8080/realms/chatterbox-local
+      OIDC_CLIENT_ID: chatterbox
+      OIDC_CLIENT_SECRET: chatterbox-local-secret
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-Keycloak}
+      AUTHZ_MODE: idp
+      IDENTITY_PROVIDER: keycloak
+      KEYCLOAK_GROUP_USE_ID: 3feea890-10fb-48c1-961b-1253a5fe9061
+      KEYCLOAK_GROUP_CURATE_ID: 0264aed5-d8ba-4cb4-a5c9-a6a37e380eb2
+      KEYCLOAK_GROUP_ACCESS_MANAGE_ID: d0d65bad-b2b1-41ac-af8d-50a9b3e7a632
+      KEYCLOAK_VERIFIER_CLIENT_ID: chatterbox-access-verifier
+      KEYCLOAK_VERIFIER_CLIENT_SECRET: chatterbox-access-verifier-local-secret
+      AUTHZ_VERIFICATION_MAX_AGE: "60"
+      AUTHZ_ADMIN_MAX_AUTH_AGE: "300"
+      MCP_AUDIENCE: chatterbox-mcp
+      MCP_ALLOWED_CLIENTS: claude,claude-enterprise,claude-code,chatterbox-bot
+      MCP_SERVICE_CLIENTS: chatterbox-bot
+    volumes:
+      - audio:/app/audio
+      - storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 24
+
+volumes:
+  pgdata:
+  keycloak-data:
+  audio:
+  storage:

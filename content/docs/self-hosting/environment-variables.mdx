@@ -1,9 +1,9 @@
 ---
 title: Environment variables
-description: Every env var that Riffado reads, what it does, and what it defaults to.
+description: Every env var that Chatterbox reads, what it does, and what it defaults to.
 ---
 
-Riffado validates every environment variable through a Zod schema in
+Chatterbox validates every environment variable through a Zod schema in
 `src/lib/env.ts` at process start. A misconfigured env crashes the
 server with a precise error message rather than booting into a broken
 state — that's intentional. Read this page as the source of truth for
@@ -19,7 +19,7 @@ on production secrets.
 | --------------------------- | -------- | ---------------------------------------------------------------------- |
 | `DATABASE_URL`              | string   | Postgres connection string                                             |
 | `BETTER_AUTH_SECRET`        | string   | At least 32 chars; signs session cookies                               |
-| `APP_URL`                   | URL      | Public origin (e.g. `https://riffado.example.com`)                   |
+| `APP_URL`                   | URL      | Public origin (e.g. `https://chatterbox.example.com`)                   |
 | `ENCRYPTION_KEY`            | hex(64)  | Exactly 64 hex chars (32 bytes); see [Encryption](../reference/encryption-at-rest)|
 
 ## Optional knobs
@@ -107,13 +107,32 @@ the public entrance and connector variables.
 
 | Variable                   | Default | Effect                                                                                               |
 | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `riffado-mcp`). Unset, `/api/mcp` answers 404. |
+| `MCP_AUDIENCE`             | —       | Client id of the Keycloak resource client holding the access roles (e.g. `chatterbox-mcp`). Unset, `/api/mcp` answers 404. |
 | `MCP_ALLOWED_CLIENTS`      | —       | Comma-separated client ids (`azp`) allowed to call. Required when `MCP_PUBLIC_CLIENTS` is set; otherwise, unset admits any client of the realm whose token carries the roles (logged as a warning at start). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Header the public reverse proxy sets on what it forwards (e.g. `X-MCP-Ingress`); the internal route removes it. A request carrying it is served only for `MCP_PUBLIC_CLIENTS`. |
 | `MCP_PUBLIC_CLIENTS`       | —       | Comma-separated client ids served through the public entrance (e.g. `claude`). Needs `MCP_PUBLIC_INGRESS_HEADER`. |
 | `MCP_CONNECTOR_KEYS`       | —       | Comma-separated `client=key` pairs (keys of 32+ characters): a token of a listed client is served only with `X-API-Key: <key>`, a Claude connector's request header. Secret. |
 | `MCP_RESOURCE_AUDIENCE`    | `false` | When `true`, also accept tokens whose `aud` is `<APP_URL>/api/mcp` (Keycloak's resource indicators). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Days a row of the `mcp_access_log` table is kept (1 to 3650).                                         |
+| `MCP_SERVICE_CLIENTS`      | —       | Comma-separated service-only clients whose marked tokens act in the Organization's data context. Each must be in `MCP_ALLOWED_CLIENTS` when that is set. With it set (or with `AUTHZ_MODE=idp`), a token is a service only when its client is listed and the realm marked it; unset in `local` mode, a token with `client_id` is still taken for a service (deprecated). |
+
+## Authorization from the identity provider
+
+Self-host with single sign-on only. Off unless `AUTHZ_MODE=idp`. See
+[Single sign-on](./sso#authorization-from-the-identity-provider).
+
+| Variable                          | Default    | Effect |
+| --------------------------------- | ---------- | ------ |
+| `AUTHZ_MODE`                      | `local`    | `local`: everyone who signs in may use the application and the organization account curates. `idp`: the identity provider grants `use`, `org.curate` and `access.manage`. |
+| `IDENTITY_PROVIDER`               | —          | Required with `AUTHZ_MODE=idp`. Only `keycloak` today; any other value stops the server. |
+| `KEYCLOAK_ROLES_CLIENT`           | `OIDC_CLIENT_ID` | Keycloak client whose client roles carry the capabilities. |
+| `KEYCLOAK_GROUP_USE_ID`           | —          | Id of the group that grants `use`. The three group ids are set together and each must differ. With them, administrators manage access in **Settings → Access**. |
+| `KEYCLOAK_GROUP_CURATE_ID`        | —          | Id of the group that grants `org.curate`. |
+| `KEYCLOAK_GROUP_ACCESS_MANAGE_ID` | —          | Id of the group that grants `access.manage`. |
+| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Read-only service client (`realm-management/view-users`) that re-verifies the access of API key and MCP holders. Set with its secret; must not be the web client or an MCP client. |
+| `KEYCLOAK_VERIFIER_CLIENT_SECRET` | —          | Its secret. |
+| `AUTHZ_VERIFICATION_MAX_AGE`      | `1800`     | Seconds a verified access is used before the provider is asked again (at most 3600). |
+| `AUTHZ_ADMIN_MAX_AUTH_AGE`        | `28800`    | Seconds since the administrator last signed in at the provider within which they may change access. |
 
 ## Learn (knowledge from recordings)
 
@@ -124,7 +143,7 @@ Self-host only; ignored when `IS_HOSTED=true`. All optional.
 | `EMBEDDING_BASE_URL` | —        | An OpenAI-compatible `embeddings` endpoint. Unset, Learn matches names by their words only, and says so. |
 | `EMBEDDING_MODEL`    | `bge-m3` | The embedding model to ask that endpoint for.                                                            |
 | `EMBEDDING_API_KEY`  | —        | Sent as a bearer token, when the endpoint needs one.                                                     |
-| `LEARN_MCP_URL`      | —        | The one URL of Riffado's read-only knowledge tools the Learn bridge may call back.                       |
+| `LEARN_MCP_URL`      | —        | The one URL of Chatterbox's read-only knowledge tools the Learn bridge may call back.                       |
 | `LEARN_BRIDGE_URL`   | —        | Your agent bridge's base URL as a provider names it (e.g. `http://agent-bridge:8787/v1`). Only a Claude Code or Codex provider pointing exactly there lets Learn's model look things up itself (with `LEARN_MCP_URL`); anything else, and a provider merely named like one, uses the fallback. |
 | `KNOWLEDGE_MEMORY_MB`| `256`    | How much decrypted knowledge one process holds in memory before it evicts the least recently used.     |
 

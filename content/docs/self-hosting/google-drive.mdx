@@ -13,20 +13,23 @@ The integration is for self-hosted instances inside one Google Workspace.
 It uses an OAuth consent screen of type **Internal**, which only accounts
 of your own Workspace can use and which Google does not review.
 
-## What Riffado can see
+<span id="what-riffado-can-see" />
 
-Riffado asks for the `drive.file` scope. With it, Riffado sees only:
+## What Chatterbox can see
+
+Chatterbox asks for the `drive.file` scope. With it, Chatterbox sees only:
 
 - the folder a user picks in the Google Picker, and
-- the folders and files Riffado creates itself.
+- the folders and files Chatterbox creates itself.
 
 It cannot list or read anything else in the user's Drive. The flip side:
-Riffado also cannot see files people put into the folders it created. It
+Chatterbox also cannot see files people put into the folders it created. It
 tracks its own folders and moves one to the Google Drive trash when it no
 longer needs it, and only while none of its own files are in it. Anything
 a person stored there goes to the trash with it, where it stays
-restorable for 30 days. Every folder Riffado creates carries the Drive
+restorable for 30 days. Every folder Chatterbox creates carries the Drive
 description "Managed by Riffado. Content you add here may be removed."
+This stored description retains the upstream name.
 
 Google Docs are regenerated whenever the transcript or summary changes,
 into the same document (its link and sharing survive). Edits made in the
@@ -45,7 +48,7 @@ Doc are overwritten.
 4. **Credentials → Create credentials → OAuth client ID**, type **Web
    application**:
    - Authorized JavaScript origin: your `APP_URL` (e.g.
-     `https://riffado.example.com`).
+     `https://chatterbox.example.com`).
    - Authorized redirect URI:
      `<APP_URL>/api/integrations/google/callback`.
 
@@ -65,16 +68,16 @@ GOOGLE_CLOUD_PROJECT_NUMBER=1234567890
 GOOGLE_WORKSPACE_DOMAINS=example.com
 ```
 
-Restart Riffado. **Settings → Google Account** now offers to connect an
+Restart Chatterbox. **Settings → Google Account** now offers to connect an
 account, and the folder export dialog offers **Add Google Drive export**.
 
 ## Exporting the Organization tree to a shared drive
 
 The organization account exports the Organization tree like anyone else.
 Connect it to a dedicated service mailbox (for example
-`riffado@example.com`, a licensed Workspace user), not to a person: the
+`chatterbox@example.com`, a licensed Workspace user), not to a person: the
 export writes through that account and stops if it is removed. Add the
-mailbox to the shared drive as **Content manager**, sign in to Riffado as
+mailbox to the shared drive as **Content manager**, sign in to Chatterbox as
 the organization account, connect the mailbox, and pick a folder of the
 shared drive.
 
@@ -82,7 +85,7 @@ shared drive.
 
 If an account's access is revoked, its password changes in a way that
 revokes tokens, or it is removed from Workspace, Google stops honoring
-Riffado's refresh token. The connection is then marked for reconnecting,
+Chatterbox's refresh token. The connection is then marked for reconnecting,
 Drive exports of that user pause, and the export dialog and settings say
 so. Reconnecting the same account resumes every paused export.
 

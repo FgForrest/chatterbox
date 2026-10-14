@@ -58,7 +58,7 @@ function token(
     claims: Record<string, unknown> = {},
     options: TokenOptions = {},
 ): Promise<string> {
-    const jwt = new SignJWT(claims)
+    const jwt = new SignJWT({ typ: "Bearer", ...claims })
         .setProtectedHeader({ alg: "RS256", kid: options.kid ?? "k1" })
         .setIssuer(options.issuer ?? ISSUER)
         .setIssuedAt()
@@ -221,6 +221,8 @@ describe("verifyMcpToken", () => {
         expect(await kindOf(await token({ typ: "Bearer" }))).toBe("valid");
         expect(await kindOf(await token({ typ: "ID" }))).toBe("invalid");
         expect(await kindOf(await token({ typ: "Refresh" }))).toBe("invalid");
+        expect(await kindOf(await token({ typ: undefined }))).toBe("invalid");
+        expect(await kindOf(await token({ typ: "at+jwt" }))).toBe("invalid");
         expect(
             await kindOf(await token({ typ: "ID" }, { audience: "claude" })),
         ).toBe("invalid");
@@ -368,6 +370,49 @@ describe("verifyMcpToken with the configured realm", () => {
         await expect(verifyMcpToken(await token())).rejects.toThrow(
             "fetch failed",
         );
+    });
+
+    it("finds a rotated key once the key set may be refetched", async () => {
+        const rotating = "http://keycloak-rotating:8080/realms/acme";
+        const published: JWK[] = [publicJwk];
+        mockEnv.MCP_AUDIENCE = AUDIENCE;
+        mockEnv.OIDC_ISSUER_URL = rotating;
+        fetchSpy.mockImplementation(async (input) => {
+            const url = String(input);
+            if (url === `${rotating}/.well-known/openid-configuration`) {
+                return Response.json({
+                    issuer: ISSUER,
+                    jwks_uri: `${rotating}/protocol/openid-connect/certs`,
+                });
+            }
+            if (url === `${rotating}/protocol/openid-connect/certs`) {
+                return Response.json({ keys: published });
+            }
+            return new Response(null, { status: 404 });
+        });
+        const rotated = await generateKeyPair("RS256");
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+            expect((await verifyMcpToken(await token())).kind).toBe("valid");
+            published.push({
+                ...(await exportJWK(rotated.publicKey)),
+                kid: "k2",
+                alg: "RS256",
+                use: "sig",
+            });
+            const signedByNewKey = () =>
+                token({}, { kid: "k2", key: rotated.privateKey });
+
+            expect((await verifyMcpToken(await signedByNewKey())).kind).toBe(
+                "invalid",
+            );
+            vi.setSystemTime(Date.now() + 31_000);
+            expect((await verifyMcpToken(await signedByNewKey())).kind).toBe(
+                "valid",
+            );
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("throws when the realm cannot be discovered", async () => {

@@ -7,7 +7,7 @@ description: Přihlášení, průvodce prvním spuštěním a orientace v prost�
 
 ## Přihlášení
 
-Otevřete svou adresu Riffado v prohlížeči a přihlaste se pomocí svého e-mailu a hesla. Na nové instanci s vlastním hostingem se první zaregistrovaný účet stává administrátorem.
+Otevřete svou adresu Chatterbox v prohlížeči a přihlaste se pomocí svého e-mailu a hesla. Na nové instanci s vlastním hostingem se první zaregistrovaný účet stává administrátorem.
 
 Pokud vaše organizace používá jednotné přihlašování, na přihlašovací obrazovce se místo toho zobrazí jedno tlačítko, například **Přihlásit se přes Keycloak**. Váš účet se vytvoří při prvním přihlášení. Registrace může být na vaší instanci uzavřená; v tom případě požádejte svého administrátora o přístup.
 
@@ -15,12 +15,12 @@ Pokud vaše organizace používá jednotné přihlašování, na přihlašovací
 
 ## Průvodce prvním spuštěním
 
-Při prvním otevření Riffado vám krátký průvodce pomůže nastavit základní věci. Jakýkoliv krok můžete přeskočit a vrátit se k němu později v Nastavení.
+Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Jakýkoliv krok můžete přeskočit a vrátit se k němu později v Nastavení.
 
 | Krok | Co dělá |
 | --- | --- |
-| ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Riffado umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče Riffado Connector, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Riffado začíná pravidelně stahovat vaše nahrávky. |
+| ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Chatterbox umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
+| ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče Riffado Connector, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Chatterbox začíná pravidelně stahovat vaše nahrávky. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
 | ![Done](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
@@ -35,7 +35,7 @@ Pro zobrazení průvodce znovu přejděte do **Nastavení → Export/Záloha** a
 Horní lišta obsahuje tři sekce:
 
 - **Nahrávky**: vaše knihovna. Vlevo je seznam nahrávek, vpravo detail vybrané nahrávky.
-- **Almanach**: osoby a objekty, o kterých Riffado ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
+- **Almanach**: osoby a objekty, o kterých Chatterbox ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
 - **Úkoly**: akční položky nalezené ve vašich nahrávkách. Odznak ukazuje nové úkoly přiřazené vám. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
@@ -57,7 +57,7 @@ Klikněte na **Nápověda** v horní liště nebo stiskněte `h` pro otevření 
 - **Otevřít celou příručku** otevře stejnou stránku v nové záložce s navigací a vyhledáváním.
 - Malé **?** u některých funkcí, například na kartách Přepis a Shrnutí, v recenzi Učit se nebo u nastavení exportu složek, otevře panel přímo u této funkce.
 
-Celá příručka je také dostupná na `/docs` na vaší adrese Riffado v sekci **Uživatelská příručka**.
+Celá příručka je také dostupná na `/docs` na vaší adrese Chatterbox v sekci **Uživatelská příručka**.
 
 ![Uživatelská příručka na /docs](images/docs-user-guide.png)
 
@@ -89,6 +89,6 @@ Paleta během psaní vyhledává v názvech i přepisech. Stiskněte `Enter` pro
 
 ## Jazyk
 
-Riffado komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Riffado zasílá, se také posílají ve stejném jazyce.
+Chatterbox komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Chatterbox zasílá, se také posílají ve stejném jazyce.
 
 Pokračujte: [Nahrávky](recordings.md)

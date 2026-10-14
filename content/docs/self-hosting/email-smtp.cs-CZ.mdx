@@ -1,6 +1,6 @@
 ---
 title: Nastavení e-mailu (SMTP)
-description: Nakonfigurujte SMTP server, aby Riffado mohl doručovat e-mailová upozornění.
+description: Nakonfigurujte SMTP server, aby Chatterbox mohl doručovat e-mailová upozornění.
 ---
 
 E-mailová upozornění jsou odesílána prostřednictvím libovolného SMTP serveru, který nakonfigurujete –
@@ -13,7 +13,7 @@ e-mailu) je popsána v [Upozornění](../guides/notifications).
 
 ## Konfigurace
 
-Nastavte tyto proměnné v prostředí, ve kterém běží Riffado:
+Nastavte tyto proměnné v prostředí, ve kterém běží Chatterbox:
 
 ```bash
 SMTP_HOST=smtp.example.com
@@ -21,7 +21,7 @@ SMTP_PORT=587                  # 465 if SMTP_SECURE=true, else 587
 SMTP_SECURE=false              # true => implicit TLS on 465
 SMTP_USER=apikey-or-username
 SMTP_PASSWORD=secret
-SMTP_FROM="Riffado <noreply@example.com>"
+SMTP_FROM="Chatterbox <noreply@example.com>"
 ```
 
 `SMTP_FROM` přijímá buď samostatný e-mail (`noreply@example.com`)

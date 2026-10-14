@@ -449,7 +449,7 @@ describe("buildAndUploadExportArchive", () => {
                 {
                     id: "p-1",
                     displayName: "enc-Jan",
-                    primaryEmail: "enc-jan@fg.cz",
+                    primaryEmail: "enc-jan@example.test",
                     notes: null,
                     mergedIntoId: null,
                     createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -507,7 +507,7 @@ describe("buildAndUploadExportArchive", () => {
         expect(knowledge.people).toHaveLength(1);
         expect(knowledge.people[0].displayName).toBe("decrypted:enc-Jan");
         expect(knowledge.people[0].primaryEmail).toBe(
-            "decrypted:enc-jan@fg.cz",
+            "decrypted:enc-jan@example.test",
         );
         // The email hash is derived from a server secret, so it is recomputed
         // on restore rather than pinning the archive to one instance.

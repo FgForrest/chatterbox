@@ -77,6 +77,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             OIDC_CLIENT_SECRET: "riffado-e2e-client-secret",
             MCP_AUDIENCE: "riffado-mcp",
             MCP_ALLOWED_CLIENTS: [] as string[],
+            MCP_SERVICE_CLIENTS: [] as string[],
             MCP_PUBLIC_INGRESS_HEADER: "x-mcp-ingress",
             MCP_PUBLIC_CLIENTS: ["claude"],
             MCP_CONNECTOR_KEYS: [] as { client: string; key: string }[],
@@ -693,7 +694,7 @@ describeWithKeycloak("Claude's sign-in against Keycloak", () => {
             const response = await listTools(bob.access_token ?? "", PUBLIC);
             expect(response.status).toBe(403);
             await expect(response.json()).resolves.toEqual({
-                error: "This token carries no Riffado MCP role",
+                error: "This token carries no Chatterbox MCP permission",
             });
         },
     );
