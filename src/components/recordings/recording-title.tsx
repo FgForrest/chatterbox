@@ -184,7 +184,7 @@ export function RecordingTitle({
             >
                 <span className={cn("truncate", className)}>{filename}</span>
                 <Pencil
-                    className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100"
+                    className="size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100 [@media(hover:none)]:opacity-100"
                     aria-hidden="true"
                 />
             </button>
@@ -197,7 +197,7 @@ export function RecordingTitle({
                     name: filename,
                 })}
                 className={cn(
-                    "shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100",
+                    "shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-within/title:opacity-100 [@media(hover:none)]:opacity-100",
                     "hover:bg-accent/60 hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
                     regenerating && "opacity-100",
                 )}
