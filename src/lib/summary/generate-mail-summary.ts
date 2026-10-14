@@ -24,6 +24,7 @@ import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { MAIL_SUMMARY_PROMPT_ID } from "@/lib/profiles/settings";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import type { ContentRunContext } from "@/lib/sharing/run-context";
 import {
@@ -43,8 +44,7 @@ import type {
 } from "./generate-summary";
 import { runSummary, summaryModelFor } from "./summary-model";
 
-/** The built-in mail template's id, reported when no template was chosen. */
-export const MAIL_SUMMARY_PROMPT_ID = "mail";
+export { MAIL_SUMMARY_PROMPT_ID } from "@/lib/profiles/settings";
 
 function mailNotSummarized(message: string): AppError {
     return new AppError(ErrorCode.INVALID_INPUT, message, 400);
@@ -150,7 +150,7 @@ export async function generateMailSummary(
 
     // A chosen template is honoured; otherwise mail gets its own, since the
     // user's default is written for recordings.
-    let usedPromptId = MAIL_SUMMARY_PROMPT_ID;
+    let usedPromptId: string = MAIL_SUMMARY_PROMPT_ID;
     let promptTemplate = MAIL_SUMMARY_PROMPT;
     if (opts.presetId && opts.presetId !== MAIL_SUMMARY_PROMPT_ID) {
         const promptConfig = normalizeSummaryPromptConfig(
