@@ -87,6 +87,7 @@ export async function gatherFacts(
             .select({
                 provider: apiCredentials.provider,
                 isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
+                disabledAt: apiCredentials.disabledAt,
             })
             .from(apiCredentials)
             .where(eq(apiCredentials.userId, userId)),

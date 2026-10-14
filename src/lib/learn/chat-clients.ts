@@ -6,25 +6,19 @@
  * (retried). Every response records its usage for the recording.
  */
 
-import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
-import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
-import {
-    enhancementChatModel,
-    pickLearnCredential,
-} from "@/lib/ai/enhancement-provider";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import {
     type AiOperation,
     recordChatCompletionUsage,
 } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { LearnBridgeChat } from "@/lib/learn/run-bridge";
 import type { LearnChat } from "@/lib/learn/run-fallback";
+import { resolveStepProvider } from "@/lib/profiles/providers";
 
 const CALL_RETRY_ATTEMPTS = 3;
 /** A call through the bridge, tools and all; the jobs allow 20 min. */
@@ -53,25 +47,26 @@ export async function learnChatClients(input: {
     signal: AbortSignal;
 }): Promise<LearnChatClients> {
     const { actorUserId, signal } = input;
-    const configured = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, actorUserId));
-    const credentials = pickLearnCredential(configured);
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "learn",
+        pin: null,
+        actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
             "No AI provider configured",
             400,
         );
     }
+    const credentials = resolved.credential;
     const openai = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: 0,
         timeout: BRIDGE_CALL_TIMEOUT_MS,
@@ -79,7 +74,7 @@ export async function learnChatClients(input: {
     const usage = {
         recordingId: input.recordingId,
         ownerUserId: input.ownerUserId,
-        payerUserId: actorUserId,
+        payerUserId: resolved.payerUserId,
         operation: input.operation,
         provider: credentials.provider,
         model,
@@ -101,6 +96,7 @@ export async function learnChatClients(input: {
         bridge: {
             complete: async ({ system, user, schema, mcp, maxTokens }) => {
                 signal.throwIfAborted();
+                await resolved.reserveCall();
                 const response = await bridgeClient.chat.completions.create(
                     {
                         ...buildChatCompletionParams({
@@ -136,6 +132,7 @@ export async function learnChatClients(input: {
                     isRetryable: isRetryableError,
                     run: async () => {
                         signal.throwIfAborted();
+                        await resolved.reserveCall();
                         const response = await openai.chat.completions.create(
                             buildChatCompletionParams({
                                 model,

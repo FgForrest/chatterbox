@@ -1,18 +1,15 @@
-import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
-import {
-    enhancementChatModel,
-    pickEnhancementCredential,
-} from "@/lib/ai/enhancement-provider";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
+import {
+    type DecryptedCredential,
+    resolveStepProvider,
+} from "@/lib/profiles/providers";
 import {
     clampRounds,
     formatPassOutcomes,
@@ -25,13 +22,13 @@ import {
     type SummaryPayload,
 } from "./payload";
 
-type CredentialRow = typeof apiCredentials.$inferSelect;
-
 /** The provider a summary runs on: the actor's, who pays for it. */
 export interface SummaryModel {
     openai: OpenAI;
     model: string;
-    credentials: CredentialRow;
+    credentials: DecryptedCredential;
+    payerUserId: string;
+    reserveCall: () => Promise<void>;
 }
 
 /** How a run went when it used multi-pass. Counts and outcomes only. */
@@ -60,31 +57,32 @@ const PASS_RETRY_MAX_MS = 15_000;
 export async function summaryModelFor(
     actorUserId: string,
 ): Promise<SummaryModel> {
-    const configuredCredentials = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, actorUserId));
-
-    const credentials = pickEnhancementCredential(configuredCredentials);
-
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "summary",
+        pin: null,
+        actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
-            configuredCredentials.length > 0
-                ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to generate summaries."
-                : "No AI provider configured",
+            "No AI provider configured",
             400,
         );
     }
-
-    const apiKey = decrypt(credentials.apiKey);
+    const credentials = resolved.credential;
 
     const openai = new OpenAI({
-        apiKey,
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
     });
 
-    return { openai, model: enhancementChatModel(credentials), credentials };
+    return {
+        openai,
+        model: enhancementChatModel(credentials),
+        credentials,
+        payerUserId: resolved.payerUserId,
+        reserveCall: resolved.reserveCall,
+    };
 }
 
 export interface RunSummaryInput {
@@ -109,7 +107,9 @@ export async function runSummary(input: RunSummaryInput): Promise<{
     payload: SummaryPayload;
     multiPass?: MultiPassSummaryOutcome;
 }> {
-    const { openai, model, credentials } = input.model;
+    const { openai, model, credentials, payerUserId, reserveCall } =
+        input.model;
+    let reservationError: AppError | null = null;
 
     /**
      * Retry one provider call, not the whole job.
@@ -156,6 +156,17 @@ export async function runSummary(input: RunSummaryInput): Promise<{
             requestMaxTokens: number,
         ): Promise<string> =>
             withPassRetry(requestLabel, async () => {
+                try {
+                    await reserveCall();
+                } catch (error) {
+                    if (
+                        error instanceof AppError &&
+                        error.code === ErrorCode.AI_RATE_LIMITED
+                    ) {
+                        reservationError = error;
+                    }
+                    throw error;
+                }
                 const response = await openai.chat.completions.create(
                     buildChatCompletionParams({
                         model,
@@ -168,7 +179,7 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                     {
                         recordingId: input.usage.itemId,
                         ownerUserId: input.usage.ownerUserId,
-                        payerUserId: input.usage.payerUserId,
+                        payerUserId,
                         operation: "summary",
                         provider: credentials.provider,
                         model,
@@ -249,13 +260,20 @@ Correct the serialization without dropping or inventing information. Return exac
         return { payload: parseSummaryPayload(await runPass()) };
     }
 
-    const result = await runMultiPassSummary({
-        rounds: clampRounds(input.multiPass.rounds),
-        runPass,
-        runMerge,
-        mergePrompt: input.multiPass.mergePrompt,
-        onProgress: input.onProgress,
-    });
+    let result: Awaited<ReturnType<typeof runMultiPassSummary>>;
+    try {
+        result = await runMultiPassSummary({
+            rounds: clampRounds(input.multiPass.rounds),
+            runPass,
+            runMerge,
+            mergePrompt: input.multiPass.mergePrompt,
+            onProgress: input.onProgress,
+        });
+    } catch (error) {
+        if (reservationError) throw reservationError;
+        throw error;
+    }
+    if (reservationError) throw reservationError;
     // A degraded run is otherwise silent: dropping an unusable pass is the
     // correct behaviour, and `onRetry` logs nothing for a pass that failed
     // without retrying or that returned text which simply would not parse.

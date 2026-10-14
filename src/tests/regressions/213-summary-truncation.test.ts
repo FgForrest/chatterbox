@@ -63,6 +63,12 @@ vi.mock("@/lib/org/config", () => ({
     isOrgAccount: async () => false,
     assertNotOrgAccount: async () => {},
 }));
+vi.mock("@/lib/env", () => ({
+    env: {
+        IS_HOSTED: false,
+        ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60,
+    },
+}));
 
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),

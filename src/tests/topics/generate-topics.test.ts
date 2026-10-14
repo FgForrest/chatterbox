@@ -27,6 +27,9 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/env", () => ({
+    env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
+}));
 
 const { createMock, curatesNow, runAsCurator } = vi.hoisted(() => ({
     createMock: vi.fn(),
@@ -155,6 +158,7 @@ function stage(turns: unknown = TURNS) {
     ]);
     selectResults.set(userSettings, [
         [{ topicPrompt: null, aiOutputLanguage: null }],
+        [{ defaultProviders: null }],
     ]);
     selectResults.set(apiCredentials, [
         [

@@ -104,6 +104,10 @@ import { db } from "@/db";
 import { chatterItems, recordings } from "@/db/schema";
 import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
+import {
+    isMynahConfigured,
+    transcribeViaMynah,
+} from "@/lib/hosted/transcription/mynah";
 import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
@@ -213,10 +217,121 @@ describe("Transcription", () => {
             expect(result.error).toBe("No transcription API configured");
         });
 
-        it("fails fast (does not fall back to Mynah) when an explicit providerId override doesn't resolve", async () => {
-            const { isMynahConfigured, transcribeViaMynah } = await import(
-                "@/lib/hosted/transcription/mynah"
+        it("returns the same no-provider failure for a Mynah pointer when Mynah is not configured", async () => {
+            (db.select as Mock)
+                .mockReturnValueOnce(
+                    recordingLookup([
+                        {
+                            id: mockRecordingId,
+                            title: "test.mp3",
+                            storagePath: "test.mp3",
+                        },
+                    ]),
+                )
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    defaultTranscriptionProviderId:
+                                        "riffado-included",
+                                },
+                            ]),
+                        }),
+                    }),
+                });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
             );
+
+            expect(result).toMatchObject({
+                success: false,
+                error: "No transcription API configured",
+                errorCode: "NO_TRANSCRIPTION_PROVIDER",
+            });
+            expect(transcribeViaMynah).not.toHaveBeenCalled();
+        });
+
+        it("emits the included-budget failure for an exhausted Mynah pointer", async () => {
+            (isMynahConfigured as Mock).mockReturnValue(true);
+            const budgetError = new Error(
+                "Mynah transcription budget exhausted for this cycle",
+            );
+            budgetError.name = "MynahBudgetExhaustedError";
+            (transcribeViaMynah as Mock).mockRejectedValue(budgetError);
+
+            (db.select as Mock)
+                .mockReturnValueOnce(
+                    recordingLookup([
+                        {
+                            id: mockRecordingId,
+                            title: "test.mp3",
+                            storagePath: "test.mp3",
+                            duration: 1_000,
+                        },
+                    ]),
+                )
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([
+                                {
+                                    defaultTranscriptionProviderId:
+                                        "riffado-included",
+                                },
+                            ]),
+                        }),
+                    }),
+                });
+
+            const result = await transcribeRecording(
+                mockUserId,
+                mockRecordingId,
+            );
+
+            expect(result).toMatchObject({
+                success: false,
+                errorCode: "MYNAH_BUDGET_EXHAUSTED",
+            });
+            expect(emitEvent).toHaveBeenCalledWith(
+                "transcription.failed",
+                mockUserId,
+                mockRecordingId,
+                { error: "included_transcription_budget_exhausted" },
+            );
+        });
+
+        it("fails fast (does not fall back to Mynah) when an explicit providerId override doesn't resolve", async () => {
             (isMynahConfigured as Mock).mockReturnValueOnce(true);
 
             (db.select as Mock)

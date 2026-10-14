@@ -12,24 +12,14 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import {
-    apiCredentials,
-    recordings,
-    transcriptions,
-    userSettings,
-} from "@/db/schema";
+import { recordings, transcriptions, userSettings } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import {
-    enhancementChatModel,
-    pickTopicsCredential,
-} from "@/lib/ai/enhancement-provider";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
-import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
-import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
@@ -37,6 +27,7 @@ import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { modelInput } from "@/lib/learn/llm-input";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
 import {
@@ -185,33 +176,21 @@ export async function generateTopicsForTranscript(
     );
 
     // The provider is the actor's, who pays.
-    const configured = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, ctx.actorUserId));
-    const [providerSettings] =
-        ctx.actorUserId === ctx.settingsUserId
-            ? [settings]
-            : await db
-                  .select({ defaultProviders: userSettings.defaultProviders })
-                  .from(userSettings)
-                  .where(eq(userSettings.userId, ctx.actorUserId))
-                  .limit(1);
-    const credentials = pickTopicsCredential(
-        configured,
-        topicsProviderId(providerSettings?.defaultProviders),
-    );
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "topics",
+        pin: null,
+        actorUserId: ctx.actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
-            configured.length > 0
-                ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to detect topics."
-                : "No AI provider configured",
+            "No AI provider configured",
             400,
         );
     }
+    const credentials = resolved.credential;
     const openai = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
     });
     const model = enhancementChatModel(credentials);
@@ -253,6 +232,7 @@ export async function generateTopicsForTranscript(
             jitter: 0.5,
             isRetryable: isRetryableError,
             run: async () => {
+                await resolved.reserveCall();
                 const response = await openai.chat.completions.create(
                     buildChatCompletionParams({
                         model,
@@ -268,7 +248,7 @@ export async function generateTopicsForTranscript(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        payerUserId: resolved.payerUserId,
                         operation: "topics",
                         provider: credentials.provider,
                         model,

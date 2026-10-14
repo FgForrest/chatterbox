@@ -1,15 +1,11 @@
 import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { apiCredentials, userSettings } from "@/db/schema";
+import { userSettings } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import {
-    enhancementChatModel,
-    pickEnhancementCredential,
-} from "@/lib/ai/enhancement-provider";
-import { titleProviderId } from "@/lib/ai/title-provider";
-import { decrypt } from "@/lib/encryption";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { decryptJsonField } from "@/lib/encryption/fields";
+import { resolveStepProvider } from "@/lib/profiles/providers";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import {
     normalizeTitlePromptConfig,
@@ -48,29 +44,20 @@ export async function generateTitleFromTranscription(
             TITLE_TEMPLATE_KIND,
         );
 
-        const configuredCredentials = await db
-            .select()
-            .from(apiCredentials)
-            .where(eq(apiCredentials.userId, userId))
-            .orderBy(apiCredentials.createdAt, apiCredentials.id);
-
-        const selectedId = titleProviderId(userSettingsRow?.defaultProviders);
-        const credentials =
-            configuredCredentials.find(
-                (candidate) => candidate.id === selectedId,
-            ) ?? pickEnhancementCredential(configuredCredentials);
-
-        if (!credentials) {
+        const resolved = await resolveStepProvider({
+            step: "title",
+            pin: null,
+            actorUserId: userId,
+        });
+        if (resolved.kind !== "credential") {
             console.warn("No AI provider found for title generation");
             return null;
         }
-
-        // Decrypt API key
-        const apiKey = decrypt(credentials.apiKey);
+        const credentials = resolved.credential;
 
         // Create OpenAI client
         const openai = new OpenAI({
-            apiKey,
+            apiKey: credentials.apiKey,
             baseURL: credentials.baseUrl || undefined,
         });
 
@@ -107,6 +94,7 @@ export async function generateTitleFromTranscription(
                 : "You are a helpful assistant that generates concise, descriptive titles for audio recordings based on transcriptions. Always follow the rules strictly.";
         const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective}`;
 
+        await resolved.reserveCall();
         const response = await openai.chat.completions.create(
             buildChatCompletionParams({
                 model,
@@ -128,7 +116,7 @@ export async function generateTitleFromTranscription(
             {
                 recordingId,
                 ownerUserId,
-                payerUserId: userId,
+                payerUserId: resolved.payerUserId,
                 operation: "title",
                 provider: credentials.provider,
                 model,

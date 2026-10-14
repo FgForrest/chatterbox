@@ -19,6 +19,7 @@ import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import {
     exportRecordingSidecarsIfEnabled,
     removeRecordingSidecar,
@@ -41,6 +42,11 @@ import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
+import {
+    type DecryptedCredential,
+    type ResolvedStepProvider,
+    resolveStepProvider,
+} from "@/lib/profiles/providers";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -515,26 +521,37 @@ async function transcribeRecordingInner(
             };
         }
 
-        const [legacyDefaultCredentials] = opts.providerId
-            ? []
-            : await db
-                  .select()
-                  .from(apiCredentials)
-                  .where(
-                      and(
-                          eq(apiCredentials.userId, ctx.actorUserId),
-                          eq(apiCredentials.isDefaultTranscription, true),
-                      ),
-                  )
-                  .limit(1);
-
+        let resolvedDefault: ResolvedStepProvider | null = null;
+        if (!opts.providerId) {
+            try {
+                resolvedDefault = await resolveStepProvider({
+                    step: "transcription",
+                    pin: null,
+                    actorUserId: ctx.actorUserId,
+                });
+            } catch (error) {
+                if (
+                    error instanceof AppError &&
+                    error.code === ErrorCode.NO_TRANSCRIPTION_PROVIDER
+                ) {
+                    return {
+                        success: false,
+                        error: "No transcription API configured",
+                        errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                    };
+                }
+                throw error;
+            }
+        }
         // The engine (provider pointer) is the actor's, because the keys are.
         // What the output should look like (language) follows the view.
-        const [settings] = await db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, ctx.actorUserId))
-            .limit(1);
+        const [settings] = opts.providerId
+            ? await db
+                  .select()
+                  .from(userSettings)
+                  .where(eq(userSettings.userId, ctx.actorUserId))
+                  .limit(1)
+            : [resolvedDefault?.actorSettings];
         const [contentSettings] =
             ctx.settingsUserId === ctx.actorUserId
                 ? [settings]
@@ -552,26 +569,43 @@ async function transcribeRecordingInner(
         const autoGenerateTitle =
             !orgView && (settings?.autoGenerateTitle ?? true);
         const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
-        const pointer = settings?.defaultTranscriptionProviderId ?? null;
-        const requested = opts.providerId || pointer || null;
-        const useManaged = isRiffadoIncludedProviderId(requested);
-
         void quality;
 
-        let credentials: typeof apiCredentials.$inferSelect | undefined;
-        if (!useManaged && requested) {
+        let credentials:
+            | typeof apiCredentials.$inferSelect
+            | DecryptedCredential
+            | undefined;
+        let credentialKeyIsDecrypted = false;
+        let useManaged = isRiffadoIncludedProviderId(opts.providerId);
+        let payerUserId = ctx.actorUserId;
+        let reserveCall: () => Promise<void> = () => Promise.resolve();
+        if (opts.providerId && !useManaged) {
             [credentials] = await db
                 .select()
                 .from(apiCredentials)
                 .where(
                     and(
-                        eq(apiCredentials.id, requested),
+                        eq(apiCredentials.id, opts.providerId),
                         eq(apiCredentials.userId, ctx.actorUserId),
                     ),
                 )
                 .limit(1);
-        } else if (!useManaged) {
-            credentials = legacyDefaultCredentials;
+            if (credentials?.disabledAt) {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    `The selected provider ${credentials.provider} is disabled. Enable it or choose another provider.`,
+                    409,
+                );
+            }
+        } else if (resolvedDefault) {
+            const resolved = resolvedDefault;
+            payerUserId = resolved.payerUserId;
+            reserveCall = resolved.reserveCall;
+            useManaged = resolved.kind === "managed";
+            if (resolved.kind === "credential") {
+                credentials = resolved.credential;
+                credentialKeyIsDecrypted = true;
+            }
         }
 
         const runManagedTranscription = async () => {
@@ -582,12 +616,13 @@ async function transcribeRecordingInner(
                 language: defaultLanguage,
                 filename: decryptText(recording.title),
             };
+            await reserveCall();
             const result = await transcribeViaMynah(input);
             await recordAiUsage(
                 {
                     recordingId,
                     ownerUserId: ctx.ownerUserId,
-                    payerUserId: ctx.actorUserId,
+                    payerUserId,
                     operation: "transcription",
                     provider: "Mynah",
                     model: "parakeet",
@@ -644,7 +679,9 @@ async function transcribeRecordingInner(
             persistProvider = result.provider;
             persistModel = result.model;
         } else if (credentials) {
-            const apiKey = decrypt(credentials.apiKey);
+            const apiKey = credentialKeyIsDecrypted
+                ? credentials.apiKey
+                : decrypt(credentials.apiKey);
 
             const storage = await createUserStorageProvider(ctx.ownerUserId);
             const audioBuffer = await storage.downloadFile(
@@ -681,6 +718,7 @@ async function transcribeRecordingInner(
             );
 
             if (transcriptionStyle === "gemini") {
+                await reserveCall();
                 const result = await geminiTranscribe({
                     apiKey,
                     model,
@@ -692,7 +730,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -712,6 +750,7 @@ async function transcribeRecordingInner(
                 const keyterms = elevenLabsTakesKeyterms(model)
                     ? (await almanacTerms()).map((term) => term.text)
                     : [];
+                await reserveCall();
                 const result = await elevenLabsTranscribe({
                     apiKey,
                     model,
@@ -724,7 +763,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -742,6 +781,7 @@ async function transcribeRecordingInner(
             } else if (transcriptionStyle === "speechmatics") {
                 // Batch accepts hours-long uploads, so the Whisper 25 MiB
                 // re-encode is skipped here the same way it is for Scribe.
+                await reserveCall();
                 const result = await speechmaticsTranscribe({
                     apiKey,
                     model,
@@ -756,7 +796,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -776,6 +816,7 @@ async function transcribeRecordingInner(
                 });
 
                 if (transcriptionStyle === "chat") {
+                    await reserveCall();
                     const result = await chatTranscribe({
                         client: openai,
                         model,
@@ -787,7 +828,7 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
-                            payerUserId: ctx.actorUserId,
+                            payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
                             model,
@@ -826,6 +867,7 @@ async function transcribeRecordingInner(
                     // can keep the request open 20-40 min. The SDK default
                     // (10 min) times out long before that; override
                     // per-request so other OpenAI calls keep the default.
+                    await reserveCall();
                     const transcription =
                         await openai.audio.transcriptions.create(
                             buildTranscriptionParams({
@@ -852,7 +894,7 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
-                            payerUserId: ctx.actorUserId,
+                            payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
                             model,
@@ -876,7 +918,7 @@ async function transcribeRecordingInner(
                 }
             }
         } else {
-            if (requested || !isMynahConfigured()) {
+            if (opts.providerId || !isMynahConfigured()) {
                 return {
                     success: false,
                     error: "No transcription API configured",
@@ -1091,5 +1133,10 @@ function refusedResult(refusal: WriterRefusal | "cancelled"): TranscribeResult {
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {
-    return error instanceof Error && error.name === "MynahBudgetExhaustedError";
+    return (
+        (error instanceof Error &&
+            error.name === "MynahBudgetExhaustedError") ||
+        (error instanceof AppError &&
+            error.code === ErrorCode.MYNAH_BUDGET_EXHAUSTED)
+    );
 }
