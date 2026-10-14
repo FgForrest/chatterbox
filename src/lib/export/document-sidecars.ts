@@ -12,8 +12,15 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import { resolveAiOutputLanguage } from "@/lib/ai/summary-presets";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
+import {
+    type AppLocale,
+    defaultLocale,
+    normalizeLocale,
+} from "@/lib/i18n/config";
+import { translatedSourceMessage } from "@/lib/i18n/messages";
 import { buildNameResolver } from "@/lib/knowledge/attribution";
 import { projectTranscript } from "@/lib/knowledge/project-transcript";
 import {
@@ -65,6 +72,7 @@ export interface SummarySidecarInput {
     model: string;
     source: string;
     transcriptSource: string;
+    language?: string | null;
     summary: string | null;
     keyPoints: string[];
     actionItems: string[];
@@ -90,6 +98,7 @@ interface SidecarProjectionContext {
     resolve: SpeakerNameResolver | undefined;
     participants: string[];
     speakers: string[];
+    summaryLanguage: string | null;
 }
 
 export { sidecarKey } from "@/lib/recordings/storage-files";
@@ -138,31 +147,46 @@ export function buildSummaryMarkdown(input: SummarySidecarInput): string {
 export function summarySections(
     input: Pick<
         SummarySidecarInput,
-        "summary" | "keyPoints" | "actionItems" | "tasks"
+        "summary" | "keyPoints" | "actionItems" | "tasks" | "language"
     >,
 ): string[] {
     const sections: string[] = [];
+    const locale = normalizeLocale(input.language) ?? defaultLocale;
     const summary = input.summary?.trim();
     if (summary) {
-        sections.push(`## Summary\n\n${summary}`);
+        sections.push(
+            `## ${translatedSourceMessage(locale, "Summary")}\n\n${summary}`,
+        );
     }
     if (input.keyPoints.length > 0) {
-        sections.push(`## Key points\n\n${bulletList(input.keyPoints)}`);
+        sections.push(
+            `## ${translatedSourceMessage(locale, "Key Points")}\n\n${bulletList(input.keyPoints)}`,
+        );
     }
     if (input.tasks && input.tasks.length > 0) {
-        sections.push(`## Tasks\n\n${taskList(input.tasks)}`);
+        sections.push(
+            `## ${translatedSourceMessage(locale, "Tasks")}\n\n${taskList(input.tasks, locale)}`,
+        );
     } else if (input.actionItems.length > 0) {
-        sections.push(`## Action items\n\n${bulletList(input.actionItems)}`);
+        sections.push(
+            `## ${translatedSourceMessage(locale, "Action Items")}\n\n${bulletList(input.actionItems)}`,
+        );
     }
     return sections;
 }
 
-function taskList(tasks: readonly SummarySidecarTask[]): string {
+function taskList(
+    tasks: readonly SummarySidecarTask[],
+    locale: AppLocale,
+): string {
+    const due = translatedSourceMessage(locale, "Due").toLocaleLowerCase(
+        locale,
+    );
     return tasks
         .map((task) => {
             const details = [
                 task.assignee,
-                task.dueDate ? `due ${task.dueDate}` : null,
+                task.dueDate ? `${due} ${task.dueDate}` : null,
             ].filter(Boolean);
             const suffix = details.length > 0 ? ` (${details.join(", ")})` : "";
             const text = task.text.replace(/\s+/g, " ").trim();
@@ -478,6 +502,7 @@ async function renderRecordingMarkdownDocument(
             model: enhancement.model,
             source: enhancement.source,
             transcriptSource: projection.primary?.source ?? enhancement.source,
+            language: projection.summaryLanguage,
             summary,
             keyPoints,
             actionItems,
@@ -504,7 +529,12 @@ async function loadSidecarProjectionContext(
             ),
         );
     const [settings] = await db
-        .select({ preferred: userSettings.preferredTranscriptSource })
+        .select({
+            preferred: userSettings.preferredTranscriptSource,
+            aiOutputLanguage: userSettings.aiOutputLanguage,
+            defaultTranscriptionLanguage:
+                userSettings.defaultTranscriptionLanguage,
+        })
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
         .limit(1);
@@ -528,6 +558,10 @@ async function loadSidecarProjectionContext(
         resolve,
         participants: participantNames(speakers, resolve),
         speakers,
+        summaryLanguage: resolveAiOutputLanguage(
+            settings?.aiOutputLanguage,
+            primary?.detectedLanguage ?? settings?.defaultTranscriptionLanguage,
+        ),
     };
 }
 
