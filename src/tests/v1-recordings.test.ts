@@ -80,7 +80,11 @@ const transcription = {
     turns: null,
     topics: null,
     topicsInputFingerprint: null,
+    profileRevisionId: null,
+    builtinPromptsVersion: null,
+    inputs: null,
     producedByUserId: null,
+    payerUserId: null,
     revision: 0,
     audioMd5: null,
     createdAt: now,
@@ -99,10 +103,16 @@ const enhancement = {
     transcriptionId: "tr-1",
     // Single-pass summary: multi-pass provenance is NULL.
     inputFingerprint: null,
+    profileRevisionId: null,
+    builtinPromptsVersion: null,
+    inputs: null,
+    outputLanguage: null,
+    outputFormatLocale: null,
     multiPassRounds: null,
     multiPassUsed: null,
     multiPassMerged: null,
     producedByUserId: null,
+    payerUserId: null,
     createdAt: now,
 };
 

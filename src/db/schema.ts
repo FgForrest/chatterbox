@@ -581,6 +581,78 @@ export const chatterItems = pgTable(
     }),
 );
 
+export const processingProfiles = pgTable(
+    "processing_profiles",
+    {
+        id: text("id").primaryKey(),
+        ownerUserId: text("owner_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        scope: varchar("scope", { length: 16 })
+            .$type<"personal" | "organization">()
+            .notNull(),
+        channel: varchar("channel", { length: 16 })
+            .$type<"audio" | "mail">()
+            .notNull(),
+        // Encrypted.
+        name: text("name").notNull(),
+        description: text("description"),
+        isDefault: boolean("is_default").notNull().default(false),
+        // No FK avoids a cycle with processing_profile_revisions.
+        currentRevisionId: text("current_revision_id"),
+        version: integer("version").notNull().default(1),
+        createdBy: text("created_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        updatedBy: text("updated_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+        archivedAt: timestamp("archived_at"),
+    },
+    (table) => ({
+        ownerIdx: index("processing_profiles_owner_user_id_idx").on(
+            table.ownerUserId,
+        ),
+        ownerChannelDefaultUnique: uniqueIndex(
+            "processing_profiles_owner_channel_default_unique",
+        )
+            .on(table.ownerUserId, table.channel)
+            .where(sql`${table.isDefault} and ${table.archivedAt} is null`),
+        scopeCheck: check(
+            "processing_profiles_scope_check",
+            sql`${table.scope} in ('personal', 'organization')`,
+        ),
+        channelCheck: check(
+            "processing_profiles_channel_check",
+            sql`${table.channel} in ('audio', 'mail')`,
+        ),
+    }),
+);
+
+// Immutable: revisions are inserted and never updated.
+export const processingProfileRevisions = pgTable(
+    "processing_profile_revisions",
+    {
+        id: text("id").primaryKey(),
+        profileId: text("profile_id")
+            .notNull()
+            .references(() => processingProfiles.id, { onDelete: "cascade" }),
+        // Encrypted JSON stored as text.
+        settings: text("settings").notNull(),
+        createdBy: text("created_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        profileIdIdx: index("processing_profile_revisions_profile_id_idx").on(
+            table.profileId,
+        ),
+    }),
+);
+
 // `phases` holds only state names, reason codes, generations and input
 // fingerprints, never user content, so nothing in this table is encrypted.
 export const itemProcessing = pgTable(
@@ -595,7 +667,10 @@ export const itemProcessing = pgTable(
         view: varchar("view", { length: 8 })
             .$type<"private" | "org">()
             .notNull(),
-        profileId: text("profile_id"),
+        profileId: text("profile_id").references(() => processingProfiles.id, {
+            onDelete: "set null",
+        }),
+        // No FK: revisions live until their profile is deleted, while this item row must survive.
         profileRevisionId: text("profile_revision_id"),
         phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
         requestedGeneration: integer("requested_generation")
@@ -797,6 +872,31 @@ export const recordingFolders = pgTable(
         rootKindUnique: uniqueIndex("recording_folders_user_root_kind_unique")
             .on(table.userId, table.kind)
             .where(sql`${table.kind} in ('private', 'public')`),
+    }),
+);
+
+export const folderDefaultProfiles = pgTable(
+    "folder_default_profiles",
+    {
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        channel: varchar("channel", { length: 16 })
+            .$type<"audio" | "mail">()
+            .notNull(),
+        profileId: text("profile_id").references(() => processingProfiles.id, {
+            onDelete: "set null",
+        }),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.folderId, table.channel] }),
+        profileIdIdx: index("folder_default_profiles_profile_id_idx").on(
+            table.profileId,
+        ),
+        channelCheck: check(
+            "folder_default_profiles_channel_check",
+            sql`${table.channel} in ('audio', 'mail')`,
+        ),
     }),
 );
 
@@ -1201,13 +1301,23 @@ export const transcriptions = pgTable(
         topicsInputFingerprint: varchar("topics_input_fingerprint", {
             length: 64,
         }),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
         // Who ran the provider. Differs from `userId` when the organization
         // account changes a shared recording: the rows stay the owner's, and
-        // the organization account produced (and paid for) them.
+        // the organization account produced them.
         producedByUserId: text("produced_by_user_id").references(
             () => users.id,
             { onDelete: "set null" },
         ),
+        // Who paid for the provider call; the producer remains the actor.
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         // Goes up by one on every write of `text` or `turns`, so anything
         // made from one version of the transcript (a speaker change, a Learn
         // run) can tell it is looking at the version it was made on. Topics
@@ -1225,6 +1335,9 @@ export const transcriptions = pgTable(
         producedByIdx: index("transcriptions_produced_by_user_id_idx")
             .on(table.producedByUserId)
             .where(sql`${table.producedByUserId} is not null`),
+        payerUserIdIdx: index("transcriptions_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
         // At most one transcript per (recording, user, source) so a
         // Plaud-imported transcript and the user's own provider can coexist
         // while each source still upserts cleanly. Also serves every lookup
@@ -2184,12 +2297,21 @@ export const learnRuns = pgTable(
         actorUserId: text("actor_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         trigger: varchar("trigger", { length: 16 })
             .$type<"manual" | "auto">()
             .notNull(),
         // The revision of the content it read.
         transcriptRevision: integer("transcript_revision").notNull(),
         vocabularyVersion: integer("vocabulary_version").notNull(),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
         status: varchar("status", { length: 16 })
             .$type<
                 | "queued"
@@ -2223,6 +2345,9 @@ export const learnRuns = pgTable(
         userIdx: index("learn_runs_user_id_idx").on(table.userId),
         scopeIdx: index("learn_runs_scope_user_id_idx").on(table.scopeUserId),
         actorIdx: index("learn_runs_actor_user_id_idx").on(table.actorUserId),
+        payerUserIdIdx: index("learn_runs_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
         // The review badge: recordings with a run waiting for review.
         readyIdx: index("learn_runs_ready_idx")
             .on(table.view, table.userId, table.itemId)
@@ -2462,6 +2587,14 @@ export const aiEnhancements = pgTable(
         // corrections applied); null for a summary made before corrections
         // existed, which never reads as stale.
         inputFingerprint: varchar("input_fingerprint", { length: 64 }),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
+        outputLanguage: varchar("output_language", { length: 16 }),
+        outputFormatLocale: varchar("output_format_locale", { length: 16 }),
         multiPassRounds: integer("multi_pass_rounds"),
         multiPassUsed: integer("multi_pass_passes_used"),
         multiPassMerged: boolean("multi_pass_merged"),
@@ -2470,6 +2603,9 @@ export const aiEnhancements = pgTable(
             () => users.id,
             { onDelete: "set null" },
         ),
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
@@ -2483,6 +2619,9 @@ export const aiEnhancements = pgTable(
         producedByIdx: index("ai_enhancements_produced_by_user_id_idx")
             .on(table.producedByUserId)
             .where(sql`${table.producedByUserId} is not null`),
+        payerUserIdIdx: index("ai_enhancements_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
     }),
 );
 
@@ -2776,6 +2915,7 @@ export const apiCredentials = pgTable(
             precision: 16,
             scale: 6,
         }),
+        disabledAt: timestamp("disabled_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },

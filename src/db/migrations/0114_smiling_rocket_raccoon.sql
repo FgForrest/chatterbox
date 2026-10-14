@@ -1,0 +1,3 @@
+CREATE INDEX "ai_enhancements_payer_user_id_idx" ON "ai_enhancements" USING btree ("payer_user_id") WHERE "ai_enhancements"."payer_user_id" is not null;--> statement-breakpoint
+CREATE INDEX "learn_runs_payer_user_id_idx" ON "learn_runs" USING btree ("payer_user_id") WHERE "learn_runs"."payer_user_id" is not null;--> statement-breakpoint
+CREATE INDEX "transcriptions_payer_user_id_idx" ON "transcriptions" USING btree ("payer_user_id") WHERE "transcriptions"."payer_user_id" is not null;
