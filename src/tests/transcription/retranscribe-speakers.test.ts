@@ -219,7 +219,7 @@ describe("forced re-transcribe and speaker attributions", () => {
         expect(upsertTranscription).toHaveBeenCalledWith(
             expect.objectContaining({
                 profileRevisionId: "seeded-profile-revision",
-                builtinPromptsVersion: expect.any(String),
+                builtinPromptsVersion: null,
                 payerUserId: userId,
                 inputs: {
                     contentId: recordingId,

@@ -107,8 +107,9 @@ describeWithDatabase("processing profiles schema", () => {
                     'profile_revision_id', 'builtin_prompts_version', 'inputs',
                     'payer_user_id'
                ))
+               or (table_name = 'ai_usage_events' and column_name = 'actor_user_id')
         `;
-        expect(columns).toHaveLength(15);
+        expect(columns).toHaveLength(16);
 
         const indexes = await database.sql<{ indexname: string }[]>`
             select indexname
@@ -117,15 +118,46 @@ describeWithDatabase("processing profiles schema", () => {
               and indexname in (
                   'transcriptions_payer_user_id_idx',
                   'ai_enhancements_payer_user_id_idx',
-                  'learn_runs_payer_user_id_idx'
+                  'learn_runs_payer_user_id_idx',
+                  'ai_usage_events_actor_user_id_idx',
+                  'item_processing_profile_id_idx',
+                  'processing_profiles_created_by_idx',
+                  'processing_profiles_updated_by_idx',
+                  'processing_profile_revisions_created_by_idx'
               )
             order by indexname
         `;
         expect(indexes.map(({ indexname }) => indexname)).toEqual([
             "ai_enhancements_payer_user_id_idx",
+            "ai_usage_events_actor_user_id_idx",
+            "item_processing_profile_id_idx",
             "learn_runs_payer_user_id_idx",
+            "processing_profile_revisions_created_by_idx",
+            "processing_profiles_created_by_idx",
+            "processing_profiles_updated_by_idx",
             "transcriptions_payer_user_id_idx",
         ]);
+
+        const partialIndexes = await database.sql<
+            { indexname: string; indexdef: string }[]
+        >`
+            select indexname, indexdef
+            from pg_indexes
+            where schemaname = 'public'
+              and indexname in (
+                  'ai_usage_events_actor_user_id_idx',
+                  'item_processing_profile_id_idx',
+                  'processing_profiles_created_by_idx',
+                  'processing_profiles_updated_by_idx',
+                  'processing_profile_revisions_created_by_idx'
+              )
+        `;
+        expect(partialIndexes).toHaveLength(5);
+        expect(
+            partialIndexes.every(({ indexdef }) =>
+                /WHERE \(.+ IS NOT NULL\)/.test(indexdef),
+            ),
+        ).toBe(true);
     });
 
     it("rejects unsupported profile scopes and channels", async () => {

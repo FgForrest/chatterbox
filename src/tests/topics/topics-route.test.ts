@@ -94,6 +94,9 @@ describe("GET /api/recordings/[id]/topics", () => {
             "recording-1",
             "topics",
         );
+        expect(
+            vi.mocked(getActiveJob).mock.invocationCallOrder[0],
+        ).toBeLessThan(vi.mocked(pipelineMayQueue).mock.invocationCallOrder[0]);
     });
 
     it("does not report the pipeline driver when automatic topics are off", async () => {
@@ -193,5 +196,6 @@ describe("GET /api/recordings/[id]/topics", () => {
             jobId: "topics-job-1",
             jobKind: "topics",
         });
+        expect(pipelineMayQueue).not.toHaveBeenCalled();
     });
 });

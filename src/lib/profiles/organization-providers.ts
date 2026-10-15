@@ -1,4 +1,4 @@
-import { and, count, eq, sum } from "drizzle-orm";
+import { and, count, eq, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
     adminActionLog,
@@ -45,6 +45,20 @@ export interface OrganizationProviderUpdate {
 
 type CredentialRow = typeof apiCredentials.$inferSelect;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type OrganizationProviderAuditContext = Pick<
+    OrganizationProviderContext,
+    "userId" | "email" | "orgUserId"
+>;
+
+/** Identify a local organization account using the personal provider routes. */
+export async function organizationAccountProviderAuditContext(input: {
+    userId: string;
+    email: string;
+}): Promise<OrganizationProviderAuditContext | null> {
+    if (isIdpAuthorization()) return null;
+    const orgUserId = await getOrgUserId();
+    return orgUserId === input.userId ? { ...input, orgUserId } : null;
+}
 
 function unavailable(): AppError {
     return new AppError(
@@ -117,10 +131,11 @@ function auditSnapshot(row: CredentialRow | null) {
     };
 }
 
-async function writeAudit(
+/** Write the non-secret audit record for an Organization provider mutation. */
+export async function writeOrganizationProviderAudit(
     tx: Tx,
     input: {
-        context: OrganizationProviderContext;
+        context: OrganizationProviderAuditContext;
         action: string;
         credentialId: string;
         before: CredentialRow | null;
@@ -175,7 +190,7 @@ export async function createOrganizationProvider(
                 500,
             );
         }
-        await writeAudit(tx, {
+        await writeOrganizationProviderAudit(tx, {
             context,
             action: "org_provider.create",
             credentialId: created.id,
@@ -240,7 +255,7 @@ export async function updateOrganizationProvider(
                 : before.disabledAt !== null && after.disabledAt === null
                   ? "org_provider.enable"
                   : "org_provider.update";
-        await writeAudit(tx, {
+        await writeOrganizationProviderAudit(tx, {
             context,
             action,
             credentialId,
@@ -279,7 +294,7 @@ export async function deleteOrganizationProvider(
                     eq(apiCredentials.id, credentialId),
                 ),
             );
-        await writeAudit(tx, {
+        await writeOrganizationProviderAudit(tx, {
             context,
             action: "org_provider.delete",
             credentialId,
@@ -300,18 +315,19 @@ export interface OrganizationProviderMemberUsage {
 export async function organizationProviderUsage(
     context: OrganizationProviderContext,
 ): Promise<OrganizationProviderMemberUsage[]> {
+    const actorUserId = sql<string>`coalesce(${aiUsageEvents.actorUserId}, ${aiUsageEvents.userId})`;
     const rows = await db
         .select({
-            userId: aiUsageEvents.userId,
+            userId: actorUserId,
             email: users.email,
             calls: count(aiUsageEvents.id),
             estimatedCostUsd: sum(aiUsageEvents.costUsd),
         })
         .from(aiUsageEvents)
-        .innerJoin(users, eq(users.id, aiUsageEvents.userId))
+        .innerJoin(users, eq(users.id, actorUserId))
         .where(eq(aiUsageEvents.payerUserId, context.orgUserId))
-        .groupBy(aiUsageEvents.userId, users.email)
-        .orderBy(users.email, aiUsageEvents.userId);
+        .groupBy(actorUserId, users.email)
+        .orderBy(users.email, actorUserId);
     return rows.map((row) => ({
         userId: row.userId,
         email: row.email,

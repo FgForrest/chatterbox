@@ -240,6 +240,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ]),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {
@@ -326,6 +327,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {
@@ -397,6 +399,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ]),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {

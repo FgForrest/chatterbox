@@ -90,25 +90,27 @@ vi.mock("@/lib/sharing/access", async () => {
                 : "private",
         recordingJobSubject: (id: string, view: string) =>
             view === "org" ? `org:${id}` : id,
-        requireRecordingView: vi.fn(async (userId: string, id: string) => {
-            if (!recordingAccess.exists) {
-                throw new AppError(
-                    ErrorCode.RECORDING_NOT_FOUND,
-                    "Recording not found",
-                    404,
-                );
-            }
-            return {
-                recordingId: id,
-                ownerUserId: userId,
-                contentUserId: userId,
-                role: "owner",
-                kind: "audio",
-                shared: false,
-                orgUserId: null,
-                view: "private",
-            };
-        }),
+        requireRecordingView: vi.fn(
+            async (userId: string, id: string, view: "private" | "org") => {
+                if (!recordingAccess.exists) {
+                    throw new AppError(
+                        ErrorCode.RECORDING_NOT_FOUND,
+                        "Recording not found",
+                        404,
+                    );
+                }
+                return {
+                    recordingId: id,
+                    ownerUserId: userId,
+                    contentUserId: userId,
+                    role: "owner",
+                    kind: "audio",
+                    shared: false,
+                    orgUserId: null,
+                    view,
+                };
+            },
+        ),
     };
 });
 vi.mock("@/lib/sharing/jobs", () => ({ getJobVisibleTo: vi.fn() }));
@@ -135,6 +137,7 @@ vi.mock("@/lib/demo/fixtures", () => ({
 
 import { GET, POST } from "@/app/api/recordings/[id]/summary/route";
 import { getActiveJob } from "@/db/queries/async-jobs";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { watchJob } from "@/lib/jobs/watch";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
 import { resolveSelectedProfile } from "@/lib/profiles/resolve";
@@ -159,6 +162,7 @@ function stubRecordingExists(exists = true) {
 describe("POST /api/recordings/[id]/summary (manual)", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(actsForOrganization).mockResolvedValue(false);
         stubRecordingExists();
         (enqueueSummaryJob as Mock).mockResolvedValue({
             job: { id: "job-1", status: "pending" },
@@ -251,6 +255,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         expect(resolveSelectedProfile).toHaveBeenCalledWith({
             profileId: "profile-1",
             actorUserId: "user-1",
+            view: "private",
         });
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: "user-1",
@@ -260,6 +265,30 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             trigger: "manual",
             view: "private",
         });
+    });
+
+    it("rejects a personal profile on the Organization view", async () => {
+        vi.mocked(actsForOrganization).mockResolvedValue(true);
+        (resolveSelectedProfile as Mock).mockResolvedValue(null);
+        const response = await POST(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?view=org",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ profileId: "personal-profile" }),
+                },
+            ),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(400);
+        expect(resolveSelectedProfile).toHaveBeenCalledWith({
+            profileId: "personal-profile",
+            actorUserId: "user-1",
+            view: "org",
+        });
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
     });
 
     it("rejects preset and profileId together", async () => {
@@ -415,6 +444,7 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             model: "plaud-native",
             availableSources: ["plaud", "riffado"],
         });
+        expect(pipelineMayQueue).not.toHaveBeenCalled();
     });
 
     it("reports the private pipeline driver while automatic summary work is pending", async () => {
@@ -453,6 +483,9 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             "rec-1",
             "summary",
         );
+        expect(
+            vi.mocked(getActiveJob).mock.invocationCallOrder[0],
+        ).toBeLessThan(vi.mocked(pipelineMayQueue).mock.invocationCallOrder[0]);
     });
 
     it("does not report the pipeline driver when automatic summaries are off", async () => {

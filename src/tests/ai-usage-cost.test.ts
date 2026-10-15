@@ -8,6 +8,7 @@ function context(provider: string, model: string): AiUsageContext {
     return {
         recordingId: "recording",
         ownerUserId: "owner",
+        actorUserId: "owner",
         payerUserId: "owner",
         operation: "transcription",
         provider,

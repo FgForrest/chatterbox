@@ -36,6 +36,7 @@ export type DecryptedCredential = Omit<CredentialRow, "apiKey"> & {
 interface ResolvedProviderBase {
     payerUserId: string;
     reserveCall: () => Promise<void>;
+    organizationCredential: boolean;
     actorSettings?: typeof userSettings.$inferSelect;
 }
 
@@ -64,12 +65,14 @@ function resolvedCredential(
     credential: CredentialRow,
     payerUserId: string,
     reserveCall: () => Promise<void>,
+    organizationCredential = false,
 ): ResolvedStepProvider {
     return {
         kind: "credential",
         credential: { ...credential, apiKey: decrypt(credential.apiKey) },
         payerUserId,
         reserveCall,
+        organizationCredential,
     };
 }
 
@@ -82,6 +85,7 @@ async function managedProvider(
         provider: RIFFADO_INCLUDED_PROVIDER_LABEL,
         payerUserId: actorUserId,
         reserveCall: noReservation,
+        organizationCredential: false,
     };
 }
 
@@ -279,7 +283,7 @@ async function resolvePinnedOrganization(input: {
         }
     };
 
-    return resolvedCredential(credential, orgUserId, reserveCall);
+    return resolvedCredential(credential, orgUserId, reserveCall, true);
 }
 
 async function activeCredentials(

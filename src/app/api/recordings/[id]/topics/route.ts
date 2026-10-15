@@ -73,15 +73,17 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     );
     const matchingTopicsJob =
         topicsJob && topicsJob.payload.source === source ? topicsJob : null;
-    const pipelineJob =
-        !matchingTopicsJob &&
-        view === "private" &&
-        source === "riffado" &&
-        (await pipelineMayQueue(access.ownerUserId, id, "topics"))
+    const pipelineDriver =
+        !matchingTopicsJob && view === "private" && source === "riffado"
             ? await getActiveJob(
                   PIPELINE_ADVANCE_JOB_KIND,
                   recordingJobSubject(id, "private"),
               )
+            : null;
+    const pipelineJob =
+        pipelineDriver &&
+        (await pipelineMayQueue(access.ownerUserId, id, "topics"))
+            ? pipelineDriver
             : null;
     const job =
         matchingTopicsJob ??

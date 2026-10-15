@@ -216,6 +216,46 @@ describe("profile prompt resolution", () => {
         });
     });
 
+    it.each([
+        ["de", "en"],
+        ["cs", "cs-CZ"],
+    ] as const)("uses language-independent custom title and topic prompts for %s output", (outputLanguage, uiLocale) => {
+        const profile = defaultProfileSettings("audio");
+        const title = {
+            ...profile.steps.title,
+            fullPrompt: "Custom title: {transcription}",
+        };
+        const topics = {
+            ...profile.steps.topics,
+            fullPrompt: "Custom topics: {transcription}",
+        };
+
+        expect(
+            resolveTitlePrompt({
+                settings: title,
+                outputLanguage,
+                contentLanguage: outputLanguage,
+                uiLocale,
+            }),
+        ).toMatchObject({
+            text: "Custom title: {transcription}",
+            formatLocale: "custom",
+            builtinVersion: null,
+        });
+        expect(
+            resolveTopicPrompt({
+                settings: topics,
+                outputLanguage,
+                contentLanguage: outputLanguage,
+                uiLocale,
+            }),
+        ).toMatchObject({
+            text: "Custom topics: {transcription}",
+            formatLocale: "custom",
+            builtinVersion: null,
+        });
+    });
+
     it("uses English title and topic built-ins for unsupported output languages", () => {
         const profile = defaultProfileSettings("audio");
         const title = {

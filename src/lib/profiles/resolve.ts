@@ -111,19 +111,22 @@ async function readProfileRevision(input: {
 export async function resolveSelectedProfile(input: {
     profileId: string;
     actorUserId: string;
+    view?: RecordingView;
 }): Promise<ResolvedItemProfile | null> {
-    await ensureProfiles(input.actorUserId);
-    const personal = await getProfile(
-        input.actorUserId,
-        input.profileId,
-        input.actorUserId,
-    );
-    if (personal?.currentRevisionId) {
-        return {
-            profile: personal,
-            revisionId: personal.currentRevisionId,
-            settings: personal.settings,
-        };
+    if ((input.view ?? "private") === "private") {
+        await ensureProfiles(input.actorUserId);
+        const personal = await getProfile(
+            input.actorUserId,
+            input.profileId,
+            input.actorUserId,
+        );
+        if (personal?.currentRevisionId) {
+            return {
+                profile: personal,
+                revisionId: personal.currentRevisionId,
+                settings: personal.settings,
+            };
+        }
     }
 
     const orgUserId = await getOrgUserId();
@@ -149,20 +152,36 @@ export async function loadSelectedProfileRevision(input: {
     revisionId: string;
     actorUserId: string;
     channel: ProfileChannel;
+    view: RecordingView;
 }): Promise<ResolvedItemProfile> {
     const orgUserId = await getOrgUserId();
-    const candidates = [
-        {
-            ownerUserId: input.actorUserId,
-            scope:
-                orgUserId === input.actorUserId
-                    ? ("organization" as const)
-                    : ("personal" as const),
-        },
-        ...(orgUserId && orgUserId !== input.actorUserId
-            ? [{ ownerUserId: orgUserId, scope: "organization" as const }]
-            : []),
-    ];
+    const candidates =
+        input.view === "org"
+            ? orgUserId
+                ? [
+                      {
+                          ownerUserId: orgUserId,
+                          scope: "organization" as const,
+                      },
+                  ]
+                : []
+            : [
+                  {
+                      ownerUserId: input.actorUserId,
+                      scope:
+                          orgUserId === input.actorUserId
+                              ? ("organization" as const)
+                              : ("personal" as const),
+                  },
+                  ...(orgUserId && orgUserId !== input.actorUserId
+                      ? [
+                            {
+                                ownerUserId: orgUserId,
+                                scope: "organization" as const,
+                            },
+                        ]
+                      : []),
+              ];
     for (const candidate of candidates) {
         const [revision] = await db
             .select({ profileId: processingProfileRevisions.profileId })
@@ -194,9 +213,9 @@ export async function loadSelectedProfileRevision(input: {
         if (resolved) return resolved;
     }
     throw new AppError(
-        ErrorCode.NOT_FOUND,
+        input.view === "org" ? ErrorCode.INVALID_INPUT : ErrorCode.NOT_FOUND,
         "The selected processing profile revision is unavailable",
-        404,
+        input.view === "org" ? 400 : 404,
     );
 }
 

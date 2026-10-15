@@ -30,6 +30,7 @@ export interface SummaryModel {
     credentials: DecryptedCredential;
     payerUserId: string;
     reserveCall: () => Promise<void>;
+    organizationCredential: boolean;
 }
 
 /** How a run went when it used multi-pass. Counts and outcomes only. */
@@ -76,6 +77,7 @@ export async function summaryModelFor(
     const openai = new OpenAI({
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
 
     return {
@@ -84,13 +86,19 @@ export async function summaryModelFor(
         credentials,
         payerUserId: resolved.payerUserId,
         reserveCall: resolved.reserveCall,
+        organizationCredential: resolved.organizationCredential,
     };
 }
 
 export interface RunSummaryInput {
     model: SummaryModel;
     /** Whose item the run is on, and who pays: recorded with its usage. */
-    usage: { itemId: string; ownerUserId: string; payerUserId: string };
+    usage: {
+        itemId: string;
+        ownerUserId: string;
+        actorUserId: string;
+        payerUserId: string;
+    };
     systemContent: string;
     prompt: string;
     /** The merge's system message, around the user's merge prompt. */
@@ -109,8 +117,19 @@ export async function runSummary(input: RunSummaryInput): Promise<{
     payload: SummaryPayload;
     multiPass?: MultiPassSummaryOutcome;
 }> {
-    const { openai, model, credentials, payerUserId, reserveCall } =
-        input.model;
+    const {
+        openai,
+        model,
+        credentials,
+        payerUserId,
+        reserveCall,
+        organizationCredential,
+    } = input.model;
+    const multiPassRounds = input.multiPass
+        ? clampRounds(input.multiPass.rounds)
+        : null;
+    const preReservedMultiPass =
+        organizationCredential && multiPassRounds !== null;
     let reservationError: AppError | null = null;
 
     /**
@@ -156,19 +175,23 @@ export async function runSummary(input: RunSummaryInput): Promise<{
             requestLabel: string,
             requestMessages: ChatCompletionMessageParam[],
             requestMaxTokens: number,
-        ): Promise<string> =>
-            withPassRetry(requestLabel, async () => {
-                try {
-                    await reserveCall();
-                } catch (error) {
-                    if (
-                        error instanceof AppError &&
-                        error.code === ErrorCode.AI_RATE_LIMITED
-                    ) {
-                        reservationError = error;
+        ): Promise<string> => {
+            let firstAttempt = true;
+            return withPassRetry(requestLabel, async () => {
+                if (!preReservedMultiPass || !firstAttempt) {
+                    try {
+                        await reserveCall();
+                    } catch (error) {
+                        if (
+                            error instanceof AppError &&
+                            error.code === ErrorCode.AI_RATE_LIMITED
+                        ) {
+                            reservationError = error;
+                        }
+                        throw error;
                     }
-                    throw error;
                 }
+                firstAttempt = false;
                 const response = await openai.chat.completions.create(
                     buildChatCompletionParams({
                         model,
@@ -181,6 +204,7 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                     {
                         recordingId: input.usage.itemId,
                         ownerUserId: input.usage.ownerUserId,
+                        actorUserId: input.usage.actorUserId,
                         payerUserId,
                         operation: "summary",
                         provider: credentials.provider,
@@ -192,10 +216,13 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                 );
                 return response.choices[0]?.message?.content?.trim() || "";
             });
+        };
 
         const raw = await complete(label, messages, maxTokens);
         const firstParse = parseSummaryPayloadResult(raw);
         if (!firstParse.failure) return raw;
+
+        if (preReservedMultiPass) return raw;
 
         console.warn(
             `[summary] ${label} returned invalid structured output (${firstParse.failure}); requesting repair`,
@@ -262,10 +289,16 @@ Correct the serialization without dropping or inventing information. Return exac
         return { payload: parseSummaryPayload(await runPass()) };
     }
 
+    if (preReservedMultiPass) {
+        for (let index = 0; index < (multiPassRounds ?? 0) + 1; index += 1) {
+            await reserveCall();
+        }
+    }
+
     let result: Awaited<ReturnType<typeof runMultiPassSummary>>;
     try {
         result = await runMultiPassSummary({
-            rounds: clampRounds(input.multiPass.rounds),
+            rounds: multiPassRounds ?? clampRounds(input.multiPass.rounds),
             runPass,
             runMerge,
             mergePrompt: input.multiPass.mergePrompt,

@@ -615,6 +615,12 @@ export const processingProfiles = pgTable(
         ownerIdx: index("processing_profiles_owner_user_id_idx").on(
             table.ownerUserId,
         ),
+        createdByIdx: index("processing_profiles_created_by_idx")
+            .on(table.createdBy)
+            .where(sql`${table.createdBy} is not null`),
+        updatedByIdx: index("processing_profiles_updated_by_idx")
+            .on(table.updatedBy)
+            .where(sql`${table.updatedBy} is not null`),
         ownerChannelDefaultUnique: uniqueIndex(
             "processing_profiles_owner_channel_default_unique",
         )
@@ -650,6 +656,9 @@ export const processingProfileRevisions = pgTable(
         profileIdIdx: index("processing_profile_revisions_profile_id_idx").on(
             table.profileId,
         ),
+        createdByIdx: index("processing_profile_revisions_created_by_idx")
+            .on(table.createdBy)
+            .where(sql`${table.createdBy} is not null`),
     }),
 );
 
@@ -686,6 +695,9 @@ export const itemProcessing = pgTable(
     (table) => ({
         pk: primaryKey({ columns: [table.itemId, table.view] }),
         userIdIdx: index("item_processing_user_id_idx").on(table.userId),
+        profileIdIdx: index("item_processing_profile_id_idx")
+            .on(table.profileId)
+            .where(sql`${table.profileId} is not null`),
         stalledIdx: index("item_processing_stalled_idx")
             .on(table.updatedAt)
             .where(
@@ -2847,6 +2859,9 @@ export const aiUsageEvents = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         payerUserId: text("payer_user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
@@ -2866,6 +2881,9 @@ export const aiUsageEvents = pgTable(
             table.payerUserId,
         ),
         userIdx: index("ai_usage_events_user_id_idx").on(table.userId),
+        actorIdx: index("ai_usage_events_actor_user_id_idx")
+            .on(table.actorUserId)
+            .where(sql`${table.actorUserId} is not null`),
         payerIdx: index("ai_usage_events_payer_user_id_idx").on(
             table.payerUserId,
         ),

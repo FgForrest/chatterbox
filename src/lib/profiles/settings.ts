@@ -68,6 +68,7 @@ const titleStepSchema = z
             "idea-stormer",
         ]),
         prompt: localeTextSchema,
+        fullPrompt: z.string().nullable().optional().default(null),
     })
     .strict();
 
@@ -80,6 +81,7 @@ const topicsStepSchema = z
         ...commonStepSchema,
         preset: z.literal("default"),
         prompt: localeTextSchema,
+        fullPrompt: z.string().nullable().optional().default(null),
     })
     .strict();
 
@@ -178,6 +180,7 @@ function sharedDefaults() {
             provider: null,
             preset: "default" as PromptPreset,
             prompt: {},
+            fullPrompt: null,
         },
         summary: {
             enabled: true,
@@ -241,6 +244,7 @@ export function defaultProfileSettings(
                 provider: null,
                 preset: "default" as TopicPreset,
                 prompt: {},
+                fullPrompt: null,
             },
         },
     };

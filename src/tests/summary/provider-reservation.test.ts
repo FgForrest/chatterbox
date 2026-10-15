@@ -83,6 +83,7 @@ describe("summary provider call reservations", () => {
             credentials: credential,
             payerUserId: "org-user",
             reserveCall,
+            organizationCredential: true,
         } as SummaryModel;
 
         const pending = runSummary({
@@ -90,6 +91,7 @@ describe("summary provider call reservations", () => {
             usage: {
                 itemId: "recording",
                 ownerUserId: "actor",
+                actorUserId: "actor",
                 payerUserId: "actor",
             },
             systemContent: "system",
@@ -131,6 +133,7 @@ describe("summary provider call reservations", () => {
             credential,
             payerUserId: "org-user",
             reserveCall,
+            organizationCredential: true,
         });
         const pin = {
             credentialId: "org-card",
@@ -144,6 +147,7 @@ describe("summary provider call reservations", () => {
             usage: {
                 itemId: "recording",
                 ownerUserId: "owner",
+                actorUserId: "actor",
                 payerUserId: model.payerUserId,
             },
             systemContent: "system",
@@ -160,6 +164,59 @@ describe("summary provider call reservations", () => {
         expect(model.payerUserId).toBe("org-user");
         expect(create).toHaveBeenCalledTimes(3);
         expect(reserveCall).toHaveBeenCalledTimes(3);
+        expect(model.openai.maxRetries).toBe(0);
+    });
+
+    it("makes no paid pass when a pinned multi-pass cap is hit during pre-reservation", async () => {
+        const create = vi.fn().mockResolvedValue(reply());
+        const cap = new AppError(ErrorCode.AI_RATE_LIMITED, "cap reached", 429);
+        const reserveCall = vi
+            .fn()
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(cap);
+        const credential = {
+            id: "org-card",
+            userId: "org-user",
+            provider: "OpenAI",
+            apiKey: "plaintext-at-use",
+            baseUrl: null,
+            defaultModel: "gpt-4o-mini",
+            isDefaultTranscription: false,
+            isDefaultEnhancement: false,
+            isDefaultLearn: false,
+            inputUsdPerMillion: null,
+            outputUsdPerMillion: null,
+            audioUsdPerHour: null,
+            disabledAt: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+        } satisfies typeof apiCredentials.$inferSelect;
+        const model = {
+            openai: { chat: { completions: { create } } } as unknown as OpenAI,
+            model: "gpt-4o-mini",
+            credentials: credential,
+            payerUserId: "org-user",
+            reserveCall,
+            organizationCredential: true,
+        } satisfies SummaryModel;
+
+        await expect(
+            runSummary({
+                model,
+                usage: {
+                    itemId: "recording",
+                    ownerUserId: "owner",
+                    actorUserId: "actor",
+                    payerUserId: "org-user",
+                },
+                systemContent: "system",
+                prompt: "prompt",
+                mergeSystem: (prompt) => prompt,
+                multiPass: { rounds: 3, mergePrompt: null },
+            }),
+        ).rejects.toBe(cap);
+        expect(reserveCall).toHaveBeenCalledTimes(2);
+        expect(create).not.toHaveBeenCalled();
     });
 
     it("does not fall back when a pinned provider is missing", async () => {

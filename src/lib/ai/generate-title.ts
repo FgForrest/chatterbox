@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { transcriptions } from "@/db/schema";
+import { transcriptions, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
@@ -10,10 +10,7 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/view";
 import { buildChatCompletionParams } from "./chat-completion-params";
-import {
-    getAiOutputLanguageDirective,
-    resolveAiOutputLanguage,
-} from "./summary-presets";
+import { getAiOutputLanguageDirective } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
 export async function generateTitleFromTranscription(
@@ -42,15 +39,16 @@ export async function generateTitleFromTranscription(
             ),
         )
         .limit(1);
-    const outputLanguage = resolveAiOutputLanguage(
-        settings.steps.summary.outputLanguage,
-        transcript?.detectedLanguage,
-    );
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ownerUserId))
+        .limit(1);
     const promptTemplate = resolveTitlePrompt({
         settings: settings.steps.title,
         outputLanguage: settings.steps.summary.outputLanguage,
         contentLanguage: transcript?.detectedLanguage ?? null,
-        uiLocale: "en",
+        uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
     }).text;
     let resolved: Awaited<ReturnType<typeof resolveStepProvider>>;
     try {
@@ -75,6 +73,7 @@ export async function generateTitleFromTranscription(
         const openai = new OpenAI({
             apiKey: credentials.apiKey,
             baseURL: credentials.baseUrl || undefined,
+            maxRetries: resolved.organizationCredential ? 0 : undefined,
         });
 
         // Use a lightweight model for title generation
@@ -92,7 +91,9 @@ export async function generateTitleFromTranscription(
         // Apply the AI output language directive via the system
         // message rather than the user prompt, so it doesn't compete with
         // the title-format rules in the user prompt.
-        const languageDirective = getAiOutputLanguageDirective(outputLanguage);
+        const languageDirective = getAiOutputLanguageDirective(
+            settings.steps.summary.outputLanguage,
+        );
 
         // Replacement function so `$` sequences in the transcript are
         // inserted verbatim, not treated as `String.prototype.replace`
@@ -130,6 +131,7 @@ export async function generateTitleFromTranscription(
             {
                 recordingId,
                 ownerUserId,
+                actorUserId: userId,
                 payerUserId: resolved.payerUserId,
                 operation: "title",
                 provider: credentials.provider,

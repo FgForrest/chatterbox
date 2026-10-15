@@ -71,6 +71,9 @@ vi.mock("@/lib/identity/factory", () => ({
     isIdpAuthorization: () => state.idp,
 }));
 vi.mock("@/lib/auth-server", () => ({
+    requireApiSession: async () => ({
+        user: { id: state.actorId, email: state.email },
+    }),
     requireApiSessionActor: async () => {
         const actor: ActorContext = {
             kind: state.idp
@@ -106,6 +109,11 @@ import {
     GET as listOrganizationProviders,
 } from "@/app/api/settings/ai/organization-providers/route";
 import { GET as organizationProviderUsage } from "@/app/api/settings/ai/organization-providers/usage/route";
+import {
+    DELETE as deletePersonalProvider,
+    PUT as updatePersonalProvider,
+} from "@/app/api/settings/ai/providers/[id]/route";
+import { POST as createPersonalProvider } from "@/app/api/settings/ai/providers/route";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -302,6 +310,37 @@ describeWithDatabase(
             expect(JSON.stringify(audit)).not.toContain("apiKey");
         });
 
+        it("audits local Organization-account mutations through personal provider routes", async () => {
+            state.idp = false;
+            state.actorId = "org-user";
+            state.email = "org@example.test";
+            const createdResponse = await createPersonalProvider(
+                request("POST", { provider: "OpenAI", apiKey: "secret" }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+
+            await updatePersonalProvider(
+                request("PUT", { defaultModel: "gpt-4o-mini" }, `/${id}`),
+                context(id),
+            );
+            await deletePersonalProvider(
+                request("DELETE", undefined, `/${id}`),
+                context(id),
+            );
+
+            const audit = await databaseClient()
+                .select()
+                .from(adminActionLog)
+                .where(eq(adminActionLog.targetResourceId, id))
+                .orderBy(adminActionLog.createdAt);
+            expect(audit.map((row) => row.action)).toEqual([
+                "org_provider.create",
+                "org_provider.update",
+                "org_provider.delete",
+            ]);
+        });
+
         it("summarizes organization-paid usage per member", async () => {
             await databaseClient()
                 .insert(chatterItems)
@@ -327,6 +366,7 @@ describeWithDatabase(
                     {
                         itemId: "item-manager",
                         userId: "manager",
+                        actorUserId: "member",
                         payerUserId: "org-user",
                         operation: "summary",
                         provider: "OpenAI",
@@ -336,6 +376,7 @@ describeWithDatabase(
                     {
                         itemId: "item-member",
                         userId: "member",
+                        actorUserId: "manager",
                         payerUserId: "org-user",
                         operation: "topics",
                         provider: "OpenAI",
@@ -345,6 +386,7 @@ describeWithDatabase(
                     {
                         itemId: "item-member",
                         userId: "member",
+                        actorUserId: null,
                         payerUserId: "org-user",
                         operation: "title",
                         provider: "OpenAI",
@@ -363,12 +405,12 @@ describeWithDatabase(
                     expect.objectContaining({
                         userId: "manager",
                         calls: 1,
-                        estimatedCostUsd: "0.100000000",
+                        estimatedCostUsd: "0.250000000",
                     }),
                     expect.objectContaining({
                         userId: "member",
                         calls: 2,
-                        estimatedCostUsd: "0.250000000",
+                        estimatedCostUsd: "0.100000000",
                     }),
                 ]),
             );

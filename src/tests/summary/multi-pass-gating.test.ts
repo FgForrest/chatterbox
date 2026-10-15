@@ -15,6 +15,8 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import { defaultTemplateConfig } from "@/lib/ai/prompt-templates";
+import { SUMMARY_TEMPLATE_KIND } from "@/lib/ai/summary-presets";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { loadSelectedProfileRevision } from "@/lib/profiles/resolve";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
@@ -307,6 +309,7 @@ describe("multi-pass gating", () => {
         expect(row.multiPassRounds).toBe(3);
         expect(row.multiPassUsed).toBe(3);
         expect(row.multiPassMerged).toBe(true);
+        expect(row.inputs).toMatchObject({ multiPass: "person" });
     });
 
     it("persists the profile, prompt version, payer, and content inputs", async () => {
@@ -320,10 +323,27 @@ describe("multi-pass gating", () => {
             inputs: {
                 contentId: "transcription-1",
                 contentRevision: 4,
+                multiPass: "off",
             },
             outputLanguage: null,
             outputFormatLocale: "en",
         });
+    });
+
+    it("records no built-in prompt version for a full custom prompt", async () => {
+        const summaryPrompt = defaultTemplateConfig(SUMMARY_TEMPLATE_KIND);
+        summaryPrompt.selectedPrompt = "custom-summary";
+        summaryPrompt.templates.push({
+            id: "custom-summary",
+            name: "Custom",
+            prompt: "Summarize this: {transcription}",
+            createdAt: "2026-10-15T00:00:00.000Z",
+        });
+        stage({ summaryPrompt });
+
+        await generate("manual");
+
+        expect(written.at(-1)).toMatchObject({ builtinPromptsVersion: null });
     });
 
     it("persists the explicitly selected immutable profile revision", async () => {
@@ -334,6 +354,7 @@ describe("multi-pass gating", () => {
             revisionId: "selected-profile-revision",
             actorUserId: "user-1",
             channel: "audio",
+            view: "private",
         });
         expect(written.at(-1)).toMatchObject({
             profileRevisionId: "selected-profile-revision",

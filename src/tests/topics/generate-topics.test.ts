@@ -12,9 +12,9 @@ import {
     recordings,
     transcriptions,
     userSettings,
+    users,
 } from "@/db/schema";
 import { ErrorCode } from "@/lib/errors";
-import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored turns as they are.
@@ -169,6 +169,7 @@ function stage(turns: unknown = TURNS) {
             },
         ],
     ]);
+    selectResults.set(users, [[{ uiLocale: "cs-CZ" }]]);
     selectResults.set(userSettings, [
         [{ topicPrompt: null, aiOutputLanguage: null }],
         [{ defaultProviders: null }],
@@ -238,12 +239,13 @@ describe("generateTopicsForTranscript", () => {
         expect(writes[0].set.topics).toMatchObject({
             encrypted: { topics: result.topics, templateId: "default" },
         });
-        expect(writes[0].set).toMatchObject({
-            profileRevisionId: "seeded-profile-revision",
-            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
-            payerUserId: "user-1",
-            inputs: { contentId: "tr-1", contentRevision: 7 },
-        });
+        expect(writes[0].set).not.toHaveProperty("profileRevisionId");
+        expect(writes[0].set).not.toHaveProperty("builtinPromptsVersion");
+        expect(writes[0].set).not.toHaveProperty("payerUserId");
+        expect(writes[0].set).not.toHaveProperty("inputs");
+        expect(createMock.mock.calls[0]?.[0].messages[0].content).toContain(
+            "the language the transcription is predominantly spoken in",
+        );
     });
 
     it("rechecks curation after the model finishes and refuses a revoked curator", async () => {

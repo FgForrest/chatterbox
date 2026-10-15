@@ -6,6 +6,7 @@ import {
     recordings,
     transcriptions,
     userSettings,
+    users,
 } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
@@ -276,6 +277,7 @@ export async function generateSummaryForRecording(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "audio",
+                view: ctx.view,
             })
           : await resolveItemProfile(
                 recordingId,
@@ -299,6 +301,11 @@ export async function generateSummaryForRecording(
                   .from(userSettings)
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
+        .limit(1);
 
     const promptConfig = normalizeSummaryPromptConfig(
         userSettingsRow?.summaryPrompt
@@ -335,7 +342,7 @@ export async function generateSummaryForRecording(
               settings: profileSettings.steps.summary,
               outputLanguage: profileSettings.steps.summary.outputLanguage,
               contentLanguage,
-              uiLocale: "en",
+              uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
           })
         : null;
     const promptTemplate = profilePrompt?.text ?? legacyPrompt?.prompt;
@@ -430,6 +437,7 @@ export async function generateSummaryForRecording(
         usage: {
             itemId: recordingId,
             ownerUserId: ctx.ownerUserId,
+            actorUserId: ctx.actorUserId,
             payerUserId: summaryModel.payerUserId,
         },
         systemContent,
@@ -502,6 +510,11 @@ export async function generateSummaryForRecording(
         inputs: {
             contentId: transcription.id,
             contentRevision: transcription.revision,
+            multiPass: multiPassOn
+                ? pinnedMultiPass
+                    ? "profile"
+                    : "person"
+                : "off",
         },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,

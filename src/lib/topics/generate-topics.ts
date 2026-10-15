@@ -12,14 +12,11 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { recordings, transcriptions } from "@/db/schema";
+import { recordings, transcriptions, users } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
-import {
-    getAiOutputLanguageDirective,
-    resolveAiOutputLanguage,
-} from "@/lib/ai/summary-presets";
+import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField } from "@/lib/encryption/fields";
@@ -168,11 +165,16 @@ export async function generateTopicsForTranscript(
         ctx.actorUserId,
     );
     const settings = profile.settings as AudioProfileSettings;
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
+        .limit(1);
     const resolvedPrompt = resolveTopicPrompt({
         settings: settings.steps.topics,
         outputLanguage: settings.steps.summary.outputLanguage,
         contentLanguage: transcript.detectedLanguage,
-        uiLocale: "en",
+        uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
     });
     const templateId = settings.steps.topics.preset;
     const promptTemplate = resolvedPrompt.text;
@@ -194,17 +196,13 @@ export async function generateTopicsForTranscript(
     const openai = new OpenAI({
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
-    const outputLanguage = resolveAiOutputLanguage(
-        settings.steps.summary.outputLanguage,
-        transcript.detectedLanguage,
-    );
-
     const systemContent = [
         TOPIC_SYSTEM_PROMPT,
         CONTENT_IS_DATA_DIRECTIVE,
-        getAiOutputLanguageDirective(outputLanguage),
+        getAiOutputLanguageDirective(settings.steps.summary.outputLanguage),
     ].join("\n\n");
 
     // Read with its corrections applied (same turns, same times), and the
@@ -254,6 +252,7 @@ export async function generateTopicsForTranscript(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
+                        actorUserId: ctx.actorUserId,
                         payerUserId: resolved.payerUserId,
                         operation: "topics",
                         provider: credentials.provider,
@@ -337,13 +336,6 @@ export async function generateTopicsForTranscript(
             .set({
                 topics: encryptJsonField(stored),
                 topicsInputFingerprint: input.fingerprint,
-                profileRevisionId: profile.revisionId,
-                builtinPromptsVersion: resolvedPrompt.builtinVersion,
-                payerUserId: resolved.payerUserId,
-                inputs: {
-                    contentId: transcript.id,
-                    contentRevision: transcript.revision,
-                },
             })
             .where(
                 and(

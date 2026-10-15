@@ -17,8 +17,8 @@ describe("profile settings", () => {
             schemaVersion: 1,
             steps: {
                 transcribe: { provider: null, quality: "balanced" },
-                title: { preset: "default", prompt: {} },
-                topics: { preset: "default", prompt: {} },
+                title: { preset: "default", prompt: {}, fullPrompt: null },
+                topics: { preset: "default", prompt: {}, fullPrompt: null },
                 summary: {
                     preset: "general",
                     focus: null,
@@ -115,6 +115,21 @@ describe("profile settings", () => {
                 steps: { ...mail.steps, title },
             }).steps.title.enabled,
         ).toBe(false);
+    });
+
+    it("defaults missing title and topic full prompts in stored v1 revisions", () => {
+        const audio = defaultProfileSettings("audio");
+        const { fullPrompt: _titlePrompt, ...title } = audio.steps.title;
+        const { fullPrompt: _topicPrompt, ...topics } = audio.steps.topics;
+
+        const parsed = parseProfileSettings("audio", {
+            ...audio,
+            steps: { ...audio.steps, title, topics },
+        });
+
+        expect(parsed.steps.title.fullPrompt).toBeNull();
+        expect(parsed.steps.topics.fullPrompt).toBeNull();
+        expect(parsed.schemaVersion).toBe(1);
     });
 
     it("accepts prompt overrides only for supported locales", () => {

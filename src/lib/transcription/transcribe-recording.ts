@@ -40,7 +40,6 @@ import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
-import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import {
     type ResolvedStepProvider,
     resolveStepProvider,
@@ -167,7 +166,7 @@ export async function storeBrowserTranscription(
     const profile = await resolveItemProfile(recordingId, "private", userId);
     const runRecord = {
         profileRevisionId: profile.revisionId,
-        builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+        builtinPromptsVersion: null,
         payerUserId: userId,
         inputs: {
             contentId: recording.id,
@@ -587,7 +586,10 @@ async function transcribeRecordingInner(
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
 
-        const defaultLanguage = transcribeStep.language || undefined;
+        const defaultLanguage =
+            (opts.trigger ?? "manual") === "manual"
+                ? settings?.defaultTranscriptionLanguage || undefined
+                : transcribeStep.language || undefined;
         const quality = transcribeStep.quality;
         // Title, Plaud and automation side effects act on the owner's
         // recording; a run on the Organization view never triggers them.
@@ -618,6 +620,7 @@ async function transcribeRecordingInner(
                 {
                     recordingId,
                     ownerUserId: ctx.ownerUserId,
+                    actorUserId: ctx.actorUserId,
                     payerUserId,
                     operation: "transcription",
                     provider: "Mynah",
@@ -724,6 +727,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
+                        actorUserId: ctx.actorUserId,
                         payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
@@ -757,6 +761,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
+                        actorUserId: ctx.actorUserId,
                         payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
@@ -790,6 +795,7 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
+                        actorUserId: ctx.actorUserId,
                         payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
@@ -807,6 +813,7 @@ async function transcribeRecordingInner(
                     apiKey,
                     baseURL: credentials.baseUrl || undefined,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
+                    maxRetries: resolved.organizationCredential ? 0 : undefined,
                 });
 
                 if (transcriptionStyle === "chat") {
@@ -822,6 +829,7 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
+                            actorUserId: ctx.actorUserId,
                             payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
@@ -888,6 +896,7 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
+                            actorUserId: ctx.actorUserId,
                             payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
@@ -940,7 +949,7 @@ async function transcribeRecordingInner(
             model: persistModel,
             turns,
             profileRevisionId: profile.revisionId,
-            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            builtinPromptsVersion: null,
             payerUserId,
             inputs: {
                 contentId: recording.id,

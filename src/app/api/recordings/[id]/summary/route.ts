@@ -142,6 +142,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         ? await resolveSelectedProfile({
               profileId,
               actorUserId: userId,
+              view,
           })
         : null;
     if (profileId && !selectedProfile) {
@@ -400,15 +401,17 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         SUMMARY_JOB_KIND,
         recordingJobSubject(id, view),
     );
-    const activePipeline =
-        !activeSummary &&
-        view === "private" &&
-        source === "riffado" &&
-        (await pipelineMayQueue(access.ownerUserId, id, "summary"))
+    const pipelineDriver =
+        !activeSummary && view === "private" && source === "riffado"
             ? await getActiveJob(
                   PIPELINE_ADVANCE_JOB_KIND,
                   recordingJobSubject(id, "private"),
               )
+            : null;
+    const activePipeline =
+        pipelineDriver &&
+        (await pipelineMayQueue(access.ownerUserId, id, "summary"))
+            ? pipelineDriver
             : null;
     const active = activeSummary ?? activePipeline;
     const activeJob =

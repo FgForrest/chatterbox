@@ -9,7 +9,10 @@ import { SUMMARY_TEMPLATE_KIND } from "@/lib/ai/summary-presets";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { TOPIC_TEMPLATE_KIND } from "@/lib/topics/topic-presets";
 
-vi.mock("@/db", () => ({ db: {} }));
+vi.mock("@/db", () => ({
+    db: { select: vi.fn(), transaction: vi.fn() },
+}));
+vi.mock("@/lib/org/config", () => ({ getOrgUserId: vi.fn() }));
 vi.mock("@/lib/env", () => ({
     env: {
         ENCRYPTION_KEY:
@@ -19,8 +22,11 @@ vi.mock("@/lib/env", () => ({
     },
 }));
 
+import { db } from "@/db";
+import { getOrgUserId } from "@/lib/org/config";
 import {
     buildSeedProfiles,
+    ensureProfiles,
     type LegacyProfileSettings,
     type SeedProfile,
 } from "@/lib/profiles/seed";
@@ -82,6 +88,21 @@ function fixture(
 }
 
 describe("legacy settings to profile seeds", () => {
+    it("returns before opening a seed transaction when profiles already exist", async () => {
+        vi.mocked(db.select).mockReturnValueOnce({
+            from: () => ({
+                where: () => ({
+                    limit: () => Promise.resolve([{ id: "existing-profile" }]),
+                }),
+            }),
+        } as unknown as ReturnType<typeof db.select>);
+
+        await ensureProfiles("owner");
+
+        expect(db.transaction).not.toHaveBeenCalled();
+        expect(getOrgUserId).not.toHaveBeenCalled();
+    });
+
     it("maps unedited presets without freezing their prompts", () => {
         const profiles = buildSeedProfiles(fixture(), "personal");
         const audio = profiles.find((profile) => profile.channel === "audio");
@@ -125,13 +146,13 @@ describe("legacy settings to profile seeds", () => {
             preset: "general",
             fullPrompt: "Complete summary",
         });
-        expect(audio?.settings.steps.title.prompt).toEqual({
-            en: "Edited title",
-            "cs-CZ": "Edited title",
+        expect(audio?.settings.steps.title).toMatchObject({
+            prompt: {},
+            fullPrompt: "Edited title",
         });
-        expect(audio?.settings.steps.topics.prompt).toEqual({
-            en: "Custom topics",
-            "cs-CZ": "Custom topics",
+        expect(audio?.settings.steps.topics).toMatchObject({
+            prompt: {},
+            fullPrompt: "Custom topics",
         });
 
         const mail = profiles.find((profile) => profile.channel === "mail");
@@ -290,6 +311,31 @@ describe("legacy settings to profile seeds", () => {
         expect(audio[1]?.settings.steps.title.automatic).toBe(false);
         expect(audio[1]?.settings.steps.topics.automatic).toBe(false);
         expect(audio[1]?.settings.steps.learn.automatic).toBe(false);
+    });
+
+    it("seeds built-in profile names in Czech without translating custom names", () => {
+        const summaryConfig = config(SUMMARY_TEMPLATE_KIND, "used", [
+            template("used", "Vlastní šablona", "Used prompt"),
+            template("extra", "Custom stays", "Extra prompt"),
+        ]);
+        const profiles = buildSeedProfiles(
+            fixture({
+                autoSummarizePreset: "meeting-notes",
+                summaryPrompt: summaryConfig,
+            }),
+            "personal",
+            "cs-CZ",
+        );
+
+        expect(profiles.map(({ name }) => name)).toEqual([
+            "Automatický",
+            "Ruční",
+            "Custom stays",
+            "Pošta",
+        ]);
+        expect(buildSeedProfiles(fixture(), "personal", "cs-CZ")[0]?.name).toBe(
+            "Nahrávky",
+        );
     });
 
     it("adds unused custom summaries with their names and automation off", () => {

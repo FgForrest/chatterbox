@@ -15,6 +15,10 @@ import { encrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { captureServerEvent } from "@/lib/posthog-server";
+import {
+    organizationAccountProviderAuditContext,
+    writeOrganizationProviderAudit,
+} from "@/lib/profiles/organization-providers";
 
 // GET - List all AI providers for the user
 export const GET = apiHandler(async (request: Request) => {
@@ -119,9 +123,13 @@ export const POST = apiHandler(async (request: Request) => {
 
     // Encrypt the API key; a duplicate's is already encrypted
     const encryptedKey = copiedKey ?? encrypt(apiKey);
+    const auditContext = await organizationAccountProviderAuditContext({
+        userId: session.user.id,
+        email: session.user.email,
+    });
 
     // Use a transaction to ensure atomic update of default providers
-    const [newProvider] = await db.transaction(async (tx) => {
+    const newProvider = await db.transaction(async (tx) => {
         // If setting as default, remove default flag from other providers
         if (isDefaultTranscription) {
             await tx
@@ -148,7 +156,7 @@ export const POST = apiHandler(async (request: Request) => {
         }
 
         // Insert new provider
-        return await tx
+        const [created] = await tx
             .insert(apiCredentials)
             .values({
                 userId: session.user.id,
@@ -160,14 +168,31 @@ export const POST = apiHandler(async (request: Request) => {
                 isDefaultEnhancement: isDefaultEnhancement || false,
                 ...rates,
             })
-            .returning({
-                id: apiCredentials.id,
-                provider: apiCredentials.provider,
-                baseUrl: apiCredentials.baseUrl,
-                defaultModel: apiCredentials.defaultModel,
-                isDefaultTranscription: apiCredentials.isDefaultTranscription,
-                isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
+            .returning();
+        if (!created) {
+            throw new AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "Provider was not created",
+                500,
+            );
+        }
+        if (auditContext) {
+            await writeOrganizationProviderAudit(tx, {
+                context: auditContext,
+                action: "org_provider.create",
+                credentialId: created.id,
+                before: null,
+                after: created,
             });
+        }
+        return {
+            id: created.id,
+            provider: created.provider,
+            baseUrl: created.baseUrl,
+            defaultModel: created.defaultModel,
+            isDefaultTranscription: created.isDefaultTranscription,
+            isDefaultEnhancement: created.isDefaultEnhancement,
+        };
     });
 
     if (isDefaultTranscription) {

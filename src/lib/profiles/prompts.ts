@@ -29,7 +29,7 @@ interface PromptLanguageOptions {
 /** Prompt text and the built-in provenance recorded with a processing run. */
 export interface ResolvedProfilePrompt {
     text: string;
-    builtinVersion: string;
+    builtinVersion: string | null;
     formatLocale: AppLocale | "custom";
 }
 
@@ -107,7 +107,7 @@ export function resolveSummaryPrompt(
     if (settings.fullPrompt !== null) {
         return {
             text: settings.fullPrompt,
-            builtinVersion: BUILTIN_PROMPTS_VERSION,
+            builtinVersion: null,
             formatLocale: "custom",
         };
     }
@@ -129,8 +129,15 @@ export function resolveSummaryPrompt(
 export function resolveTitlePrompt(
     options: PromptLanguageOptions & { settings: TitleStepSettings },
 ): ResolvedProfilePrompt {
-    const { locale, useLocaleOverride } = resolvePromptLocale(options);
     const { settings } = options;
+    if (settings.fullPrompt !== null) {
+        return {
+            text: settings.fullPrompt,
+            builtinVersion: null,
+            formatLocale: "custom",
+        };
+    }
+    const { locale, useLocaleOverride } = resolvePromptLocale(options);
     return {
         text:
             (useLocaleOverride ? settings.prompt[locale] : undefined) ??
@@ -144,8 +151,15 @@ export function resolveTitlePrompt(
 export function resolveTopicPrompt(
     options: PromptLanguageOptions & { settings: TopicStepSettings },
 ): ResolvedProfilePrompt {
-    const { locale, useLocaleOverride } = resolvePromptLocale(options);
     const { settings } = options;
+    if (settings.fullPrompt !== null) {
+        return {
+            text: settings.fullPrompt,
+            builtinVersion: null,
+            formatLocale: "custom",
+        };
+    }
+    const { locale, useLocaleOverride } = resolvePromptLocale(options);
     return {
         text:
             (useLocaleOverride ? settings.prompt[locale] : undefined) ??

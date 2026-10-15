@@ -49,6 +49,7 @@ services:
       ORG_ACCOUNT_EMAIL: ${ORG_ACCOUNT_EMAIL:-}
       ORG_ACCOUNT_PASSWORD: ${ORG_ACCOUNT_PASSWORD:-}
       ORG_ACCOUNT_NAME: ${ORG_ACCOUNT_NAME:-}
+      ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: ${ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:-}
       # Single sign-on (optional; see docs/self-hosting/sso). With issuer,
       # client id and secret set, it is the only way to sign in.
       OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}

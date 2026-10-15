@@ -98,7 +98,10 @@ interface CredentialRow {
     defaultModel: string | null;
 }
 
-function mockDbForCredential(credential: CredentialRow): void {
+function mockDbForCredential(
+    credential: CredentialRow,
+    accountLanguage = "cs",
+): void {
     (db.select as Mock)
         // recording lookup
         .mockReturnValueOnce({
@@ -151,7 +154,7 @@ function mockDbForCredential(credential: CredentialRow): void {
                             syncTitleToPlaud: false,
                             autoSummarize: false,
                             transcriptionQuality: "balanced",
-                            defaultTranscriptionLanguage: "cs",
+                            defaultTranscriptionLanguage: accountLanguage,
                         },
                     ]),
                 }),
@@ -237,6 +240,44 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
         const form = init.body as FormData;
         expect(form.get("model_id")).toBe("scribe_v2");
         expect(form.get("language_code")).toBe("cs");
+    });
+
+    it("uses the account transcription language for a manual run", async () => {
+        mockDbForCredential(
+            {
+                provider: "ElevenLabs",
+                baseUrl: null,
+                defaultModel: "scribe_v2",
+            },
+            "de",
+        );
+
+        await transcribeRecording("user-el", "rec-el", { trigger: "manual" });
+
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).get("language_code")).toBe("de");
+    });
+
+    it("uses the profile transcription language for an automatic run", async () => {
+        mockDbForCredential(
+            {
+                provider: "ElevenLabs",
+                baseUrl: null,
+                defaultModel: "scribe_v2",
+            },
+            "de",
+        );
+
+        await transcribeRecording("user-el", "rec-el", { trigger: "sync" });
+
+        const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
+            string,
+            RequestInit,
+        ];
+        expect((init.body as FormData).get("language_code")).toBe("cs");
     });
 
     it("falls back to the preset default model when the credential has none", async () => {

@@ -6,6 +6,7 @@ import {
     processingProfileRevisions,
     processingProfiles,
     userSettings,
+    users,
 } from "@/db/schema";
 import {
     normalizeTitlePromptConfig,
@@ -29,12 +30,10 @@ import {
     decryptText,
     encryptText,
 } from "@/lib/encryption/fields";
-import { locales } from "@/lib/i18n/config";
 import { getOrgUserId } from "@/lib/org/config";
 import {
     type AudioProfileSettings,
     defaultProfileSettings,
-    type Locale,
     MAIL_SUMMARY_PROMPT_ID,
     type MailProfileSettings,
     type ProfileScope,
@@ -115,10 +114,6 @@ function resolveStoredTemplate<P extends string>(
     };
 }
 
-function promptByLocale(prompt: string): Partial<Record<Locale, string>> {
-    return Object.fromEntries(locales.map((locale) => [locale, prompt]));
-}
-
 function legacyValue<T>(value: unknown): T | null {
     return decryptJsonField<T>(value);
 }
@@ -167,13 +162,15 @@ function audioSettings(
         ...settings.steps.title,
         automatic: legacy.autoGenerateTitle,
         preset: title.preset as PromptPreset,
-        prompt: title.fullPrompt ? promptByLocale(title.prompt) : {},
+        prompt: {},
+        fullPrompt: title.fullPrompt,
     };
     settings.steps.topics = {
         ...settings.steps.topics,
         automatic: legacy.autoDetectTopics,
         preset: topics.preset,
-        prompt: topics.fullPrompt ? promptByLocale(topics.prompt) : {},
+        prompt: {},
+        fullPrompt: topics.fullPrompt,
     };
     settings.steps.summary = {
         ...settings.steps.summary,
@@ -227,7 +224,8 @@ function mailSettings(legacy: LegacyProfileSettings): MailProfileSettings {
         enabled: false,
         automatic: false,
         preset: title.preset as PromptPreset,
-        prompt: title.fullPrompt ? promptByLocale(title.prompt) : {},
+        prompt: {},
+        fullPrompt: title.fullPrompt,
     };
     settings.steps.summary = {
         ...settings.steps.summary,
@@ -260,7 +258,9 @@ function customSummaryTemplates(
 export function buildSeedProfiles(
     legacy: LegacyProfileSettings,
     scope: ProfileScope,
+    uiLocale: string | null = null,
 ): SeedProfile[] {
+    const czech = uiLocale === "cs-CZ";
     const summaryConfig = normalizeSummaryPromptConfig(
         legacyValue(legacy.summaryPrompt),
     );
@@ -283,7 +283,7 @@ export function buildSeedProfiles(
         usedSummaryIds.add(automatic.id);
         usedSummaryIds.add(selected.id);
         result.push({
-            name: "Automatic",
+            name: czech ? "Automatický" : "Automatic",
             description: null,
             scope,
             channel: "audio",
@@ -295,7 +295,7 @@ export function buildSeedProfiles(
             ),
         });
         result.push({
-            name: "Manual",
+            name: czech ? "Ruční" : "Manual",
             description: null,
             scope,
             channel: "audio",
@@ -307,7 +307,7 @@ export function buildSeedProfiles(
     } else {
         usedSummaryIds.add(selected.id);
         result.push({
-            name: "Recordings",
+            name: czech ? "Nahrávky" : "Recordings",
             description: null,
             scope,
             channel: "audio",
@@ -331,7 +331,7 @@ export function buildSeedProfiles(
     }
 
     result.push({
-        name: "Mail",
+        name: czech ? "Pošta" : "Mail",
         description: null,
         scope,
         channel: "mail",
@@ -367,6 +367,13 @@ function defaultLegacySettings(): LegacyProfileSettings {
 
 /** Lazily seed one owner's legacy settings into immutable profile revisions. */
 export async function ensureProfiles(userId: string): Promise<void> {
+    const existing = await db
+        .select({ id: processingProfiles.id })
+        .from(processingProfiles)
+        .where(eq(processingProfiles.ownerUserId, userId))
+        .limit(1);
+    if (existing.length > 0) return;
+
     const orgUserId = await getOrgUserId();
     const scope: ProfileScope =
         orgUserId === userId ? "organization" : "personal";
@@ -385,9 +392,18 @@ export async function ensureProfiles(userId: string): Promise<void> {
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
+        const [owner] = await tx
+            .select({ uiLocale: users.uiLocale })
+            .from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
         const legacy: LegacyProfileSettings = stored ?? defaultLegacySettings();
 
-        for (const profile of buildSeedProfiles(legacy, scope)) {
+        for (const profile of buildSeedProfiles(
+            legacy,
+            scope,
+            owner?.uiLocale,
+        )) {
             const profileId = nanoid();
             const revisionId = nanoid();
             const inserted = await tx

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, mailMessages, userSettings } from "@/db/schema";
+import { chatterItems, mailMessages, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import {
     MAIL_PARTICIPANT_DIRECTIVE,
@@ -152,6 +152,7 @@ export async function generateMailSummary(
                 revisionId: opts.profileRevisionId,
                 actorUserId: ctx.actorUserId,
                 channel: "mail",
+                view: ctx.view,
             })
           : await resolveItemProfile(
                 itemId,
@@ -175,6 +176,11 @@ export async function generateMailSummary(
                   .from(userSettings)
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
+        .limit(1);
 
     // A chosen template is honoured; otherwise mail gets its own, since the
     // user's default is written for recordings.
@@ -220,7 +226,7 @@ export async function generateMailSummary(
               settings: profileSettings.steps.summary,
               outputLanguage: profileSettings.steps.summary.outputLanguage,
               contentLanguage,
-              uiLocale: "en",
+              uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
           })
         : null;
     if (profilePrompt) {
@@ -277,6 +283,7 @@ export async function generateMailSummary(
         usage: {
             itemId,
             ownerUserId: ctx.ownerUserId,
+            actorUserId: ctx.actorUserId,
             payerUserId: summaryModel.payerUserId,
         },
         systemContent,
@@ -351,6 +358,11 @@ export async function generateMailSummary(
         inputs: {
             contentId: stored.sourceId,
             contentRevision: stored.revision,
+            multiPass: multiPassOn
+                ? pinnedMultiPass
+                    ? "profile"
+                    : "person"
+                : "off",
         },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,

@@ -66,6 +66,7 @@ export async function learnChatClients(input: {
     const openai = new OpenAI({
         apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
@@ -77,6 +78,7 @@ export async function learnChatClients(input: {
     const usage = {
         recordingId: input.recordingId,
         ownerUserId: input.ownerUserId,
+        actorUserId,
         payerUserId: resolved.payerUserId,
         operation: input.operation,
         provider: credentials.provider,
