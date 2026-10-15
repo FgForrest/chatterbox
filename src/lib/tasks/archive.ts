@@ -5,6 +5,7 @@ import {
     type EvidenceProvenance,
     people,
     recordingTasks,
+    type TaskUpdateProposalKind,
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
@@ -44,7 +45,7 @@ export interface ArchivedTaskUpdate {
     id: string;
     /** The task it changes: in the same archive. */
     taskId: string;
-    kind: "done" | "due";
+    kind: TaskUpdateProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
     quote: string | null;

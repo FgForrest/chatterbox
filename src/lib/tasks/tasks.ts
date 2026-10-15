@@ -22,6 +22,7 @@ import {
     recordings,
     recordingTaskRejections,
     recordingTasks,
+    type TaskUpdateProposalKind,
     taskUpdateProposals,
     userSettings,
 } from "@/db/schema";
@@ -97,7 +98,7 @@ export interface TaskView {
 /** A follow-up heard on a recording, about a task of another. */
 export interface TaskUpdateView {
     id: string;
-    kind: "done" | "due";
+    kind: TaskUpdateProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
     quote: string | null;

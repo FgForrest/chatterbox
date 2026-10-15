@@ -515,6 +515,12 @@ export type ChatterItemKind = "audio" | "mail";
  */
 export type EvidenceProvenance = "quoted" | "unverified" | "unlocated";
 
+export type TaskUpdateProposalKind =
+    | "done"
+    | "due"
+    | "due_phrase"
+    | "attach_merge";
+
 // The Chatter pile: one row per item of any kind, sharing its id with the
 // row of its kind (`recordings`, `mail_messages`). Everything that is not
 // about one kind (folders, summaries, tasks, Learn, exports) points here.
@@ -2724,6 +2730,12 @@ export const recordingTasks = pgTable(
         updatedByUserId: text("updated_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
+        statusEffectiveAt: timestamp("status_effective_at"),
+        dueEffectiveAt: timestamp("due_effective_at"),
+        assigneeEffectiveAt: timestamp("assignee_effective_at"),
+        originItemId: text("origin_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -2751,6 +2763,9 @@ export const recordingTasks = pgTable(
         updatedByIdx: index("recording_tasks_updated_by_user_id_idx").on(
             table.updatedByUserId,
         ),
+        originItemIdx: index("recording_tasks_origin_item_id_idx").on(
+            table.originItemId,
+        ),
         statusCheck: check(
             "recording_tasks_status_check",
             sql`${table.status} in ('proposed', 'open', 'done', 'dropped')`,
@@ -2763,6 +2778,157 @@ export const recordingTasks = pgTable(
             "recording_tasks_evidence_check",
             sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
         ),
+    }),
+);
+
+export const taskMentions = pgTable(
+    "task_mentions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 8 })
+            .$type<"private" | "org">()
+            .notNull(),
+        evidenceStartMs: integer("evidence_start_ms"),
+        evidenceSegmentIndex: integer("evidence_segment_index"),
+        evidenceCharStart: integer("evidence_char_start"),
+        evidenceCharEnd: integer("evidence_char_end"),
+        // Encrypted, as on `recording_tasks`.
+        quote: text("quote"),
+        provenance: varchar("provenance", {
+            length: 16,
+        }).$type<EvidenceProvenance>(),
+        contentSourceId: varchar("content_source_id", { length: 20 }),
+        contentRevision: integer("content_revision"),
+        statementAt: timestamp("statement_at").notNull(),
+        matchDecision: varchar("match_decision", { length: 16 })
+            .$type<
+                | "home"
+                | "suggested"
+                | "accepted"
+                | "rejected"
+                | "undone"
+                | "kept_new"
+            >()
+            .notNull(),
+        decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        decidedAt: timestamp("decided_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskIdIdx: index("task_mentions_task_id_idx").on(table.taskId),
+        itemIdIdx: index("task_mentions_item_id_idx").on(table.itemId),
+        userIdIdx: index("task_mentions_user_id_idx").on(table.userId),
+        itemViewIdx: index("task_mentions_item_id_view_idx").on(
+            table.itemId,
+            table.view,
+        ),
+        viewCheck: check(
+            "task_mentions_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+        matchDecisionCheck: check(
+            "task_mentions_match_decision_check",
+            sql`${table.matchDecision} in ('home', 'suggested', 'accepted', 'rejected', 'undone', 'kept_new')`,
+        ),
+        evidenceCheck: check(
+            "task_mentions_evidence_check",
+            sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
+        ),
+    }),
+);
+
+export const taskHomeMoves = pgTable(
+    "task_home_moves",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        fromItemId: text("from_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        toItemId: text("to_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        fromUserId: text("from_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        toUserId: text("to_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        reason: varchar("reason", { length: 16 })
+            .$type<"deleted" | "erased" | "withdrawn">()
+            .notNull(),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskIdIdx: index("task_home_moves_task_id_idx").on(table.taskId),
+        fromItemIdIdx: index("task_home_moves_from_item_id_idx").on(
+            table.fromItemId,
+        ),
+        toItemIdIdx: index("task_home_moves_to_item_id_idx").on(table.toItemId),
+        fromUserIdIdx: index("task_home_moves_from_user_id_idx").on(
+            table.fromUserId,
+        ),
+        toUserIdIdx: index("task_home_moves_to_user_id_idx").on(table.toUserId),
+        actorUserIdIdx: index("task_home_moves_actor_user_id_idx").on(
+            table.actorUserId,
+        ),
+        reasonCheck: check(
+            "task_home_moves_reason_check",
+            sql`${table.reason} in ('deleted', 'erased', 'withdrawn')`,
+        ),
+    }),
+);
+
+export const taskVectors = pgTable(
+    "task_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        dim: integer("dim").notNull(),
+        // `encodeVector`, then encrypted.
+        vector: text("vector").notNull(),
+        // `domainLookupHash("vector-input", rendered task text)`.
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskGenerationUnique: unique("task_vectors_task_generation_unique").on(
+            table.taskId,
+            table.vectorGeneration,
+        ),
+        taskIdIdx: index("task_vectors_task_id_idx").on(table.taskId),
+        userIdIdx: index("task_vectors_user_id_idx").on(table.userId),
     }),
 );
 
@@ -2813,7 +2979,9 @@ export const taskUpdateProposals = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
-        kind: varchar("kind", { length: 8 }).$type<"done" | "due">().notNull(),
+        kind: varchar("kind", { length: 16 })
+            .$type<TaskUpdateProposalKind>()
+            .notNull(),
         dueDate: date("due_date", { mode: "string" }),
         // Encrypted, as on `recording_tasks`.
         duePhrase: text("due_phrase"),
@@ -2826,6 +2994,23 @@ export const taskUpdateProposals = pgTable(
         evidenceProvenance: varchar("evidence_provenance", {
             length: 16,
         }).$type<EvidenceProvenance>(),
+        state: varchar("state", { length: 32 })
+            .$type<
+                | "awaiting_source_review"
+                | "awaiting_share"
+                | "awaiting_target_review"
+                | "applied"
+                | "rejected"
+                | "obsolete"
+            >()
+            .notNull()
+            .default("awaiting_source_review"),
+        routedTo: jsonb("routed_to").$type<string[] | { role: "curators" }>(),
+        decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        decidedAt: timestamp("decided_at"),
+        obsoleteReason: varchar("obsolete_reason", { length: 64 }),
         ticked: boolean("ticked").notNull().default(false),
         version: integer("version").notNull().default(0),
         createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -2841,13 +3026,24 @@ export const taskUpdateProposals = pgTable(
             table.itemId,
         ),
         userIdIdx: index("task_update_proposals_user_id_idx").on(table.userId),
+        userStateIdx: index("task_update_proposals_user_id_state_idx").on(
+            table.userId,
+            table.state,
+        ),
+        decidedByIdx: index("task_update_proposals_decided_by_user_id_idx").on(
+            table.decidedByUserId,
+        ),
         kindCheck: check(
             "task_update_proposals_kind_check",
-            sql`${table.kind} in ('done', 'due')`,
+            sql`${table.kind} in ('done', 'due', 'due_phrase', 'attach_merge')`,
+        ),
+        stateCheck: check(
+            "task_update_proposals_state_check",
+            sql`${table.state} in ('awaiting_source_review', 'awaiting_share', 'awaiting_target_review', 'applied', 'rejected', 'obsolete')`,
         ),
         dueCheck: check(
             "task_update_proposals_due_check",
-            sql`${table.kind} = 'done' or ${table.dueDate} is not null`,
+            sql`${table.kind} <> 'due' or ${table.dueDate} is not null`,
         ),
         evidenceCheck: check(
             "task_update_proposals_evidence_check",
