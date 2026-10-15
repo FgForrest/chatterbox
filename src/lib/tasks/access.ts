@@ -9,6 +9,11 @@ import {
     taskVisible,
 } from "@/db/queries/task-visibility";
 import { people, recordingTasks, users } from "@/db/schema";
+import {
+    actsForOrganization,
+    userCuratesOrganizationNow,
+} from "@/lib/authz/curator";
+import type { ActorContext } from "@/lib/authz/model";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { getOrgUserId } from "@/lib/org/config";
 
@@ -16,15 +21,22 @@ export { ANY_TASK_ITEM, RECORDING_TASK_ITEM, taskRecordingShared, taskVisible };
 export type { TaskItemColumns, TaskViewer };
 
 /** The viewer for a signed-in user. */
-export async function taskViewer(user: {
-    id: string;
-    email: string;
-}): Promise<TaskViewer> {
+export async function taskViewer(
+    user: {
+        id: string;
+        email: string;
+    },
+    actor?: ActorContext,
+): Promise<TaskViewer> {
     const orgUserId = await getOrgUserId();
+    const isCurator = actor
+        ? await actsForOrganization(actor)
+        : await userCuratesOrganizationNow(user.id);
     return {
         userId: user.id,
         emailHash: lookupHash(user.email),
         isOrg: orgUserId !== null && orgUserId === user.id,
+        isCurator,
         orgUserId,
     };
 }
@@ -50,19 +62,17 @@ export function assignedToViewer(viewer: TaskViewer): SQL {
 
 /**
  * SQL: the task is in one of the viewer's lists, as the Tasks page shows
- * them (`recordings` joined): the organization account's are the shared
- * recordings' tasks; a user's are their own recordings' tasks and the
- * shared ones assigned to them.
+ * them (`recordings` joined): their home tasks, shared tasks assigned to
+ * them, and every shared task when they are a curator.
  */
 export function taskListed(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
-    if (viewer.isOrg) return taskRecordingShared(viewer, item);
-    return or(
-        eq(item.userId, viewer.userId),
-        and(taskVisible(viewer, item), assignedToViewer(viewer)),
-    ) as SQL;
+    const own = eq(item.userId, viewer.userId);
+    const shared = taskRecordingShared(viewer, item);
+    if (viewer.isCurator) return or(own, shared) as SQL;
+    return or(own, and(shared, assignedToViewer(viewer))) as SQL;
 }
 
 /** SQL: the viewer may mark the task done or open again (`recordings` joined, or `item`). */
@@ -70,12 +80,10 @@ export function taskClosable(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
+    const own = eq(item.userId, viewer.userId);
     const shared = taskRecordingShared(viewer, item);
-    if (viewer.isOrg) return shared;
-    return or(
-        eq(item.userId, viewer.userId),
-        and(shared, assignedToViewer(viewer)),
-    ) as SQL;
+    if (viewer.isCurator) return or(own, shared) as SQL;
+    return or(own, and(shared, assignedToViewer(viewer))) as SQL;
 }
 
 /** SQL: the viewer may change the task (`recordings` joined, or `item`). */
@@ -83,7 +91,7 @@ export function taskEditable(
     viewer: TaskViewer,
     item: TaskItemColumns = RECORDING_TASK_ITEM,
 ): SQL {
+    const own = eq(item.userId, viewer.userId);
     const shared = taskRecordingShared(viewer, item);
-    if (viewer.isOrg) return shared;
-    return and(eq(item.userId, viewer.userId), sql`not (${shared})`) as SQL;
+    return viewer.isCurator ? (or(own, shared) as SQL) : own;
 }

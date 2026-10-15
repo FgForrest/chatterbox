@@ -15,6 +15,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
     transcriptions,
     users,
@@ -302,6 +303,57 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         expect(await assignments(itemId)).toEqual([orgFolderId]);
     });
 
+    it("routes an awaiting-share task proposal when an intended share executes", async () => {
+        const targetItemId = "audio-task-target";
+        const sourceItemId = "audio-task-source";
+        await insertAudio(targetItemId);
+        await insertTranscript(targetItemId);
+        await recordIntent(targetItemId);
+        await expect(
+            executeIntendedShares(ALICE, targetItemId),
+        ).resolves.toEqual([]);
+        const [task] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId: targetItemId,
+                userId: ALICE,
+                status: "open",
+                source: "manual",
+                text: encryptText("Send the release notes"),
+            })
+            .returning({ id: recordingTasks.id });
+
+        await insertAudio(sourceItemId);
+        await insertTranscript(sourceItemId);
+        await recordIntent(sourceItemId);
+        const [proposal] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: task?.id ?? "",
+                itemId: sourceItemId,
+                userId: ALICE,
+                kind: "due",
+                dueDate: "2026-10-20",
+                state: "awaiting_share",
+            })
+            .returning({ id: taskUpdateProposals.id });
+
+        await expect(
+            executeIntendedShares(ALICE, sourceItemId),
+        ).resolves.toEqual([]);
+        const [routed] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                routedTo: taskUpdateProposals.routedTo,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.id, proposal?.id ?? ""));
+        expect(routed).toEqual({
+            state: "awaiting_target_review",
+            routedTo: [ALICE],
+        });
+    });
+
     it("keeps a blocked mail intent, then shares it exactly once", async () => {
         const itemId = "mail-intent";
         await insertMail(itemId);
@@ -468,18 +520,49 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
                 text: encryptText("Send the draft"),
             })
             .returning({ id: recordingTasks.id });
-        await db()
+        const [proposal] = await db()
             .insert(taskUpdateProposals)
             .values({
                 taskId: task?.id ?? "",
                 itemId: mailId,
                 userId: ALICE,
                 kind: "done",
+            })
+            .returning({ id: taskUpdateProposals.id });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task?.id ?? "",
+                itemId: mailId,
+                userId: ALICE,
+                view: "private",
+                statementAt: new Date("2026-10-15T10:00:00Z"),
+                matchDecision: "suggested",
             });
 
         const problems = await appDb.transaction((tx) =>
             mailShareProblems(tx, mailId, ALICE),
         );
         expect(problems).toEqual([{ kind: "tasks_unreviewed", proposals: 1 }]);
+
+        for (const state of [
+            "awaiting_share",
+            "awaiting_target_review",
+            "applied",
+            "rejected",
+            "obsolete",
+        ] as const) {
+            await db()
+                .update(taskUpdateProposals)
+                .set({ state })
+                .where(eq(taskUpdateProposals.id, proposal?.id ?? ""));
+            await db()
+                .update(taskMentions)
+                .set({ matchDecision: "accepted" })
+                .where(eq(taskMentions.itemId, mailId));
+            await expect(
+                appDb.transaction((tx) => mailShareProblems(tx, mailId, ALICE)),
+            ).resolves.toEqual([]);
+        }
     });
 });

@@ -82,6 +82,7 @@ const reviewer: TaskViewer = {
     userId: OWNER,
     emailHash: lookupHash("owner@example.test"),
     isOrg: false,
+    isCurator: false,
     orgUserId: ORG,
 };
 

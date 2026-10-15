@@ -921,20 +921,34 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
             ).toMatchObject({ outcome: "invalid" });
         });
 
-        it("leaves reassigning a shared task to the Organization, not its owner", async () => {
-            expect(
-                await failure(
-                    call(
-                        "update_task",
-                        alice(["tasks:read", "tasks:write", "knowledge:read"]),
-                        {
-                            task: id("aliceSharedBob"),
-                            version: 0,
-                            assignee: "Petra Malá",
-                        },
-                    ),
-                ),
-            ).toMatchObject({ outcome: "denied" });
+        it("lets a shared task's home owner reassign it with actor and effective time", async () => {
+            const result = await call<UpdateOut>(
+                "update_task",
+                alice(["tasks:read", "tasks:write", "knowledge:read"]),
+                {
+                    task: id("aliceSharedBob"),
+                    version: 0,
+                    assignee: "Carol Cole",
+                },
+            );
+            expect(result.task).toMatchObject({
+                assignee: { id: person.orgCarol, name: "Carol Cole" },
+                version: 1,
+                can_edit: true,
+            });
+            const [stored] = await db()
+                .select({
+                    assignee: recordingTasks.assigneePersonId,
+                    effectiveAt: recordingTasks.assigneeEffectiveAt,
+                    actor: recordingTasks.updatedByUserId,
+                })
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, id("aliceSharedBob")));
+            expect(stored).toEqual({
+                assignee: person.orgCarol,
+                effectiveAt: expect.any(Date),
+                actor: ALICE,
+            });
         });
     });
 
@@ -999,6 +1013,13 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
             ).toMatchObject({ id: id("bobSharedCarol"), status: "dropped" });
             expect(audit).toHaveBeenCalledTimes(1);
             expect(audit.mock.calls[0]?.[0]).toMatchObject({
+                caller: {
+                    kind: "service",
+                    subject: "service-sub",
+                    clientId: "test-bot",
+                    roles: expect.any(Set),
+                    orgUserId,
+                },
                 tool: "update_task",
                 outcome: "ok",
                 targetIds: [id("bobSharedCarol")],

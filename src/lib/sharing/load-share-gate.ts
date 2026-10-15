@@ -1,20 +1,13 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { db } from "@/db";
-import {
-    learnRuns,
-    recordingTasks,
-    taskMentions,
-    taskUpdateProposals,
-    transcriptions,
-    transcriptSpeakers,
-} from "@/db/schema";
+import { learnRuns, transcriptions, transcriptSpeakers } from "@/db/schema";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import {
     evaluateShareGate,
     type ShareGateProblem,
 } from "@/lib/sharing/share-gate";
-import { liveFollowUpCondition } from "@/lib/tasks/store";
+import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 type Executor = Pick<typeof db, "select">;
 
@@ -77,40 +70,11 @@ export async function loadShareGate(
                 learnRunOpen(),
             ),
         );
-    // Proposed tasks are the owner's to settle: once shared, only the
-    // Organization changes the recording's tasks.
-    const [proposals] = await executor
-        .select({ count: sql<number>`count(*)::int` })
-        .from(recordingTasks)
-        .where(
-            and(
-                eq(recordingTasks.itemId, recordingId),
-                eq(recordingTasks.userId, ownerUserId),
-                eq(recordingTasks.status, "proposed"),
-            ),
-        );
-    // So are follow-ups heard on it about earlier tasks, the ones its
-    // review shows.
-    const [followUps] = await executor
-        .select({ count: sql<number>`count(*)::int` })
-        .from(taskUpdateProposals)
-        .where(
-            and(
-                eq(taskUpdateProposals.itemId, recordingId),
-                eq(taskUpdateProposals.userId, ownerUserId),
-                liveFollowUpCondition(),
-            ),
-        );
-    const [matches] = await executor
-        .select({ count: sql<number>`count(*)::int` })
-        .from(taskMentions)
-        .where(
-            and(
-                eq(taskMentions.itemId, recordingId),
-                eq(taskMentions.userId, ownerUserId),
-                eq(taskMentions.matchDecision, "suggested"),
-            ),
-        );
+    const taskDecisions = await waitingTaskDecisions(
+        executor,
+        recordingId,
+        ownerUserId,
+    );
     return evaluateShareGate({
         transcripts: transcripts.map((transcript) => ({
             id: transcript.id,
@@ -119,9 +83,6 @@ export async function loadShareGate(
         })),
         attributions,
         unfinishedLearnRuns: unfinished?.count ?? 0,
-        waitingTaskProposals:
-            (proposals?.count ?? 0) +
-            (followUps?.count ?? 0) +
-            (matches?.count ?? 0),
+        waitingTaskProposals: taskDecisions.total,
     });
 }

@@ -199,12 +199,14 @@ describeWithDatabase("MCP caller scopes (PostgreSQL)", () => {
             userId: ALICE,
             emailHash: lookupHash("alice@example.test"),
             isOrg: false,
+            isCurator: false,
             orgUserId,
         });
         await expect(taskViewerFor(service())).resolves.toEqual({
             userId: orgUserId,
             emailHash: lookupHash("org@example.test"),
             isOrg: true,
+            isCurator: true,
             orgUserId,
         });
     });

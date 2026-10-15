@@ -1,7 +1,6 @@
 import { and, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { ANY_TASK_ITEM, taskVisible } from "@/db/queries/task-visibility";
-import { liveFollowUpCondition } from "@/db/queries/tasks";
 import {
     aiEnhancements,
     chatterItems,
@@ -173,15 +172,16 @@ export async function writeTaskProposalsInTx(
                 eq(recordingTasks.version, 0),
             ),
         );
-    // Untouched follow-ups are heard again; stale ones (the task moved on)
-    // have nothing left to review.
+    // Untouched source-review follow-ups are heard again. Decisions already
+    // routed or made are durable history.
     await tx
         .delete(taskUpdateProposals)
         .where(
             and(
                 eq(taskUpdateProposals.itemId, recordingId),
                 eq(taskUpdateProposals.userId, ownerUserId),
-                sql`(${taskUpdateProposals.version} = 0 or not ${liveFollowUpCondition()})`,
+                eq(taskUpdateProposals.state, "awaiting_source_review"),
+                sql`${taskUpdateProposals.updatedAt} = ${taskUpdateProposals.createdAt}`,
             ),
         );
 
@@ -282,6 +282,7 @@ export async function writeTaskProposalsInTx(
                   await tx
                       .select({
                           id: recordingTasks.id,
+                          version: recordingTasks.version,
                           statusEffectiveAt: recordingTasks.statusEffectiveAt,
                           dueEffectiveAt: recordingTasks.dueEffectiveAt,
                       })
@@ -477,6 +478,7 @@ export async function writeTaskProposalsInTx(
                     evidenceCharEnd: update.evidenceText?.charEnd ?? null,
                     evidenceProvenance: update.evidenceProvenance ?? null,
                     ticked: false,
+                    version: openTasks.get(update.taskId)?.version ?? 0,
                 })),
             )
             .onConflictDoNothing();

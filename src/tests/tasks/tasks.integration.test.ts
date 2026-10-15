@@ -64,6 +64,7 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
         mockEnv: {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared",
+            AUTHZ_MODE: "local" as "local" | "idp",
             ORG_ACCOUNT_EMAIL: "org@example.test",
             ORG_ACCOUNT_PASSWORD: "organization-password",
             ENCRYPTION_KEY:
@@ -100,6 +101,7 @@ vi.mock("@/lib/storage/factory", () => ({
 
 import { markRecordingDeleted } from "@/db/items";
 import { deleteSummaryForRecording } from "@/db/queries/retention";
+import type { ActorContext } from "@/lib/authz/model";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
@@ -111,6 +113,11 @@ import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
 import { deleteItemTaskDataInTx } from "@/lib/tasks/mentions";
 import { loadTasksPromptContext, taskFingerprint } from "@/lib/tasks/proposals";
+import {
+    applyRoutedTaskProposal,
+    listRoutedTaskProposals,
+    rejectRoutedTaskProposal,
+} from "@/lib/tasks/routing";
 import type {
     ProposedTask,
     ProposedTaskMatch,
@@ -120,6 +127,7 @@ import {
     acceptReview,
     addTask,
     countNewTasks,
+    listCallerTasks,
     listRecordingTasks,
     listTasks,
     markTasksSeen,
@@ -203,10 +211,10 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await database?.dispose();
     }, 30_000);
 
-    async function addRecording(id: string, startTime: string) {
+    async function addRecording(id: string, startTime: string, userId = ALICE) {
         await insertRecordings(db(), {
             id,
-            userId: ALICE,
+            userId,
             deviceSn: "SN-1",
             plaudFileId: `plaud-${id}`,
             filename: encryptText(`Recording ${id}`),
@@ -216,7 +224,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             filesize: 11,
             fileMd5: "0".repeat(32),
             storageType: "local",
-            storagePath: `${ALICE}/${id}.mp3`,
+            storagePath: `${userId}/${id}.mp3`,
             storageFilename: `${id}.mp3`,
             plaudVersion: "1",
         });
@@ -224,7 +232,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             .insert(transcriptions)
             .values({
                 recordingId: id,
-                userId: ALICE,
+                userId,
                 text: encryptText("What was said."),
                 provider: "openai",
                 model: "whisper-1",
@@ -327,13 +335,13 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(result.committed).toBe(true);
     }
 
-    async function share(recordingId = REC) {
+    async function share(recordingId = REC, userId = ALICE) {
         const [root] = await db()
             .select({ id: recordingFolders.id })
             .from(recordingFolders)
             .where(eq(recordingFolders.userId, orgUserId));
         await addRecordingToFolder({
-            userId: ALICE,
+            userId,
             recordingId,
             folderId: root?.id ?? "",
         });
@@ -797,23 +805,37 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(mention?.decision).toBe("rejected");
     });
 
-    it("counts an undecided suggested match in the share and phase gates", async () => {
-        const task = await addTask(alice, LATER, {
+    it("counts one source-review decision for a match and its field proposal", async () => {
+        const task = await addTask(alice, REC, {
             text: "Send the partner email",
             status: "open",
         });
-        await summarize(REC, [], { matches: [match(task.id)] });
+        await summarize(LATER, [], {
+            matches: [match(task.id)],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "the partner email was sent",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
 
-        await expect(share(REC)).rejects.toMatchObject({
+        await expect(share(LATER)).rejects.toMatchObject({
             statusCode: 409,
             details: {
                 problems: [{ kind: "tasks_unreviewed", proposals: 1 }],
             },
         });
-        expect((await gatherFacts(REC, "private", ALICE)).taskReview).toEqual({
-            proposals: 1,
-            followUps: 0,
-        });
+        expect((await gatherFacts(LATER, "private", ALICE)).taskReview).toEqual(
+            {
+                proposals: 0,
+                followUps: 1,
+            },
+        );
     });
 
     it("drops a task that is no longer visible to the proposal reviewer", async () => {
@@ -1225,17 +1247,24 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             status: "open",
         });
         expect(await review(bob, REC).catch(() => null)).toBeNull();
+        expect(await review(org, REC).catch(() => null)).toBeNull();
         expect(await listTasks(bob, query("mine"))).toEqual([]);
         expect(await countNewTasks(bob)).toBe(0);
         await expect(
             updateTask(bob, task.id, { version: task.version, status: "done" }),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            addTask(org, REC, {
+                text: "Organization cannot add privately",
+                status: "open",
+            }),
         ).rejects.toMatchObject({ statusCode: 404 });
         expect(
             (await listTasks(alice, query("tracked"))).map((row) => row.text),
         ).toEqual(["Draft the pricing page"]);
     });
 
-    it("on a shared recording: the Organization edits, owner and assignee close, members read", async () => {
+    it("on a shared recording: home owner and curator edit, assignee closes, members read", async () => {
         await share();
         const task = await addTask(org, REC, {
             text: "Draft the pricing page",
@@ -1274,17 +1303,23 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         });
         expect(done.status).toBe("done");
 
-        // Alice, the owner: may reopen, may not edit or drop.
+        // Alice, the home owner: may reopen, edit and drop.
         const reopened = await updateTask(alice, task.id, {
             version: done.version,
             status: "open",
         });
-        await expect(
-            updateTask(alice, task.id, {
-                version: reopened.version,
-                status: "dropped",
-            }),
-        ).rejects.toMatchObject({ statusCode: 403 });
+        const edited = await updateTask(alice, task.id, {
+            version: reopened.version,
+            text: "Draft the launch page",
+        });
+        const dropped = await updateTask(alice, task.id, {
+            version: edited.version,
+            status: "dropped",
+        });
+        expect(dropped).toMatchObject({
+            text: "Draft the launch page",
+            status: "dropped",
+        });
 
         // Carol, a member: sees it on the recording, not in her lists.
         const forCarol = await review(carol);
@@ -1300,9 +1335,281 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(
             (await listTasks(org, query("tracked"))).map((row) => row.id),
         ).toEqual([task.id]);
+        expect(
+            (
+                await listCallerTasks(org, {
+                    status: "all",
+                    assigneePersonId: null,
+                    recordingId: null,
+                    dueBefore: null,
+                    recordingCondition: null,
+                    after: null,
+                    limit: 10,
+                })
+            ).map((row) => row.id),
+        ).toEqual([task.id]);
     });
 
-    it("hides a shared recording's proposals from all but the Organization", async () => {
+    it("gives an idp curator the shared-item rights and match-review right", async () => {
+        mockEnv.AUTHZ_MODE = "idp";
+        try {
+            await share();
+            await share(LATER);
+            const memberActor: ActorContext = {
+                kind: "user",
+                actorId: CAROL,
+                issuer: "https://idp.example.test/realms/chatterbox",
+                subject: "carol-subject",
+                capabilities: new Set(["use"]),
+                clientId: "chatterbox",
+                clientPermissions: new Set(),
+                verifiedAt: new Date(),
+            };
+            const curatorActor: ActorContext = {
+                kind: "user",
+                actorId: CAROL,
+                issuer: "https://idp.example.test/realms/chatterbox",
+                subject: "carol-subject",
+                capabilities: new Set(["use", "org.curate"]),
+                clientId: "chatterbox",
+                clientPermissions: new Set(),
+                verifiedAt: new Date(),
+            };
+            const curator = await taskViewer(
+                { id: CAROL, email: "carol@example.test" },
+                curatorActor,
+            );
+            const member = await taskViewer(
+                { id: CAROL, email: "carol@example.test" },
+                memberActor,
+            );
+            const carolMail = "mail-carol-private-rights";
+            const aliceMail = "mail-alice-private-rights";
+            await addMail(carolMail, CAROL);
+            await addMail(aliceMail);
+            const ownPrivate = await addTask(curator, carolMail, {
+                text: "Carol's private task",
+                status: "open",
+            });
+            const otherPrivate = await addTask(alice, aliceMail, {
+                text: "Alice's private task",
+                status: "open",
+            });
+            expect(
+                (await listTasks(curator, query("tracked"))).map(
+                    (row) => row.id,
+                ),
+            ).toContain(ownPrivate.id);
+            const callerTasks = await listCallerTasks(curator, {
+                status: "all",
+                assigneePersonId: null,
+                recordingId: null,
+                dueBefore: null,
+                recordingCondition: null,
+                after: null,
+                limit: 10,
+            });
+            expect(callerTasks.map((row) => row.id)).toContain(ownPrivate.id);
+            expect(callerTasks.map((row) => row.id)).not.toContain(
+                otherPrivate.id,
+            );
+            expect(
+                await review(curator, aliceMail).catch(() => null),
+            ).toBeNull();
+            await expect(
+                updateTask(curator, otherPrivate.id, {
+                    version: otherPrivate.version,
+                    text: "Curator must not see this",
+                }),
+            ).rejects.toMatchObject({ statusCode: 404 });
+            const ownEdited = await updateTask(curator, ownPrivate.id, {
+                version: ownPrivate.version,
+                text: "Carol's edited private task",
+            });
+            const ownClosed = await updateTask(curator, ownPrivate.id, {
+                version: ownEdited.version,
+                status: "done",
+            });
+            expect(ownClosed).toMatchObject({
+                text: "Carol's edited private task",
+                status: "done",
+                canEdit: true,
+                canClose: true,
+            });
+
+            await markTasksSeen(curator);
+            const [privateRouted] = await db()
+                .insert(taskUpdateProposals)
+                .values({
+                    taskId: ownPrivate.id,
+                    itemId: carolMail,
+                    userId: CAROL,
+                    kind: "due",
+                    dueDate: "2026-10-22",
+                    state: "awaiting_target_review",
+                    routedTo: [CAROL],
+                    version: ownClosed.version,
+                })
+                .returning({ id: taskUpdateProposals.id });
+            expect(
+                (await listRoutedTaskProposals(curator)).map((row) => row.id),
+            ).toContain(privateRouted?.id);
+            expect(await countNewTasks(curator)).toBe(1);
+            await expect(
+                applyRoutedTaskProposal(
+                    curator,
+                    carolMail,
+                    privateRouted?.id ?? "",
+                ),
+            ).resolves.toEqual({
+                state: "obsolete",
+                obsoleteReason: "task_closed",
+            });
+            expect(await countNewTasks(curator)).toBe(0);
+
+            const task = await addTask(alice, REC, {
+                text: "Prepare the launch notes",
+                assigneePersonId: bobOrg,
+                status: "open",
+            });
+
+            expect((await review(curator, REC)).tasks[0]).toMatchObject({
+                id: task.id,
+                canEdit: true,
+                canClose: true,
+            });
+            expect(
+                (await listTasks(curator, query("tracked"))).map(
+                    (row) => row.id,
+                ),
+            ).toContain(task.id);
+            const edited = await updateTask(curator, task.id, {
+                version: task.version,
+                text: "Prepare the final launch notes",
+            });
+            expect(edited.text).toBe("Prepare the final launch notes");
+            expect((await review(member, REC)).tasks[0]).toMatchObject({
+                id: task.id,
+                canEdit: false,
+                canClose: false,
+            });
+            await expect(
+                addTask(member, REC, {
+                    text: "Member cannot add",
+                    status: "open",
+                }),
+            ).rejects.toMatchObject({ statusCode: 403 });
+            await expect(
+                addTask(curator, REC, {
+                    text: "Curator can add",
+                    status: "open",
+                }),
+            ).resolves.toMatchObject({ canEdit: true, canClose: true });
+
+            await db()
+                .insert(taskMentions)
+                .values({
+                    taskId: task.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    view: "org",
+                    statementAt: new Date("2026-10-08T10:00:00Z"),
+                    matchDecision: "suggested",
+                    ticked: true,
+                });
+            expect((await review(curator, LATER)).matches).toHaveLength(1);
+            await acceptReview(curator, LATER);
+            const [mention] = await db()
+                .select({ decision: taskMentions.matchDecision })
+                .from(taskMentions)
+                .where(
+                    and(
+                        eq(taskMentions.itemId, LATER),
+                        eq(taskMentions.taskId, task.id),
+                    ),
+                );
+            expect(mention?.decision).toBe("accepted");
+            const closed = await updateTask(curator, task.id, {
+                version: edited.version,
+                status: "done",
+            });
+            expect(closed.status).toBe("done");
+        } finally {
+            mockEnv.AUTHZ_MODE = "local";
+        }
+    });
+
+    it.each([
+        "local",
+        "idp",
+    ] as const)("resolves %s curators for accepting and undoing shared matches", async (mode) => {
+        mockEnv.AUTHZ_MODE = mode;
+        try {
+            const curator =
+                mode === "local"
+                    ? org
+                    : await taskViewer(
+                          { id: CAROL, email: "carol@example.test" },
+                          {
+                              kind: "user",
+                              actorId: CAROL,
+                              issuer: "https://idp.example.test/realms/chatterbox",
+                              subject: "carol-subject",
+                              capabilities: new Set(["use", "org.curate"]),
+                              clientId: "chatterbox",
+                              clientPermissions: new Set(),
+                              verifiedAt: new Date(),
+                          },
+                      );
+            const task = await addTask(alice, REC, {
+                text: "Publish the launch notes",
+                status: "open",
+            });
+            expect(await review(curator, LATER).catch(() => null)).toBeNull();
+
+            await share(REC);
+            await share(LATER);
+            const [mention] = await db()
+                .insert(taskMentions)
+                .values({
+                    taskId: task.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    view: "org",
+                    statementAt: new Date("2026-10-08T10:00:00Z"),
+                    matchDecision: "suggested",
+                    ticked: true,
+                })
+                .returning({ id: taskMentions.id });
+            await tickUpdateProposal(
+                curator,
+                LATER,
+                mention?.id ?? "",
+                false,
+                task.version,
+            );
+            await tickUpdateProposal(
+                curator,
+                LATER,
+                mention?.id ?? "",
+                true,
+                task.version,
+            );
+            await acceptReview(curator, LATER);
+            expect(
+                (
+                    await db()
+                        .select({ decision: taskMentions.matchDecision })
+                        .from(taskMentions)
+                        .where(eq(taskMentions.id, mention?.id ?? ""))
+                )[0]?.decision,
+            ).toBe("accepted");
+        } finally {
+            mockEnv.AUTHZ_MODE = "local";
+        }
+    });
+
+    it("shows a shared recording's proposals to the home owner and curators", async () => {
         await share();
         await db()
             .insert(recordingTasks)
@@ -1314,10 +1621,11 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 source: "riffado",
             });
         expect((await review(org)).proposals).toHaveLength(1);
-        expect((await review(alice)).proposals).toEqual([]);
+        expect((await review(alice)).proposals).toHaveLength(1);
         expect((await review(bob)).proposals).toEqual([]);
-        await expect(acceptReview(alice, REC)).rejects.toMatchObject({
-            statusCode: 403,
+        await expect(acceptReview(alice, REC)).resolves.toMatchObject({
+            accepted: 1,
+            rejected: 0,
         });
     });
 
@@ -1362,10 +1670,357 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(row?.status).toBe("done");
         expect(
             await db()
-                .select()
+                .select({ state: taskUpdateProposals.state })
                 .from(taskUpdateProposals)
                 .where(eq(taskUpdateProposals.itemId, LATER)),
-        ).toEqual([]);
+        ).toEqual([{ state: "applied" }]);
+    });
+
+    it("waits for a private source to be shared, then routes by proposal kind", async () => {
+        await share(REC);
+        const completionTarget = await addTask(alice, REC, {
+            text: "Send the launch brief",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        const dueTarget = await addTask(alice, REC, {
+            text: "Prepare the launch deck",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        await markTasksSeen(bob);
+        await markTasksSeen(org);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: completionTarget.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "the brief was sent",
+                    evidenceStartMs: 1_000,
+                },
+                {
+                    taskId: dueTarget.id,
+                    kind: "due",
+                    dueDate: "2026-10-20",
+                    duePhrase: "by October 20",
+                    quote: "the deck moved to October 20",
+                    evidenceStartMs: 2_000,
+                },
+            ],
+        });
+        const updates = (await review(alice, LATER)).updates;
+        for (const update of updates) {
+            await tickUpdateProposal(
+                alice,
+                LATER,
+                update.id,
+                true,
+                update.version,
+            );
+        }
+
+        await acceptReview(alice, LATER);
+        const waiting = await db()
+            .select({
+                id: taskUpdateProposals.id,
+                kind: taskUpdateProposals.kind,
+                state: taskUpdateProposals.state,
+                routedTo: taskUpdateProposals.routedTo,
+                decidedBy: taskUpdateProposals.decidedByUserId,
+                decidedAt: taskUpdateProposals.decidedAt,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.itemId, LATER));
+        expect(waiting).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    kind: "done",
+                    state: "awaiting_share",
+                    routedTo: null,
+                    decidedBy: ALICE,
+                    decidedAt: expect.any(Date),
+                }),
+                expect.objectContaining({
+                    kind: "due",
+                    state: "awaiting_share",
+                    routedTo: null,
+                }),
+            ]),
+        );
+        expect(
+            await db()
+                .select({ view: taskMentions.view })
+                .from(taskMentions)
+                .where(eq(taskMentions.itemId, LATER)),
+        ).toEqual(
+            expect.arrayContaining([{ view: "private" }, { view: "private" }]),
+        );
+        expect((await review(alice, REC)).tasks).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: completionTarget.id,
+                    status: "open",
+                }),
+                expect.objectContaining({ id: dueTarget.id, dueDate: null }),
+            ]),
+        );
+
+        await share(LATER);
+        const routed = await db()
+            .select({
+                id: taskUpdateProposals.id,
+                kind: taskUpdateProposals.kind,
+                state: taskUpdateProposals.state,
+                routedTo: taskUpdateProposals.routedTo,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.itemId, LATER));
+        expect(routed).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    kind: "done",
+                    state: "awaiting_target_review",
+                    routedTo: expect.arrayContaining([ALICE, BOB]),
+                }),
+                expect.objectContaining({
+                    kind: "due",
+                    state: "awaiting_target_review",
+                    routedTo: [ALICE],
+                }),
+            ]),
+        );
+        expect(
+            await db()
+                .select({ view: taskMentions.view })
+                .from(taskMentions)
+                .where(eq(taskMentions.itemId, LATER)),
+        ).toEqual(expect.arrayContaining([{ view: "org" }, { view: "org" }]));
+        expect(
+            (await listRoutedTaskProposals(bob)).map((row) => row.kind),
+        ).toEqual(["done"]);
+        expect(
+            new Set(
+                (await listRoutedTaskProposals(org)).map((row) => row.kind),
+            ),
+        ).toEqual(new Set(["done", "due"]));
+        expect(await countNewTasks(bob)).toBe(1);
+        expect(await countNewTasks(org)).toBe(2);
+
+        const completion = routed.find((row) => row.kind === "done");
+        const due = routed.find((row) => row.kind === "due");
+        if (!completion) throw new Error("missing routed completion");
+        if (!due) throw new Error("missing routed due proposal");
+        await expect(
+            rejectRoutedTaskProposal(org, LATER, due.id),
+        ).resolves.toMatchObject({ state: "rejected" });
+        const [rejected] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                decidedBy: taskUpdateProposals.decidedByUserId,
+                decidedAt: taskUpdateProposals.decidedAt,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.id, due.id));
+        expect(rejected).toEqual({
+            state: "rejected",
+            decidedBy: orgUserId,
+            decidedAt: expect.any(Date),
+        });
+        await expect(
+            applyRoutedTaskProposal(alice, LATER, completion.id),
+        ).resolves.toMatchObject({ state: "applied" });
+        expect((await review(alice, REC)).tasks).toContainEqual(
+            expect.objectContaining({
+                id: completionTarget.id,
+                status: "done",
+            }),
+        );
+    });
+
+    it("routes an awaiting-share proposal to another member's shared task", async () => {
+        const bobShared = "rec-bob-shared-target";
+        const bobPrivateMail = "mail-bob-private-target";
+        await addRecording(bobShared, "2026-10-09T10:00:00Z", BOB);
+        await share(bobShared, BOB);
+        await addMail(bobPrivateMail, BOB);
+        const sharedTarget = await addTask(org, bobShared, {
+            text: "Publish Bob's shared notes",
+            status: "open",
+        });
+        const privateTarget = await addTask(bob, bobPrivateMail, {
+            text: "Bob's private notes",
+            status: "open",
+        });
+        await db()
+            .insert(taskUpdateProposals)
+            .values([
+                {
+                    taskId: sharedTarget.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    kind: "due",
+                    dueDate: "2026-10-24",
+                    duePhrase: encryptText("by October 24"),
+                    quote: encryptText("publish by October 24"),
+                    state: "awaiting_share",
+                    routedTo: null,
+                    version: sharedTarget.version,
+                },
+                {
+                    taskId: privateTarget.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    kind: "done",
+                    state: "awaiting_share",
+                    routedTo: null,
+                    version: privateTarget.version,
+                },
+            ]);
+
+        await share(LATER);
+
+        const routed = await db()
+            .select({
+                taskId: taskUpdateProposals.taskId,
+                state: taskUpdateProposals.state,
+                reason: taskUpdateProposals.obsoleteReason,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.itemId, LATER));
+        expect(routed).toEqual(
+            expect.arrayContaining([
+                {
+                    taskId: sharedTarget.id,
+                    state: "awaiting_target_review",
+                    reason: null,
+                },
+                {
+                    taskId: privateTarget.id,
+                    state: "obsolete",
+                    reason: "task_invisible",
+                },
+            ]),
+        );
+    });
+
+    it("makes every routed apply re-check failure obsolete with its reason", async () => {
+        await share(REC);
+        const versionTarget = await addTask(alice, REC, {
+            text: "Version target",
+            status: "open",
+        });
+        const closedTarget = await addTask(alice, REC, {
+            text: "Closed target",
+            status: "open",
+        });
+        const invisibleTarget = await addTask(alice, LATER, {
+            text: "Invisible target",
+            status: "open",
+        });
+        const rightsTarget = await addTask(alice, REC, {
+            text: "Rights target",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        const inserted = await db()
+            .insert(taskUpdateProposals)
+            .values([
+                {
+                    taskId: versionTarget.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    kind: "due",
+                    dueDate: "2026-10-20",
+                    state: "awaiting_target_review",
+                    routedTo: [ALICE],
+                    version: versionTarget.version,
+                },
+                {
+                    taskId: closedTarget.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    kind: "done",
+                    state: "awaiting_target_review",
+                    routedTo: [ALICE],
+                    version: closedTarget.version,
+                },
+                {
+                    taskId: invisibleTarget.id,
+                    itemId: REC,
+                    userId: ALICE,
+                    kind: "done",
+                    state: "awaiting_target_review",
+                    routedTo: [BOB],
+                    version: invisibleTarget.version,
+                },
+                {
+                    taskId: rightsTarget.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    kind: "done",
+                    state: "awaiting_target_review",
+                    routedTo: [BOB],
+                    version: rightsTarget.version,
+                },
+            ])
+            .returning({
+                id: taskUpdateProposals.id,
+                kind: taskUpdateProposals.kind,
+            });
+        const [
+            versionProposal,
+            closedProposal,
+            invisibleProposal,
+            rightsProposal,
+        ] = inserted;
+        if (
+            !versionProposal ||
+            !closedProposal ||
+            !invisibleProposal ||
+            !rightsProposal
+        ) {
+            throw new Error("missing routed proposals");
+        }
+        await updateTask(alice, versionTarget.id, {
+            version: versionTarget.version,
+            text: "Changed version target",
+        });
+        await db()
+            .update(recordingTasks)
+            .set({ status: "done" })
+            .where(eq(recordingTasks.id, closedTarget.id));
+        await db()
+            .update(recordingTasks)
+            .set({ assigneePersonId: null })
+            .where(eq(recordingTasks.id, rightsTarget.id));
+
+        await expect(
+            applyRoutedTaskProposal(alice, LATER, versionProposal.id),
+        ).resolves.toMatchObject({
+            state: "obsolete",
+            obsoleteReason: "version_changed",
+        });
+        await expect(
+            applyRoutedTaskProposal(alice, LATER, closedProposal.id),
+        ).resolves.toMatchObject({
+            state: "obsolete",
+            obsoleteReason: "task_closed",
+        });
+        await expect(
+            applyRoutedTaskProposal(bob, REC, invisibleProposal.id),
+        ).resolves.toMatchObject({
+            state: "obsolete",
+            obsoleteReason: "task_invisible",
+        });
+        await expect(
+            applyRoutedTaskProposal(bob, LATER, rightsProposal.id),
+        ).resolves.toMatchObject({
+            state: "obsolete",
+            obsoleteReason: "rights_lost",
+        });
     });
 
     it("applies a vague deadline without inventing a date", async () => {
@@ -1599,7 +2254,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(updates).toEqual([]);
     });
 
-    it("lets a follow-up whose task moved on stop blocking the share", async () => {
+    it("keeps an awaiting source decision blocking after its task moved on", async () => {
         const task = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -1614,7 +2269,17 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             version: task.version,
             status: "done",
         });
-        expect((await review(alice)).updates).toEqual([]);
+        expect((await review(alice)).updates).toHaveLength(1);
+        await expect(share(REC)).rejects.toMatchObject({ statusCode: 409 });
+        await acceptReview(alice, REC);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals),
+        ).toEqual([{ state: "rejected", reason: null }]);
         await share(REC);
     });
 
@@ -2296,7 +2961,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 recordingId: LATER,
                 kind: "audio",
                 title: `Recording ${LATER}`,
-                proposals: 3,
+                proposals: 4,
             },
             {
                 recordingId: REC,
@@ -2309,7 +2974,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(await recordingsAwaitingTaskReview(org)).toEqual([]);
     });
 
-    it("lists a shared recording's review for the Organization only", async () => {
+    it("lists a shared recording's review for its owner and curators", async () => {
         const open = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -2333,6 +2998,12 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 kind: "audio",
                 title: `Recording ${LATER}`,
                 proposals: 1,
+            },
+            {
+                recordingId: REC,
+                kind: "audio",
+                title: `Recording ${REC}`,
+                proposals: 2,
             },
         ]);
     });

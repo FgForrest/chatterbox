@@ -1,4 +1,4 @@
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
@@ -8,8 +8,11 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 /** The signed-in caller, as tasks see them. */
 export async function requireTaskViewer(request: Request): Promise<TaskViewer> {
-    const session = await requireApiSession(request);
-    return taskViewer({ id: session.user.id, email: session.user.email });
+    const { session, actor } = await requireApiSessionActor(request);
+    return taskViewer(
+        { id: session.user.id, email: session.user.email },
+        actor,
+    );
 }
 
 /** The request's JSON object, or a 400/413. */

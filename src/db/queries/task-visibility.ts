@@ -11,9 +11,9 @@ import {
  *
  * | action                   | private recording | shared recording                          |
  * |--------------------------|-------------------|-------------------------------------------|
- * | edit, add, drop, review  | owner             | organization account                      |
- * | done, reopen             | owner             | organization account, owner, assignee     |
- * | see                      | owner             | everyone; in a list: owner, assignee, org |
+ * | edit, add, drop, review  | owner             | home owner, curator                        |
+ * | done, reopen             | owner             | home owner, assignee, curator              |
+ * | see                      | owner             | everyone; list: owner, assignee, curator   |
  *
  * A task on a private recording reaches nobody but its owner, even when it
  * names someone else: tasks travel only through the Organization. The
@@ -24,6 +24,8 @@ export interface TaskViewer {
     /** `lookupHash` of the viewer's login email. */
     emailHash: string;
     isOrg: boolean;
+    /** The viewer currently acts as an Organization curator. */
+    isCurator: boolean;
     /** The organization account this instance shows, or null. */
     orgUserId: string | null;
 }

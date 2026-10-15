@@ -12,9 +12,6 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
-    recordingTasks,
-    taskMentions,
-    taskUpdateProposals,
     transcriptions,
     users,
 } from "@/db/schema";
@@ -40,6 +37,7 @@ import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
+import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
@@ -301,9 +299,7 @@ export async function gatherFacts(
         shared,
         placements,
         intents,
-        proposals,
-        followUps,
-        matches,
+        taskDecisions,
         plaudTranscript,
         [transcriptionJob],
         [failedTranscriptionJob],
@@ -388,36 +384,7 @@ export async function gatherFacts(
                     eq(mailPendingShares.userId, userId),
                 ),
             ),
-        db
-            .select({ id: recordingTasks.id })
-            .from(recordingTasks)
-            .where(
-                and(
-                    eq(recordingTasks.itemId, itemId),
-                    eq(recordingTasks.userId, userId),
-                    eq(recordingTasks.status, "proposed"),
-                ),
-            ),
-        db
-            .select({ id: taskUpdateProposals.id })
-            .from(taskUpdateProposals)
-            .where(
-                and(
-                    eq(taskUpdateProposals.itemId, itemId),
-                    eq(taskUpdateProposals.userId, userId),
-                ),
-            ),
-        db
-            .select({ id: taskMentions.id })
-            .from(taskMentions)
-            .where(
-                and(
-                    eq(taskMentions.itemId, itemId),
-                    eq(taskMentions.userId, userId),
-                    eq(taskMentions.view, view),
-                    eq(taskMentions.matchDecision, "suggested"),
-                ),
-            ),
+        waitingTaskDecisions(db, itemId, userId, view),
         plaudTranscriptPromise,
         item.kind === "audio"
             ? db
@@ -801,8 +768,8 @@ export async function gatherFacts(
             ),
         },
         taskReview: {
-            proposals: proposals.length + matches.length,
-            followUps: followUps.length,
+            proposals: taskDecisions.proposals,
+            followUps: taskDecisions.followUps,
         },
         share: { problems: shareProblems },
         phases,
