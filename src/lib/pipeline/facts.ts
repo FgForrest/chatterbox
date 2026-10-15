@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -7,16 +7,25 @@ import {
     chatterItems,
     mailContents,
     mailMessages,
+    mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
+    recordingTasks,
+    taskUpdateProposals,
     transcriptions,
     users,
 } from "@/db/schema";
 import { pickEnhancementCredential } from "@/lib/ai/enhancement-provider";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { readProcessing } from "@/lib/pipeline/state";
-import type { PipelineFacts, PipelineView } from "@/lib/pipeline/types";
+import type {
+    PhaseRecord,
+    PipelineFacts,
+    PipelinePhases,
+    PipelineView,
+} from "@/lib/pipeline/types";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 
@@ -48,6 +57,57 @@ async function readShared(itemId: string, userId: string): Promise<boolean> {
         )
         .limit(1);
     return row !== undefined;
+}
+
+function legacyPhases(input: {
+    kind: "audio" | "mail";
+    hasPlacement: boolean;
+    content: { id: string; revision: number } | null;
+}): PipelinePhases {
+    const at = new Date().toISOString();
+    const phases: PipelinePhases = {
+        categorize: {
+            state: input.hasPlacement ? "done" : "skipped",
+            reason: "legacy",
+            generation: 0,
+            at,
+        },
+    };
+    if (!input.content) return phases;
+
+    const contentInput = {
+        contentId: input.content.id,
+        contentSourceId: input.kind === "audio" ? "riffado" : "mail",
+        contentRevision: input.content.revision,
+    };
+    const summarySteps: NonNullable<PhaseRecord["steps"]> = {};
+    const stepNames =
+        input.kind === "audio"
+            ? (["title", "topics", "summary"] as const)
+            : (["title", "summary"] as const);
+    for (const step of stepNames) {
+        summarySteps[step] = {
+            contentId: contentInput.contentId,
+            contentRevision: contentInput.contentRevision,
+            generation: 0,
+        };
+    }
+    phases.learn = {
+        state: "done",
+        reason: "legacy",
+        generation: 0,
+        inputs: contentInput,
+        at,
+    };
+    phases.summary = {
+        state: "done",
+        reason: "legacy",
+        generation: 0,
+        inputs: contentInput,
+        steps: summarySteps,
+        at,
+    };
+    return phases;
 }
 
 /** Read the durable, owner-scoped facts consumed by the Stage 1 planner. */
@@ -96,40 +156,22 @@ export async function gatherFacts(
             content: null,
             summaryDueAt: null,
             profile: null,
+            categorization: {
+                placementFolderIds: [],
+                intendedFolderIds: [],
+                profileAssigned: false,
+                resolution: null,
+            },
             hasEnhancementCredential: Boolean(
                 pickEnhancementCredential(credentials),
             ),
             mail: null,
             summary: { exists: false, stale: false, jobActive: false },
+            taskReview: { proposals: 0, followUps: 0 },
             phases: processing?.phases ?? {},
             at: new Date().toISOString(),
         };
     }
-
-    const resolvedProfile =
-        view === "private"
-            ? await resolveItemProfile(itemId, "private", userId)
-            : null;
-    const profile = resolvedProfile
-        ? {
-              revisionId: resolvedProfile.revisionId,
-              automatic: {
-                  learn:
-                      resolvedProfile.settings.steps.learn.enabled &&
-                      resolvedProfile.settings.steps.learn.automatic,
-                  summary:
-                      resolvedProfile.settings.steps.summary.enabled &&
-                      resolvedProfile.settings.steps.summary.automatic,
-                  title:
-                      resolvedProfile.settings.steps.title.enabled &&
-                      resolvedProfile.settings.steps.title.automatic,
-                  topics:
-                      "topics" in resolvedProfile.settings.steps &&
-                      resolvedProfile.settings.steps.topics.enabled &&
-                      resolvedProfile.settings.steps.topics.automatic,
-              },
-          }
-        : null;
 
     const contentPromise: Promise<{
         id: string;
@@ -199,42 +241,144 @@ export async function gatherFacts(
                   )
                   .limit(1)
             : Promise.resolve([]);
-    const [content, [mail], [summary], [summaryJob], shared] =
-        await Promise.all([
-            contentPromise,
-            mailPromise,
-            db
-                .select({ id: aiEnhancements.id })
-                .from(aiEnhancements)
-                .where(
-                    and(
-                        eq(aiEnhancements.itemId, itemId),
-                        eq(aiEnhancements.userId, userId),
-                        eq(aiEnhancements.source, "riffado"),
-                    ),
-                )
-                .limit(1),
-            db
-                .select({ id: asyncJobs.id })
-                .from(asyncJobs)
-                .where(
-                    and(
-                        eq(asyncJobs.userId, userId),
-                        eq(asyncJobs.kind, SUMMARY_JOB_KIND),
-                        eq(
-                            asyncJobs.subjectId,
-                            recordingJobSubject(itemId, view),
-                        ),
-                        inArray(asyncJobs.status, ["pending", "processing"]),
-                    ),
-                )
-                .limit(1),
-            item.kind === "mail"
-                ? readShared(itemId, userId)
-                : Promise.resolve(false),
-        ]);
+    const [
+        content,
+        [mail],
+        [summary],
+        [summaryJob],
+        shared,
+        placements,
+        intents,
+        proposals,
+        followUps,
+    ] = await Promise.all([
+        contentPromise,
+        mailPromise,
+        db
+            .select({ id: aiEnhancements.id })
+            .from(aiEnhancements)
+            .where(
+                and(
+                    eq(aiEnhancements.itemId, itemId),
+                    eq(aiEnhancements.userId, userId),
+                    eq(aiEnhancements.source, "riffado"),
+                ),
+            )
+            .limit(1),
+        db
+            .select({ id: asyncJobs.id })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, userId),
+                    eq(asyncJobs.kind, SUMMARY_JOB_KIND),
+                    eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                ),
+            )
+            .limit(1),
+        item.kind === "mail"
+            ? readShared(itemId, userId)
+            : Promise.resolve(false),
+        db
+            .select({ folderId: recordingFolderAssignments.folderId })
+            .from(recordingFolderAssignments)
+            .innerJoin(
+                recordingFolders,
+                eq(recordingFolders.id, recordingFolderAssignments.folderId),
+            )
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, itemId),
+                    eq(recordingFolderAssignments.userId, userId),
+                    isNotNull(recordingFolders.parentId),
+                ),
+            ),
+        db
+            .select({ folderId: mailPendingShares.folderId })
+            .from(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.itemId, itemId),
+                    eq(mailPendingShares.userId, userId),
+                ),
+            ),
+        db
+            .select({ id: recordingTasks.id })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.itemId, itemId),
+                    eq(recordingTasks.userId, userId),
+                    eq(recordingTasks.status, "proposed"),
+                ),
+            ),
+        db
+            .select({ id: taskUpdateProposals.id })
+            .from(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, itemId),
+                    eq(taskUpdateProposals.userId, userId),
+                ),
+            ),
+    ]);
+    const placementFolderIds = placements.map((row) => row.folderId);
+    const intendedFolderIds = intents.map((row) => row.folderId);
+    const phases =
+        processing?.phases ??
+        legacyPhases({
+            kind: item.kind,
+            hasPlacement:
+                placementFolderIds.length > 0 || intendedFolderIds.length > 0,
+            content: content
+                ? { id: content.id, revision: content.revision }
+                : null,
+        });
+    const categorizedAsLegacy =
+        phases.categorize?.state === "done" &&
+        phases.categorize.reason === "legacy";
+    const profileAssigned = Boolean(
+        processing?.profileId && processing.profileRevisionId,
+    );
+    const folderIds = [...placementFolderIds, ...intendedFolderIds];
+    const resolution =
+        view === "private" && folderIds.length > 0 && !profileAssigned
+            ? await resolveProfileForPlacements({
+                  ownerUserId: userId,
+                  itemId,
+                  channel: item.kind,
+                  folderIds,
+                  view,
+              })
+            : null;
+    const resolvedProfile =
+        view === "private" &&
+        (profileAssigned || categorizedAsLegacy || processing?.profileId)
+            ? await resolveItemProfile(itemId, "private", userId)
+            : null;
+    const profile = resolvedProfile
+        ? {
+              revisionId: resolvedProfile.revisionId,
+              automatic: {
+                  learn:
+                      resolvedProfile.settings.steps.learn.enabled &&
+                      resolvedProfile.settings.steps.learn.automatic,
+                  summary:
+                      resolvedProfile.settings.steps.summary.enabled &&
+                      resolvedProfile.settings.steps.summary.automatic,
+                  title:
+                      resolvedProfile.settings.steps.title.enabled &&
+                      resolvedProfile.settings.steps.title.automatic,
+                  topics:
+                      "topics" in resolvedProfile.settings.steps &&
+                      resolvedProfile.settings.steps.topics.enabled &&
+                      resolvedProfile.settings.steps.topics.automatic,
+              },
+          }
+        : null;
     const summaryExists = summary !== undefined;
-    const learn = processing?.phases.learn;
+    const learn = phases.learn;
     const releasedCurrentContent =
         item.kind === "audio" &&
         item.summaryDueAt === null &&
@@ -264,6 +408,12 @@ export async function gatherFacts(
             : null,
         summaryDueAt: item.summaryDueAt?.toISOString() ?? null,
         profile,
+        categorization: {
+            placementFolderIds,
+            intendedFolderIds,
+            profileAssigned,
+            resolution: resolution?.status ?? null,
+        },
         hasEnhancementCredential: Boolean(
             pickEnhancementCredential(credentials),
         ),
@@ -276,7 +426,11 @@ export async function gatherFacts(
                     : false,
             jobActive: summaryJob !== undefined,
         },
-        phases: processing?.phases ?? {},
+        taskReview: {
+            proposals: proposals.length,
+            followUps: followUps.length,
+        },
+        phases,
         at: new Date().toISOString(),
     };
 }

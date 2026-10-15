@@ -296,7 +296,10 @@ export async function resolveItemProfile(
     }
     const channel = item.kind;
     const [processing] = await db
-        .select({ profileId: itemProcessing.profileId })
+        .select({
+            profileId: itemProcessing.profileId,
+            profileRevisionId: itemProcessing.profileRevisionId,
+        })
         .from(itemProcessing)
         .where(
             and(
@@ -316,6 +319,9 @@ export async function resolveItemProfile(
                 actorUserId,
                 channel,
                 scope: "personal",
+                ...(processing.profileRevisionId
+                    ? { revisionId: processing.profileRevisionId }
+                    : {}),
             });
             if (personal) return personal;
             if (orgUserId) {
@@ -325,6 +331,9 @@ export async function resolveItemProfile(
                     actorUserId,
                     channel,
                     scope: "organization",
+                    ...(processing.profileRevisionId
+                        ? { revisionId: processing.profileRevisionId }
+                        : {}),
                 });
                 if (organization) return organization;
             }
@@ -335,8 +344,18 @@ export async function resolveItemProfile(
                 actorUserId,
                 channel,
                 scope: "organization",
+                ...(processing.profileRevisionId
+                    ? { revisionId: processing.profileRevisionId }
+                    : {}),
             });
             if (organization) return organization;
+        }
+        if (view === "private") {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "The processing profile revision assigned to this item is unavailable",
+                404,
+            );
         }
     }
 

@@ -11,7 +11,11 @@ import { recordingJobSubject } from "@/lib/sharing/view";
 /** Queue kind for the durable pipeline driver. */
 export const PIPELINE_ADVANCE_JOB_KIND = "pipeline.advance";
 
-export type PipelineAdvanceReason = "transcript" | "arrival" | "learn-released";
+export type PipelineAdvanceReason =
+    | "transcript"
+    | "arrival"
+    | "learn-released"
+    | "categorized";
 
 export interface RequestAdvanceInput {
     itemId: string;

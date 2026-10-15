@@ -18,6 +18,44 @@ function sameInput(
     );
 }
 
+function markPhase(
+    facts: PipelineFacts,
+    phase: "categorize" | "transcribe" | "learn" | "taskReview",
+    state: PhaseRecord["state"],
+    reason: string,
+    input?: ContentRevisionInput,
+): PipelineAction {
+    return {
+        type: "markPhase",
+        phase,
+        record: {
+            state,
+            reason,
+            generation: facts.generation,
+            ...(input ? { inputs: input } : {}),
+            at: facts.at,
+            ...(input && facts.profile
+                ? { profileRevisionId: facts.profile.revisionId }
+                : {}),
+        },
+    };
+}
+
+function phaseMatches(
+    record: PhaseRecord | undefined,
+    state: PhaseRecord["state"],
+    reason: string,
+    generation: number,
+    input?: ContentRevisionInput,
+): boolean {
+    return (
+        record?.state === state &&
+        record.reason === reason &&
+        record.generation >= generation &&
+        (!input || sameInput(record, input))
+    );
+}
+
 function stepRequested(
     record: PhaseRecord | undefined,
     step: SummaryStepName,
@@ -64,6 +102,7 @@ function summaryStepMarker(
 function planMail(
     facts: PipelineFacts,
     input: ContentRevisionInput,
+    minimumGeneration: number,
 ): PipelineAction[] {
     const mail = facts.mail;
     if (
@@ -79,7 +118,12 @@ function planMail(
     const steps = { ...facts.phases.summary?.steps };
     if (
         facts.profile?.automatic.summary &&
-        !stepRequested(facts.phases.summary, "summary", input)
+        !stepRequested(
+            facts.phases.summary,
+            "summary",
+            input,
+            minimumGeneration,
+        )
     ) {
         actions.push({ type: "queueSummary", presetId: null, strict: false });
         actions.push(
@@ -89,7 +133,8 @@ function planMail(
 
     if (
         facts.profile?.automatic.learn &&
-        !sameInput(facts.phases.learn, input)
+        (!sameInput(facts.phases.learn, input) ||
+            (facts.phases.learn?.generation ?? -1) < minimumGeneration)
     ) {
         actions.push({ type: "startAutoLearnMail" });
         actions.push({
@@ -112,11 +157,17 @@ function planReleasedAudio(
     facts: PipelineFacts,
     input: ContentRevisionInput,
     releaseGeneration: number,
+    minimumGeneration: number,
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
     const notRequested = (step: SummaryStepName) =>
-        !stepRequested(facts.phases.summary, step, input, releaseGeneration);
+        !stepRequested(
+            facts.phases.summary,
+            step,
+            input,
+            Math.max(releaseGeneration, minimumGeneration),
+        );
 
     if (
         facts.profile?.automatic.summary &&
@@ -153,6 +204,7 @@ function planReleasedAudio(
 function planTranscriptAudio(
     facts: PipelineFacts,
     input: ContentRevisionInput & { timed: boolean },
+    minimumGeneration: number,
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
@@ -160,7 +212,7 @@ function planTranscriptAudio(
     if (
         input.timed &&
         facts.profile?.automatic.topics &&
-        !stepRequested(facts.phases.summary, "topics", input)
+        !stepRequested(facts.phases.summary, "topics", input, minimumGeneration)
     ) {
         actions.push({ type: "queueTopics", strict: false });
         actions.push(
@@ -170,7 +222,12 @@ function planTranscriptAudio(
 
     if (
         facts.profile?.automatic.summary &&
-        !stepRequested(facts.phases.summary, "summary", input)
+        !stepRequested(
+            facts.phases.summary,
+            "summary",
+            input,
+            minimumGeneration,
+        )
     ) {
         actions.push({
             type: "queueSummary",
@@ -184,15 +241,162 @@ function planTranscriptAudio(
     return actions;
 }
 
-/** Decide the Stage 1 work due solely from durable item facts. */
+function legacyContentAlreadyHandled(facts: PipelineFacts): boolean {
+    const categorize = facts.phases.categorize;
+    if (categorize?.reason !== "legacy") return false;
+    if (!facts.content) return true;
+    const input = facts.content;
+    const learn = facts.phases.learn;
+    if (
+        learn?.reason !== "legacy" ||
+        learn.state !== "done" ||
+        !sameInput(learn, input)
+    ) {
+        return false;
+    }
+    const steps =
+        facts.item.kind === "audio"
+            ? (["title", "topics", "summary"] as const)
+            : (["title", "summary"] as const);
+    return steps.every((step) =>
+        stepRequested(facts.phases.summary, step, input),
+    );
+}
+
+function taskReviewActions(facts: PipelineFacts): PipelineAction[] {
+    if (facts.taskReview.proposals + facts.taskReview.followUps === 0)
+        return [];
+    if (
+        phaseMatches(
+            facts.phases.taskReview,
+            "waiting",
+            "needs_review",
+            facts.generation,
+        )
+    ) {
+        return [];
+    }
+    return [markPhase(facts, "taskReview", "waiting", "needs_review")];
+}
+
+/** Decide the work due solely from durable item facts. */
 export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (facts.view === "org") return { actions: [] };
+    if (!facts.item.exists || facts.item.deleted) {
+        return { actions: [], reason: "gone" };
+    }
+
+    if (legacyContentAlreadyHandled(facts)) return { actions: [] };
+
+    const mail = facts.mail;
     if (
-        !facts.item.exists ||
-        facts.item.deleted ||
-        !facts.content ||
-        (facts.item.kind === "audio" &&
-            facts.content.contentSourceId !== "riffado")
+        facts.item.kind === "mail" &&
+        (mail?.autoGenerated || mail?.unreadable)
+    ) {
+        const reason = mail.autoGenerated ? "machine_sent" : "unreadable";
+        if (
+            phaseMatches(
+                facts.phases.categorize,
+                "not_processed",
+                reason,
+                facts.generation,
+            )
+        ) {
+            return { actions: [] };
+        }
+        return {
+            actions: [markPhase(facts, "categorize", "not_processed", reason)],
+        };
+    }
+
+    const placementCount =
+        facts.categorization.placementFolderIds.length +
+        facts.categorization.intendedFolderIds.length;
+    const categorize = facts.phases.categorize;
+    const legacyCategorized =
+        categorize?.state === "done" && categorize.reason === "legacy";
+    const categorized =
+        categorize?.state === "done" &&
+        (legacyCategorized ||
+            (placementCount > 0 && facts.categorization.profileAssigned));
+    const actions: PipelineAction[] = [];
+    if (!categorized) {
+        if (placementCount === 0) {
+            if (
+                phaseMatches(
+                    categorize,
+                    "waiting",
+                    "needs_folder",
+                    facts.generation,
+                )
+            ) {
+                return { actions: [] };
+            }
+            return {
+                actions: [
+                    markPhase(facts, "categorize", "waiting", "needs_folder"),
+                ],
+            };
+        }
+        if (!facts.categorization.profileAssigned) {
+            const state =
+                facts.categorization.resolution === "choose"
+                    ? "waiting"
+                    : "pending";
+            const reason =
+                facts.categorization.resolution === "choose"
+                    ? "needs_profile"
+                    : "resolving_profile";
+            if (phaseMatches(categorize, state, reason, facts.generation)) {
+                return { actions: [] };
+            }
+            return {
+                actions: [markPhase(facts, "categorize", state, reason)],
+            };
+        }
+        actions.push(markPhase(facts, "categorize", "done", "categorized"));
+    }
+
+    const minimumGeneration =
+        actions.length > 0
+            ? facts.generation
+            : (facts.phases.categorize?.generation ?? facts.generation);
+
+    if (!facts.content) {
+        if (facts.item.kind === "audio") {
+            if (
+                !phaseMatches(
+                    facts.phases.transcribe,
+                    "waiting",
+                    "needs_transcript",
+                    minimumGeneration,
+                )
+            ) {
+                actions.push(
+                    markPhase(
+                        facts,
+                        "transcribe",
+                        "waiting",
+                        "needs_transcript",
+                    ),
+                );
+            }
+        } else if (
+            !phaseMatches(
+                facts.phases.learn,
+                "waiting",
+                "needs_content",
+                minimumGeneration,
+            )
+        ) {
+            actions.push(markPhase(facts, "learn", "waiting", "needs_content"));
+        }
+        return { actions };
+    }
+
+    if (
+        facts.item.kind === "audio" &&
+        facts.content.contentSourceId !== "riffado"
     ) {
         return { actions: [], reason: "gone" };
     }
@@ -202,7 +406,51 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         contentSourceId: facts.content.contentSourceId,
         contentRevision: facts.content.contentRevision,
     };
-    if (facts.item.kind === "mail") return { actions: planMail(facts, input) };
+    if (facts.item.kind === "mail") {
+        if (
+            !phaseMatches(
+                facts.phases.transcribe,
+                "skipped",
+                "not-applicable",
+                minimumGeneration,
+            )
+        ) {
+            actions.push(
+                markPhase(facts, "transcribe", "skipped", "not-applicable"),
+            );
+        }
+        if (
+            !facts.profile?.automatic.learn &&
+            !phaseMatches(
+                facts.phases.learn,
+                "skipped",
+                "disabled",
+                minimumGeneration,
+                input,
+            )
+        ) {
+            actions.push(
+                markPhase(facts, "learn", "skipped", "disabled", input),
+            );
+        }
+        actions.push(...planMail(facts, input, minimumGeneration));
+        actions.push(...taskReviewActions(facts));
+        return { actions };
+    }
+
+    if (
+        !phaseMatches(
+            facts.phases.transcribe,
+            "done",
+            "content-available",
+            minimumGeneration,
+            input,
+        )
+    ) {
+        actions.push(
+            markPhase(facts, "transcribe", "done", "content-available", input),
+        );
+    }
 
     if (facts.summaryDueAt) {
         if (
@@ -210,35 +458,43 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             facts.phases.learn?.state === "waiting" &&
             facts.phases.learn.generation >= facts.generation
         ) {
-            return { actions: [] };
+            return { actions };
         }
-        return {
-            actions: [
-                {
-                    type: "markPhase",
-                    phase: "learn",
-                    record: {
-                        state: "waiting",
-                        reason: "auto-learn-hold",
-                        generation: facts.generation,
-                        inputs: input,
-                        at: facts.at,
-                        profileRevisionId: facts.profile?.revisionId,
-                    },
-                },
-            ],
-        };
+        actions.push(
+            markPhase(facts, "learn", "waiting", "auto-learn-hold", input),
+        );
+        return { actions };
     }
 
     const learn = facts.phases.learn;
     if (
         learn?.state === "done" &&
         learn.reason === "released" &&
-        sameInput(learn, input)
+        sameInput(learn, input) &&
+        learn.generation >= minimumGeneration
     ) {
-        return {
-            actions: planReleasedAudio(facts, input, learn.generation),
-        };
+        actions.push(
+            ...planReleasedAudio(
+                facts,
+                input,
+                learn.generation,
+                minimumGeneration,
+            ),
+        );
+        actions.push(...taskReviewActions(facts));
+        return { actions };
     }
-    return { actions: planTranscriptAudio(facts, facts.content) };
+
+    if (
+        (!sameInput(learn, input) ||
+            (learn?.generation ?? -1) < minimumGeneration) &&
+        !facts.profile?.automatic.learn
+    ) {
+        actions.push(markPhase(facts, "learn", "skipped", "disabled", input));
+    }
+    actions.push(
+        ...planTranscriptAudio(facts, facts.content, minimumGeneration),
+    );
+    actions.push(...taskReviewActions(facts));
+    return { actions };
 }

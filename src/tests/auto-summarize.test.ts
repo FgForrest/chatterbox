@@ -250,10 +250,48 @@ function mountSelectChain(
                 topics: false,
             },
         },
+        categorization: {
+            placementFolderIds: ["folder-1"],
+            intendedFolderIds: [],
+            profileAssigned: true,
+            resolution: "resolved",
+        },
         hasEnhancementCredential: true,
         mail: null,
         summary: { exists: false, stale: false, jobActive: false },
-        phases: {},
+        taskReview: { proposals: 0, followUps: 0 },
+        phases: {
+            categorize: {
+                state: "done",
+                reason: "categorized",
+                generation: 1,
+                at: "2026-10-14T12:00:00.000Z",
+            },
+            transcribe: {
+                state: "done",
+                reason: "content-available",
+                generation: 1,
+                inputs: {
+                    contentId: "transcription-1",
+                    contentSourceId: "riffado",
+                    contentRevision: 1,
+                },
+                at: "2026-10-14T12:00:00.000Z",
+                profileRevisionId: "seeded-profile-revision",
+            },
+            learn: {
+                state: "skipped",
+                reason: "disabled",
+                generation: 1,
+                inputs: {
+                    contentId: "transcription-1",
+                    contentSourceId: "riffado",
+                    contentRevision: 1,
+                },
+                at: "2026-10-14T12:00:00.000Z",
+                profileRevisionId: "seeded-profile-revision",
+            },
+        },
         at: "2026-10-14T12:00:00.000Z",
     };
 }

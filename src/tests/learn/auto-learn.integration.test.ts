@@ -23,7 +23,10 @@ import {
     apiRateLimitBuckets,
     asyncJobs,
     chatterItems,
+    itemProcessing,
     learnRuns,
+    recordingFolderAssignments,
+    recordingFolders,
     transcriptions,
     userSettings,
     users,
@@ -105,6 +108,7 @@ import { recordingFollowUps } from "@/lib/learn/follow-ups";
 import * as learnJob from "@/lib/learn/learn-job";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
@@ -205,6 +209,31 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             });
         riffadoId = inserted.find((row) => row.source === "riffado")?.id ?? "";
         plaudId = inserted.find((row) => row.source === "plaud")?.id ?? "";
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "auto-learn-root",
+                    userId: OWNER,
+                    parentId: null,
+                    name: "Private",
+                    nameHash: "auto-learn-root-hash",
+                    kind: "private",
+                },
+                {
+                    id: "auto-learn-folder",
+                    userId: OWNER,
+                    parentId: "auto-learn-root",
+                    name: "Learn",
+                    nameHash: "auto-learn-folder-hash",
+                    kind: "custom",
+                },
+            ]);
+        await db().insert(recordingFolderAssignments).values({
+            userId: OWNER,
+            itemId: REC,
+            folderId: "auto-learn-folder",
+        });
     });
 
     const dueAt = async () =>
@@ -263,6 +292,41 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     /** Run the queued pipeline driver, as the worker would. */
     const runAdvance = async () => {
+        const profile = await resolveDefaultProfile(OWNER, "audio");
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: REC,
+                userId: OWNER,
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .onConflictDoUpdate({
+                target: [itemProcessing.itemId, itemProcessing.view],
+                set: {
+                    profileId: profile.profile.id,
+                    profileRevisionId: profile.revisionId,
+                },
+            });
+        const [processing] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, REC),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, REC, "private", OWNER, "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.generation ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
         await pipelineAdvanceJobHandler.run({
             jobId: "job-advance",
             userId: OWNER,

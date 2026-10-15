@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     accounts,
     apiCredentials,
+    itemProcessing,
     knowledgeFactEvidence,
     knowledgeFacts,
     learnReviewItems,
@@ -25,6 +26,7 @@ import {
     mailParticipants,
     people,
     personEmails,
+    recordingFolderAssignments,
     recordingFolders,
     users,
 } from "@/db/schema";
@@ -129,6 +131,7 @@ import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { deleteMail } from "@/lib/mail/manage";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
 import { requireRecordingView } from "@/lib/sharing/access";
@@ -169,6 +172,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
     let acmeId = "";
     let firstMail = "";
     let orgUserId = "";
+    let categoryFolderId = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -238,8 +242,51 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
         return { runId, result };
     }
 
-    const runAdvance = (itemId: string) =>
-        pipelineAdvanceJobHandler.run({
+    const runAdvance = async (itemId: string) => {
+        const profile = await resolveDefaultProfile("u-jan", "mail");
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: "u-jan",
+                itemId,
+                folderId: categoryFolderId,
+            })
+            .onConflictDoNothing();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: "u-jan",
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .onConflictDoUpdate({
+                target: [itemProcessing.itemId, itemProcessing.view],
+                set: {
+                    profileId: profile.profile.id,
+                    profileRevisionId: profile.revisionId,
+                },
+            });
+        const [processing] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, "u-jan"),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, itemId, "private", "u-jan", "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.generation ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
+        return pipelineAdvanceJobHandler.run({
             jobId: `pipeline-${itemId}`,
             userId: "u-jan",
             payload: { itemId, view: "private", reason: "arrival" },
@@ -248,6 +295,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: () => undefined,
         });
+    };
 
     async function setAutomaticLearn(automatic: boolean): Promise<void> {
         const resolved = await resolveDefaultProfile("u-jan", "mail");
@@ -298,6 +346,17 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             providerId: "oidc",
         });
         await ensureRootFolders("u-jan");
+        const [privateRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, "u-jan"));
+        categoryFolderId = (
+            await createFolder({
+                userId: "u-jan",
+                parentId: privateRoot?.id ?? "",
+                name: "Categorized",
+            })
+        ).id;
         await ensureMailbox("u-jan");
         // No automatic processing: the runs here are started by hand.
         await db()

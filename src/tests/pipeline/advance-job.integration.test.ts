@@ -14,6 +14,8 @@ import {
     apiCredentials,
     asyncJobs,
     itemProcessing,
+    recordingFolderAssignments,
+    recordingFolders,
     transcriptions,
     userSettings,
     users,
@@ -25,6 +27,7 @@ import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvance,
 } from "@/lib/pipeline/trigger";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { insertRecordings } from "@/tests/integration/items";
 import {
     createMigratedTestDatabase,
@@ -125,7 +128,11 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         return database.db;
     }
 
-    async function seedAudio(itemId = ITEM_ID, revision = 1): Promise<void> {
+    async function seedAudio(
+        itemId = ITEM_ID,
+        revision = 1,
+        categorized = true,
+    ): Promise<void> {
         await insertRecordings(db(), {
             id: itemId,
             userId: USER_ID,
@@ -153,6 +160,30 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 model: "test",
                 source: "riffado",
                 revision,
+            });
+        if (!categorized) return;
+        const profile = await resolveDefaultProfile(USER_ID, "audio");
+        await db().insert(recordingFolderAssignments).values({
+            userId: USER_ID,
+            itemId,
+            folderId: "pipeline-folder",
+        });
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: USER_ID,
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 0,
+                        at: new Date().toISOString(),
+                    },
+                },
             });
     }
 
@@ -211,6 +242,26 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             defaultModel: "test-model",
             isDefaultEnhancement: true,
         });
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "pipeline-root",
+                    userId: USER_ID,
+                    parentId: null,
+                    name: "Private",
+                    nameHash: "pipeline-root-hash",
+                    kind: "private",
+                },
+                {
+                    id: "pipeline-folder",
+                    userId: USER_ID,
+                    parentId: "pipeline-root",
+                    name: "Pipeline",
+                    nameHash: "pipeline-folder-hash",
+                    kind: "custom",
+                },
+            ]);
     });
 
     it("loops when a trigger arrives after the generation read", async () => {
@@ -466,7 +517,11 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             }),
         ).rejects.toBe(abandoned);
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
-        expect((await processing())?.phases).toEqual({});
+        expect((await processing())?.phases).toMatchObject({
+            categorize: { state: "done", reason: "categorized" },
+            transcribe: { state: "done", reason: "content-available" },
+            learn: { state: "skipped", reason: "disabled" },
+        });
     });
 
     it("does not check summary staleness outside the Learn release path", async () => {
@@ -546,7 +601,9 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             fresh: "pipeline-sweep-fresh",
             poison: "pipeline-sweep-poison",
         };
-        for (const itemId of Object.values(ids)) await seedAudio(itemId);
+        for (const itemId of Object.values(ids)) {
+            await seedAudio(itemId, 1, false);
+        }
         const now = new Date();
         const old = new Date(now.getTime() - 3 * 60_000);
         await db()

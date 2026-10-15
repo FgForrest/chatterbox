@@ -105,7 +105,10 @@ interface AccessibleFolder {
     ownerId: string;
 }
 
-async function scheduleExportProjection(userId: string): Promise<void> {
+/** Schedule the owner's folder-export projection after a placement change. */
+export async function scheduleFolderExportProjection(
+    userId: string,
+): Promise<void> {
     await enqueueExportPlansForUser(userId).catch((error) => {
         console.error("Failed to schedule folder export projection:", error);
     });
@@ -115,7 +118,7 @@ async function scheduleExportProjection(userId: string): Promise<void> {
 export async function orgTreeChanged(): Promise<void> {
     await notifyOrgChange({ type: "tree" });
     const orgUserId = await getOrgUserId();
-    if (orgUserId) await scheduleExportProjection(orgUserId);
+    if (orgUserId) await scheduleFolderExportProjection(orgUserId);
 }
 
 function normalizeName(value: string): string {
@@ -585,7 +588,7 @@ export async function renameFolder(input: {
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
     return serializeFolder(updated, target.scope);
 }
@@ -749,7 +752,7 @@ export async function moveFolder(input: {
     if (moved.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
     return moved.folder;
 }
@@ -875,7 +878,7 @@ export async function deleteFolder(
     if (scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(userId);
+        await scheduleFolderExportProjection(userId);
     }
 }
 
@@ -907,7 +910,7 @@ async function requireOwnedRecording(
 }
 
 /** Drop assignments to ancestors of another assignment in the same tree. */
-async function pruneRedundantAssignments(
+export async function pruneRedundantAssignmentsInTx(
     tx: Tx,
     treeOwnerId: string,
     recordingId: string,
@@ -1022,7 +1025,7 @@ export async function shareItemToOrganizationFolderInTx(
             }
             throw error;
         }
-        await pruneRedundantAssignments(tx, input.orgUserId, input.itemId);
+        await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
         return [];
     }
 
@@ -1034,7 +1037,7 @@ export async function shareItemToOrganizationFolderInTx(
             folderId: folder.id,
         })
         .onConflictDoNothing();
-    await pruneRedundantAssignments(tx, input.orgUserId, input.itemId);
+    await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
     if (wasShared) return [];
 
     const names = await publishSpeakerNamesInTx(tx, {
@@ -1124,7 +1127,7 @@ export async function addRecordingToFolder(input: {
                     folderId: target.folder.id,
                 })
                 .onConflictDoNothing();
-            await pruneRedundantAssignments(
+            await pruneRedundantAssignmentsInTx(
                 tx,
                 target.ownerId,
                 input.recordingId,
@@ -1145,7 +1148,7 @@ export async function addRecordingToFolder(input: {
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
 }
 
@@ -1185,7 +1188,7 @@ export async function removeRecordingFromFolder(input: {
                     eq(recordingFolderAssignments.folderId, input.folderId),
                 ),
             );
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
         return;
     }
 
@@ -1508,12 +1511,12 @@ export async function moveRecordingBetweenFolders(input: {
                     eq(recordingFolderAssignments.folderId, from.folder.id),
                 ),
             );
-        await pruneRedundantAssignments(tx, to.ownerId, input.recordingId);
+        await pruneRedundantAssignmentsInTx(tx, to.ownerId, input.recordingId);
     });
     if (to.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
 }
 

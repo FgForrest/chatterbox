@@ -19,8 +19,11 @@ import {
     aiEnhancements,
     apiCredentials,
     asyncJobs,
+    itemProcessing,
     mailMessages,
     mailParticipants,
+    recordingFolderAssignments,
+    recordingFolders,
     recordingTasks,
     userSettings,
     users,
@@ -109,7 +112,7 @@ import { readItemContent } from "@/lib/content/read-item-content";
 import { renderMailForModel } from "@/lib/content/render-mail";
 import { encrypt } from "@/lib/encryption";
 import { decryptText } from "@/lib/encryption/fields";
-import { ensureRootFolders } from "@/lib/folders/folders";
+import { createFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { createPerson } from "@/lib/knowledge/people";
 import { ensureMailbox } from "@/lib/mail/addresses";
 import { collectArchivedMail } from "@/lib/mail/archive";
@@ -117,6 +120,7 @@ import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
@@ -166,6 +170,7 @@ function reply(content: object) {
 describeWithDatabase("summaries of mail (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
     let storageDir = "";
+    let categoryFolderId = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -195,8 +200,51 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         return message.id;
     }
 
-    const runAdvance = (itemId: string) =>
-        pipelineAdvanceJobHandler.run({
+    const runAdvance = async (itemId: string) => {
+        const profile = await resolveDefaultProfile("u-jan", "mail");
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: "u-jan",
+                itemId,
+                folderId: categoryFolderId,
+            })
+            .onConflictDoNothing();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: "u-jan",
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .onConflictDoUpdate({
+                target: [itemProcessing.itemId, itemProcessing.view],
+                set: {
+                    profileId: profile.profile.id,
+                    profileRevisionId: profile.revisionId,
+                },
+            });
+        const [processing] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, "u-jan"),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, itemId, "private", "u-jan", "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.generation ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
+        return pipelineAdvanceJobHandler.run({
             jobId: `pipeline-${itemId}`,
             userId: "u-jan",
             payload: { itemId, view: "private", reason: "arrival" },
@@ -205,6 +253,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: () => undefined,
         });
+    };
 
     async function setAutomaticSummary(automatic: boolean): Promise<void> {
         const resolved = await resolveDefaultProfile("u-jan", "mail");
@@ -268,6 +317,17 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             providerId: "oidc",
         });
         await ensureRootFolders("u-jan");
+        const [privateRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, "u-jan"));
+        categoryFolderId = (
+            await createFolder({
+                userId: "u-jan",
+                parentId: privateRoot?.id ?? "",
+                name: "Categorized",
+            })
+        ).id;
         await ensureMailbox("u-jan");
         await db()
             .insert(apiCredentials)
