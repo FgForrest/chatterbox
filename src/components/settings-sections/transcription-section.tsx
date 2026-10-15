@@ -749,7 +749,7 @@ export function TranscriptionSection({
                         </Label>
                         <p className="text-sm text-muted-foreground">
                             {i18n(
-                                "Automatically generate descriptive titles from transcriptions using AI",
+                                "Generate titles from summaries when available, or from corrected transcripts",
                             )}
                         </p>
                     </div>
@@ -764,6 +764,15 @@ export function TranscriptionSection({
                         }}
                         disabled={isSavingSettings}
                     />
+                </div>
+
+                <div className="pl-4 border-l-2 border-primary/20">
+                    <ProviderRoleSelect purpose="title" />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {i18n(
+                            "Choose a provider for titles, or use the summary provider. Manual regeneration works even when automatic titles are off.",
+                        )}
+                    </p>
                 </div>
 
                 {autoGenerateTitle && (
@@ -815,7 +824,7 @@ export function TranscriptionSection({
                                     {"{transcription}"}
                                 </code>{" "}
                                 {i18n(
-                                    "where the transcript goes. The model must reply with the title alone, as plain text. Only the beginning of a long transcript is sent.",
+                                    "where the summary or corrected transcript goes. The model must reply with the title alone, as plain text. Long input is shortened.",
                                 )}
                             </>
                         }

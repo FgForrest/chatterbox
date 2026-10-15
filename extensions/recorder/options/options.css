@@ -1,0 +1,198 @@
+:root {
+    color-scheme: light dark;
+    --background: #faf9f5;
+    --foreground: #243348;
+    --surface: #fff;
+    --muted: #f1eee8;
+    --muted-foreground: #626b73;
+    --border: #dad9d4;
+    --primary: #c63b50;
+    --primary-foreground: #fff;
+    --error: #b42332;
+    --success: #277a49;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #3b3a38;
+        --foreground: #d4d0c9;
+        --surface: #444340;
+        --muted: #302f2d;
+        --muted-foreground: #c3bdb3;
+        --border: #62605b;
+        --primary: #f35f6d;
+        --primary-foreground: #14263c;
+        --error: #ff8b94;
+        --success: #80d2a0;
+    }
+}
+
+body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+}
+
+main {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 24px 20px 48px;
+}
+
+h1 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 20px;
+}
+
+h1 img {
+    flex: none;
+}
+
+h2 {
+    font-size: 15px;
+    margin: 0 0 6px;
+}
+
+section {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 18px;
+    background: var(--surface);
+}
+
+label {
+    display: block;
+    font-size: 13px;
+    margin: 12px 0 4px;
+}
+
+label.check {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 12px;
+}
+
+label.check[hidden] {
+    display: none;
+}
+
+input[type="checkbox"] {
+    accent-color: var(--primary);
+}
+
+input[type="url"],
+input[type="password"],
+input[type="text"],
+select,
+textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: inherit;
+}
+
+.hint,
+th {
+    color: var(--muted-foreground);
+}
+
+.hint {
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.status {
+    font-size: 12px;
+    min-height: 16px;
+    margin-top: 8px;
+}
+
+.status.ok {
+    color: var(--success);
+}
+
+.status.err {
+    color: var(--error);
+}
+
+button {
+    font: inherit;
+    font-size: 13px;
+    margin-top: 14px;
+    padding: 8px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--muted);
+    color: inherit;
+    cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+    border-color: var(--primary);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
+button.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--primary-foreground);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 8px;
+}
+
+th,
+td {
+    text-align: left;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+th {
+    font-weight: 600;
+    font-size: 12px;
+}
+
+td select {
+    width: auto;
+    padding: 4px 8px;
+}
+
+.policy {
+    font-size: 13px;
+    padding: 10px;
+    border-radius: 7px;
+    background: var(--muted);
+}
+
+button.link {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    color: var(--primary);
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 12px;
+}

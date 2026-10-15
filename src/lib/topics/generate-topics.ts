@@ -28,6 +28,7 @@ import { resolveTemplate } from "@/lib/ai/prompt-templates";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
 import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -137,6 +138,7 @@ export async function generateTopicsForTranscript(
         recordingId,
         ownerUserId: userId,
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
 
@@ -321,6 +323,10 @@ export async function generateTopicsForTranscript(
     // Under the recording lock sharing takes, so a recording shared while
     // the model ran keeps what it was shared with.
     const orgUserId = await sharingOrgUserId();
+    // Before the lock: it may ask the identity provider.
+    const actsForOrganization =
+        ctx.actsForOrganization &&
+        (await userCuratesOrganizationNow(ctx.actorUserId));
     const written = await db.transaction(async (tx) => {
         await tx
             .select({ id: recordings.id })
@@ -337,6 +343,7 @@ export async function generateTopicsForTranscript(
             ownerUserId: userId,
             actorUserId: ctx.actorUserId,
             orgUserId,
+            actsForOrganization,
         });
         if (shared) throw writerRefusalError(shared);
         return tx

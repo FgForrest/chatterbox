@@ -48,11 +48,21 @@ vi.mock("@/db", () => ({
 vi.mock("@/db/queries/async-jobs", () => ({
     getActiveJob: mocks.getActiveJob,
 }));
-vi.mock("@/lib/auth-server", () => ({
-    requireApiSession: vi.fn().mockResolvedValue({
-        user: { id: "user-1" },
-    }),
+vi.mock("@/lib/authz/curator", () => ({
+    actsForOrganization: vi.fn().mockResolvedValue(false),
+    userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
 }));
+vi.mock("@/lib/auth-server", async () => {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
+        requireApiSession: vi.fn().mockResolvedValue({
+            user: { id: "user-1" },
+        }),
+    });
+});
+
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
 }));

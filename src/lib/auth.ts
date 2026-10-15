@@ -4,9 +4,12 @@ import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { runInAuthRequest } from "./authz/login-grant";
+import { sessionAccess } from "./authz/session-access";
 import { env } from "./env";
 import { closeCycleForUser } from "./hosted/billing/cycle-close";
 import { localeFromAcceptLanguage, normalizeLocale } from "./i18n/config";
+import { isIdpAuthorization } from "./identity/factory";
 import {
     sendEmailChangeConfirm,
     sendPasswordResetEmail,
@@ -18,13 +21,16 @@ import {
     guardSsoSession,
     mapSsoProfile,
     prepareSsoAccount,
+    SupersededSignInError,
+    verifySsoLogin,
 } from "./sso/auth-hooks";
 import {
     isSsoEnabled,
     PASSWORD_AUTH_PATHS,
+    PROVIDER_TOKEN_PATHS,
     ssoDiscoveryUrl,
 } from "./sso/config";
-import { SSO_PROVIDER_ID } from "./sso/constants";
+import { SSO_PROVIDER_ID, SSO_UNAVAILABLE_ERROR } from "./sso/constants";
 
 const EMAIL_VERIFICATION_TTL_SECONDS = 24 * 60 * 60;
 
@@ -88,18 +94,28 @@ function ssoPlugins() {
                     clientSecret,
                     scopes: env.OIDC_SCOPES,
                     pkce: true,
+                    authorizationUrlParams: (ctx): Record<string, string> =>
+                        isIdpAuthorization() &&
+                        ctx.body?.additionalData?.reauthenticate === true
+                            ? { max_age: "0", prompt: "login" }
+                            : {},
                     // A closed instance stays closed under single sign-on:
                     // only existing accounts sign in.
                     disableSignUp: env.DISABLE_REGISTRATION,
                     overrideUserInfo: true,
                     mapProfileToUser: mapSsoProfile,
+                    // With identity-provider authorization the profile and
+                    // the capabilities come from verified tokens only.
+                    ...(isIdpAuthorization()
+                        ? { getUserInfo: verifySsoLogin }
+                        : {}),
                 },
             ],
         }),
     ];
 }
 
-export const auth = betterAuth({
+const betterAuthInstance = betterAuth({
     database: drizzleAdapter(db, {
         provider: "pg",
         schema,
@@ -107,8 +123,11 @@ export const auth = betterAuth({
     }),
     ...(ssoEnabled
         ? {
-              disabledPaths: [...PASSWORD_AUTH_PATHS],
+              disabledPaths: [...PASSWORD_AUTH_PATHS, ...PROVIDER_TOKEN_PATHS],
               account: {
+                  additionalFields: {
+                      issuer: { type: "string", required: false, input: false },
+                  },
                   accountLinking: {
                       enabled: true,
                       requireLocalEmailVerified: false,
@@ -222,5 +241,67 @@ export const auth = betterAuth({
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.APP_URL,
 });
+
+/**
+ * `/get-session` for the browser: a session whose access no longer holds
+ * (identity-provider authorization) reads as signed out.
+ */
+async function guardedGetSession(response: Response): Promise<Response> {
+    if (!response.ok) return response;
+    const body = (await response
+        .clone()
+        .json()
+        .catch(() => null)) as {
+        session?: { id?: unknown; userId?: unknown };
+    } | null;
+    const id = body?.session?.id;
+    const userId = body?.session?.userId;
+    if (typeof id !== "string" || typeof userId !== "string") return response;
+    const access = await sessionAccess({ id, userId });
+    if (access.ok) return response;
+    if (access.reason === "unavailable") {
+        return Response.json(
+            { error: "Access could not be verified" },
+            {
+                status: 503,
+                headers: { "Retry-After": "30", "Cache-Control": "no-store" },
+            },
+        );
+    }
+    return Response.json(null, { headers: response.headers });
+}
+
+/**
+ * Every auth request runs in its own scope, where a verified sign-in keeps
+ * its grant for the session it creates.
+ */
+async function handler(request: Request): Promise<Response> {
+    return runInAuthRequest(async () => {
+        let response: Response;
+        try {
+            response = await betterAuthInstance.handler(request);
+        } catch (error) {
+            if (error instanceof SupersededSignInError) {
+                return Response.redirect(
+                    `${env.APP_URL}/login?error=${SSO_UNAVAILABLE_ERROR}`,
+                    302,
+                );
+            }
+            throw error;
+        }
+        if (
+            isIdpAuthorization() &&
+            new URL(request.url).pathname.endsWith("/get-session")
+        ) {
+            return guardedGetSession(response);
+        }
+        return response;
+    });
+}
+
+export const auth: typeof betterAuthInstance = {
+    ...betterAuthInstance,
+    handler,
+};
 
 export type Session = typeof auth.$Infer.Session;

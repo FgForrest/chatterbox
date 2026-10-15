@@ -3,7 +3,7 @@ title: Backup and restore
 description: Export your recordings, transcripts, and audio so you can leave at any time.
 ---
 
-Riffado has two separate export paths, deliberately. They serve
+Chatterbox has two separate export paths, deliberately. They serve
 different jobs:
 
 - **`/api/backup`** — a complete JSON archive of every recording row
@@ -42,7 +42,7 @@ Organization added by hand.
 Finished archives stay downloadable for **7 days**, then a cleanup pass
 deletes them.
 
-The contents are **plaintext**. Riffado's at-rest encryption decrypts
+The contents are **plaintext**. Chatterbox's at-rest encryption decrypts
 every field before writing it into the archive, because the backup is
 *your* export of your own data — you own it from this point. Treat the
 file the way you would an unencrypted database dump: store it
@@ -172,7 +172,7 @@ Some specifics worth knowing before you switch it on:
 - **Settings shows how many recordings the policy applies to** before you
   save it.
 - **Markdown sidecars are left alone.** `<recording>.transcript.md` in your
-  storage folder is an export you asked for, not Riffado's copy; retention
+  storage folder is an export you asked for, not Chatterbox's copy; retention
   removes the database rows and the audio blob and does not touch files it
   did not put there on your behalf. Delete those yourself if you want them
   gone.
@@ -200,5 +200,5 @@ A reminder, because this trips people up:
   AES-256-GCM (see [Encryption at rest](../reference/encryption-at-rest)).
 - **In a backup file produced by `/api/backup`**, those fields are
   decrypted before serialization. Your responsibility from there.
-- **Audio files in storage** are *not* encrypted by Riffado's
+- **Audio files in storage** are *not* encrypted by Chatterbox's
   app-layer encryption — use bucket-level SSE if you need that.

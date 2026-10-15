@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/auth-request";
+import { authenticateRequest, requireApiScope } from "@/lib/auth-request";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     enforceV1AuthenticatedRateLimit,
@@ -17,6 +17,8 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     if (!authn) {
         throw new AppError(ErrorCode.UNAUTHORIZED, "Unauthorized", 401);
     }
+
+    requireApiScope(authn, "read");
 
     const authLimitResponse = await enforceV1AuthenticatedRateLimit(authn);
     if (authLimitResponse) return authLimitResponse;

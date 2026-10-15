@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { transcriptions } from "@/db/schema";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
@@ -81,14 +82,15 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
  * when it takes longer than the request is willing to wait.
  */
 export const POST = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const userId = session.user.id;
     const { id } = await (context as IdContext).params;
     const view = requestedRecordingView(request);
     const access = await requireRecordingView(userId, id, view);
-    // The owner on the private view; while shared, the organization account
-    // on the Organization view, with the Organization's prompt and language.
-    assertMayChange(access, userId);
+    // The owner on the private view; while shared, a curator (or the
+    // organization account) on the Organization view, with the
+    // Organization's prompt and language.
+    assertMayChange(access, userId, await actsForOrganization(actor));
     const source = requestedTopicSource(request);
 
     const { job } = await enqueueTopicsJob({

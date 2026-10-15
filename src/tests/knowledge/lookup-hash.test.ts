@@ -13,27 +13,33 @@ const { domainLookupHash, lookupHash, normalizeForLookup } = await import(
 
 describe("normalizeForLookup", () => {
     it("folds case and surrounding whitespace", () => {
-        expect(normalizeForLookup("  Jan.Novotny@FG.cz ")).toBe(
-            "jan.novotny@fg.cz",
+        expect(normalizeForLookup("  Jan.Novotny@Example.test ")).toBe(
+            "jan.novotny@example.test",
         );
     });
 });
 
 describe("lookupHash", () => {
     it("is stable for the same value", () => {
-        expect(lookupHash("jan@fg.cz")).toBe(lookupHash("jan@fg.cz"));
+        expect(lookupHash("jan@example.test")).toBe(
+            lookupHash("jan@example.test"),
+        );
     });
 
     it("ignores case and whitespace so one person is not created twice", () => {
-        expect(lookupHash("  JAN@FG.CZ ")).toBe(lookupHash("jan@fg.cz"));
+        expect(lookupHash("  JAN@EXAMPLE.TEST ")).toBe(
+            lookupHash("jan@example.test"),
+        );
     });
 
     it("differs for different values", () => {
-        expect(lookupHash("jan@fg.cz")).not.toBe(lookupHash("petr@fg.cz"));
+        expect(lookupHash("jan@example.test")).not.toBe(
+            lookupHash("petr@example.test"),
+        );
     });
 
     it("does not return the plaintext", () => {
-        const hash = lookupHash("jan@fg.cz");
+        const hash = lookupHash("jan@example.test");
         expect(hash).not.toContain("jan");
         expect(hash).toMatch(/^[0-9a-f]{64}$/);
     });

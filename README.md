@@ -6,13 +6,12 @@
 
 **Open-source AI transcription companion for voice recorders.**
 
-*Bring your own AI provider, own your transcripts, self-host or hosted.*
+*Bring your own AI provider, own your transcripts, and host your own data.*
 
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Discord](https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white)](https://riffado.com/discord)
 [![Sponsor](https://img.shields.io/badge/sponsor-riffado-EA4AAA?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/riffado)
 
-[Quick start](#quick-start) • [Documentation](https://riffado.com/docs) • [Discord](https://riffado.com/discord) • [Sponsor](https://github.com/sponsors/riffado)
+[Quick start](#quick-start) • [Documentation](#documentation) • [Sponsor upstream](https://github.com/sponsors/riffado)
 
 </div>
 
@@ -28,7 +27,7 @@ Chatterbox is an open-source companion app for AI voice recorders. It syncs your
 - Works with any OpenAI-compatible provider — OpenAI, Groq, OpenRouter, Together, LM Studio, Ollama, Azure, anything with a `baseURL`.
 - Free browser transcription via Transformers.js (Whisper in WebAssembly).
 - Local filesystem or S3-compatible storage (AWS S3, Cloudflare R2, MinIO, Backblaze B2, DigitalOcean Spaces, Wasabi).
-- AES-256-GCM encryption at rest for tokens, API keys, transcripts, and summaries.
+- Server-side AES-256-GCM encryption at rest for tokens, API keys, transcripts, and summaries.
 - Auto-sync on a schedule, with browser and email notifications.
 - Full export and backup — JSON, TXT, SRT, VTT, plus one-archive backup/restore.
 - Automation API with signed webhooks for integrations.
@@ -46,7 +45,7 @@ This repository builds on Riffado with features for people who work with their r
 - **Topics.** Long recordings split into titled chapters you can jump between. Lectures and monologues read in paragraphs.
 - **Play from the transcript.** Click a sentence to hear it. The transcript follows the player, and scrolling the transcript moves the player.
 - **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people and projects so they spell them right.
-- **Video uploads.** Upload a meeting video; Riffado keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
+- **Video uploads.** Upload a meeting video; Chatterbox keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
 
 **Summaries and tasks**
 
@@ -68,7 +67,7 @@ This repository builds on Riffado with features for people who work with their r
 **Your data, your way**
 
 - **Folders**, nested, with drag and drop. A recording can live in several.
-- **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Riffado did not write is touched.
+- **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Chatterbox did not write is touched.
 - **Scheduled backups**, kept apart for each user and for the Organization.
 - **Automatic deletion** of old audio, transcripts, summaries or recorder originals, each on its own schedule, and erasing any one part of a recording by hand.
 
@@ -91,7 +90,7 @@ You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionall
 Every release attaches `docker-compose.yml` and `env.example`. Replace `<owner>/<repository>` with this repository's GitHub path:
 
 ```bash
-mkdir riffado && cd riffado
+mkdir chatterbox && cd chatterbox
 curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
 curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
 
@@ -117,7 +116,7 @@ Full install guide, version pinning, image tags, and Windows/WSL notes: [Self-ho
 
 Chatterbox signs into Plaud using your email — the same OTP flow as the official app. The verification code is forwarded directly to Plaud and never stored. Your access token is encrypted with AES-256-GCM before hitting the database. Region (Global, EU, APAC) is auto-detected.
 
-If you signed up to Plaud with **Continue with Google** or **Continue with Apple**, the email-code flow won't return any recordings — that's a different identity on Plaud's side. Use the [Riffado Connector browser extension](https://github.com/riffado/connector), or paste a token manually. Full instructions: [riffado.com/docs/guides/connect-plaud-account](https://riffado.com/docs/guides/connect-plaud-account).
+If you signed up to Plaud with **Continue with Google** or **Continue with Apple**, the email-code flow won't return any recordings — that's a different identity on Plaud's side. Use the [Riffado Connector browser extension](https://github.com/riffado/connector), or paste a token manually. Full instructions: [Connect your Plaud account](content/docs/guides/connect-plaud-account.mdx).
 
 > Every line that handles your credentials is open source — [send-code route](src/app/api/plaud/auth/send-code/route.ts) · [verify route](src/app/api/plaud/auth/verify/route.ts) · [encryption](src/lib/encryption.ts).
 
@@ -128,27 +127,28 @@ The **[user guide](content/docs/user-guide/index.md)** in this repository covers
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
 - [The Organization](content/docs/self-hosting/organization.mdx)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
-- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Riffado in Claude](content/docs/user-guide/claude.md)
+- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Chatterbox in Claude](content/docs/user-guide/claude.md)
 - [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
 - [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
 - [Meeting recorder (meetrec)](cmd/meetrec/README.md)
+- [Chrome meeting recorder extension and its privacy policy](extensions/recorder/README.md)
 
-Every instance also serves these pages at `/docs`. The upstream documentation lives at **[riffado.com/docs](https://riffado.com/docs)**. Direct links:
+Every instance also serves these pages at `/docs`. Direct links in this repository:
 
-- [Install & first run](https://riffado.com/docs/self-hosting/install)
-- [Environment variables](https://riffado.com/docs/self-hosting/environment-variables)
-- [Upgrading](https://riffado.com/docs/self-hosting/upgrading)
-- [S3-compatible storage](https://riffado.com/docs/self-hosting/storage-s3)
-- [Email / SMTP](https://riffado.com/docs/self-hosting/email-smtp)
-- [Connect your Plaud account](https://riffado.com/docs/guides/connect-plaud-account)
-- [AI providers](https://riffado.com/docs/guides/ai-providers)
-- [Backup & restore](https://riffado.com/docs/guides/backup-and-restore)
-- [Notifications](https://riffado.com/docs/guides/notifications)
-- [Automation & webhooks](https://riffado.com/docs/guides/automation-and-webhooks)
-- [Public API reference](https://riffado.com/docs/reference/public-api)
-- [Encryption at rest](https://riffado.com/docs/reference/encryption-at-rest)
-- [Security model](https://riffado.com/docs/reference/security-model)
-- [Architecture](https://riffado.com/docs/reference/architecture)
+- [Install & first run](content/docs/self-hosting/install.mdx)
+- [Environment variables](content/docs/self-hosting/environment-variables.mdx)
+- [Upgrading](content/docs/self-hosting/upgrading.mdx)
+- [S3-compatible storage](content/docs/self-hosting/storage-s3.mdx)
+- [Email / SMTP](content/docs/self-hosting/email-smtp.mdx)
+- [Connect your Plaud account](content/docs/guides/connect-plaud-account.mdx)
+- [AI providers](content/docs/guides/ai-providers.mdx)
+- [Backup & restore](content/docs/guides/backup-and-restore.mdx)
+- [Notifications](content/docs/guides/notifications.mdx)
+- [Automation & webhooks](content/docs/guides/automation-and-webhooks.mdx)
+- [Public API reference](content/docs/reference/public-api.mdx)
+- [Encryption at rest](content/docs/reference/encryption-at-rest.mdx)
+- [Security model](content/docs/reference/security-model.mdx)
+- [Architecture](content/docs/reference/architecture.mdx)
 
 ## Sponsors
 

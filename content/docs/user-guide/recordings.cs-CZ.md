@@ -24,8 +24,8 @@ Seznam vlevo v části **Nahrávky** zobrazuje Vaše nejnovější nahrávky jak
 
 Nahrávky přibývají dvěma způsoby:
 
-- **Z Vašeho záznamníku.** Riffado stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
-- **Nahráním souboru.** Klikněte na **Nahrát** a vyberte zvukový nebo video soubor. U videa si Riffado ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou. Nahrané nahrávky jsou automaticky přepsány, pokud je zapnutá funkce **Automaticky přepsat nové nahrávky** (Nastavení → Přepisování).
+- **Z Vašeho záznamníku.** Chatterbox stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
+- **Nahráním souboru.** Klikněte na **Nahrát** a vyberte zvukový nebo video soubor. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou. Nahrané nahrávky jsou automaticky přepsány, pokud je zapnutá funkce **Automaticky přepsat nové nahrávky** (Nastavení → Přepisování).
 
 Pořizujete záznam schůzky v prohlížeči na Linuxu? Váš administrátor Vám může poskytnout **meetrec**, malý program z příkazového řádku, který zaznamená Vás i ostatní účastníky do jednoho souboru vhodného pro nahrání. Viz [Pro administrátory](administrators.md#meeting-recorder-meetrec).
 
@@ -69,9 +69,9 @@ Kliknutím na **Odhadovaná spotřeba AI** zjistíte, kolik stála jednotlivá z
 
 **Vymazat** odstraní části nahrávky a zbytek ponechá:
 
-- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Riffado. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
+- **Vymazat místní zvuk** odstraní kopii nahrávky uloženou v Chatterbox. Přepis a souhrn zůstávají zachovány. Pokud je originál stále ve Vašem cloudu nahrávače, **Obnovit zvuk z Plaud** jej vrátí zpět.
 - **Vymazat přepisy** a **Vymazat souhrny** odstraní pouze tyto položky.
-- **Smazat všechna místní data** vymaže nahrávku z Riffado, ale originál zůstane ve Vašem cloudu rekordéru.
+- **Smazat všechna místní data** vymaže nahrávku z Chatterbox, ale originál zůstane ve Vašem cloudu rekordéru.
 - **Přemístit originál Plaud do Koše** přesune originál do Koše na Vašem cloudu rekordéru.
 - **Smazat všude** provede obojí. Akci potvrdíte opsáním názvu nahrávky.
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { isValidCalendarDateString } from "./date-validation";
+import { KEYCLOAK_ISSUER_PATH } from "./identity/providers/keycloak/issuer";
 
 const optionalStrictBoolean = z
     .string()
@@ -77,6 +78,27 @@ function positiveIntEnv(name: string, fallback: number, max: number) {
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
 const MIN_CONNECTOR_KEY_LENGTH = 32;
+
+/** An optional Keycloak object id (UUID). */
+function keycloakGroupId(name: string) {
+    return z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined))
+        .refine(
+            (val) =>
+                val === undefined ||
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                    val,
+                ),
+            { message: `${name} must be a Keycloak group id (UUID)` },
+        );
+}
+
+/** An empty value counts as unset, as compose passes `${VAR:-}`. */
+function unsetIfEmpty(val: unknown): unknown {
+    return typeof val === "string" && val.trim() === "" ? undefined : val;
+}
 
 /** A comma-separated list, trimmed, without empty entries. */
 function commaList(val: string | undefined): string[] {
@@ -266,6 +288,71 @@ const baseEnvSchema = z.object({
      * resource-indicators feature on.
      */
     MCP_RESOURCE_AUDIENCE: optionalStrictBoolean,
+    /**
+     * Comma-separated service-only clients of the realm whose marked
+     * service tokens act in the Organization's data context. A token of any
+     * other client is a person's, whatever claims it carries.
+     */
+    MCP_SERVICE_CLIENTS: z.string().optional().transform(commaList),
+
+    /**
+     * Where authorization comes from. `local` (default): every account may
+     * use the application and the organization account curates. `idp`: the
+     * identity provider grants `use`, `org.curate` and `access.manage`;
+     * needs single sign-on and IDENTITY_PROVIDER.
+     */
+    AUTHZ_MODE: z.preprocess(
+        unsetIfEmpty,
+        z.enum(["local", "idp"]).optional().default("local"),
+    ),
+    /** The identity provider adapter for AUTHZ_MODE=idp. */
+    IDENTITY_PROVIDER: z.preprocess(
+        unsetIfEmpty,
+        z.enum(["keycloak"]).optional(),
+    ),
+    /** Keycloak client whose client roles carry the capabilities; default OIDC_CLIENT_ID. */
+    KEYCLOAK_ROLES_CLIENT: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /** Ids of the Keycloak groups that grant `use`, `org.curate` and `access.manage`. */
+    KEYCLOAK_GROUP_USE_ID: keycloakGroupId("KEYCLOAK_GROUP_USE_ID"),
+    KEYCLOAK_GROUP_CURATE_ID: keycloakGroupId("KEYCLOAK_GROUP_CURATE_ID"),
+    KEYCLOAK_GROUP_ACCESS_MANAGE_ID: keycloakGroupId(
+        "KEYCLOAK_GROUP_ACCESS_MANAGE_ID",
+    ),
+    /**
+     * Read-only service client (client credentials, `view-users` and `view-clients`) that
+     * re-verifies a holder's access for API keys and MCP without their
+     * interactive login.
+     */
+    KEYCLOAK_VERIFIER_CLIENT_ID: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    KEYCLOAK_VERIFIER_CLIENT_SECRET: z
+        .string()
+        .optional()
+        .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /**
+     * Seconds a verified authorization snapshot stays valid before the
+     * provider is asked again. Default 30 minutes, at most one hour.
+     */
+    AUTHZ_VERIFICATION_MAX_AGE: positiveIntEnv(
+        "AUTHZ_VERIFICATION_MAX_AGE",
+        30 * 60,
+        60 * 60,
+    ),
+    /**
+     * Seconds since the administrator last authenticated at the provider
+     * within which access management is allowed. Default 8 hours.
+     */
+    AUTHZ_ADMIN_MAX_AUTH_AGE: positiveIntEnv(
+        "AUTHZ_ADMIN_MAX_AUTH_AGE",
+        8 * 60 * 60,
+        7 * 24 * 60 * 60,
+    ),
+
     /** Days the MCP access log keeps a row. Default 90. */
     MCP_AUDIT_RETENTION_DAYS: z
         .string()
@@ -1115,7 +1202,179 @@ const baseEnvSchema = z.object({
                 "BILLING_LAUNCH_DATE must be a real calendar date (YYYY-MM-DD)",
         })
         .optional(),
+
+    /**
+     * Meeting Recorder extension defaults pushed to paired extensions.
+     * All optional and inert when unset: the extension records nothing
+     * automatically unless a platform is listed here or the user opts in.
+     *
+     * Comma-separated platform ids (see `src/lib/recorder/platforms.ts`) or
+     * `all`. Unknown ids are logged and ignored by recorder config resolution.
+     */
+    RECORDER_AUTO_RECORD_PLATFORMS: z
+        .string()
+        .optional()
+        .transform((val) => {
+            if (!val || val.trim() === "") return [] as string[];
+            return val
+                .split(",")
+                .map((part) => part.trim().toLowerCase())
+                .filter((part) => part.length > 0);
+        }),
+
+    /** Seconds of tab silence before an auto-mode recording stops itself. */
+    RECORDER_AUTO_STOP_QUIET_SECONDS: z
+        .string()
+        .regex(
+            /^\d+$/,
+            "RECORDER_AUTO_STOP_QUIET_SECONDS must be a positive integer",
+        )
+        .optional()
+        .transform((val) => (val ? Number(val) : 180))
+        .pipe(z.number().int().min(30).max(3600)),
+
+    /** Recording-policy text shown by the extension before auto mode is enabled. */
+    RECORDER_NOTICE_TEXT: z
+        .string()
+        .optional()
+        .transform((val) =>
+            val && val.trim() !== "" ? val.trim() : undefined,
+        ),
+
+    /** When true, users cannot turn a server-defaulted auto platform off. */
+    RECORDER_LOCK_DEFAULTS: optionalStrictBoolean,
+
+    /**
+     * Chrome extension id of the Meeting Recorder, used by the web app to
+     * detect and message the extension. Defaults to the published build's
+     * pinned id; self-hosters who build their own extension override it.
+     */
+    NEXT_PUBLIC_RECORDER_EXTENSION_ID: z
+        .string()
+        .regex(
+            /^[a-p]{32}$/,
+            "NEXT_PUBLIC_RECORDER_EXTENSION_ID must be a 32-character Chrome extension id",
+        )
+        .optional(),
 });
+
+type BaseEnv = z.infer<typeof baseEnvSchema>;
+
+/** The path of a URL; empty when it does not parse (reported by its own check). */
+function urlPath(value: string): string {
+    try {
+        return new URL(value).pathname;
+    } catch {
+        return "";
+    }
+}
+
+/**
+ * The combinations of identity-provider authorization: `idp` needs single
+ * sign-on and an adapter, and nothing about it may be half-configured; the
+ * `local` mode has no provider administration at all.
+ */
+function validateAuthorization(
+    parsed: BaseEnv,
+    oidcConfigured: boolean,
+    ctx: z.RefinementCtx,
+): void {
+    const issue = (path: string, message: string) =>
+        ctx.addIssue({ code: "custom", path: [path], message });
+    const groups = [
+        parsed.KEYCLOAK_GROUP_USE_ID,
+        parsed.KEYCLOAK_GROUP_CURATE_ID,
+        parsed.KEYCLOAK_GROUP_ACCESS_MANAGE_ID,
+    ];
+    const providerOnly = {
+        IDENTITY_PROVIDER: parsed.IDENTITY_PROVIDER,
+        KEYCLOAK_ROLES_CLIENT: parsed.KEYCLOAK_ROLES_CLIENT,
+        KEYCLOAK_GROUP_USE_ID: parsed.KEYCLOAK_GROUP_USE_ID,
+        KEYCLOAK_GROUP_CURATE_ID: parsed.KEYCLOAK_GROUP_CURATE_ID,
+        KEYCLOAK_GROUP_ACCESS_MANAGE_ID: parsed.KEYCLOAK_GROUP_ACCESS_MANAGE_ID,
+        KEYCLOAK_VERIFIER_CLIENT_ID: parsed.KEYCLOAK_VERIFIER_CLIENT_ID,
+        KEYCLOAK_VERIFIER_CLIENT_SECRET: parsed.KEYCLOAK_VERIFIER_CLIENT_SECRET,
+    };
+
+    if (parsed.AUTHZ_MODE === "local") {
+        for (const [name, value] of Object.entries(providerOnly)) {
+            if (value !== undefined) {
+                issue(name, `${name} needs AUTHZ_MODE=idp`);
+            }
+        }
+        return;
+    }
+
+    if (parsed.IS_HOSTED) {
+        issue("AUTHZ_MODE", "AUTHZ_MODE=idp is self-host only");
+    }
+    if (!oidcConfigured) {
+        issue(
+            "AUTHZ_MODE",
+            "AUTHZ_MODE=idp needs single sign-on (OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET)",
+        );
+    }
+    if (!parsed.IDENTITY_PROVIDER) {
+        issue("IDENTITY_PROVIDER", "AUTHZ_MODE=idp needs IDENTITY_PROVIDER");
+    }
+    if (
+        parsed.IDENTITY_PROVIDER === "keycloak" &&
+        parsed.OIDC_ISSUER_URL &&
+        !KEYCLOAK_ISSUER_PATH.test(urlPath(parsed.OIDC_ISSUER_URL))
+    ) {
+        issue(
+            "OIDC_ISSUER_URL",
+            "IDENTITY_PROVIDER=keycloak needs OIDC_ISSUER_URL of the form <base>/realms/<realm>",
+        );
+    }
+    if (groups.some(Boolean) && !groups.every(Boolean)) {
+        issue(
+            "KEYCLOAK_GROUP_USE_ID",
+            "KEYCLOAK_GROUP_USE_ID, KEYCLOAK_GROUP_CURATE_ID and KEYCLOAK_GROUP_ACCESS_MANAGE_ID must be set together",
+        );
+    }
+    if (groups.every(Boolean) && new Set(groups).size !== groups.length) {
+        issue(
+            "KEYCLOAK_GROUP_USE_ID",
+            "Each capability needs its own Keycloak group",
+        );
+    }
+    if (
+        Boolean(parsed.KEYCLOAK_VERIFIER_CLIENT_ID) !==
+        Boolean(parsed.KEYCLOAK_VERIFIER_CLIENT_SECRET)
+    ) {
+        issue(
+            "KEYCLOAK_VERIFIER_CLIENT_ID",
+            "KEYCLOAK_VERIFIER_CLIENT_ID and KEYCLOAK_VERIFIER_CLIENT_SECRET must be set together",
+        );
+    }
+    if (
+        parsed.KEYCLOAK_VERIFIER_CLIENT_ID &&
+        parsed.KEYCLOAK_VERIFIER_CLIENT_ID === parsed.OIDC_CLIENT_ID
+    ) {
+        issue(
+            "KEYCLOAK_VERIFIER_CLIENT_ID",
+            "The access verifier must be its own service client, not OIDC_CLIENT_ID",
+        );
+    }
+    if (
+        parsed.KEYCLOAK_VERIFIER_CLIENT_ID &&
+        [...parsed.MCP_ALLOWED_CLIENTS, ...parsed.MCP_SERVICE_CLIENTS].includes(
+            parsed.KEYCLOAK_VERIFIER_CLIENT_ID,
+        )
+    ) {
+        issue(
+            "KEYCLOAK_VERIFIER_CLIENT_ID",
+            "The access verifier must not be an MCP client",
+        );
+    }
+    if (parsed.MCP_AUDIENCE && parsed.MCP_ALLOWED_CLIENTS.length === 0) {
+        issue(
+            "MCP_ALLOWED_CLIENTS",
+            "AUTHZ_MODE=idp with MCP needs MCP_ALLOWED_CLIENTS",
+        );
+    }
+}
 
 export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
     const annualConfigPresent = Boolean(
@@ -1205,6 +1464,49 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
         }
     }
     if (
+        parsed.OIDC_CLIENT_ID &&
+        parsed.MCP_ALLOWED_CLIENTS.includes(parsed.OIDC_CLIENT_ID)
+    ) {
+        ctx.addIssue({
+            code: "custom",
+            path: ["MCP_ALLOWED_CLIENTS"],
+            message:
+                "The web sign-in client (OIDC_CLIENT_ID) cannot be an MCP client",
+        });
+    }
+    if (parsed.MCP_SERVICE_CLIENTS.length > 0) {
+        if (!parsed.MCP_AUDIENCE) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["MCP_SERVICE_CLIENTS"],
+                message: "MCP_SERVICE_CLIENTS needs MCP_AUDIENCE",
+            });
+        }
+        const notAllowed = parsed.MCP_SERVICE_CLIENTS.filter(
+            (client) =>
+                parsed.MCP_ALLOWED_CLIENTS.length > 0 &&
+                !parsed.MCP_ALLOWED_CLIENTS.includes(client),
+        );
+        if (notAllowed.length > 0) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["MCP_SERVICE_CLIENTS"],
+                message: `MCP_SERVICE_CLIENTS lists ${notAllowed.join(", ")}, which MCP_ALLOWED_CLIENTS does not`,
+            });
+        }
+        if (
+            parsed.OIDC_CLIENT_ID &&
+            parsed.MCP_SERVICE_CLIENTS.includes(parsed.OIDC_CLIENT_ID)
+        ) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["MCP_SERVICE_CLIENTS"],
+                message:
+                    "The web sign-in client (OIDC_CLIENT_ID) cannot be an MCP service client",
+            });
+        }
+    }
+    if (
         parsed.MCP_PUBLIC_CLIENTS.length > 0 &&
         !parsed.MCP_PUBLIC_INGRESS_HEADER
     ) {
@@ -1225,6 +1527,8 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
                 "MCP_ALLOWED_CLIENTS must be set when MCP_PUBLIC_CLIENTS is set",
         });
     }
+
+    validateAuthorization(parsed, oidcConfigured, ctx);
 
     if (parsed.MAIL_DOMAIN) {
         if (!oidcConfigured) {
@@ -1318,6 +1622,20 @@ function validateEnv(): Env {
             MCP_CONNECTOR_KEYS: process.env.MCP_CONNECTOR_KEYS,
             MCP_RESOURCE_AUDIENCE: process.env.MCP_RESOURCE_AUDIENCE,
             MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
+            MCP_SERVICE_CLIENTS: process.env.MCP_SERVICE_CLIENTS,
+            AUTHZ_MODE: process.env.AUTHZ_MODE,
+            IDENTITY_PROVIDER: process.env.IDENTITY_PROVIDER,
+            KEYCLOAK_ROLES_CLIENT: process.env.KEYCLOAK_ROLES_CLIENT,
+            KEYCLOAK_GROUP_USE_ID: process.env.KEYCLOAK_GROUP_USE_ID,
+            KEYCLOAK_GROUP_CURATE_ID: process.env.KEYCLOAK_GROUP_CURATE_ID,
+            KEYCLOAK_GROUP_ACCESS_MANAGE_ID:
+                process.env.KEYCLOAK_GROUP_ACCESS_MANAGE_ID,
+            KEYCLOAK_VERIFIER_CLIENT_ID:
+                process.env.KEYCLOAK_VERIFIER_CLIENT_ID,
+            KEYCLOAK_VERIFIER_CLIENT_SECRET:
+                process.env.KEYCLOAK_VERIFIER_CLIENT_SECRET,
+            AUTHZ_VERIFICATION_MAX_AGE: process.env.AUTHZ_VERIFICATION_MAX_AGE,
+            AUTHZ_ADMIN_MAX_AUTH_AGE: process.env.AUTHZ_ADMIN_MAX_AUTH_AGE,
             DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
             DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
             DOCS_REPOSITORY: process.env.DOCS_REPOSITORY,
@@ -1420,6 +1738,14 @@ function validateEnv(): Env {
             BILLING_TRIAL_GRACE_DAYS: process.env.BILLING_TRIAL_GRACE_DAYS,
             BILLING_PAID_GRACE_DAYS: process.env.BILLING_PAID_GRACE_DAYS,
             BILLING_LAUNCH_DATE: process.env.BILLING_LAUNCH_DATE,
+            RECORDER_AUTO_RECORD_PLATFORMS:
+                process.env.RECORDER_AUTO_RECORD_PLATFORMS,
+            RECORDER_AUTO_STOP_QUIET_SECONDS:
+                process.env.RECORDER_AUTO_STOP_QUIET_SECONDS,
+            RECORDER_NOTICE_TEXT: process.env.RECORDER_NOTICE_TEXT,
+            RECORDER_LOCK_DEFAULTS: process.env.RECORDER_LOCK_DEFAULTS,
+            NEXT_PUBLIC_RECORDER_EXTENSION_ID:
+                process.env.NEXT_PUBLIC_RECORDER_EXTENSION_ID,
         });
 
         const isProductionBuildPhase =

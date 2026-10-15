@@ -94,7 +94,7 @@ describe("matchNames in a language", () => {
     const candidates = [
         { id: "simak", names: ["Jan Šimák"] },
         { id: "milan", names: ["Milan Petrák"] },
-        { id: "forrest", names: ["FG Forrest"] },
+        { id: "summit", names: ["North Summitt"] },
         { id: "shoptet", names: ["Shoptet"] },
         { id: "mcp", names: ["MCP"] },
         { id: "jan", names: ["Jan Novotný", "Honza"] },
@@ -108,9 +108,9 @@ describe("matchNames in a language", () => {
         });
         expect(first("Milane")).toMatchObject({ id: "milan", reason: "stem" });
         expect(first("Honzou")).toMatchObject({ id: "jan", reason: "stem" });
-        // Inflected and a letter off: "Forestu" for Forrest.
-        expect(first("Forestu")).toMatchObject({
-            id: "forrest",
+        // Inflected and a letter off: "Summitu" for Summitt.
+        expect(first("Summitu")).toMatchObject({
+            id: "summit",
             reason: "stem",
         });
         // The light stemmer's slip on "-etem" is one letter.

@@ -25,12 +25,17 @@ const SETTINGS_TOPICS: Record<SettingsSection, HelpTarget> = {
         anchor: "to-google-drive",
     },
     mail: { page: "mail", anchor: "your-addresses" },
+    access: {
+        page: "administrators",
+        anchor: "access-from-the-identity-provider",
+    },
     billing: { page: "settings", anchor: "the-other-sections" },
     "plaud-account": { page: "settings", anchor: "the-other-sections" },
     sync: { page: "settings", anchor: "the-other-sections" },
     playback: { page: "settings", anchor: "the-other-sections" },
     notifications: { page: "settings", anchor: "the-other-sections" },
     "api-keys": { page: "settings", anchor: "the-other-sections" },
+    recorder: { page: "settings", anchor: "the-other-sections" },
     webhooks: { page: "settings", anchor: "the-other-sections" },
     dev: { page: "settings", anchor: "the-other-sections" },
 };

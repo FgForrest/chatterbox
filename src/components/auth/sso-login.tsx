@@ -5,7 +5,15 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { MetalButton } from "@/components/metal-button";
 import { signIn } from "@/lib/auth-client";
-import { SSO_ORG_ACCOUNT_ERROR, SSO_PROVIDER_ID } from "@/lib/sso/constants";
+import {
+    SSO_ACCESS_DENIED_ERROR,
+    SSO_ISSUER_MISMATCH_ERROR,
+    SSO_ORG_ACCOUNT_ERROR,
+    SSO_PROVIDER_ID,
+    SSO_SESSION_ENDED_ERROR,
+    SSO_TOKEN_INVALID_ERROR,
+    SSO_UNAVAILABLE_ERROR,
+} from "@/lib/sso/constants";
 
 interface SsoLoginProps {
     /** The identity provider's name, as the operator configured it. */
@@ -43,6 +51,24 @@ export function SsoLogin({ providerName, error }: SsoLoginProps) {
                 );
             case "access_denied":
                 return i18n("Sign-in was cancelled at the identity provider.");
+            case SSO_ACCESS_DENIED_ERROR:
+                return i18n(
+                    "Your account has no access to this application. Ask your administrator.",
+                );
+            case SSO_UNAVAILABLE_ERROR:
+                return i18n(
+                    "Your access could not be verified with the identity provider right now. Try again shortly.",
+                );
+            case SSO_TOKEN_INVALID_ERROR:
+                return i18n(
+                    "The identity provider's answer could not be verified. Try again, or ask your administrator.",
+                );
+            case SSO_ISSUER_MISMATCH_ERROR:
+                return i18n(
+                    "This account belongs to a different identity provider. Ask your administrator.",
+                );
+            case SSO_SESSION_ENDED_ERROR:
+                return i18n("Your session has ended. Sign in again.");
             default:
                 return i18n("Sign-in failed. Please try again.");
         }

@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Chatterbox Meeting Recorder</title>
+        <link rel="stylesheet" href="../popup/popup.css" />
+        <link rel="stylesheet" href="picker.css" />
+    </head>
+    <body>
+        <header class="picker-header">
+            <img src="../icons/icon-128.png" alt="" width="58" height="58" />
+            <div>
+                <h1 data-i18n="extensionName">Chatterbox Meeting Recorder</h1>
+                <p id="picker-instruction" data-i18n="pickerInstruction">Choose a tab or screen with audio in Chrome's dialog.</p>
+            </div>
+        </header>
+        <p id="picker-status" role="status" data-i18n="openingPicker">Opening audio picker…</p>
+        <div id="picker-meters" hidden>
+            <div class="meter"><label data-i18n="you">You</label><div class="bar"><div id="picker-mic-bar"></div></div></div>
+            <div class="meter"><label data-i18n="others">Others</label><div class="bar"><div id="picker-system-bar"></div></div></div>
+        </div>
+        <div id="picker-progress" hidden>
+            <p id="picker-progress-stage" data-i18n="uploadingRecording">Uploading encrypted audio…</p>
+            <div id="picker-upload">
+                <div id="picker-upload-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress">
+                    <div id="picker-upload-progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="picker-upload-status" class="hint"></p>
+            </div>
+            <div id="picker-processing" class="processing-status" hidden role="status">
+                <span class="processing-spinner" aria-hidden="true"></span>
+                <div>
+                    <p id="picker-processing-status"></p>
+                    <p id="picker-processing-elapsed" class="hint" aria-hidden="true"></p>
+                </div>
+            </div>
+        </div>
+        <div id="picker-completed" hidden>
+            <div id="picker-completion-check" class="completion-check" aria-hidden="true">
+                <svg viewBox="0 0 52 52" width="52" height="52" fill="none">
+                    <circle class="completion-ring" cx="26" cy="26" r="23" />
+                    <path class="completion-tick" d="M14 26.5 22.5 35 39 18" />
+                </svg>
+            </div>
+            <p id="picker-completion-message" class="completion-message" role="status"></p>
+        </div>
+        <div id="picker-controls" class="row">
+            <button id="picker-cancel" type="button" data-i18n="cancel">Cancel</button>
+            <button id="picker-minimize" type="button" data-i18n="minimize" hidden>Minimize</button>
+            <button id="picker-stop" class="primary" type="button" data-i18n="stopSave" hidden>Stop and save</button>
+        </div>
+        <script type="module" src="picker.js"></script>
+    </body>
+</html>

@@ -17,7 +17,7 @@ import {
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
 
-type Role = "transcription" | "topics" | "learning" | "summary";
+type Role = "transcription" | "topics" | "learning" | "summary" | "title";
 const FOLLOW_SUMMARY = "__follow-summary__";
 
 const endpoints: Record<Role, string> = {
@@ -25,6 +25,7 @@ const endpoints: Record<Role, string> = {
     topics: "/api/settings/ai/providers/default-topics",
     learning: "/api/settings/ai/providers/default-learn",
     summary: "/api/settings/ai/providers/default-enhancement",
+    title: "/api/settings/ai/providers/default-title",
 };
 
 export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
@@ -70,7 +71,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
               ? provider.isDefaultTopics
               : purpose === "learning"
                 ? provider.isDefaultLearn
-                : provider.isDefaultEnhancement,
+                : purpose === "title"
+                  ? provider.isDefaultTitle
+                  : provider.isDefaultEnhancement,
     );
     const label =
         purpose === "transcription"
@@ -79,7 +82,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
               ? i18n("Topics provider")
               : purpose === "learning"
                 ? i18n("Learning provider")
-                : i18n("Summary provider");
+                : purpose === "title"
+                  ? i18n("Title provider")
+                  : i18n("Summary provider");
 
     const save = async (id: string) => {
         setSaving(true);
@@ -122,7 +127,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
             <Select
                 value={
                     selected?.id ??
-                    (purpose === "topics" || purpose === "learning"
+                    (purpose === "topics" ||
+                    purpose === "learning" ||
+                    purpose === "title"
                         ? FOLLOW_SUMMARY
                         : "")
                 }
@@ -139,7 +146,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     />
                 </SelectTrigger>
                 <SelectContent>
-                    {(purpose === "topics" || purpose === "learning") && (
+                    {(purpose === "topics" ||
+                        purpose === "learning" ||
+                        purpose === "title") && (
                         <SelectItem value={FOLLOW_SUMMARY}>
                             {i18n("Same as summaries")}
                         </SelectItem>

@@ -427,6 +427,7 @@ async function transcribeRecordingInner(
         recordingId,
         ownerUserId: ctx.ownerUserId,
         actorUserId: ctx.actorUserId,
+        actsForOrganization: ctx.actsForOrganization,
     });
     if (refusal) return refusedResult(refusal);
     try {
@@ -907,6 +908,7 @@ async function transcribeRecordingInner(
             turns,
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,
+            actsForOrganization: ctx.actsForOrganization,
             // The summary describes the text a forced re-run replaces.
             dropSummaryOnReplace: opts.force ? "riffado" : undefined,
             jobId: opts.jobId,
@@ -948,6 +950,7 @@ async function transcribeRecordingInner(
                 writer: {
                     actorUserId: ctx.actorUserId,
                     orgUserId: await sharingOrgUserId(),
+                    actsForOrganization: ctx.actsForOrganization,
                 },
             });
         }

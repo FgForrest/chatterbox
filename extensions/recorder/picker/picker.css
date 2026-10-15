@@ -1,0 +1,46 @@
+body {
+    width: auto;
+    min-width: 360px;
+    padding: 20px;
+}
+
+.picker-header {
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.picker-header h1 {
+    font-size: 16px;
+    margin-bottom: 5px;
+}
+
+.picker-header p {
+    color: var(--muted-foreground);
+    margin: 0;
+}
+
+#picker-status {
+    min-height: 20px;
+    margin-bottom: 18px;
+}
+
+#picker-meters {
+    margin-bottom: 18px;
+}
+
+.meter label {
+    width: 55px;
+}
+
+#picker-controls[hidden] {
+    display: none;
+}
+
+#picker-progress,
+#picker-completed {
+    margin: 18px 0 8px;
+}
+
+#picker-completed {
+    text-align: center;
+}

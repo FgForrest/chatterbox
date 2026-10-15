@@ -21,7 +21,7 @@ import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence"
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
-import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
+import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -53,6 +53,12 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
      * account after a withdrawal.
      */
     orgUserId: string | null;
+    /**
+     * Whether the actor acts for the Organization (a curator the server
+     * vouched for, or the organization account); left out, only the
+     * organization account does.
+     */
+    actsForOrganization?: boolean;
 }
 
 /**
@@ -76,9 +82,9 @@ export async function changeTranscriptSpeaker(
 
 /**
  * `changeTranscriptSpeaker` inside a caller's transaction. A new person
- * belongs to whoever names them: the owner's knowledge base on their own
- * recording, the Organization's on a shared one, which only the
- * organization account changes.
+ * belongs to the knowledge base the change writes into: the owner's on
+ * their own recording, the Organization's on a shared one, where the
+ * curator who named them is kept as its creator.
  */
 export async function changeTranscriptSpeakerInTx(
     tx: Tx,
@@ -99,15 +105,22 @@ export async function changeTranscriptSpeakerInTx(
  */
 export async function answerSpeakerInTx(
     tx: Tx,
-    { answer, actorUserId, orgUserId, ...version }: SpeakerChangeArgs,
+    {
+        answer,
+        actorUserId,
+        orgUserId,
+        actsForOrganization,
+        ...version
+    }: SpeakerChangeArgs,
     scopes: Set<string>,
 ): Promise<string | null> {
     const { recordingId } = await lockForSpeakerChange(tx, version);
-    const refusal = await contentWriterRefusal(tx, {
+    const { refusal, scopeUserId } = await contentWriterScope(tx, {
         recordingId,
         ownerUserId: version.userId,
         actorUserId,
         orgUserId,
+        actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
     const where = {
@@ -152,18 +165,19 @@ export async function answerSpeakerInTx(
             if ("personId" in answer) {
                 personId = await currentPersonInTx(
                     tx,
-                    actorUserId,
+                    scopeUserId,
                     answer.personId,
                 );
             } else {
                 personId = (
                     await createPersonInTx(tx, {
-                        userId: actorUserId,
+                        userId: scopeUserId,
                         displayName: answer.displayName,
-                        createdByUserId: null,
+                        createdByUserId:
+                            scopeUserId === actorUserId ? null : actorUserId,
                     })
                 ).id;
-                scopes.add(actorUserId);
+                scopes.add(scopeUserId);
             }
             await writeSpeakerInTx(tx, {
                 ...where,
@@ -195,7 +209,7 @@ export async function answerSpeakerInTx(
                 ...where,
                 personId: await currentPersonInTx(
                     tx,
-                    actorUserId,
+                    scopeUserId,
                     answer.personId,
                 ),
             });

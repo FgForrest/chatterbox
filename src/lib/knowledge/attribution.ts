@@ -122,7 +122,11 @@ interface CopyMatchingSpeakerAttributionsArgs {
      * against: nothing is offered unless that actor may change the
      * recording now (`writerRefusal`), checked under the recording lock.
      */
-    writer: { actorUserId: string; orgUserId: string | null };
+    writer: {
+        actorUserId: string;
+        orgUserId: string | null;
+        actsForOrganization?: boolean;
+    };
 }
 
 /**

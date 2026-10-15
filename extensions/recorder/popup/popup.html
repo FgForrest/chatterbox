@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Chatterbox Meeting Recorder</title>
+        <link rel="stylesheet" href="popup.css" />
+    </head>
+    <body>
+        <header>
+            <h1><img src="../icons/icon-48.png" alt="" width="28" height="28" /><span data-i18n="extensionName">Chatterbox Meeting Recorder</span></h1>
+            <button id="open-options" class="link" type="button" data-i18n="options">Options</button>
+        </header>
+
+        <!-- Not paired, and the active tab is a site we could connect to -->
+        <section id="view-connect" hidden>
+            <p data-i18n="popupConnectIntro">Connect this extension to the Chatterbox instance in the current tab. Then click Set up recorder on that page.</p>
+            <button id="connect-origin" class="primary" type="button"></button>
+            <p id="connect-status" class="hint"></p>
+            <button id="connect-options" class="link" type="button" data-i18n="connectManually">Or connect manually in options</button>
+        </section>
+
+        <!-- Not paired, nothing to connect to here -->
+        <section id="view-unpaired" hidden>
+            <p id="unpaired-intro" data-i18n="unpairedIntro">Connect the extension to your Chatterbox account to start recording.</p>
+            <p class="hint" data-i18n="unpairedHint">Open your Chatterbox instance and go to Settings → Meeting Recorder, or enter the details manually.</p>
+            <button id="go-options" class="primary" type="button" data-i18n="openOptions">Open options</button>
+        </section>
+
+        <!-- Idle -->
+        <section id="view-idle" hidden>
+            <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
+            <p id="notice-text" data-i18n="noticeDefault">Inform participants and obtain any required consent before recording.</p>
+            <button id="start" class="primary" type="button" data-i18n="recordWithConsent">Consent confirmed · Record</button>
+            <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Chrome will ask you to choose a tab or screen with audio.</p>
+            <p id="auto-hint" class="hint" hidden></p>
+        </section>
+
+        <!-- Recording -->
+        <section id="view-recording" hidden>
+            <div class="status"><span class="dot"></span> <span data-i18n="recording">Recording</span> <span id="elapsed">0:00</span></div>
+            <div class="meter"><label data-i18n="you">You</label><div class="bar"><div id="mic-bar"></div></div></div>
+            <div class="meter"><label data-i18n="others">Others</label><div class="bar"><div id="sys-bar"></div></div></div>
+            <p id="upload-status" class="hint"></p>
+            <button id="stop" class="danger" type="button" data-i18n="stopSave">Stop and save</button>
+        </section>
+
+        <!-- Finalizing -->
+        <section id="view-finalizing" hidden>
+            <p id="finalizing-stage" data-i18n="uploadingRecording">Uploading encrypted audio…</p>
+            <div id="finalizing-upload">
+                <div id="finalizing-progress" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Upload progress">
+                    <div id="finalizing-progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="finalizing-status" class="hint"></p>
+            </div>
+            <div id="finalizing-processing" class="processing-status" hidden role="status">
+                <span class="processing-spinner" aria-hidden="true"></span>
+                <div>
+                    <p id="processing-status"></p>
+                    <p id="processing-elapsed" class="hint" aria-hidden="true"></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Server confirmed recording -->
+        <section id="view-completed" hidden>
+            <div id="completion-check" class="completion-check" aria-hidden="true">
+                <svg viewBox="0 0 52 52" width="52" height="52" fill="none">
+                    <circle class="completion-ring" cx="26" cy="26" r="23" />
+                    <path class="completion-tick" d="M14 26.5 22.5 35 39 18" />
+                </svg>
+            </div>
+            <p id="completion-message" class="completion-message" role="status"></p>
+        </section>
+
+        <!-- Error -->
+        <section id="view-error" hidden>
+            <p id="error-text" class="error"></p>
+            <div id="partial-recovery" hidden>
+                <p id="partial-recovery-detail" class="hint"></p>
+                <label class="check">
+                    <input id="partial-recovery-check" type="checkbox" />
+                    <span data-i18n="partialRecoveryConfirm">I understand that the missing part and everything after it will be lost.</span>
+                </label>
+                <button id="save-prefix" type="button" disabled data-i18n="savePlayablePrefix">Save playable beginning</button>
+            </div>
+            <div class="row">
+                <button id="retry" type="button" data-i18n="retryUpload">Retry upload</button>
+                <button id="discard" class="danger" type="button" data-i18n="discard">Discard</button>
+            </div>
+        </section>
+
+        <script type="module" src="popup.js"></script>
+    </body>
+</html>

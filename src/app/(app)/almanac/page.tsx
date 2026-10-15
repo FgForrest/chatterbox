@@ -1,7 +1,5 @@
 import { and, countDistinct, eq, isNull, max, or } from "drizzle-orm";
-import { headers } from "next/headers";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { getExtracted } from "next-intl/server";
 import { PeopleList } from "@/components/people/people-list";
 import { db } from "@/db";
@@ -12,7 +10,7 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth-server";
 import { aliasTextsVisibleTo } from "@/lib/knowledge/aliases";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { listPeople } from "@/lib/knowledge/people";
@@ -23,10 +21,7 @@ import { sharedRecordingCondition } from "@/lib/sharing/shared";
 export const dynamic = "force-dynamic";
 
 export default async function PeoplePage() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-        redirect("/login");
-    }
+    const session = await requireAuth();
 
     const userId = session.user.id;
     // The names on shared recordings count too, which everyone may see.

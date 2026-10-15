@@ -1,3 +1,7 @@
+# For a seeded AUTHZ_MODE=idp stack (users, curator, administrator), run:
+#   docker compose -f docker-compose.local-authz.yml up -d --build --wait
+# See e2e/authz/README.md for accounts and test scenarios.
+#
 # Single sign-on for the e2e stack: a Keycloak with a test realm, and the app
 # configured to sign in only through it.
 #

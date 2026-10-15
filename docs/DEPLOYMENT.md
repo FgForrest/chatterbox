@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers deploying Riffado to production environments.
+This guide covers deploying Chatterbox to production environments.
 
 ## Table of Contents
 
@@ -34,8 +34,8 @@ This guide covers deploying Riffado to production environments.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/riffado/riffado.git
-cd riffado
+git clone https://github.com/FgForrest/chatterbox.git
+cd chatterbox
 ```
 
 ### 2. Generate Secrets
@@ -173,7 +173,7 @@ pm2 startup
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://user:pass@host:5432/db` |
 | `BETTER_AUTH_SECRET` | Auth secret (32+ chars) | Generate with `openssl rand -hex 32` |
 | `ENCRYPTION_KEY` | Encryption key (64 hex chars) | Generate with `openssl rand -hex 32` |
-| `APP_URL` | Public URL of your app | `https://riffado.example.com` |
+| `APP_URL` | Public URL of your app | `https://chatterbox.example.com` |
 
 ### Optional Variables
 
@@ -271,10 +271,10 @@ DATABASE_URL=postgresql://user:pass@localhost:6432/riffado
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name riffado.example.com;
+    server_name chatterbox.example.com;
 
-    ssl_certificate /etc/letsencrypt/live/riffado.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/riffado.example.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/chatterbox.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chatterbox.example.com/privkey.pem;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -301,7 +301,7 @@ server {
 # Redirect HTTP to HTTPS
 server {
     listen 80;
-    server_name riffado.example.com;
+    server_name chatterbox.example.com;
     return 301 https://$server_name$request_uri;
 }
 ```
@@ -309,7 +309,7 @@ server {
 ### Caddy
 
 ```caddyfile
-riffado.example.com {
+chatterbox.example.com {
     reverse_proxy localhost:3000
 
     header {
@@ -334,7 +334,7 @@ riffado.example.com {
 apt-get install certbot python3-certbot-nginx
 
 # Get certificate
-certbot --nginx -d riffado.example.com
+certbot --nginx -d chatterbox.example.com
 
 # Auto-renewal (already set up by certbot)
 certbot renew --dry-run
@@ -389,7 +389,7 @@ echo "Backup completed: $BACKUP_DIR"
 
 ```bash
 # Application health
-curl https://riffado.example.com/api/health
+curl https://chatterbox.example.com/api/health
 
 # Database health
 docker compose exec db pg_isready
@@ -569,6 +569,6 @@ For high-traffic deployments:
 ## Support
 
 For deployment help:
-- GitHub Discussions: https://github.com/riffado/riffado/discussions
-- Documentation: https://github.com/riffado/riffado/tree/main/docs
-- Issues: https://github.com/riffado/riffado/issues
+- GitHub Discussions: https://github.com/FgForrest/chatterbox/discussions
+- Documentation: https://github.com/FgForrest/chatterbox/tree/main/docs
+- Issues: https://github.com/FgForrest/chatterbox/issues

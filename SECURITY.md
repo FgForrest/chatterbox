@@ -30,7 +30,7 @@ This information will help us triage your report more quickly.
 
 ## Security Best Practices
 
-When deploying Riffado:
+When deploying Chatterbox:
 
 ### 1. Environment Variables
 - **Never commit `.env` files** to version control

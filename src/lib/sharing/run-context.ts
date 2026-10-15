@@ -1,3 +1,4 @@
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { AppError } from "@/lib/errors";
 import {
     type AccessOptions,
@@ -22,6 +23,12 @@ export interface ContentRunContext {
     contentUserId: string;
     /** Source of prompts, templates and output language. */
     settingsUserId: string;
+    /**
+     * Whether the actor may change the recording for the Organization (a
+     * curator, or the organization account), decided when the run starts
+     * working, not when it was queued.
+     */
+    actsForOrganization: boolean;
 }
 
 /** Private-view context: every role is the owner. */
@@ -32,6 +39,7 @@ export function privateRunContext(ownerUserId: string): ContentRunContext {
         ownerUserId,
         contentUserId: ownerUserId,
         settingsUserId: ownerUserId,
+        actsForOrganization: false,
     };
 }
 
@@ -62,6 +70,7 @@ export async function resolveRunContext(
             contentUserId: access.contentUserId,
             // Never null here: the Organization view requires the account.
             settingsUserId: access.orgUserId ?? access.ownerUserId,
+            actsForOrganization: await userCuratesOrganizationNow(actorUserId),
         };
     } catch (error) {
         if (error instanceof AppError && error.statusCode === 404) return null;

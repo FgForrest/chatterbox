@@ -183,6 +183,7 @@ export async function addAliasInTx(
     actorUserId: string,
     target: KnowledgeTarget,
     text: string,
+    createdByUserId = actorUserId,
 ): Promise<string | null> {
     const clean = cleanText(text);
     const resolved = await resolveTargetInTx(tx, actorUserId, target);
@@ -194,7 +195,7 @@ export async function addAliasInTx(
             kind: "alias",
             text: encryptText(clean),
             textHmac: domainLookupHash(TEXT_DOMAIN, clean),
-            createdByUserId: actorUserId,
+            createdByUserId,
         })
         .onConflictDoNothing()
         .returning({ id: knowledgeAliases.id });

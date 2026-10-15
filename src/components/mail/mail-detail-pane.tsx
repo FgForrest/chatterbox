@@ -55,6 +55,8 @@ interface Props {
     ) => Promise<void>;
     /** The organization account, which may take shared mail out. */
     isOrgAccount?: boolean;
+    /** The viewer changes the Organization's content (a curator). */
+    canCurate?: boolean;
 }
 
 function person(participant: MailParticipantView): string {
@@ -93,6 +95,7 @@ export function MailDetailPane({
     onRemoveFromFolder,
     onMoveBetweenFolders,
     isOrgAccount = false,
+    canCurate = false,
 }: Props) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -476,14 +479,18 @@ export function MailDetailPane({
             {detail && !detail.unreadable && (
                 <MailSummaryCard
                     mail={mail}
-                    canChange={mail.view === "org" ? isOrgAccount : isOwn}
+                    canChange={
+                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
+                    }
                 />
             )}
             {detail && (
                 <MailLearnCard
                     mail={mail}
                     detail={detail}
-                    canChange={mail.view === "org" ? isOrgAccount : isOwn}
+                    canChange={
+                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
+                    }
                 />
             )}
 

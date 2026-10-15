@@ -37,11 +37,20 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
 }));
 
-vi.mock("@/lib/auth-server", () => ({
-    requireApiSession: vi.fn().mockResolvedValue({
-        user: { id: "user-1", email: "u@example.com" },
-    }),
+vi.mock("@/lib/authz/curator", () => ({
+    actsForOrganization: vi.fn().mockResolvedValue(false),
+    userCuratesOrganizationNow: vi.fn().mockResolvedValue(false),
 }));
+vi.mock("@/lib/auth-server", async () => {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
+        requireApiSession: vi.fn().mockResolvedValue({
+            user: { id: "user-1", email: "u@example.com" },
+        }),
+    });
+});
 
 vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
     const actual =

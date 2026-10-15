@@ -1,0 +1,493 @@
+{
+    "realm": "chatterbox-test",
+    "enabled": true,
+    "sslRequired": "none",
+    "registrationAllowed": false,
+    "resetPasswordAllowed": false,
+    "roles": {
+        "client": {
+            "chatterbox": [
+                {
+                    "name": "use"
+                },
+                {
+                    "name": "org.curate"
+                },
+                {
+                    "name": "access.manage"
+                }
+            ],
+            "chatterbox-mcp": [
+                {
+                    "name": "knowledge:read"
+                },
+                {
+                    "name": "transcripts:read"
+                },
+                {
+                    "name": "summaries:read"
+                },
+                {
+                    "name": "tasks:read"
+                },
+                {
+                    "name": "tasks:write"
+                },
+                {
+                    "name": "mail:read"
+                }
+            ]
+        }
+    },
+    "groups": [
+        {
+            "name": "chatterbox-users",
+            "clientRoles": {
+                "chatterbox": ["use"],
+                "realm-management": []
+            }
+        },
+        {
+            "name": "chatterbox-curators",
+            "clientRoles": {
+                "chatterbox": ["org.curate"],
+                "realm-management": []
+            }
+        },
+        {
+            "name": "chatterbox-admins",
+            "clientRoles": {
+                "chatterbox": ["access.manage"],
+                "realm-management": ["manage-users", "view-clients"]
+            }
+        }
+    ],
+    "defaultGroups": [],
+    "clientScopes": [
+        {
+            "name": "basic",
+            "protocolMappers": [
+                {
+                    "name": "sub",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-sub-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true"
+                    }
+                },
+                {
+                    "name": "auth_time",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-usersessionmodel-note-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "user.session.note": "AUTH_TIME",
+                        "claim.name": "auth_time",
+                        "jsonType.label": "long",
+                        "id.token.claim": "true"
+                    }
+                }
+            ],
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "false"
+            }
+        },
+        {
+            "name": "roles",
+            "protocolMappers": [
+                {
+                    "name": "client roles",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-usermodel-client-role-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "claim.name": "resource_access.${client_id}.roles",
+                        "jsonType.label": "String",
+                        "multivalued": "true"
+                    }
+                },
+                {
+                    "name": "audience resolve",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-audience-resolve-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true"
+                    }
+                }
+            ],
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "false"
+            }
+        },
+        {
+            "name": "profile",
+            "protocolMappers": [
+                {
+                    "name": "full name",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-full-name-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "id.token.claim": "true",
+                        "userinfo.token.claim": "true"
+                    }
+                }
+            ],
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true"
+            }
+        },
+        {
+            "name": "email",
+            "protocolMappers": [
+                {
+                    "name": "email",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-usermodel-attribute-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "user.attribute": "email",
+                        "claim.name": "email",
+                        "jsonType.label": "String",
+                        "id.token.claim": "true",
+                        "userinfo.token.claim": "true"
+                    }
+                },
+                {
+                    "name": "email verified",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-usermodel-property-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "user.attribute": "emailVerified",
+                        "claim.name": "email_verified",
+                        "jsonType.label": "boolean",
+                        "id.token.claim": "true",
+                        "userinfo.token.claim": "true"
+                    }
+                }
+            ],
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true"
+            }
+        },
+        {
+            "name": "service_account",
+            "protocolMappers": [
+                {
+                    "name": "Client ID",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-usersessionmodel-note-mapper",
+                    "config": {
+                        "access.token.claim": "true",
+                        "introspection.token.claim": "true",
+                        "user.session.note": "client_id",
+                        "claim.name": "client_id",
+                        "jsonType.label": "String"
+                    }
+                }
+            ],
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "false"
+            }
+        },
+        {
+            "name": "knowledge:read",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        },
+        {
+            "name": "transcripts:read",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        },
+        {
+            "name": "summaries:read",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        },
+        {
+            "name": "tasks:read",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        },
+        {
+            "name": "tasks:write",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        },
+        {
+            "name": "mail:read",
+            "protocol": "openid-connect",
+            "attributes": {
+                "include.in.token.scope": "true",
+                "display.on.consent.screen": "true"
+            }
+        }
+    ],
+    "clients": [
+        {
+            "clientId": "chatterbox",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": true,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false,
+            "redirectUris": [
+                "http://localhost:3000/api/auth/oauth2/callback/oidc"
+            ],
+            "webOrigins": ["http://localhost:3000"],
+            "attributes": {
+                "pkce.code.challenge.method": "S256"
+            },
+            "secret": "chatterbox-local-secret",
+            "clientAuthenticatorType": "client-secret",
+            "defaultClientScopes": ["basic", "roles", "profile", "email"],
+            "optionalClientScopes": [],
+            "protocolMappers": []
+        },
+        {
+            "clientId": "chatterbox-verifier",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": true,
+            "fullScopeAllowed": false,
+            "attributes": {},
+            "secret": "chatterbox-verifier-local-secret",
+            "clientAuthenticatorType": "client-secret",
+            "defaultClientScopes": [
+                "basic",
+                "roles",
+                "profile",
+                "email",
+                "service_account"
+            ],
+            "optionalClientScopes": [],
+            "protocolMappers": []
+        },
+        {
+            "clientId": "chatterbox-mcp",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": false,
+            "bearerOnly": true,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": false,
+            "attributes": {
+                "resource_url": "https://chatterbox.example.com/api/mcp"
+            },
+            "defaultClientScopes": ["basic", "roles", "profile", "email"],
+            "optionalClientScopes": [],
+            "protocolMappers": []
+        },
+        {
+            "clientId": "claude",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": true,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false,
+            "redirectUris": ["https://claude.ai/api/mcp/auth_callback"],
+            "attributes": {
+                "pkce.code.challenge.method": "S256",
+                "access.token.lifespan": "900"
+            },
+            "secret": "claude-local-secret",
+            "clientAuthenticatorType": "client-secret",
+            "defaultClientScopes": [
+                "basic",
+                "roles",
+                "profile",
+                "email",
+                "knowledge:read",
+                "mail:read",
+                "summaries:read",
+                "tasks:read",
+                "tasks:write",
+                "transcripts:read"
+            ],
+            "optionalClientScopes": ["offline_access"],
+            "protocolMappers": [
+                {
+                    "name": "chatterbox-mcp-audience",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {
+                        "included.client.audience": "chatterbox-mcp",
+                        "included.custom.audience": "https://chatterbox.example.com/api/mcp",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false"
+                    },
+                    "protocol": "openid-connect"
+                }
+            ]
+        },
+        {
+            "clientId": "mcp-tester",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": true,
+            "bearerOnly": false,
+            "standardFlowEnabled": true,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": true,
+            "serviceAccountsEnabled": false,
+            "fullScopeAllowed": false,
+            "redirectUris": ["http://localhost/callback"],
+            "attributes": {
+                "pkce.code.challenge.method": "S256"
+            },
+            "defaultClientScopes": [
+                "basic",
+                "roles",
+                "profile",
+                "email",
+                "knowledge:read",
+                "transcripts:read"
+            ],
+            "optionalClientScopes": [],
+            "protocolMappers": [
+                {
+                    "name": "chatterbox-mcp-audience",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {
+                        "included.client.audience": "chatterbox-mcp",
+                        "included.custom.audience": "https://chatterbox.example.com/api/mcp",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false"
+                    },
+                    "protocol": "openid-connect"
+                }
+            ]
+        },
+        {
+            "clientId": "chatterbox-bot",
+            "protocol": "openid-connect",
+            "enabled": true,
+            "publicClient": false,
+            "bearerOnly": false,
+            "standardFlowEnabled": false,
+            "implicitFlowEnabled": false,
+            "directAccessGrantsEnabled": false,
+            "serviceAccountsEnabled": true,
+            "fullScopeAllowed": false,
+            "attributes": {},
+            "secret": "chatterbox-bot-local-secret",
+            "clientAuthenticatorType": "client-secret",
+            "defaultClientScopes": [
+                "basic",
+                "roles",
+                "profile",
+                "email",
+                "service_account",
+                "knowledge:read",
+                "tasks:read"
+            ],
+            "optionalClientScopes": [],
+            "protocolMappers": [
+                {
+                    "name": "chatterbox-mcp-audience",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {
+                        "included.client.audience": "chatterbox-mcp",
+                        "included.custom.audience": "https://chatterbox.example.com/api/mcp",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false"
+                    },
+                    "protocol": "openid-connect"
+                },
+                {
+                    "name": "chatterbox-subject-kind",
+                    "protocolMapper": "oidc-hardcoded-claim-mapper",
+                    "config": {
+                        "claim.name": "chatterbox_subject_kind",
+                        "claim.value": "service",
+                        "jsonType.label": "String",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false",
+                        "userinfo.token.claim": "false",
+                        "introspection.token.claim": "true"
+                    },
+                    "protocol": "openid-connect"
+                }
+            ]
+        }
+    ],
+    "clientScopeMappings": {
+        "chatterbox": [
+            {
+                "client": "chatterbox",
+                "roles": ["use", "org.curate", "access.manage"]
+            }
+        ],
+        "realm-management": [
+            {
+                "client": "chatterbox",
+                "roles": ["manage-users", "view-clients"]
+            },
+            {
+                "client": "chatterbox-verifier",
+                "roles": ["view-users", "view-clients"]
+            }
+        ]
+    },
+    "users": [
+        {
+            "username": "service-account-chatterbox-verifier",
+            "enabled": true,
+            "serviceAccountClientId": "chatterbox-verifier",
+            "clientRoles": {
+                "realm-management": ["view-users", "view-clients"]
+            }
+        },
+        {
+            "username": "service-account-chatterbox-bot",
+            "enabled": true,
+            "serviceAccountClientId": "chatterbox-bot",
+            "clientRoles": {
+                "chatterbox-mcp": []
+            }
+        }
+    ]
+}

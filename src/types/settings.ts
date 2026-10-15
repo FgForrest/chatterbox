@@ -5,6 +5,7 @@
 export type SettingsSection =
     | "providers"
     | "api-keys"
+    | "recorder"
     | "webhooks"
     | "transcription"
     | "topics"
@@ -20,4 +21,5 @@ export type SettingsSection =
     | "billing"
     | "google-account"
     | "mail"
+    | "access"
     | "dev";

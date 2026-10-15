@@ -1,12 +1,12 @@
 # `src/lib/hosted/`
 
-Hosted-only code. Lives here so that the boundary between "everything self-hosters benefit from" and "code that only runs on the Riffado-operated hosted instance" is enforced at directory level instead of guessed at per-file.
+Hosted-only code. Lives here so that the boundary between "everything self-hosters benefit from" and "code that only runs on the Chatterbox-operated hosted instance" is enforced at directory level instead of guessed at per-file.
 
 ## Rule
 
 Code outside `src/lib/hosted/` and `src/app/(hosted)/` does **not** import from these directories.
 
-The rule is one-way: hosted code may import from anywhere in the repo (it builds on top of the public app), but the public app must never depend on hosted code -- otherwise the self-host build would either fail to compile or pull in code paths that have no business running outside Riffado-operated infra.
+The rule is one-way: hosted code may import from anywhere in the repo (it builds on top of the public app), but the public app must never depend on hosted code -- otherwise the self-host build would either fail to compile or pull in code paths that have no business running outside Chatterbox-operated infra.
 
 ### Exception: hosted-only routes that need a stable public URL
 
@@ -47,4 +47,4 @@ Code in `src/lib/hosted/` ships in the self-host docker image. It is dormant by 
 - Hostname gate: `env.ADMIN_HOSTNAME` is unset by default; the gate is permissive and `/admin/*` works on the operator's own host without subdomain ceremony.
 - Billing (when added): inert unless `STRIPE_SECRET_KEY` and friends are configured.
 
-Self-hosters never need to touch any of this. It's load-bearing for Riffado-operated infra and invisible elsewhere.
+Self-hosters never need to touch any of this. It's load-bearing for Chatterbox-operated infra and invisible elsewhere.

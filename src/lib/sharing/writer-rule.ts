@@ -25,26 +25,40 @@ type Executor = Parameters<typeof isRecordingShared>[2];
  * `local` mode there is none, and the owner changes their recording again;
  * switched back, the Organization sees it as it is then.
  *
- * - `"shared"`: shared, and the actor is not the organization account;
+ * Who changes a shared recording "for the Organization": the organization
+ * account, or a curator acting under their own identity. The caller says
+ * which (`actsForOrganization`, decided by the server from the actor's
+ * verified access); left out, only the organization account does.
+ *
+ * - `"shared"`: shared, and the actor does not act for the Organization;
  *   for the owner that is a 409 (withdraw it first).
  * - `"withdrawn"`: not shared, and the actor is not the owner; to them the
  *   recording is gone (a queued Organization run after a withdrawal).
  */
 export type WriterRefusal = "shared" | "withdrawn";
 
-export function writerRefusal({
-    actorUserId,
-    ownerUserId,
-    orgUserId,
-    shared,
-}: {
+/** Whether `actorUserId` acts for the Organization: told, else the organization account. */
+function actsForOrg(input: {
+    actorUserId: string;
+    orgUserId: string | null;
+    actsForOrganization?: boolean;
+}): boolean {
+    return (
+        input.actsForOrganization ??
+        (input.orgUserId !== null && input.actorUserId === input.orgUserId)
+    );
+}
+
+export function writerRefusal(input: {
     actorUserId: string;
     ownerUserId: string;
     orgUserId: string | null;
     shared: boolean;
+    actsForOrganization?: boolean;
 }): WriterRefusal | null {
+    const { actorUserId, ownerUserId, orgUserId, shared } = input;
     if (shared && orgUserId !== null) {
-        return actorUserId === orgUserId ? null : "shared";
+        return actsForOrg(input) ? null : "shared";
     }
     return actorUserId === ownerUserId ? null : "withdrawn";
 }
@@ -56,20 +70,39 @@ export function writerRefusal({
  */
 export async function contentWriterRefusal(
     executor: Executor,
-    {
-        recordingId,
-        ownerUserId,
-        actorUserId,
-        orgUserId,
-    }: {
+    input: {
         recordingId: string;
         ownerUserId: string;
         actorUserId: string;
         orgUserId: string | null;
+        actsForOrganization?: boolean;
     },
 ): Promise<WriterRefusal | null> {
+    return (await contentWriterScope(executor, input)).refusal;
+}
+
+/**
+ * {@link contentWriterRefusal}, and the knowledge scope the change writes
+ * into when allowed: the Organization's on a shared recording, the
+ * actor's own otherwise. The actor stays the author (`createdBy`).
+ */
+export async function contentWriterScope(
+    executor: Executor,
+    input: {
+        recordingId: string;
+        ownerUserId: string;
+        actorUserId: string;
+        orgUserId: string | null;
+        actsForOrganization?: boolean;
+    },
+): Promise<{ refusal: WriterRefusal | null; scopeUserId: string }> {
+    const { recordingId, orgUserId, actorUserId } = input;
     const shared =
         orgUserId !== null &&
         (await isRecordingShared(recordingId, orgUserId, executor));
-    return writerRefusal({ actorUserId, ownerUserId, orgUserId, shared });
+    const refusal = writerRefusal({ ...input, shared });
+    return {
+        refusal,
+        scopeUserId: shared && orgUserId !== null ? orgUserId : actorUserId,
+    };
 }

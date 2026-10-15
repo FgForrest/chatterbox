@@ -60,9 +60,9 @@ describe("rolesFromPayload", () => {
         ).toBe(0);
     });
 
-    it("drops tasks:write without tasks:read", () => {
-        expect(rolesFromPayload(payload(["tasks:write"]), AUDIENCE).size).toBe(
-            0,
+    it("implies tasks:read from tasks:write", () => {
+        expect(rolesFromPayload(payload(["tasks:write"]), AUDIENCE)).toEqual(
+            new Set(["tasks:read", "tasks:write"]),
         );
         expect(
             rolesFromPayload(payload(["tasks:write", "tasks:read"]), AUDIENCE),
