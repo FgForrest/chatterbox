@@ -132,9 +132,22 @@ export async function startLearnRun(input: {
         access.ownerUserId,
         actorUserId,
     );
+    const learnSettings = profile.settings.steps.learn;
+    if (
+        !learnSettings.enabled ||
+        (trigger === "auto" && !learnSettings.automatic)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            trigger === "auto"
+                ? "Automatic Learn is off in this item's profile."
+                : "Learn is off in this item's profile.",
+            400,
+        );
+    }
     const provider = await resolveStepProvider({
         step: "learn",
-        pin: profile.settings.steps.learn.provider,
+        pin: learnSettings.provider,
         actorUserId,
     });
     if (provider.kind !== "credential") {

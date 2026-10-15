@@ -1285,12 +1285,6 @@ export async function removeRecordingFromFolder(input: {
                 view: "private",
                 reason: "placement",
             });
-            await requestAdvanceInTx(tx, {
-                itemId: input.recordingId,
-                userId: owner.userId,
-                view: "org",
-                reason: "placement",
-            });
         }
     });
     nudge();
@@ -1341,12 +1335,6 @@ export async function unshareRecording(
                 itemId: recordingId,
                 userId: owner.userId,
                 view: "private",
-                reason: "placement",
-            });
-            await requestAdvanceInTx(tx, {
-                itemId: recordingId,
-                userId: owner.userId,
-                view: "org",
                 reason: "placement",
             });
         }

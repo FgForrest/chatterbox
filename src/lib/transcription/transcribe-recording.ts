@@ -34,7 +34,6 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
-import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
@@ -1027,21 +1026,6 @@ async function transcribeRecordingInner(
                 "riffado",
             );
         }
-
-        // Automatic Learn holds the title, summary and topics back until
-        // its review is done (72 h at most), so they are made from the
-        // transcript as corrected; `transcription.completed` then fires
-        // without the title, which follows as `recording.updated`.
-        const heldForLearn =
-            !orgView &&
-            categorized &&
-            (await holdForAutoLearn({
-                userId,
-                recordingId,
-                timed: Boolean(turns?.length),
-            }));
-
-        void heldForLearn;
 
         await emitEvent("transcription.completed", userId, recordingId);
         await notifyIfShared(recordingId);

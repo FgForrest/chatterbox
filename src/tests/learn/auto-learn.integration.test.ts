@@ -7,7 +7,7 @@
  * create scratch databases on.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -25,9 +25,12 @@ import {
     chatterItems,
     itemProcessing,
     learnRuns,
+    mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
+    recordingTasks,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -99,21 +102,28 @@ import {
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import {
     AUTO_LEARN_HOLD_MS,
-    holdForAutoLearn,
     learnReleaseJobHandler,
     releaseAutoLearnHold,
+    startAutomaticLearn,
     sweepAutoLearnHolds,
 } from "@/lib/learn/auto-learn";
 import { recordingFollowUps } from "@/lib/learn/follow-ups";
 import * as learnJob from "@/lib/learn/learn-job";
+import { finishReview } from "@/lib/learn/review";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { planAdvance } from "@/lib/pipeline/plan";
+import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { updateProfile } from "@/lib/profiles/store";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import * as titleQueue from "@/lib/recordings/title-job";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
+import { requireRecordingView } from "@/lib/sharing/access";
+import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import * as autoSummary from "@/lib/summary/auto-summary";
 import * as topicsQueue from "@/lib/topics/topics-job";
 import { enqueueTopicsJob } from "@/lib/topics/topics-job";
@@ -244,6 +254,21 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 .where(eq(chatterItems.id, REC))
         )[0]?.at ?? null;
 
+    const processing = async () =>
+        (
+            await db()
+                .select()
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, REC),
+                        eq(itemProcessing.userId, OWNER),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1)
+        )[0];
+
     const kinds = async () =>
         (
             await db()
@@ -357,6 +382,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
     async function setLearnAutomation(input: {
         automatic: boolean;
         enabled: boolean;
+        followUpsAutomatic?: boolean;
     }): Promise<void> {
         const resolved = await resolveDefaultProfile(OWNER, "audio");
         const settings = resolved.settings;
@@ -381,7 +407,28 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 ...settings,
                 steps: {
                     ...settings.steps,
-                    learn: { ...settings.steps.learn, ...input },
+                    learn: {
+                        ...settings.steps.learn,
+                        enabled: input.enabled,
+                        automatic: input.automatic,
+                        correctAfterLearn: false,
+                    },
+                    ...(input.followUpsAutomatic === false
+                        ? {
+                              title: {
+                                  ...settings.steps.title,
+                                  automatic: false,
+                              },
+                              summary: {
+                                  ...settings.steps.summary,
+                                  automatic: false,
+                              },
+                              topics: {
+                                  ...settings.steps.topics,
+                                  automatic: false,
+                              },
+                          }
+                        : {}),
                 },
             },
         });
@@ -391,12 +438,13 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         const before = Date.now();
 
         expect(
-            await holdForAutoLearn({
+            await startAutomaticLearn({
                 userId: OWNER,
-                recordingId: REC,
+                itemId: REC,
+                source: "riffado",
                 timed: true,
             }),
-        ).toBe(true);
+        ).toEqual({ status: "started" });
 
         const due = await dueAt();
         expect(due?.getTime()).toBeGreaterThanOrEqual(
@@ -410,18 +458,135 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(runs).toEqual([{ trigger: "auto", status: "queued" }]);
     });
 
-    it("holds nothing when the person or the transcript does not allow it", async () => {
-        const tryHold = (timed = true) =>
-            holdForAutoLearn({ userId: OWNER, recordingId: REC, timed });
+    it("refuses untimed and profile-disabled automatic Learn", async () => {
+        const tryStart = (timed = true) =>
+            startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed,
+            });
 
-        expect(await tryHold(false)).toBe(false);
+        expect(await tryStart(false)).toEqual({
+            status: "skipped",
+            reason: "no_timings",
+        });
         await setLearnAutomation({ enabled: true, automatic: false });
-        expect(await tryHold()).toBe(false);
+        expect(await tryStart()).toEqual({
+            status: "skipped",
+            reason: "profile_off",
+        });
         await setLearnAutomation({ enabled: false, automatic: true });
-        expect(await tryHold()).toBe(false);
+        expect(await tryStart()).toEqual({
+            status: "skipped",
+            reason: "profile_off",
+        });
 
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual([]);
+    });
+
+    it("refuses hosted, shared, and rate-limited automatic Learn", async () => {
+        mockEnv.IS_HOSTED = true;
+        await expect(
+            startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).resolves.toEqual({ status: "skipped", reason: "hosted" });
+        mockEnv.IS_HOSTED = false;
+
+        const [org] = await db()
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.email, "org@example.test"))
+            .limit(1);
+        const [orgRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, org?.id ?? ""),
+                    isNull(recordingFolders.parentId),
+                ),
+            )
+            .limit(1);
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: OWNER,
+                itemId: REC,
+                folderId: orgRoot?.id ?? "",
+            });
+        await expect(
+            startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).resolves.toEqual({ status: "skipped", reason: "shared" });
+        await db()
+            .delete(recordingFolderAssignments)
+            .where(eq(recordingFolderAssignments.folderId, orgRoot?.id ?? ""));
+
+        for (let index = 0; index < 20; index++) {
+            await consumeRateLimitBucket(`auto-learn:user:${OWNER}`, {
+                limit: 20,
+                windowMs: 60 * 60 * 1000,
+            });
+        }
+        await expect(
+            startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).resolves.toEqual({ status: "skipped", reason: "rate_limited" });
+        expect(await dueAt()).toBeNull();
+        expect(await kinds()).toEqual([]);
+    });
+
+    it("starts one automatic Learn run and consumes its bucket once after a transcript write", async () => {
+        await db().delete(apiRateLimitBuckets);
+        await setLearnAutomation({ enabled: true, automatic: true });
+        await db()
+            .delete(transcriptions)
+            .where(eq(transcriptions.id, riffadoId));
+
+        await upsertTranscription({
+            userId: OWNER,
+            recordingId: REC,
+            text: "A new timed transcript.",
+            detectedLanguage: "en",
+            source: "riffado",
+            provider: "openai",
+            model: "gpt-4o-transcribe-diarize",
+            turns: [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 5_000,
+                    text: "A new timed transcript.",
+                },
+            ],
+        });
+        await runAdvance();
+
+        expect(
+            await db()
+                .select({ id: learnRuns.id })
+                .from(learnRuns)
+                .where(eq(learnRuns.itemId, REC)),
+        ).toHaveLength(1);
+        const next = await consumeRateLimitBucket(`auto-learn:user:${OWNER}`, {
+            limit: 20,
+            windowMs: 60 * 60 * 1000,
+        });
+        expect(next.remaining).toBe(18);
     });
 
     it("waits while a run is queued or awaits review, and releases once when the last review is done", async () => {
@@ -502,7 +667,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     it("releases when the time is up, even with a review still waiting", async () => {
         await hold();
-        await run("ready");
+        const runId = await run("ready");
 
         expect(await sweepAutoLearnHolds(new Date())).toBe(0);
         expect(
@@ -512,6 +677,203 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         ).toBe(1);
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual(["pipeline.advance"]);
+
+        await runAdvance();
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, REC),
+                    eq(itemProcessing.userId, OWNER),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        expect(processing?.phases.learn).toMatchObject({
+            state: "waiting",
+            reason: "review_pending_timeout",
+        });
+        expect(processing?.phases.summary).toMatchObject({ state: "pending" });
+        expect(await kinds()).toContain("summary");
+        expect(
+            (
+                await db()
+                    .select({ status: learnRuns.status })
+                    .from(learnRuns)
+                    .where(eq(learnRuns.id, runId))
+            )[0]?.status,
+        ).toBe("ready");
+    });
+
+    it("reviews privately, decides proposals, and shares an intended placement once", async () => {
+        await setLearnAutomation({
+            enabled: true,
+            automatic: true,
+            followUpsAutomatic: false,
+        });
+        const [org] = await db()
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.email, "org@example.test"))
+            .limit(1);
+        const [orgRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(
+                and(
+                    eq(recordingFolders.userId, org?.id ?? ""),
+                    isNull(recordingFolders.parentId),
+                ),
+            )
+            .limit(1);
+        const folderId = "auto-learn-org-folder";
+        await db()
+            .insert(recordingFolders)
+            .values({
+                id: folderId,
+                userId: org?.id ?? "",
+                parentId: orgRoot?.id ?? "",
+                name: encryptText("Reviewed"),
+                nameHash: "auto-learn-org-folder-hash",
+                kind: "custom",
+            });
+        await db().transaction((tx) =>
+            recordIntendedPlacementInTx(tx, {
+                ownerUserId: OWNER,
+                itemId: REC,
+                folderId,
+                requestPipeline: false,
+            }),
+        );
+        const [proposal] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId: REC,
+                userId: OWNER,
+                status: "proposed",
+                source: "riffado",
+                text: encryptText("Send the notes"),
+            })
+            .returning({ id: recordingTasks.id });
+
+        expect(
+            await startAutomaticLearn({
+                userId: OWNER,
+                itemId: REC,
+                source: "riffado",
+                timed: true,
+            }),
+        ).toEqual({ status: "started" });
+        const [learn] = await db()
+            .select({ id: learnRuns.id, view: learnRuns.view })
+            .from(learnRuns)
+            .where(eq(learnRuns.itemId, REC));
+        expect(learn?.view).toBe("private");
+        await db()
+            .update(learnRuns)
+            .set({ status: "ready" })
+            .where(eq(learnRuns.id, learn?.id ?? ""));
+        await runAdvance();
+        expect(
+            await db()
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.folderId, folderId)),
+        ).toEqual([]);
+
+        const access = await requireRecordingView(OWNER, REC, "private");
+        await expect(
+            finishReview(access, OWNER, { versions: {} }),
+        ).resolves.toMatchObject({ status: "finished" });
+        await runAdvance();
+        expect((await processing())?.phases.share).toMatchObject({
+            state: "waiting",
+            reason: "gate_blocked",
+        });
+        await db()
+            .insert(transcriptSpeakers)
+            .values(
+                [riffadoId, plaudId].map((transcriptionId) => ({
+                    userId: OWNER,
+                    transcriptionId,
+                    label: "speaker_0",
+                    personId: null,
+                    source: "user" as const,
+                    status: "confirmed" as const,
+                    markedUnknown: true,
+                    confirmedByUserId: OWNER,
+                })),
+            );
+        await db()
+            .update(recordingTasks)
+            .set({ status: "open" })
+            .where(eq(recordingTasks.id, proposal?.id ?? ""));
+        await requestAdvance({
+            itemId: REC,
+            userId: OWNER,
+            view: "private",
+            reason: "review-finished",
+        });
+        await expect(loadShareGate(db(), REC, OWNER)).resolves.toEqual([]);
+        expect(
+            planAdvance(await gatherFacts(REC, "private", OWNER)).actions,
+        ).toContainEqual({ type: "executeShares" });
+
+        await pipelineAdvanceJobHandler.run({
+            jobId: "job-share",
+            userId: OWNER,
+            payload: {
+                itemId: REC,
+                view: "private",
+                reason: "review-finished",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        } as unknown as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+        expect((await processing())?.phases.share).toMatchObject({
+            state: "done",
+            reason: "shared",
+        });
+        expect(
+            await db()
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.folderId, folderId)),
+        ).toHaveLength(1);
+        expect(
+            await db()
+                .select()
+                .from(mailPendingShares)
+                .where(eq(mailPendingShares.itemId, REC)),
+        ).toEqual([]);
+
+        await requestAdvance({
+            itemId: REC,
+            userId: OWNER,
+            view: "private",
+            reason: "placement",
+        });
+        await pipelineAdvanceJobHandler.run({
+            jobId: "job-share-repeat",
+            userId: OWNER,
+            payload: {
+                itemId: REC,
+                view: "private",
+                reason: "placement",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        } as unknown as Parameters<typeof pipelineAdvanceJobHandler.run>[0]);
+        expect(
+            await db()
+                .select()
+                .from(recordingFolderAssignments)
+                .where(eq(recordingFolderAssignments.folderId, folderId)),
+        ).toHaveLength(1);
     });
 
     it("does not let holds still waiting for their review crowd out one to release", async () => {
@@ -747,12 +1109,13 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         const title = vi.spyOn(titleQueue, "enqueueTitleJob");
 
         expect(
-            await holdForAutoLearn({
+            await startAutomaticLearn({
                 userId: OWNER,
-                recordingId: REC,
+                itemId: REC,
+                source: "riffado",
                 timed: true,
             }),
-        ).toBe(true);
+        ).toEqual({ status: "started" });
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual(["pipeline.advance"]);
 

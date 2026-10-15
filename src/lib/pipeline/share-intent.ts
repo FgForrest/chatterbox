@@ -10,6 +10,7 @@ import {
 } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 
@@ -77,8 +78,39 @@ export async function executeIntendedShares(
     ownerUserId: string,
     itemId: string,
 ): Promise<ShareGateProblem[]> {
+    return (await executeIntendedSharesWithOutcome(ownerUserId, itemId))
+        .problems;
+}
+
+export interface IntendedShareOutcome {
+    problems: ShareGateProblem[];
+    shared: boolean;
+    remaining: boolean;
+}
+
+/** Execute intended shares and report whether an intent was fulfilled or remains. */
+export async function executeIntendedSharesWithOutcome(
+    ownerUserId: string,
+    itemId: string,
+): Promise<IntendedShareOutcome> {
     const orgUserId = await getOrgUserId();
-    if (!orgUserId) return [];
+    if (!orgUserId) {
+        const [remaining] = await db
+            .select({ folderId: mailPendingShares.folderId })
+            .from(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.userId, ownerUserId),
+                    eq(mailPendingShares.itemId, itemId),
+                ),
+            )
+            .limit(1);
+        return {
+            problems: [],
+            shared: false,
+            remaining: remaining !== undefined,
+        };
+    }
     const intents = await db
         .select({ folderId: mailPendingShares.folderId })
         .from(mailPendingShares)
@@ -149,14 +181,30 @@ export async function executeIntendedShares(
                 return { problems: [], shared: true };
             }),
         );
-        if (result.problems.length > 0) return result.problems;
+        if (result.problems.length > 0) {
+            return {
+                problems: result.problems,
+                shared,
+                remaining: true,
+            };
+        }
         shared ||= result.shared;
     }
     if (shared) {
         nudge();
         await orgTreeChanged();
     }
-    return [];
+    const [remaining] = await db
+        .select({ folderId: mailPendingShares.folderId })
+        .from(mailPendingShares)
+        .where(
+            and(
+                eq(mailPendingShares.userId, ownerUserId),
+                eq(mailPendingShares.itemId, itemId),
+            ),
+        )
+        .limit(1);
+    return { problems: [], shared, remaining: remaining !== undefined };
 }
 
 /** Withdraw an owner's intended placement without sharing the item. */
@@ -166,7 +214,7 @@ export async function cancelIntendedPlacement(
     folderId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
-        await tx
+        const deleted = await tx
             .delete(mailPendingShares)
             .where(
                 and(
@@ -174,13 +222,33 @@ export async function cancelIntendedPlacement(
                     eq(mailPendingShares.itemId, itemId),
                     eq(mailPendingShares.folderId, folderId),
                 ),
-            );
-        await requestAdvanceInTx(tx, {
+            )
+            .returning({ folderId: mailPendingShares.folderId });
+        const advance = await requestAdvanceInTx(tx, {
             itemId,
             userId: ownerUserId,
             view: "private",
             reason: "placement",
         });
+        if (!advance || deleted.length === 0) return;
+        const [remaining] = await tx
+            .select({ folderId: mailPendingShares.folderId })
+            .from(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.userId, ownerUserId),
+                    eq(mailPendingShares.itemId, itemId),
+                ),
+            )
+            .limit(1);
+        if (!remaining) {
+            await updatePhaseInTx(tx, itemId, "private", ownerUserId, "share", {
+                state: "skipped",
+                reason: "cancelled",
+                generation: advance.requestedGeneration,
+                at: new Date().toISOString(),
+            });
+        }
     });
     nudge();
 }

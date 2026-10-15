@@ -1,6 +1,13 @@
 import { db } from "@/db";
+import { nudge } from "@/lib/jobs/nudge";
+import {
+    releaseAutoLearnHold,
+    startAutomaticLearn,
+} from "@/lib/learn/auto-learn";
 import { autoLearnMail } from "@/lib/mail/auto-process";
+import { executeIntendedSharesWithOutcome } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
@@ -59,9 +66,79 @@ export async function executePipelineAction(
         case "queueTitleJob":
             await enqueueTitleJob(userId, itemId);
             return;
-        case "startAutoLearnMail":
-            await autoLearnMail(userId, itemId);
+        case "startAutoLearn": {
+            await db.transaction((tx) =>
+                updatePhaseInTx(tx, itemId, view, userId, "learn", {
+                    state: "running",
+                    reason: "started",
+                    generation,
+                    inputs: action.input,
+                    at: new Date().toISOString(),
+                }),
+            );
+            const outcome =
+                action.source === "mail"
+                    ? await autoLearnMail(userId, itemId)
+                    : await startAutomaticLearn({
+                          userId,
+                          itemId,
+                          source: action.source,
+                          timed: true,
+                      });
+            if (outcome.status === "started") return;
+            const requested = await db.transaction(async (tx) => {
+                await updatePhaseInTx(tx, itemId, view, userId, "learn", {
+                    state: "skipped",
+                    reason: outcome.reason,
+                    generation,
+                    inputs: action.input,
+                    at: new Date().toISOString(),
+                });
+                return requestAdvanceInTx(tx, {
+                    itemId,
+                    userId,
+                    view,
+                    reason: "learn-settled",
+                });
+            });
+            if (requested) nudge();
             return;
+        }
+        case "releaseLearnTimeout":
+            await releaseAutoLearnHold(itemId, { expired: true });
+            return;
+        case "executeShares": {
+            const outcome = await executeIntendedSharesWithOutcome(
+                userId,
+                itemId,
+            );
+            await db.transaction((tx) =>
+                updatePhaseInTx(tx, itemId, view, userId, "share", {
+                    state:
+                        outcome.problems.length > 0
+                            ? "waiting"
+                            : outcome.shared
+                              ? "done"
+                              : outcome.remaining
+                                ? "waiting"
+                                : "skipped",
+                    reason:
+                        outcome.problems.length > 0
+                            ? "gate_blocked"
+                            : outcome.shared
+                              ? "shared"
+                              : outcome.remaining
+                                ? "org_unavailable"
+                                : "cancelled",
+                    generation,
+                    at: new Date().toISOString(),
+                    ...(outcome.problems.length > 0
+                        ? { problems: outcome.problems }
+                        : {}),
+                }),
+            );
+            return;
+        }
         case "markPhase":
             await db.transaction((tx) =>
                 updatePhaseInTx(tx, itemId, view, userId, action.phase, {

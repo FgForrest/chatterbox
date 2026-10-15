@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import {
     chatterItems,
+    itemProcessing,
     mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
@@ -328,6 +329,20 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         expect(await executeIntendedShares(ALICE, itemId)).toEqual([]);
         expect(await assignments(itemId)).toEqual([]);
         expect(await intents(itemId)).toEqual([]);
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ALICE),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        expect(processing?.phases.share).toMatchObject({
+            state: "skipped",
+            reason: "cancelled",
+        });
     });
 
     it("refuses both roots and another owner's folder", async () => {

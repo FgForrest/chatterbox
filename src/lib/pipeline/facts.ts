@@ -5,6 +5,7 @@ import {
     apiCredentials,
     asyncJobs,
     chatterItems,
+    learnRuns,
     mailContents,
     mailMessages,
     mailPendingShares,
@@ -17,7 +18,10 @@ import {
     users,
 } from "@/db/schema";
 import { pickEnhancementCredential } from "@/lib/ai/enhancement-provider";
+import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
+import { learnRunOpen } from "@/lib/learn/learn-open";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
+import { mailShareProblems } from "@/lib/mail/share-gate";
 import { readProcessing } from "@/lib/pipeline/state";
 import type {
     PhaseRecord,
@@ -25,8 +29,10 @@ import type {
     PipelinePhases,
     PipelineView,
 } from "@/lib/pipeline/types";
+import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
@@ -169,9 +175,14 @@ export async function gatherFacts(
             hasEnhancementCredential: Boolean(
                 pickEnhancementCredential(credentials),
             ),
+            learnAvailability: isLearnDeploymentAvailable()
+                ? "no_provider"
+                : "hosted",
+            learnRunOpen: false,
             mail: null,
             summary: { exists: false, stale: false, jobActive: false },
             taskReview: { proposals: 0, followUps: 0 },
+            share: { problems: [] },
             phases: processing?.phases ?? {},
             at: new Date().toISOString(),
         };
@@ -286,6 +297,7 @@ export async function gatherFacts(
         [transcriptionJob],
         [failedTranscriptionJob],
         [recording],
+        [openLearnRun],
     ] = await Promise.all([
         contentPromise,
         mailPromise,
@@ -410,6 +422,18 @@ export async function gatherFacts(
                   )
                   .limit(1)
             : Promise.resolve([]),
+        db
+            .select({ id: learnRuns.id })
+            .from(learnRuns)
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, userId),
+                    eq(learnRuns.view, "private"),
+                    learnRunOpen(),
+                ),
+            )
+            .limit(1),
     ]);
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
@@ -477,8 +501,38 @@ export async function gatherFacts(
                       resolvedProfile.settings.steps.topics.enabled &&
                       resolvedProfile.settings.steps.topics.automatic,
               },
+              learn: {
+                  enabled: resolvedProfile.settings.steps.learn.enabled,
+                  automatic: resolvedProfile.settings.steps.learn.automatic,
+              },
           }
         : null;
+    let learnAvailability: PipelineFacts["learnAvailability"] = "no_provider";
+    if (!isLearnDeploymentAvailable()) {
+        learnAvailability = "hosted";
+    } else if (
+        resolvedProfile?.settings.steps.learn.enabled &&
+        resolvedProfile.settings.steps.learn.automatic
+    ) {
+        try {
+            await resolveStepProvider({
+                step: "learn",
+                pin: resolvedProfile.settings.steps.learn.provider,
+                actorUserId: userId,
+            });
+            learnAvailability = "available";
+        } catch {
+            learnAvailability = "no_provider";
+        }
+    }
+    const shareProblems =
+        intendedFolderIds.length === 0
+            ? []
+            : item.kind === "mail"
+              ? await db.transaction((tx) =>
+                    mailShareProblems(tx, itemId, userId),
+                )
+              : await loadShareGate(db, itemId, userId);
     const summaryExists = summary !== undefined;
     const learn = phases.learn;
     const releasedCurrentContent =
@@ -555,6 +609,8 @@ export async function gatherFacts(
         hasEnhancementCredential: Boolean(
             pickEnhancementCredential(credentials),
         ),
+        learnAvailability,
+        learnRunOpen: openLearnRun !== undefined,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,
@@ -568,6 +624,7 @@ export async function gatherFacts(
             proposals: proposals.length,
             followUps: followUps.length,
         },
+        share: { problems: shareProblems },
         phases,
         at: new Date().toISOString(),
     };

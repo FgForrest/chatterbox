@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as MailAutoProcessModule from "@/lib/mail/auto-process";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 const mocks = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ const mocks = vi.hoisted(() => ({
     markLearnReleasedInTx: vi.fn(),
     dbTransaction: vi.fn(),
     resolveItemProfile: vi.fn(),
+    autoLearnMail: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -108,6 +110,7 @@ vi.mock("@/lib/knowledge/attribution", () => ({
 
 vi.mock("@/lib/knowledge/availability", () => ({
     isLearnAvailableFor: mocks.isLearnAvailableFor,
+    isLearnDeploymentAvailable: vi.fn().mockReturnValue(true),
 }));
 
 vi.mock("@/lib/knowledge/speaker-label-rules", () => ({
@@ -136,6 +139,11 @@ vi.mock("@/lib/learn/learn-open", () => ({ learnRunOpen: vi.fn() }));
 
 vi.mock("@/lib/learn/summary-refresh", () => ({
     isSummaryStale: mocks.isSummaryStale,
+}));
+
+vi.mock("@/lib/mail/auto-process", async (importOriginal) => ({
+    ...(await importOriginal<typeof MailAutoProcessModule>()),
+    autoLearnMail: mocks.autoLearnMail,
 }));
 
 vi.mock("@/lib/org/config", () => ({
@@ -681,6 +689,7 @@ beforeEach(() => {
     });
     mocks.consumeRateLimitBucket.mockResolvedValue({ allowed: true });
     mocks.startLearnRun.mockResolvedValue(undefined);
+    mocks.autoLearnMail.mockResolvedValue({ status: "started" });
     mocks.getActiveJob.mockResolvedValue(null);
     mocks.isSummaryStale.mockResolvedValue(false);
     mocks.enqueueTitleJob.mockResolvedValue(undefined);
@@ -688,7 +697,6 @@ beforeEach(() => {
         (recordingId: string, view: string) => `${recordingId}:${view}`,
     );
     mocks.resolveItemProfile.mockResolvedValue(resolvedAudioProfile());
-    vi.spyOn(autoLearn, "holdForAutoLearn").mockResolvedValue(false);
 });
 
 describe("pipeline driver facts", () => {
@@ -719,17 +727,34 @@ describe("pipeline driver facts", () => {
 });
 
 describe("transcribeRecording post-write triggers", () => {
-    it("queues no title, topics, or summary while automatic Learn holds", async () => {
+    it("leaves the single automatic Learn start to the pipeline", async () => {
         mountTranscription();
-        vi.mocked(autoLearn.holdForAutoLearn).mockResolvedValue(true);
-        pipelineFacts.summaryDueAt = AT;
+        pipelineFacts.profile = {
+            ...pipelineFacts.profile,
+            revisionId: "seeded-profile-revision",
+            learn: { enabled: true, automatic: true },
+            automatic: {
+                ...pipelineFacts.profile?.automatic,
+                learn: true,
+                summary: true,
+                title: true,
+                topics: true,
+            },
+        };
+        pipelineFacts.learnAvailability = "available";
+        delete pipelineFacts.phases.learn;
+        const start = vi
+            .spyOn(autoLearn, "startAutomaticLearn")
+            .mockResolvedValue({ status: "started" });
 
         const result = await transcribeAndAdvance();
 
         expect(result.success).toBe(true);
-        expect(autoLearn.holdForAutoLearn).toHaveBeenCalledWith({
+        expect(start).toHaveBeenCalledOnce();
+        expect(start).toHaveBeenCalledWith({
             userId: USER_ID,
-            recordingId: ITEM_ID,
+            itemId: ITEM_ID,
+            source: "riffado",
             timed: true,
         });
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
@@ -799,11 +824,6 @@ describe("transcribeRecording post-write triggers", () => {
 
         await transcribeAndAdvance();
 
-        expect(autoLearn.holdForAutoLearn).toHaveBeenCalledWith({
-            userId: USER_ID,
-            recordingId: ITEM_ID,
-            timed: false,
-        });
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
         expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
@@ -815,7 +835,6 @@ describe("transcribeRecording post-write triggers", () => {
 
         await transcribeAndAdvance({ view: "org" });
 
-        expect(autoLearn.holdForAutoLearn).not.toHaveBeenCalled();
         expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
@@ -881,7 +900,7 @@ describe("processNewMail triggers", () => {
 
     it("queues the summary but not Learn when Learn is unavailable", async () => {
         mountMail({ autoLearn: true });
-        mocks.isLearnAvailableFor.mockResolvedValue(false);
+        pipelineFacts.learnAvailability = "no_provider";
 
         await processMailAndAdvance();
 
@@ -890,23 +909,29 @@ describe("processNewMail triggers", () => {
             ITEM_ID,
             null,
         );
-        expect(mocks.startLearnRun).not.toHaveBeenCalled();
+        expect(mocks.autoLearnMail).not.toHaveBeenCalled();
     });
 
-    it("queues the summary but not Learn when its rate limit refuses", async () => {
+    it("records the real skipped outcome when the Learn rate limit refuses", async () => {
         mountMail({ autoLearn: true });
-        mocks.consumeRateLimitBucket.mockResolvedValue({ allowed: false });
+        mocks.autoLearnMail.mockResolvedValue({
+            status: "skipped",
+            reason: "rate_limited",
+        });
 
         await processMailAndAdvance();
 
-        expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
-            USER_ID,
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+        expect(mocks.updatePhaseInTx).toHaveBeenCalledWith(
+            expect.anything(),
             ITEM_ID,
-            null,
-        );
-        expect(mocks.consumeRateLimitBucket).toHaveBeenCalledWith(
-            "auto-learn:user:user-1",
-            expect.any(Object),
+            "private",
+            USER_ID,
+            "learn",
+            expect.objectContaining({
+                state: "skipped",
+                reason: "rate_limited",
+            }),
         );
         expect(mocks.startLearnRun).not.toHaveBeenCalled();
     });
@@ -914,17 +939,17 @@ describe("processNewMail triggers", () => {
     it.each([
         { name: "a non-owner role", access: { role: "editor" } },
         { name: "no access", access: null },
-    ])("queues the summary but not Learn with $name", async ({ access }) => {
+    ])("records skipped Learn with $name", async ({ access }) => {
         mountMail({ autoLearn: true });
-        mocks.resolveRecordingAccess.mockResolvedValue(access);
+        mocks.autoLearnMail.mockResolvedValue({
+            status: "skipped",
+            reason: access ? "shared" : "gone",
+        });
 
         await processMailAndAdvance();
 
-        expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
-            USER_ID,
-            ITEM_ID,
-            null,
-        );
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+        expect(mocks.autoLearnMail).toHaveBeenCalledWith(USER_ID, ITEM_ID);
         expect(mocks.startLearnRun).not.toHaveBeenCalled();
     });
 
@@ -969,28 +994,18 @@ describe("processNewMail triggers", () => {
 
         await processMailAndAdvance();
 
-        expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
-            USER_ID,
-            ITEM_ID,
-            null,
-        );
-        expect(mocks.startLearnRun).toHaveBeenCalledTimes(expectedLearnCalls);
         if (shouldLearn) {
-            expect(mocks.startLearnRun).toHaveBeenCalledWith({
-                access: {
-                    recordingId: ITEM_ID,
-                    kind: "mail",
-                    ownerUserId: USER_ID,
-                    role: "owner",
-                    shared: false,
-                    orgUserId: null,
-                    view: "private",
-                    contentUserId: USER_ID,
-                },
-                actorUserId: USER_ID,
-                source: "riffado",
-                trigger: "auto",
-            });
+            expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+        } else {
+            expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
+                USER_ID,
+                ITEM_ID,
+                null,
+            );
+        }
+        expect(mocks.autoLearnMail).toHaveBeenCalledTimes(expectedLearnCalls);
+        if (shouldLearn) {
+            expect(mocks.autoLearnMail).toHaveBeenCalledWith(USER_ID, ITEM_ID);
         }
     });
 
@@ -1004,14 +1019,15 @@ describe("processNewMail triggers", () => {
             shared: true,
             orgUserId: "org-1",
         });
+        mocks.autoLearnMail.mockResolvedValue({
+            status: "skipped",
+            reason: "shared",
+        });
 
         await processMailAndAdvance();
 
-        expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
-            USER_ID,
-            ITEM_ID,
-            null,
-        );
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+        expect(mocks.autoLearnMail).toHaveBeenCalledWith(USER_ID, ITEM_ID);
         expect(mocks.startLearnRun).not.toHaveBeenCalled();
     });
 });

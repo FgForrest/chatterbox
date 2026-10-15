@@ -15,10 +15,12 @@ import {
     asyncJobs,
     chatterItems,
     itemProcessing,
+    mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -224,7 +226,8 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
     beforeEach(async () => {
         vi.restoreAllMocks();
         vi.clearAllMocks();
-        mocks.autoLearnMail.mockResolvedValue(undefined);
+        mockEnv.IS_HOSTED = false;
+        mocks.autoLearnMail.mockResolvedValue({ status: "started" });
         mocks.enqueueTitleJob.mockResolvedValue(undefined);
         mocks.queueAutoSummary.mockResolvedValue(undefined);
         mocks.queueAutoTopics.mockResolvedValue(undefined);
@@ -269,6 +272,29 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                     kind: "custom",
                 },
             ]);
+    });
+
+    it("skips Learn as hosted and still queues Summary", async () => {
+        mockEnv.IS_HOSTED = true;
+        await db()
+            .update(userSettings)
+            .set({ autoLearn: true })
+            .where(eq(userSettings.userId, USER_ID));
+        await seedAudio();
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect((await processing())?.phases.learn).toMatchObject({
+            state: "skipped",
+            reason: "hosted",
+        });
+        expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
     });
 
     it("loops when a trigger arrives after the generation read", async () => {
@@ -352,6 +378,56 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             requestedGeneration: 1,
             processedGeneration: 1,
         });
+    });
+
+    it("settles a non-Organization share intent as unavailable without deferring", async () => {
+        await db()
+            .update(userSettings)
+            .set({
+                autoLearn: false,
+                autoSummarize: false,
+                autoDetectTopics: false,
+                autoGenerateTitle: false,
+            })
+            .where(eq(userSettings.userId, USER_ID));
+        await seedAudio();
+        await db()
+            .insert(transcriptSpeakers)
+            .values({
+                userId: USER_ID,
+                transcriptionId: `transcription-${ITEM_ID}`,
+                label: "speaker_0",
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                markedUnknown: true,
+                confirmedByUserId: USER_ID,
+            });
+        await db().insert(mailPendingShares).values({
+            userId: USER_ID,
+            itemId: ITEM_ID,
+            folderId: "pipeline-folder",
+        });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+
+        await expect(
+            pipelineAdvanceJobHandler.run(jobContext()),
+        ).resolves.toMatchObject({ processedGeneration: 1 });
+        expect((await processing())?.phases.share).toMatchObject({
+            state: "waiting",
+            reason: "org_unavailable",
+        });
+        expect(
+            await db()
+                .select()
+                .from(mailPendingShares)
+                .where(eq(mailPendingShares.itemId, ITEM_ID)),
+        ).toHaveLength(1);
     });
 
     it("runs the synchronously released Learn path exactly once", async () => {
@@ -527,7 +603,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         expect((await processing())?.phases).toMatchObject({
             categorize: { state: "done", reason: "categorized" },
             transcribe: { state: "done", reason: "content-available" },
-            learn: { state: "skipped", reason: "disabled" },
+            learn: { state: "skipped", reason: "profile_off" },
         });
     });
 
