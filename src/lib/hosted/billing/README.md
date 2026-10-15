@@ -1,6 +1,6 @@
 # `src/lib/hosted/billing/`
 
-Stripe integration for hosted Riffado. Self-host instances never touch these
+Stripe integration for hosted Chatterbox. Self-host instances never touch these
 code paths (guarded on `env.IS_HOSTED` + `isStripeConfigured()`).
 
 ## Model

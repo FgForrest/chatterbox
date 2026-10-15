@@ -22,13 +22,13 @@ If you correct names in the transcript after the summary was written, the summar
 
 ### Templates
 
-A template is the instruction the AI receives. Riffado comes with **General Summary**, **Meeting Notes**, **Key Points** and **Action Items**, and you can edit these or write your own in Settings → Summary. See [Summary settings](settings.md#summary).
+A template is the instruction the AI receives. Chatterbox comes with **General Summary**, **Meeting Notes**, **Key Points** and **Action Items**, and you can edit these or write your own in Settings → Summary. See [Summary settings](settings.md#summary).
 
 ### Multi-pass summaries
 
 ![A summary made with two of three passes](images/summary-multi-pass.png)
 
-With **Multi-pass summarization** on (Settings → Summary), Riffado summarizes the transcript several times at once and merges the results, so a point only one pass noticed still makes it into the summary. It costs about as many times more as there are passes.
+With **Multi-pass summarization** on (Settings → Summary), Chatterbox summarizes the transcript several times at once and merges the results, so a point only one pass noticed still makes it into the summary. It costs about as many times more as there are passes.
 
 The footer of such a summary says **multi-pass · 3**. When a pass failed and the summary was made from fewer, the badge turns amber, for example **multi-pass · 2/3**; hover over it to see why.
 
@@ -56,7 +56,7 @@ Accepted tasks are listed on the summary card. Tick one off when it is done, or 
 
 ![Tasks assigned to you](images/tasks-mine.png)
 
-- **Mine**: tasks assigned to you. Riffado knows which person in the Almanac is you by your email address; open your own person in the Almanac and choose **This is me** if your tasks do not show here.
+- **Mine**: tasks assigned to you. Chatterbox knows which person in the Almanac is you by your email address; open your own person in the Almanac and choose **This is me** if your tasks do not show here.
 - **Tracked**: the other tasks from your recordings, assigned to someone else or to nobody yet.
 
 ![Tasks you track](images/tasks-tracked.png)

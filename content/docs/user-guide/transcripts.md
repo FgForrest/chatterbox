@@ -30,7 +30,7 @@ Any service that speaks the OpenAI API works, and three more are built in. What 
 
 **Names from the Almanac.** ElevenLabs Scribe v2 and Speechmatics are sent up to 500 names from your [Almanac](almanac.md) with each recording: your own first, then people and things mentioned recently. They spell those names right much more often. The names are sent for every recording, including people who are not in it.
 
-**Recorder transcripts.** If your recorder's service made its own transcript and summary, Riffado can import them (Settings → Transcription → **Import Plaud transcripts and summaries**). A recording with both shows a switch between **Plaud** and **Custom**.
+**Recorder transcripts.** If your recorder's service made its own transcript and summary, Chatterbox can import them (Settings → Transcription → **Import Plaud transcripts and summaries**). A recording with both shows a switch between **Plaud** and **Custom**.
 
 ## Reading a transcript
 

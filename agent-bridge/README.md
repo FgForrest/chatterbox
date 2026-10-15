@@ -1,6 +1,6 @@
 # agent-bridge
 
-An OpenAI-compatible `chat/completions` endpoint backed by the **Claude Code** and **Codex** CLIs, so a Claude or ChatGPT *subscription* can generate Riffado summaries and titles instead of a metered API key.
+An OpenAI-compatible `chat/completions` endpoint backed by the **Claude Code** and **Codex** CLIs, so a Claude or ChatGPT *subscription* can generate Chatterbox summaries and titles instead of a metered API key.
 
 ```
 riffado-app ──http──▶ agent-bridge :8787/v1/chat/completions
@@ -9,7 +9,7 @@ riffado-app ──http──▶ agent-bridge :8787/v1/chat/completions
                         └─▶ codex exec          ─▶ ChatGPT subscription
 ```
 
-Riffado needs no code path of its own for this. Both `generateSummaryForRecording` and `generateTitleFromTranscription` do nothing more than `new OpenAI({ baseURL })` + `chat.completions.create`, so anything answering that URL is a valid enhancement provider.
+Chatterbox needs no code path of its own for this. Both `generateSummaryForRecording` and `generateTitleFromTranscription` do nothing more than `new OpenAI({ baseURL })` + `chat.completions.create`, so anything answering that URL is a valid enhancement provider.
 
 ## Setup
 
@@ -40,11 +40,11 @@ docker compose --profile agent-bridge up -d --build agent-bridge
 ./agent-bridge/smoke.sh
 ```
 
-This checks both CLIs run, both are authenticated *against a subscription*, `/health` answers, each backend completes a real round trip returning the JSON shape Riffado parses, and those round trips left no session files behind (see [Hardening](#hardening-no-tools-no-persistence)). It fails with the CLI's own error rather than a 502 three layers up.
+This checks both CLIs run, both are authenticated *against a subscription*, `/health` answers, each backend completes a real round trip returning the JSON shape Chatterbox parses, and those round trips left no session files behind (see [Hardening](#hardening-no-tools-no-persistence)). It fails with the CLI's own error rather than a 502 three layers up.
 
-**6. Add the provider in Riffado** — Settings → AI Providers → Add, pick **Claude Code** or **Codex**. Base URL and model prefill; paste `BRIDGE_TOKEN` into the API Key field and tick *Use for AI enhancements*.
+**6. Add the provider in Chatterbox** — Settings → AI Providers → Add, pick **Claude Code** or **Codex**. Base URL and model prefill; paste `BRIDGE_TOKEN` into the API Key field and tick *Use for AI enhancements*.
 
-> If your Riffado build predates those presets, add a **Custom** provider instead: Base URL `http://agent-bridge:8787/v1`, API Key `BRIDGE_TOKEN`, Default Model `claude-sonnet-5` or `gpt-5-codex`. Leave *Use for transcription* unticked — the bridge takes no audio.
+> If your Chatterbox build predates those presets, add a **Custom** provider instead: Base URL `http://agent-bridge:8787/v1`, API Key `BRIDGE_TOKEN`, Default Model `claude-sonnet-5` or `gpt-5-codex`. Leave *Use for transcription* unticked — the bridge takes no audio.
 
 ## Building the image
 
@@ -68,7 +68,7 @@ The bridge's [hardening flags](#hardening-no-tools-no-persistence) were verified
 
 ### Running alongside an existing deployment
 
-The compose service in this repo assumes you run Riffado from this checkout. If your deployment lives elsewhere — its own directory, pulling a published app image — the bridge must join **that** compose project, because the app reaches it at `http://agent-bridge:8787/v1`, a name that only resolves inside the same project's network.
+The compose service in this repo assumes you run Chatterbox from this checkout. If your deployment lives elsewhere — its own directory, pulling a published app image — the bridge must join **that** compose project, because the app reaches it at `http://agent-bridge:8787/v1`, a name that only resolves inside the same project's network.
 
 Add a service to the deployment's compose (or its override file) referencing the tag you just built:
 
@@ -176,7 +176,7 @@ docker volume rm <the name it printed>
 
 Every prompt the bridge receives carries a user's transcript, and a transcript is untrusted input: a sentence spoken in a meeting or pasted into an upload can be written as an instruction to the agent. Both CLIs are coding agents, and by default they run with their full tool sets. A prompt injection could have the agent read the credentials in this container's volume and write them into the summary, which the requesting user then reads. Codex's `--sandbox read-only` blocks writes, not reads.
 
-By default both CLIs also save every session to disk, in the credentials volume: the full prompt, so the decrypted transcript, outside Riffado's retention settings and never pruned. Both also have a cross-session memory (Claude Code's auto-memory is on by default; Codex's memories feature is off by default in the versions below). One bridge serves every user of a Riffado instance, from the same working directory, so a memory written during one user's summary would be loaded into the next user's.
+By default both CLIs also save every session to disk, in the credentials volume: the full prompt, so the decrypted transcript, outside Chatterbox's retention settings and never pruned. Both also have a cross-session memory (Claude Code's auto-memory is on by default; Codex's memories feature is off by default in the versions below). One bridge serves every user of a Chatterbox instance, from the same working directory, so a memory written during one user's summary would be loaded into the next user's.
 
 The bridge only turns a prompt into text, so it runs both CLIs with no tools and nothing saved. These flags are built into `lib.mjs` (`buildArgs`), not left to `*_EXTRA_ARGS`.
 
@@ -185,7 +185,7 @@ The bridge only turns a prompt into text, so it runs both CLIs with no tools and
 | Flag | Effect |
 |---|---|
 | `--tools ""` | Empties the built-in tool set. `--allowedTools` would only pre-approve tools; this removes them. |
-| `--strict-mcp-config` | Loads no MCP server (none is passed with `--mcp-config`). Needed on top of `--tools ""`, which leaves MCP tools in place. A Learn request passes exactly one, Riffado's (see [Learn](#learn-riffados-knowledge-tools)). |
+| `--strict-mcp-config` | Loads no MCP server (none is passed with `--mcp-config`). Needed on top of `--tools ""`, which leaves MCP tools in place. A Learn request passes exactly one, Chatterbox's (see [Learn](#learn-chatterboxs-knowledge-tools)). |
 | `--setting-sources ""` | Reads no user, project or local settings file. A user `advisorModel` setting keeps a server-side advisor that forwards the whole conversation to another model; neither `--disallowedTools` nor `--settings` removes it. OAuth still works. |
 | `--no-session-persistence` | No session transcript under `~/.claude/projects/`. |
 | `--settings '{"autoMemoryEnabled":false,"disableClaudeAiConnectors":true}'` | No auto-memory (a `MEMORY.md` per working directory, loaded into every session), and no claude.ai connectors, the subscription account's own MCP servers. |
@@ -274,9 +274,11 @@ What those are:
 
 Files an agent may have written into `/work` are in the container's own filesystem, not the volume; recreating the container (which a rebuild does) discards them.
 
-## Learn: Riffado's knowledge tools
+<span id="learn-riffados-knowledge-tools" />
 
-Riffado's Learn reads a transcript and proposes speaker names, corrections and facts. Through the bridge it can let the CLI look things up in Riffado's knowledge base itself, over MCP, with read-only tools. A request asks for that with two fields beyond the OpenAI shape:
+## Learn: Chatterbox's knowledge tools
+
+Chatterbox's Learn reads a transcript and proposes speaker names, corrections and facts. Through the bridge it can let the CLI look things up in Chatterbox's knowledge base itself, over MCP, with read-only tools. A request asks for that with two fields beyond the OpenAI shape:
 
 - `response_format: {"type": "json_schema", "json_schema": {"schema": {...}}}`: the answer's JSON Schema. Claude gets `--json-schema` and the bridge returns its `structured_output`; Codex gets `--output-schema` (a `0600` file).
 - `riffado_mcp: {"token": "<run token>", "tools": ["find_entities", ...]}`: the run's token and the tool names. **The URL is never the request's:** it is `BRIDGE_LEARN_MCP_URL`, and without it the bridge refuses such a request (400).
@@ -289,14 +291,14 @@ Riffado's Learn reads a transcript and proposes speaker names, corrections and f
 
 The token is in the child's environment only: never in argv or a file, redacted from error text, never logged. It names one Learn run, expires, and works only while that run is running. The temp files go when the request ends. Verified with Claude Code 2.1.284 and Codex 0.155.1 (Spike 0.1, and a round trip through this bridge to a probe MCP server).
 
-The bridge must reach Riffado at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, and `LEARN_BRIDGE_URL` to this bridge's base URL as the provider names it (`http://agent-bridge:8787/v1`): Riffado sends a run's token only to a Claude Code or Codex provider whose base URL is exactly that, never to an endpoint merely named like one.
+The bridge must reach Chatterbox at that URL: on the compose network, `BRIDGE_LEARN_MCP_URL=http://app:3000/api/mcp/learn`. Set `LEARN_MCP_URL` to the same value on the app, and `LEARN_BRIDGE_URL` to this bridge's base URL as the provider names it (`http://agent-bridge:8787/v1`): Chatterbox sends a run's token only to a Claude Code or Codex provider whose base URL is exactly that, never to an endpoint merely named like one.
 
 ## Configuration
 
 | Variable | Default | Notes |
 |---|---|---|
 | `BRIDGE_TOKEN` | *(required)* | Bearer token. The bridge refuses to start without it. |
-| `BRIDGE_LEARN_MCP_URL` | — | The one URL of Riffado's knowledge tools a Learn request may use, e.g. `http://app:3000/api/mcp/learn`. Unset, requests cannot use tools. |
+| `BRIDGE_LEARN_MCP_URL` | — | The one URL of Chatterbox's knowledge tools a Learn request may use, e.g. `http://app:3000/api/mcp/learn`. Unset, requests cannot use tools. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | From `claude setup-token`. Optional if you logged in interactively. |
 | `BRIDGE_MAX_CONCURRENCY` | `1` | Each request spawns a model session drawing on the same rolling window as your interactive coding. |
 | `BRIDGE_TIMEOUT_MS` | `300000` (compose: `900000`) | Per request. The child is SIGKILLed on expiry, and when the caller goes away. Learn with tools needs several minutes on a long recording. |
@@ -329,7 +331,7 @@ One sidecar serves both CLIs; the `model` field picks the backend.
 | exactly `claude` or `codex` | that CLI, with **no `--model`** — the account's own default |
 | anything else | **400** |
 
-The 400 is deliberate. Riffado falls back to `gpt-4o-mini` when a credential has no Default Model, and silently routing that to Codex would be a confusing way to find out the field was left blank.
+The 400 is deliberate. Chatterbox falls back to `gpt-4o-mini` when a credential has no Default Model, and silently routing that to Codex would be a confusing way to find out the field was left blank.
 
 ### Pin a cheap model; the default is the expensive one
 
@@ -360,13 +362,13 @@ Anything other than a bare id passes through to the CLI unchanged, so the usable
 
 ## Things worth knowing
 
-**These are coding agents, not completion endpoints.** Claude Code carries a system prompt tuned for tool use. Riffado's summary prompt demands bare JSON, and an agent sometimes prefaces it with a sentence. The bridge compensates: `extractJson` pulls a JSON payload out of a fenced block or surrounding prose, which Riffado's own fence-stripping (anchored to the very start and end of the string) cannot do. Anything not recognisably JSON passes through untouched, so plain-text callers like title generation are unaffected.
+**These are coding agents, not completion endpoints.** Claude Code carries a system prompt tuned for tool use. Chatterbox's summary prompt demands bare JSON, and an agent sometimes prefaces it with a sentence. The bridge compensates: `extractJson` pulls a JSON payload out of a fenced block or surrounding prose, which Chatterbox's own fence-stripping (anchored to the very start and end of the string) cannot do. Anything not recognisably JSON passes through untouched, so plain-text callers like title generation are unaffected.
 
-**`temperature` and `max_tokens` are dropped.** Riffado sends them; neither CLI exposes them. Summaries come out at whatever the agent's own defaults are.
+**`temperature` and `max_tokens` are dropped.** Chatterbox sends them; neither CLI exposes them. Summaries come out at whatever the agent's own defaults are.
 
 **Rate limits are shared with your interactive coding.** A sync that pulls in a dozen recordings with auto-summarize on will draw from the same window as your terminal. `BRIDGE_MAX_CONCURRENCY=1` is the default for that reason. Consider pointing title generation at a cheaper model than summaries.
 
-**Multi-pass summarization needs `BRIDGE_MAX_CONCURRENCY` raised to match.** Riffado's multi-pass setting (Settings -> Summary) runs N summary passes *in parallel* and merges them. The bridge queues at `BRIDGE_MAX_CONCURRENCY`, so leaving it at `1` turns those passes back into a serial run: the feature still works and the result is identical, but a 3-pass summary takes about four times as long as a single one instead of about the same. Set it to at least the pass count:
+**Multi-pass summarization needs `BRIDGE_MAX_CONCURRENCY` raised to match.** Chatterbox's multi-pass setting (Settings -> Summary) runs N summary passes *in parallel* and merges them. The bridge queues at `BRIDGE_MAX_CONCURRENCY`, so leaving it at `1` turns those passes back into a serial run: the feature still works and the result is identical, but a 3-pass summary takes about four times as long as a single one instead of about the same. Set it to at least the pass count:
 
 ```yaml
       BRIDGE_MAX_CONCURRENCY: "3"
@@ -374,11 +376,11 @@ Anything other than a bare id passes through to the CLI unchanged, so the usable
 
 That is a real trade, not a free win -- N concurrent agent sessions draw on the same rolling window as your own terminal, which is exactly why the default is `1`. Turning multi-pass on for auto-summary as well (off by default) multiplies this by every recording a sync brings in.
 
-**One summary at a time, whatever the queue length.** Summaries run on Riffado's durable job worker, and the summary handler declares a concurrency of `1` (`src/lib/summary/summary-job-handler.ts`). So a sync that queues a dozen auto-summaries still sends the bridge one job's worth of passes at a time: set `BRIDGE_MAX_CONCURRENCY` to the pass count, not to the pass count times the backlog. Raising the handler's concurrency would not make the backlog finish sooner either -- two jobs sharing the same bridge limit just queue inside it, while looking from the outside like two jobs that have stalled.
+**One summary at a time, whatever the queue length.** Summaries run on Chatterbox's durable job worker, and the summary handler declares a concurrency of `1` (`src/lib/summary/summary-job-handler.ts`). So a sync that queues a dozen auto-summaries still sends the bridge one job's worth of passes at a time: set `BRIDGE_MAX_CONCURRENCY` to the pass count, not to the pass count times the backlog. Raising the handler's concurrency would not make the backlog finish sooner either -- two jobs sharing the same bridge limit just queue inside it, while looking from the outside like two jobs that have stalled.
 
-**Multi-pass merges are capped by the agent, not by Riffado.** Riffado asks for a higher `max_tokens` on the merge than on a pass, because the merged output is the union of every pass and so is longer than any one of them. The bridge drops `max_tokens` (see above), so on this provider the merge is bounded by the agent's own default instead. If merged summaries come back visibly cut off, that is the reason -- not the merge prompt.
+**Multi-pass merges are capped by the agent, not by Chatterbox.** Chatterbox asks for a higher `max_tokens` on the merge than on a pass, because the merged output is the union of every pass and so is longer than any one of them. The bridge drops `max_tokens` (see above), so on this provider the merge is bounded by the agent's own default instead. If merged summaries come back visibly cut off, that is the reason -- not the merge prompt.
 
-**Usage and cost are estimates.** Claude Code's JSON result supplies token counts and `total_cost_usd`; the bridge forwards them. Codex's JSONL `turn.completed` event supplies token counts, and the bridge applies published API rates for the listed GPT-5.6 and GPT-6 models, including cached input. These are API-equivalent values, not an allocation of your subscription fee or an authoritative bill. If a CLI omits usable data or a Codex model has no known rate, Riffado leaves the request unpriced. Recordings processed by an older bridge remain unpriced because their per-request usage was not saved.
+**Usage and cost are estimates.** Claude Code's JSON result supplies token counts and `total_cost_usd`; the bridge forwards them. Codex's JSONL `turn.completed` event supplies token counts, and the bridge applies published API rates for the listed GPT-5.6 and GPT-6 models, including cached input. These are API-equivalent values, not an allocation of your subscription fee or an authoritative bill. If a CLI omits usable data or a Codex model has no known rate, Chatterbox leaves the request unpriced. Recordings processed by an older bridge remain unpriced because their per-request usage was not saved.
 
 **Terms.** Both subscriptions are licensed for the individual subscriber's use, and neither vendor documents the headless token as a backend integration path. Summarizing your own recordings on your own box is personal use, but there's no SLA on the token flow and either vendor can change it. Keeping one API-key provider configured as a fallback is cheap insurance.
 
@@ -388,20 +390,20 @@ That is a real trade, not a free win -- N concurrent agent sessions draw on the 
 
 ## Troubleshooting
 
-Errors surface in Riffado as a failed summary. `docker compose logs -f agent-bridge` shows the bridge side; the message in the 502 is the CLI's own stderr tail.
+Errors surface in Chatterbox as a failed summary. `docker compose logs -f agent-bridge` shows the bridge side; the message in the 502 is the CLI's own stderr tail.
 
 | Symptom | Cause |
 |---|---|
 | `connect ECONNREFUSED agent-bridge:8787` | Container isn't up. The profile means `docker compose up -d` alone skips it — pass `--profile agent-bridge`. |
 | `401 missing or invalid bearer token` | `BRIDGE_TOKEN` in `.env` and the API Key on the provider have drifted. The bridge compares them exactly. |
-| `400 unknown model "gpt-4o-mini"` | The provider's Default Model is blank, so Riffado substituted its own fallback. Set it. |
+| `400 unknown model "gpt-4o-mini"` | The provider's Default Model is blank, so Chatterbox substituted its own fallback. Set it. |
 | `502 … exited with code 1: … unknown/unexpected argument` | A flag in `CLAUDE_EXTRA_ARGS` / `CODEX_EXTRA_ARGS`, or one of the built-in [hardening flags](#hardening-no-tools-no-persistence), isn't in the installed version. Check with `docker compose exec agent-bridge claude --help`; pin a version the hardening was verified against. |
 | `502 … Unknown feature flag: <name>` | The installed Codex no longer knows a feature the bridge disables. Pin a verified version, then check `codex features list` for what the feature became before changing `lib.mjs`. |
 | `smoke.sh`: `the round trips wrote session files` | The running image predates the hardening, or a flag stopped working in the installed CLI. Rebuild the image. Files written before that stay where they are; removing them is optional (see [Purging](#purging-session-data-from-before-this-fix-optional)). |
 | `502 … exited with code 1` mentioning login, credits, or a plan | Authentication or rate limit. Re-run the status commands under [Authentication](#authentication). |
 | `502 … produced output that is not the expected JSON envelope` | The Claude CLI's `--output-format json` envelope changed shape. Pin the version and check `parseClaudeEnvelope` in `lib.mjs`. |
 | `504 … exceeded BRIDGE_TIMEOUT_MS` | A long transcript against a slow model. Raise `BRIDGE_TIMEOUT_MS`. |
-| Summary contains the agent's prose, `keyPoints` empty | The reply wasn't recognisably JSON, so `extractJson` passed it through untouched and Riffado stored the whole thing. Usually a model that ignores the format instruction — try a stronger one. |
+| Summary contains the agent's prose, `keyPoints` empty | The reply wasn't recognisably JSON, so `extractJson` passed it through untouched and Chatterbox stored the whole thing. Usually a model that ignores the format instruction — try a stronger one. |
 | Everything is slow when several recordings sync at once | Working as designed: `BRIDGE_MAX_CONCURRENCY=1` queues them so they don't burn the rolling window in parallel. |
 
 ## Not verified in this repo's CI

@@ -6,10 +6,9 @@ import { encryptText } from "@/lib/encryption/fields";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 
 /**
- * Store a generated title as the recording's name, unless a person has set
- * one (`titleEditedAt`). Checked in the update itself, so a rename that
- * commits while the title was being generated wins. Returns whether the
- * title was stored; nothing that follows from a new title may run if not.
+ * Store a generated title as the recording's name. Automatic runs preserve
+ * a person's edit; an explicit regeneration may replace the edit observed
+ * before generation. A newer edit always wins. Returns whether stored.
  *
  * The owner's run generates it, and a recording shared while the title was
  * being generated is the organization account's to change: checked under
@@ -19,6 +18,8 @@ export async function storeGeneratedTitle(
     userId: string,
     recordingId: string,
     title: string,
+    expectedTitleEditedAt?: Date | null,
+    actorUserId = userId,
 ): Promise<boolean> {
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
@@ -37,22 +38,29 @@ export async function storeGeneratedTitle(
             await contentWriterRefusal(tx, {
                 recordingId,
                 ownerUserId: userId,
-                actorUserId: userId,
+                actorUserId,
                 orgUserId,
             })
         ) {
             return false;
         }
         const now = new Date();
+        const titleCondition = expectedTitleEditedAt
+            ? eq(chatterItems.titleEditedAt, expectedTitleEditedAt)
+            : isNull(chatterItems.titleEditedAt);
         const stored = await tx
             .update(chatterItems)
-            .set({ title: encryptText(title), updatedAt: now })
+            .set({
+                title: encryptText(title),
+                ...(expectedTitleEditedAt ? { titleEditedAt: null } : {}),
+                updatedAt: now,
+            })
             .where(
                 and(
                     eq(chatterItems.id, recordingId),
                     eq(chatterItems.userId, userId),
                     isNull(chatterItems.deletedAt),
-                    isNull(chatterItems.titleEditedAt),
+                    titleCondition,
                 ),
             )
             .returning({ id: chatterItems.id });

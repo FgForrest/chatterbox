@@ -28,7 +28,14 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, curatesNow, runAsCurator } = vi.hoisted(() => ({
+    createMock: vi.fn(),
+    curatesNow: vi.fn(),
+    runAsCurator: { value: false },
+}));
+vi.mock("@/lib/authz/curator", () => ({
+    userCuratesOrganizationNow: curatesNow,
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -99,7 +106,8 @@ vi.mock("@/db", () => {
 // every run is the owner's, on the private view.
 vi.mock("@/lib/sharing/run-context", () => ({
     resolveRunContext: async (actorUserId: string) => ({
-        view: "private",
+        view: runAsCurator.value ? "org" : "private",
+        actsForOrganization: runAsCurator.value,
         actorUserId,
         ownerUserId: actorUserId,
         contentUserId: actorUserId,
@@ -108,7 +116,10 @@ vi.mock("@/lib/sharing/run-context", () => ({
 }));
 // Sharing is tested against a real database (`src/tests/sharing/`).
 vi.mock("@/lib/sharing/writer", () => ({
-    contentWriterRefusal: async () => null,
+    contentWriterRefusal: async (
+        _tx: unknown,
+        input: { actsForOrganization?: boolean },
+    ) => (runAsCurator.value && !input.actsForOrganization ? "shared" : null),
     contentWriterRefusalNow: async () => null,
     sharingOrgUserId: async () => null,
     writerRefusalError: () => new Error("refused"),
@@ -172,6 +183,8 @@ describe("generateTopicsForTranscript", () => {
         selectResults.clear();
         writes.length = 0;
         writeMatches = true;
+        runAsCurator.value = false;
+        curatesNow.mockReset().mockResolvedValue(true);
     });
     afterEach(() => {
         createMock.mockReset();
@@ -208,6 +221,29 @@ describe("generateTopicsForTranscript", () => {
         expect(writes[0].set.topics).toMatchObject({
             encrypted: { topics: result.topics, templateId: "default" },
         });
+    });
+
+    it("rechecks curation after the model finishes and refuses a revoked curator", async () => {
+        stage();
+        runAsCurator.value = true;
+        createMock.mockImplementationOnce(async () => {
+            curatesNow.mockResolvedValue(false);
+            return {
+                choices: [
+                    {
+                        message: {
+                            content: JSON.stringify({
+                                topics: [{ start: "00:18", title: "A" }],
+                            }),
+                        },
+                    },
+                ],
+            };
+        });
+        await expect(run()).rejects.toThrow("refused");
+        expect(curatesNow).toHaveBeenCalledWith("user-1");
+        expect(createMock).toHaveBeenCalledOnce();
+        expect(writes).toHaveLength(0);
     });
 
     it("refuses a transcript without timings before calling the provider", async () => {

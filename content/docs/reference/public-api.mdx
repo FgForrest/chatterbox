@@ -3,7 +3,7 @@ title: Public API
 description: The /api/v1/* read surface — authentication, endpoints, errors, rate limits.
 ---
 
-The `/api/v1/*` surface is Riffado's public, stable, read-only API.
+The `/api/v1/*` surface is Chatterbox's public, stable, read-only API.
 Personal API keys authenticate it; integrations like Zapier, n8n, and
 your own scripts call into it.
 
@@ -12,7 +12,7 @@ For creating keys and configuring webhooks, see
 
 ## Base URL
 
-`https://<your-riffado-host>/api/v1`
+`https://<your-chatterbox-host>/api/v1`
 
 That's whatever you set `APP_URL` to in your `.env`.
 
@@ -248,7 +248,7 @@ curl -L -H "Authorization: Bearer op_..." \
 - For recordings on **S3 storage**, the response is a `302` redirect
   to a 5-minute pre-signed URL. Follow the redirect (`curl -L`); your
   HTTP client will fetch the audio directly from S3 with no extra
-  egress through Riffado.
+  egress through Chatterbox.
 
 `416` with a `Content-Range: bytes */<size>` header is returned only
 for unsatisfiable starts (past EOF or `start > end`). Oversized `end`

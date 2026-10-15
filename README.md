@@ -45,7 +45,7 @@ This repository builds on Riffado with features for people who work with their r
 - **Topics.** Long recordings split into titled chapters you can jump between. Lectures and monologues read in paragraphs.
 - **Play from the transcript.** Click a sentence to hear it. The transcript follows the player, and scrolling the transcript moves the player.
 - **More transcription services.** ElevenLabs Scribe and Speechmatics join the OpenAI-compatible providers, with speaker labels, and are told the names of your people and projects so they spell them right.
-- **Video uploads.** Upload a meeting video; Riffado keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
+- **Video uploads.** Upload a meeting video; Chatterbox keeps the audio. For browser meetings on Linux, the `meetrec` command-line recorder captures both sides into one file.
 
 **Summaries and tasks**
 
@@ -67,7 +67,7 @@ This repository builds on Riffado with features for people who work with their r
 **Your data, your way**
 
 - **Folders**, nested, with drag and drop. A recording can live in several.
-- **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Riffado did not write is touched.
+- **Folder exports** to a disk or to Google Drive that stay in step: files move and rename with their recordings, and nothing Chatterbox did not write is touched.
 - **Scheduled backups**, kept apart for each user and for the Organization.
 - **Automatic deletion** of old audio, transcripts, summaries or recorder originals, each on its own schedule, and erasing any one part of a recording by hand.
 
@@ -90,7 +90,7 @@ You need Docker, a Plaud account at [plaud.ai](https://plaud.ai), and (optionall
 Every release attaches `docker-compose.yml` and `env.example`. Replace `<owner>/<repository>` with this repository's GitHub path:
 
 ```bash
-mkdir riffado && cd riffado
+mkdir chatterbox && cd chatterbox
 curl -fLO https://github.com/<owner>/<repository>/releases/latest/download/docker-compose.yml
 curl -fL  https://github.com/<owner>/<repository>/releases/latest/download/env.example -o .env
 
@@ -127,7 +127,7 @@ The **[user guide](content/docs/user-guide/index.md)** in this repository covers
 - [The Almanac and Learn](content/docs/guides/almanac.mdx)
 - [The Organization](content/docs/self-hosting/organization.mdx)
 - [Single sign-on](content/docs/self-hosting/sso.mdx)
-- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Riffado in Claude](content/docs/user-guide/claude.md)
+- [External MCP server](content/docs/self-hosting/mcp.mdx) and [Claude and Claude Code](content/docs/self-hosting/claude.mdx); for users: [Chatterbox in Claude](content/docs/user-guide/claude.md)
 - [Google Drive exports](content/docs/self-hosting/google-drive.mdx)
 - [Claude Code and Codex through the agent bridge](agent-bridge/README.md)
 - [Meeting recorder (meetrec)](cmd/meetrec/README.md)

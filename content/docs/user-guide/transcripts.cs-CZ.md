@@ -34,7 +34,7 @@ Funguje jakákoli služba, která podporuje OpenAI API, a další tři jsou zabu
 
 **Jména z Almanachu.** ElevenLabs Scribe v2 a Speechmatics dostanou s každou nahrávkou až 500 jmen z vašeho [Almanachu](almanac.md): nejprve vaše, pak osoby a věci zmíněné nedávno. Jména pak napíšou správně mnohem častěji. Jména jsou odesílána u každé nahrávky, včetně osob, jež se v ní nevyskytují.
 
-**Přepisy z diktafonu.** Pokud služba vašeho diktafonu vytvořila vlastní přepis a shrnutí, Riffado je dokáže importovat (Nastavení → Přepis → **Importovat přepisy a shrnutí Plaud**). Nahrávka, která má oba, zobrazí přepínač mezi **Plaud** a **Vlastní**.
+**Přepisy z diktafonu.** Pokud služba vašeho diktafonu vytvořila vlastní přepis a shrnutí, Chatterbox je dokáže importovat (Nastavení → Přepis → **Importovat přepisy a shrnutí Plaud**). Nahrávka, která má oba, zobrazí přepínač mezi **Plaud** a **Vlastní**.
 
 <span id="reading-a-transcript" />
 

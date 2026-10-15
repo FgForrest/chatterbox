@@ -1350,19 +1350,29 @@ describeWithDatabase("the knowledge vocabulary (PostgreSQL)", () => {
         // As a finished review does: types one after another, the scope
         // and the vocabulary's version bumped once, last.
         const finish = db().transaction(async (tx) => {
-            await createOwnTypeInTx(tx, ALICE, false, {
-                kind: "entity",
-                label: "stage",
-            });
+            await createOwnTypeInTx(
+                tx,
+                { ownerUserId: ALICE, actorUserId: ALICE },
+                false,
+                {
+                    kind: "entity",
+                    label: "stage",
+                },
+            );
             await resumed;
-            await createOwnTypeInTx(tx, ALICE, false, {
-                kind: "relation",
-                label: "plays at",
-                subjectTypes: ["person"],
-                objectTypes: [venue],
-                objectKind: "entity",
-                cardinality: "many",
-            });
+            await createOwnTypeInTx(
+                tx,
+                { ownerUserId: ALICE, actorUserId: ALICE },
+                false,
+                {
+                    kind: "relation",
+                    label: "plays at",
+                    subjectTypes: ["person"],
+                    objectTypes: [venue],
+                    objectKind: "entity",
+                    cardinality: "many",
+                },
+            );
             await bumpVocabularyVersionInTx(tx);
         });
         await new Promise((resolve) => setTimeout(resolve, 100));

@@ -119,7 +119,7 @@ yourself. Rebuilding with a different key changes the ID, in which case set
 | optional host access | Granted per server origin so the extension can upload only there. |
 
 Suggested Chrome Web Store explanations for every manifest permission are in
-[STORE_SUBMISSION.md](STORE_SUBMISSION.md).
+[STORE_SUBMISSION.md](store/STORE_SUBMISSION.md).
 
 ## Legal
 

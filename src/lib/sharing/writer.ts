@@ -8,6 +8,7 @@ import {
 
 export {
     contentWriterRefusal,
+    contentWriterScope,
     type WriterRefusal,
     writerRefusal,
 } from "@/lib/sharing/writer-rule";
@@ -33,6 +34,7 @@ export async function contentWriterRefusalNow(input: {
     recordingId: string;
     ownerUserId: string;
     actorUserId: string;
+    actsForOrganization?: boolean;
 }): Promise<WriterRefusal | null> {
     return contentWriterRefusal(undefined, {
         ...input,
@@ -65,20 +67,22 @@ export function writerRefusalError(refusal: WriterRefusal): AppError {
 
 /**
  * Refuse a request to change a recording in a view, before any work: on
- * the Organization view anyone but the organization account (403), and
+ * the Organization view anyone who does not act for the Organization (the
+ * organization account, or a curator the server vouched for) (403), and
  * the owner of a shared recording on the private view (409). The write
  * checks again under the recording lock (`contentWriterRefusal`).
  */
 export function assertMayChange(
     access: Pick<RecordingViewContext, "view" | "shared" | "orgUserId">,
     actorUserId: string,
+    actsForOrganization = actorUserId === access.orgUserId,
 ): void {
     if (access.view === "org") {
         assertOrgScopeWritable();
-        if (actorUserId !== access.orgUserId) {
+        if (!actsForOrganization) {
             throw new AppError(
                 ErrorCode.FORBIDDEN,
-                "Only the organization account changes a shared recording",
+                "Only a curator of the Organization changes a shared recording",
                 403,
             );
         }

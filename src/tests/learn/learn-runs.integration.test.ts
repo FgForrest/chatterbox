@@ -151,7 +151,10 @@ vi.mock("@/lib/sharing/access", async (importOriginal) => {
 vi.mock("@/lib/auth-server", async () => {
     const { AppError, ErrorCode } =
         await vi.importActual<typeof import("@/lib/errors")>("@/lib/errors");
-    return {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
         requireApiSession: vi.fn(async (request: Request) => {
             const id = request.headers.get("x-test-user");
             if (!id) {
@@ -163,7 +166,7 @@ vi.mock("@/lib/auth-server", async () => {
             }
             return { user: { id, email: `${id}@example.test` } };
         }),
-    };
+    });
 });
 
 import { GET as getPending } from "@/app/api/learn/pending/route";

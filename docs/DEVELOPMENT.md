@@ -1,13 +1,13 @@
 # Development Guide
 
-This guide covers setting up a local development environment for Riffado.
+This guide covers setting up a local development environment for Chatterbox.
 
 ## Quick Start
 
 ```bash
 # Clone repository
-git clone https://github.com/riffado/riffado.git
-cd riffado
+git clone https://github.com/FgForrest/chatterbox.git
+cd chatterbox
 
 # Install dependencies
 pnpm install
@@ -127,7 +127,7 @@ bun test src/tests/plaud.integration.test.ts
 
 The E2E Compose file builds the application from the current worktree and keeps
 its database, storage, credentials, containers, and port separate from a normal
-Riffado installation. Its defaults are disposable local-test credentials.
+Chatterbox installation. Its defaults are disposable local-test credentials.
 
 Build the image and start the stack:
 

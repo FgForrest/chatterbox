@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
@@ -65,17 +66,19 @@ export const PATCH = apiHandler<ItemContext>(async (request, context) => {
 
 /**
  * Whoever may change the recording in the view asked for: the owner on
- * the private view; while it is shared, the organization account on the
- * Organization view (Learn's unconfirmed suggestions are theirs alone).
+ * the private view; while it is shared, a curator (or the organization
+ * account) on the Organization view, who acts for the Organization there
+ * only (Learn's unconfirmed suggestions are theirs alone).
  */
 async function authorizeLearn(request: Request, recordingId: string) {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
     const access = await requireRecordingView(
         session.user.id,
         recordingId,
         requestedRecordingView(request),
         { kinds: ALL_ITEM_KINDS },
     );
-    assertMayChange(access, session.user.id);
-    return { access, actorUserId: session.user.id };
+    const curates = access.view === "org" && (await actsForOrganization(actor));
+    assertMayChange(access, session.user.id, curates);
+    return { access, actorUserId: session.user.id, curates };
 }

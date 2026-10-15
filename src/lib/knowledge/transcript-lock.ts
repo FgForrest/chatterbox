@@ -7,7 +7,7 @@ import type { db } from "@/db";
 import { recordings, transcriptions } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { TranscriptVersion } from "@/lib/knowledge/attribution";
-import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
+import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -16,21 +16,25 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 interface Writer {
     actorUserId: string;
     orgUserId: string | null;
+    /** Whether the actor acts for the Organization; see `writerRefusal`. */
+    actsForOrganization?: boolean;
 }
 
 /**
  * Lock a transcript for a change to the knowledge on it (corrections,
  * evidence), after its recording (the lock sharing and withdrawal take),
  * and check the writer rule under it. Returns what the change needs to
- * know of the transcript. 404 alike for a missing transcript and another
- * account's.
+ * know of the transcript, and the knowledge scope it writes into (the
+ * Organization's on a shared recording, the actor's own otherwise). 404
+ * alike for a missing transcript and another account's.
  */
 export async function lockTranscriptForChange(
     tx: Tx,
     { userId, transcriptionId }: Omit<TranscriptVersion, "revision">,
-    { actorUserId, orgUserId }: Writer,
+    { actorUserId, orgUserId, actsForOrganization }: Writer,
 ): Promise<{
     recordingId: string;
+    scopeUserId: string;
     revision: number;
     turns: TranscriptTurn[] | null;
     language: string | null;
@@ -70,15 +74,17 @@ export async function lockTranscriptForChange(
     if (!recording || !transcript) {
         throw new AppError(ErrorCode.NOT_FOUND, "Transcript not found", 404);
     }
-    const refusal = await contentWriterRefusal(tx, {
+    const { refusal, scopeUserId } = await contentWriterScope(tx, {
         recordingId: recording.id,
         ownerUserId: userId,
         actorUserId,
         orgUserId,
+        actsForOrganization,
     });
     if (refusal) throw writerRefusalError(refusal);
     return {
         recordingId: recording.id,
+        scopeUserId,
         revision: transcript.revision,
         turns: readTranscriptTurns(transcript),
         language: transcript.language,

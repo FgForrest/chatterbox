@@ -5,18 +5,18 @@ description: Signing in, the first-run wizard, and finding your way around.
 
 ## Signing in
 
-Open your Riffado address in a browser and sign in with your email and password. On a new self-hosted instance, the first account you register becomes the administrator.
+Open your Chatterbox address in a browser and sign in with your email and password. On a new self-hosted instance, the first account you register becomes the administrator.
 
 If your organization uses single sign-on, the sign-in page shows one button instead, such as **Sign in with Keycloak**. Your account is created the first time you sign in. Registration may be closed on your instance; in that case ask your administrator for access.
 
 ## The first-run wizard
 
-The first time you open Riffado, a short wizard helps you set up the essentials. You can skip any step and come back to it later in Settings.
+The first time you open Chatterbox, a short wizard helps you set up the essentials. You can skip any step and come back to it later in Settings.
 
 | Step | What it does |
 | --- | --- |
-| ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Riffado does: sync recordings, transcribe them, and summarize them with AI. |
-| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the Riffado Connector browser extension, with an email code, or by pasting a token. Riffado then fetches your recordings on a schedule. |
+| ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Chatterbox does: sync recordings, transcribe them, and summarize them with AI. |
+| ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the Riffado Connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Set up an AI provider.** Opens Settings, where you add the service that transcribes and summarizes. See [AI providers](settings.md#ai-providers). |
 | ![Done](images/onboarding-done.png) | **You're all set.** Click **Get Started**. |
 
@@ -29,7 +29,7 @@ To see the wizard again, open **Settings → Export/Backup** and click **Re-run 
 The bar at the top has three sections:
 
 - **Recordings**: your library. The list on the left, the selected recording on the right.
-- **Almanac**: the people and things Riffado knows about. A badge counts reviews waiting for you. See [The Almanac](almanac.md).
+- **Almanac**: the people and things Chatterbox knows about. A badge counts reviews waiting for you. See [The Almanac](almanac.md).
 - **Tasks**: the action items found in your recordings. A badge counts new tasks assigned to you. See [Summaries and tasks](summaries-and-tasks.md#the-tasks-page).
 
 On the right of the bar:
@@ -49,7 +49,7 @@ Click **Help** in the top bar, or press `h`, to open this guide beside your work
 - **Open full guide** opens the same page in a new tab, with the guide's navigation and search.
 - The small **?** next to a feature, such as the Transcription and Summary cards, the Learn review and folder export settings, opens the drawer right at that feature.
 
-The whole guide is also at `/docs` on your Riffado address, under **User guide**.
+The whole guide is also at `/docs` on your Chatterbox address, under **User guide**.
 
 ![The user guide at /docs](images/docs-user-guide.png)
 
@@ -75,6 +75,6 @@ The palette searches titles and transcripts as you type. Press `Enter` to open a
 
 ## Language
 
-Riffado speaks English and Czech. It follows your browser's language until you choose one in **Settings → Display → Language**. Emails Riffado sends you follow the same choice.
+Chatterbox speaks English and Czech. It follows your browser's language until you choose one in **Settings → Display → Language**. Emails Chatterbox sends you follow the same choice.
 
 Next: [Recordings](recordings.md)

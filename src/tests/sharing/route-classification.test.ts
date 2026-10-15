@@ -73,6 +73,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
         POST: "view",
         DELETE: "view",
     },
+    "recordings/[id]/title/route.ts": { POST: "view" },
     // Topics are written onto the owner's transcript row: by the owner on
     // the private view, by the organization account on the Organization
     // view while shared.

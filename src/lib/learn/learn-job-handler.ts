@@ -31,6 +31,7 @@ import {
     transcriptSpeakers,
     users,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { readItemContent } from "@/lib/content/read-item-content";
 import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
@@ -170,25 +171,35 @@ function chatFor(run: AnyRun, signal: AbortSignal) {
 
 /**
  * Whether the actor may still change the recording in the run's view: the
- * writer rule, and the view the run was started in. `orgUserId` is
- * resolved by the caller, outside any transaction (`sharingOrgUserId`).
+ * writer rule, and the view the run was started in. On the Organization
+ * view the actor must still act for the Organization: the organization
+ * account, or a curator whose verified access still holds `org.curate`
+ * (`curates`, decided by the caller before any transaction; a revoked
+ * curator's queued run writes nothing). `orgUserId` is resolved by the
+ * caller, outside any transaction (`sharingOrgUserId`).
  */
 export async function mayStillRun(
     run: Pick<RunRow, "actorUserId" | "itemId" | "userId" | "view">,
     orgUserId: string | null,
     executor?: Parameters<typeof contentWriterRefusal>[0],
+    curates?: boolean,
 ): Promise<boolean> {
     if (!run.actorUserId) return false;
+    const actsForOrganization =
+        run.view === "org"
+            ? (curates ?? (await userCuratesOrganizationNow(run.actorUserId)))
+            : false;
     const refusal = await contentWriterRefusal(executor, {
         recordingId: run.itemId,
         ownerUserId: run.userId,
         actorUserId: run.actorUserId,
         orgUserId,
+        actsForOrganization,
     });
     if (refusal) return false;
     return run.view === "private"
         ? run.actorUserId === run.userId
-        : orgUserId !== null && run.actorUserId === orgUserId;
+        : orgUserId !== null && actsForOrganization;
 }
 
 type Executor = Pick<typeof db, "select">;
@@ -825,6 +836,12 @@ async function runLearnJob({
                     ]),
                 ),
             });
+            // Decided before the transaction: it may ask the identity
+            // provider, which no transaction waits on.
+            const curatesNow =
+                run.view === "org" && run.actorUserId
+                    ? await userCuratesOrganizationNow(run.actorUserId)
+                    : false;
             const outcome = await db.transaction(async (tx) => {
                 await tx
                     .select({ id: recordings.id })
@@ -870,7 +887,7 @@ async function runLearnJob({
                     await finish("superseded");
                     return { status: "superseded" as const, items: 0 };
                 }
-                if (!(await mayStillRun(run, orgUserId, tx))) {
+                if (!(await mayStillRun(run, orgUserId, tx, curatesNow))) {
                     await finish("cancelled");
                     return { status: "cancelled" as const, items: 0 };
                 }
@@ -1201,6 +1218,12 @@ async function runMailLearnJob(
                     ]),
                 ),
             });
+            // Decided before the transaction: it may ask the identity
+            // provider, which no transaction waits on.
+            const curatesNow =
+                run.view === "org" && run.actorUserId
+                    ? await userCuratesOrganizationNow(run.actorUserId)
+                    : false;
             const outcome = await db.transaction(async (tx) => {
                 await tx
                     .select({ id: chatterItems.id })
@@ -1247,7 +1270,7 @@ async function runMailLearnJob(
                     await finish("superseded");
                     return { status: "superseded" as const, items: 0 };
                 }
-                if (!(await mayStillRun(run, orgUserId, tx))) {
+                if (!(await mayStillRun(run, orgUserId, tx, curatesNow))) {
                     await finish("cancelled");
                     return { status: "cancelled" as const, items: 0 };
                 }

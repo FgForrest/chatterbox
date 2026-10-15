@@ -3,7 +3,7 @@ title: Upgrading
 description: Pull a new image, restart the stack, and pick the right tag for your risk tolerance.
 ---
 
-Riffado ships as a single Docker image on GitHub Container Registry.
+Chatterbox ships as a single Docker image on GitHub Container Registry.
 Upgrades are an image pull and a restart; migrations run automatically
 on container start.
 
@@ -35,7 +35,7 @@ pulls.
 `main` is a **rolling integration branch** and may be broken at any
 commit. Stable deploys come from tagged releases. Do **not** deploy by
 cloning the repo and building from `main`; use the tagged images
-above. See [BRANCHING.md](https://github.com/riffado/riffado/blob/main/BRANCHING.md)
+above. See [BRANCHING.md](https://github.com/FgForrest/chatterbox/blob/main/BRANCHING.md)
 for the branching model.
 
 ## Update badge
@@ -62,7 +62,7 @@ RIFFADO_VERSION=0.4.1
 docker compose pull && docker compose up -d
 ```
 
-This works because Riffado's database migrations are
+This works because Chatterbox's database migrations are
 **additive by default** — dropping columns is treated as a deliberate
 breaking change with a CHANGELOG migration note. If you're rolling
 back across a release that explicitly dropped state (rare; called out

@@ -57,6 +57,7 @@ const { dbProxy, dbRef, mockEnv, baseEnv } = vi.hoisted(() => {
         OIDC_CLIENT_SECRET: "secret",
         MCP_AUDIENCE: "riffado-mcp",
         MCP_ALLOWED_CLIENTS: [] as string[],
+        MCP_SERVICE_CLIENTS: [] as string[],
     };
     return {
         dbProxy: proxy,
@@ -115,7 +116,10 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
 
     beforeEach(async () => {
         for (const key of Object.keys(mockEnv)) delete mockEnv[key];
-        Object.assign(mockEnv, baseEnv, { MCP_ALLOWED_CLIENTS: [] });
+        Object.assign(mockEnv, baseEnv, {
+            MCP_ALLOWED_CLIENTS: [],
+            MCP_SERVICE_CLIENTS: [],
+        });
         await db().delete(users);
         await db()
             .insert(users)
@@ -236,6 +240,82 @@ describeWithDatabase("resolveCaller (PostgreSQL)", () => {
         await expect(
             resolveCaller(claims("alice-sub", ["knowledge:read"])),
         ).resolves.toEqual({ ok: false, reason: "suspended" });
+    });
+
+    it("takes only a marked token of a listed service client for a service once services are listed", async () => {
+        mockEnv.MCP_SERVICE_CLIENTS = ["intranet-bot"];
+        await expect(
+            resolveCaller(
+                claims("sa-uuid", ["tasks:read"], {
+                    client_id: "intranet-bot",
+                    azp: "intranet-bot",
+                }),
+            ),
+        ).resolves.toEqual({ ok: false, reason: "no-account" });
+        await expect(
+            resolveCaller(
+                claims("sa-uuid", ["tasks:read"], {
+                    client_id: "other-bot",
+                    azp: "other-bot",
+                    chatterbox_subject_kind: "service",
+                }),
+            ),
+        ).resolves.toEqual({ ok: false, reason: "no-account" });
+        await expect(
+            resolveCaller(
+                claims("sa-uuid", ["tasks:read"], {
+                    client_id: "intranet-bot",
+                    azp: "intranet-bot",
+                    chatterbox_subject_kind: "service",
+                }),
+            ),
+        ).resolves.toMatchObject({ ok: true, caller: { kind: "service" } });
+    });
+
+    it("never takes an unlinked person for a service under identity-provider authorization", async () => {
+        mockEnv.AUTHZ_MODE = "idp";
+        try {
+            await expect(
+                resolveCaller(
+                    claims("someone", ["tasks:read"], {
+                        scope: "openid tasks:read",
+                        client_id: "intranet-bot",
+                        azp: "intranet-bot",
+                    }),
+                ),
+            ).resolves.toEqual({ ok: false, reason: "no-account" });
+        } finally {
+            mockEnv.AUTHZ_MODE = undefined;
+        }
+    });
+
+    it("links a person only through the issuer that vouched for them", async () => {
+        await db()
+            .update(accounts)
+            .set({ issuer: "https://id.example.com/realms/acme" })
+            .where(eq(accounts.accountId, "alice-sub"));
+        await expect(
+            resolveCaller(
+                claims("alice-sub", ["knowledge:read"], {
+                    iss: "https://id.example.com/realms/acme",
+                }),
+            ),
+        ).resolves.toMatchObject({ ok: true, caller: { userId: ALICE } });
+        await expect(
+            resolveCaller(
+                claims("alice-sub", ["knowledge:read"], {
+                    iss: "https://other.example.com/realms/acme",
+                }),
+            ),
+        ).resolves.toEqual({ ok: false, reason: "no-account" });
+    });
+
+    it("never admits the web sign-in client's tokens", async () => {
+        await expect(
+            resolveCaller(
+                claims("alice-sub", ["knowledge:read"], { azp: "riffado" }),
+            ),
+        ).resolves.toEqual({ ok: false, reason: "client-not-allowed" });
     });
 
     it("never resolves to the organization account", async () => {

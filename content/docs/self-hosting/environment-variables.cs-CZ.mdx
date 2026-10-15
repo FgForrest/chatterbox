@@ -1,9 +1,9 @@
 ---
 title: Proměnné prostředí
-description: Všechny proměnné prostředí, které Riffado načítá, jejich funkce a výchozí hodnoty.
+description: Všechny proměnné prostředí, které Chatterbox načítá, jejich funkce a výchozí hodnoty.
 ---
 
-Riffado ověřuje každou proměnnou prostředí pomocí schématu Zod v
+Chatterbox ověřuje každou proměnnou prostředí pomocí schématu Zod v
 `src/lib/env.ts` při startu procesu. Nesprávně nastavené prostředí způsobí
 pád serveru s přesnou chybovou zprávou namísto spuštění v poškozeném
 stavu — to je záměrné. Tato stránka slouží jako zdroj pravdy
@@ -21,7 +21,7 @@ nezávisel na produkčních tajemstvích.
 | -------------------------- | -------- | ------------------------------------------------------------------------ |
 | `DATABASE_URL`              | string   | Připojovací řetězec k Postgresu                                         |
 | `BETTER_AUTH_SECRET`        | string   | Alespoň 32 znaků; podepisuje cookies s relací                          |
-| `APP_URL`                   | URL      | Veřejný původ (např. `https://riffado.example.com`)                    |
+| `APP_URL`                   | URL      | Veřejný původ (např. `https://chatterbox.example.com`)                    |
 | `ENCRYPTION_KEY`            | hex(64)  | Přesně 64 hex znaků (32 bajtů); viz [Šifrování uložených dat](../reference/encryption-at-rest)|
 
 <span id="optional-knobs" />
@@ -117,13 +117,34 @@ a `APP_URL`; tokeny jsou ze stejné oblasti. Viz
 
 | Proměnná                   | Výchozí | Efekt                                                                                                  |
 | -------------------------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `riffado-mcp`). Pokud není, `/api/mcp` vrací 404. |
+| `MCP_AUDIENCE`             | —       | Client id Keycloak resource klienta s access roles (např. `chatterbox-mcp`). Pokud není, `/api/mcp` vrací 404. |
 | `MCP_ALLOWED_CLIENTS`      | —       | Čárkou oddělená client id (`azp`), která smějí volat. Povinné při nastavení `MCP_PUBLIC_CLIENTS`; jinak bez něj může volat každý klient realmu s požadovanou rolí (při startu se zapíše varování). |
 | `MCP_PUBLIC_INGRESS_HEADER`| —       | Hlavička, kterou veřejná reverzní proxy nastaví na přeposlané požadavky (např. `X-MCP-Ingress`); vnitřní cesta ji odebere. Požadavek s ní se obslouží jen pro `MCP_PUBLIC_CLIENTS`. |
 | `MCP_PUBLIC_CLIENTS`       | —       | Čárkou oddělená client id obsluhovaná veřejným vstupem (např. `claude`). Vyžaduje `MCP_PUBLIC_INGRESS_HEADER`. |
 | `MCP_CONNECTOR_KEYS`       | —       | Čárkou oddělené dvojice `client=klíč` (klíče od 32 znaků): token uvedeného klienta se obslouží jen s `X-API-Key: <klíč>`, request headerem konektoru Claude. Tajné. |
 | `MCP_RESOURCE_AUDIENCE`    | `false` | Při `true` přijímá i tokeny, jejichž `aud` je `<APP_URL>/api/mcp` (resource indicators v Keycloaku). |
 | `MCP_AUDIT_RETENTION_DAYS` | `90`    | Počet dní po které se záznam v tabulce `mcp_access_log` uchovává (1 až 3650).                              |
+| `MCP_SERVICE_CLIENTS`      | —       | Čárkou oddělení klienti určení jen pro služby, jejichž označené tokeny jednají v datovém kontextu Organizace. Je-li nastaveno `MCP_ALLOWED_CLIENTS`, musí v něm být každý z nich. Při nastavení (nebo při `AUTHZ_MODE=idp`) je token službou, jen když je jeho klient uveden a realm ho označil; bez nastavení v režimu `local` se token s `client_id` stále považuje za službu (zastaralé). |
+
+<span id="authorization-from-the-identity-provider" />
+
+## Oprávnění od poskytovatele identity
+
+Pouze vlastní hosting s jednotným přihlášením. Vypnuto, pokud není `AUTHZ_MODE=idp`. Viz
+[Jednotné přihlášení](./sso#authorization-from-the-identity-provider).
+
+| Proměnná                          | Výchozí    | Efekt |
+| --------------------------------- | ---------- | ----- |
+| `AUTHZ_MODE`                      | `local`    | `local`: aplikaci smí používat každý, kdo se přihlásí, a Organizaci spravuje účet organizace. `idp`: poskytovatel identity uděluje `use`, `org.curate` a `access.manage`. |
+| `IDENTITY_PROVIDER`               | —          | Povinné při `AUTHZ_MODE=idp`. Zatím jen `keycloak`; jakákoli jiná hodnota zastaví server. |
+| `KEYCLOAK_ROLES_CLIENT`           | `OIDC_CLIENT_ID` | Klient v Keycloaku, jehož klientské role nesou oprávnění. |
+| `KEYCLOAK_GROUP_USE_ID`           | —          | Id skupiny, která uděluje `use`. Všechna tři id skupin se nastavují společně a každé musí být jiné. S nimi administrátoři spravují přístup v **Nastavení → Přístupy**. |
+| `KEYCLOAK_GROUP_CURATE_ID`        | —          | Id skupiny, která uděluje `org.curate`. |
+| `KEYCLOAK_GROUP_ACCESS_MANAGE_ID` | —          | Id skupiny, která uděluje `access.manage`. |
+| `KEYCLOAK_VERIFIER_CLIENT_ID`     | —          | Servisní klient pouze pro čtení (`realm-management/view-users`), který znovu ověřuje přístup držitelů API klíčů a MCP. Nastavuje se spolu se svým tajemstvím; nesmí to být webový klient ani MCP klient. |
+| `KEYCLOAK_VERIFIER_CLIENT_SECRET` | —          | Jeho tajemství. |
+| `AUTHZ_VERIFICATION_MAX_AGE`      | `1800`     | Počet sekund, po které se ověřený přístup používá, než se poskytovatel zeptá znovu (nejvýše 3600). |
+| `AUTHZ_ADMIN_MAX_AUTH_AGE`        | `28800`    | Počet sekund od posledního přihlášení administrátora u poskytovatele, během nichž smí měnit přístup. |
 
 <span id="learn-knowledge-from-recordings" />
 
@@ -136,7 +157,7 @@ Pouze vlastní hosting; ignorováno při `IS_HOSTED=true`. Vše volitelné.
 | `EMBEDDING_BASE_URL` | —        | OpenAI-kompatibilní endpoint `embeddings`. Pokud není, Learn páruje pouze podle slov, a informuje o tom. |
 | `EMBEDDING_MODEL`    | `bge-m3` | Embedding model, který bude endpointu požadován.                                                            |
 | `EMBEDDING_API_KEY`  | —        | Posílá se jako bearer token, pokud ho endpoint vyžaduje.                                                         |
-| `LEARN_MCP_URL`      | —        | Jediná URL read-only znalostních nástrojů Riffada, kterou Learn bridge může volat zpět.                      |
+| `LEARN_MCP_URL`      | —        | Jediná URL read-only znalostních nástrojů aplikace Chatterbox, kterou Learn bridge může volat zpět.                      |
 | `LEARN_BRIDGE_URL`   | —        | Základní URL agent bridge tak, jak jej zná poskytovatel (např. `http://agent-bridge:8787/v1`). Pouze poskytovatel Claude Code či Codex přesně na této adrese povolí modelu Learn přímé vyhledání (s `LEARN_MCP_URL`); jinak nebo při pouze podobném názvu platí záloha. |
 | `KNOWLEDGE_MEMORY_MB`| `256`    | Kolik dešifrovaných znalostí drží v paměti jeden proces, než vytlačí nejméně používanou položku.         |
 

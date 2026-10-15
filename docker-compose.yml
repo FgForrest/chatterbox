@@ -67,6 +67,20 @@ services:
       MCP_CONNECTOR_KEYS: ${MCP_CONNECTOR_KEYS:-}
       MCP_RESOURCE_AUDIENCE: ${MCP_RESOURCE_AUDIENCE:-}
       MCP_AUDIT_RETENTION_DAYS: ${MCP_AUDIT_RETENTION_DAYS:-}
+      MCP_SERVICE_CLIENTS: ${MCP_SERVICE_CLIENTS:-}
+      # Authorization from the identity provider (optional; see
+      # docs/self-hosting/sso). Off unless AUTHZ_MODE=idp; requires single
+      # sign-on above.
+      AUTHZ_MODE: ${AUTHZ_MODE:-}
+      IDENTITY_PROVIDER: ${IDENTITY_PROVIDER:-}
+      KEYCLOAK_ROLES_CLIENT: ${KEYCLOAK_ROLES_CLIENT:-}
+      KEYCLOAK_GROUP_USE_ID: ${KEYCLOAK_GROUP_USE_ID:-}
+      KEYCLOAK_GROUP_CURATE_ID: ${KEYCLOAK_GROUP_CURATE_ID:-}
+      KEYCLOAK_GROUP_ACCESS_MANAGE_ID: ${KEYCLOAK_GROUP_ACCESS_MANAGE_ID:-}
+      KEYCLOAK_VERIFIER_CLIENT_ID: ${KEYCLOAK_VERIFIER_CLIENT_ID:-}
+      KEYCLOAK_VERIFIER_CLIENT_SECRET: ${KEYCLOAK_VERIFIER_CLIENT_SECRET:-}
+      AUTHZ_VERIFICATION_MAX_AGE: ${AUTHZ_VERIFICATION_MAX_AGE:-}
+      AUTHZ_ADMIN_MAX_AUTH_AGE: ${AUTHZ_ADMIN_MAX_AUTH_AGE:-}
       # Inbound mail (optional; see mail-receiver/README.md). Off unless
       # MAIL_DOMAIN is set; requires single sign-on above, both secrets,
       # and the mail-receiver service (profile `mail`).

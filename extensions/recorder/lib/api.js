@@ -7,11 +7,16 @@
 async function readError(response) {
     try {
         const body = await response.json();
-        if (body && typeof body.error === "string") return body.error;
+        if (body && typeof body.error === "string") {
+            return {
+                message: body.error,
+                code: typeof body.code === "string" ? body.code : null,
+            };
+        }
     } catch {
         // fall through
     }
-    return `Request failed (${response.status})`;
+    return { message: `Request failed (${response.status})`, code: null };
 }
 
 /**
@@ -27,9 +32,10 @@ async function request(auth, path, init = {}) {
         headers,
     });
     if (!response.ok) {
-        const message = await readError(response);
+        const { message, code } = await readError(response);
         const error = new Error(message);
         error.status = response.status;
+        error.code = code;
         const retryAfter = response.headers.get("Retry-After");
         if (retryAfter) {
             const seconds = Number(retryAfter);

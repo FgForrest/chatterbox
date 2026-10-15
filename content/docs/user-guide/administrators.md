@@ -3,12 +3,13 @@ title: For administrators
 description: What to switch on for each feature on a self-hosted instance.
 ---
 
-Most of Riffado works as soon as it runs. A few features need the instance set up for them first. They are switched on with variables in `.env` (see `.env.example`) and, for two of them, extra services in `docker-compose.yml`. Restart the stack after changing either.
+Most of Chatterbox works as soon as it runs. A few features need the instance set up for them first. They are switched on with variables in `.env` (see `.env.example`) and, for two of them, extra services in `docker-compose.yml`. Restart the stack after changing either.
 
 | Feature | What to set | More |
 | --- | --- | --- |
 | [The Organization](organization.md) | `ORG_ACCOUNT_EMAIL`, `ORG_ACCOUNT_PASSWORD` (12+ characters), optionally `ORG_ACCOUNT_NAME` | [Organization](../self-hosting/organization.mdx) |
 | Single sign-on | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, optionally `OIDC_PROVIDER_NAME`, `OIDC_SCOPES`, `OIDC_SESSION_MAX_AGE` | [Single sign-on](../self-hosting/sso.mdx) |
+| [Access from the identity provider](#access-from-the-identity-provider) | `AUTHZ_MODE=idp`, `IDENTITY_PROVIDER=keycloak`, the three `KEYCLOAK_GROUP_*_ID`, `KEYCLOAK_VERIFIER_CLIENT_*` | [Single sign-on](../self-hosting/sso.mdx#authorization-from-the-identity-provider) |
 | Closed registration | `DISABLE_REGISTRATION=true` | |
 | [Folder exports to disk](exports-backups-retention.md#to-a-disk) | `FILESYSTEM_EXPORT_HOST_PATH` (Docker) or `FILESYSTEM_EXPORT_ROOT` | |
 | [Google Drive exports](exports-backups-retention.md#to-google-drive) | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_PICKER_API_KEY`, `GOOGLE_CLOUD_PROJECT_NUMBER`, optionally `GOOGLE_WORKSPACE_DOMAINS` | [Google Drive](../self-hosting/google-drive.mdx) |
@@ -16,7 +17,7 @@ Most of Riffado works as soon as it runs. A few features need the instance set u
 | Larger video uploads | `VIDEO_UPLOAD_MAX_BYTES` (default 4 GiB) | |
 | Claude Code and Codex providers | the `agent-bridge` profile and `BRIDGE_TOKEN` | [below](#claude-code-and-codex-subscriptions) |
 | MCP server for AI clients and services | `MCP_AUDIENCE` with single sign-on, optionally `MCP_ALLOWED_CLIENTS` | [External MCP server](../self-hosting/mcp.mdx) |
-| [Riffado in Claude](claude.md) and Claude Code | Keycloak clients, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS`, `MCP_CONNECTOR_KEYS`, a public entrance for `/api/mcp` | [below](#claude-and-claude-code) |
+| [Chatterbox in Claude](claude.md) and Claude Code | Keycloak clients, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS`, `MCP_CONNECTOR_KEYS`, a public entrance for `/api/mcp` | [below](#claude-and-claude-code) |
 | [Learn](learn.md) search by meaning | the `learn` profile and `EMBEDDING_BASE_URL` | [below](#learn) |
 | Limit on automatic summaries, topics and Learn | `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` | |
 
@@ -32,6 +33,39 @@ With the three `OIDC_` variables set, the sign-in page offers one **Sign in with
 
 With `DISABLE_REGISTRATION=true` as well, only people who already have an account can sign in. To let someone new in, unset it, restart, let them sign in once, and set it again.
 
+## Access from the identity provider
+
+With `AUTHZ_MODE=idp` your identity provider decides three things about
+every person:
+
+- **Access to Chatterbox** (`use`): without it nobody signs in, and their
+  API keys, meeting recorder and AI clients stop working.
+- **Curates the Organization** (`org.curate`): changes shared recordings
+  on the Organization view (names of speakers, Learn, corrections,
+  titles, summaries, topics, transcripts) under their own name.
+- **Manages access** (`access.manage`): sees **Settings → Access** and
+  switches the three rights for others there.
+
+The rights are independent: an administrator is not a curator unless
+given both, and neither works without access. Chatterbox keeps no list
+of its own: what you switch in **Settings → Access** is written into the
+identity provider's groups, with the administrator's own sign-in, and
+read back from there. Nobody can take their own access or
+administration away.
+
+Taking access away signs the person out at once, here and at the
+provider, and blocks their API keys and meeting recorder until access is
+given back; recordings waiting in their browser are kept. If the
+provider cannot sign them out, **Settings → Access** names the person at
+the top until an administrator ends their sessions with **End
+sessions**. A person disabled or deleted at the provider loses access within
+`AUTHZ_VERIFICATION_MAX_AGE` (30 minutes by default) after Chatterbox
+learns of it; how quickly your provider learns of it is up to your IT.
+
+[Single sign-on](../self-hosting/sso.mdx#authorization-from-the-identity-provider)
+explains the setup, including the command that prepares the Keycloak
+realm and the first administrator.
+
 ## Claude Code and Codex subscriptions
 
 The agent bridge lets summaries, topics, titles and Learn run on a Claude or ChatGPT subscription instead of an API key:
@@ -41,18 +75,18 @@ echo "BRIDGE_TOKEN=$(openssl rand -hex 32)" >> .env
 docker compose --profile agent-bridge up -d --build agent-bridge
 ```
 
-Sign the bridge in to Claude or Codex once (see `agent-bridge/README.md` in the repository), then in Riffado add a **Claude Code** or **Codex** provider with the bridge token as its API key. The bridge has no prebuilt image and publishes no port. It runs one request at a time by default; raise `BRIDGE_MAX_CONCURRENCY` to the number of passes if you use multi-pass summaries. Keep an API-key provider as a fallback.
+Sign the bridge in to Claude or Codex once (see `agent-bridge/README.md` in the repository), then in Chatterbox add a **Claude Code** or **Codex** provider with the bridge token as its API key. The bridge has no prebuilt image and publishes no port. It runs one request at a time by default; raise `BRIDGE_MAX_CONCURRENCY` to the number of passes if you use multi-pass summaries. Keep an API-key provider as a fallback.
 
 ## Claude and Claude Code
 
-With the [external MCP server](../self-hosting/mcp.mdx) on, people can ask Claude (claude.ai, the desktop and mobile apps, Cowork) and Claude Code about their recordings, signed in through your Keycloak realm and limited by their roles there. Claude reaches Riffado from Anthropic's cloud, so this needs:
+With the [external MCP server](../self-hosting/mcp.mdx) on, people can ask Claude (claude.ai, the desktop and mobile apps, Cowork) and Claude Code about their recordings, signed in through your Keycloak realm and limited by their roles there. Claude reaches Chatterbox from Anthropic's cloud, so this needs:
 
 1. In Keycloak, a confidential client `claude` for the organization's connector, a public client `claude-code`, and one confidential client for each person who connects from a personal Claude plan.
 2. A public DNS name and a reverse proxy that lets Anthropic's addresses (`160.79.104.0/21`) reach `/api/mcp` and its metadata, and nothing else, and marks those requests with a header.
 3. In `.env`: `MCP_ALLOWED_CLIENTS`, `MCP_PUBLIC_INGRESS_HEADER`, `MCP_PUBLIC_CLIENTS` and, for the connector's `X-API-Key`, `MCP_CONNECTOR_KEYS`.
 4. In Claude, an Owner adds the connector once with the `claude` client's ID and secret; members then connect it.
 
-[Claude and Claude Code](../self-hosting/claude.mdx) has every step, the checks and what to do when a connection is refused. Send people to [Riffado in Claude](claude.md).
+[Claude and Claude Code](../self-hosting/claude.mdx) has every step, the checks and what to do when a connection is refused. Send people to [Chatterbox in Claude](claude.md).
 
 ## Learn
 
@@ -63,7 +97,7 @@ Learn needs no setup beyond a provider that writes summaries. Two optional addit
 
 ## Meeting recorder (meetrec)
 
-`meetrec` is a small Linux command-line recorder for meetings held in the browser. It records your microphone and the other participants into one Ogg/Opus file, with level meters while it runs, and stops when you press `Ctrl`+`C`. Upload the file to Riffado afterwards. It needs PipeWire, `pactl`, FFmpeg with Opus, and Go to build:
+`meetrec` is a small Linux command-line recorder for meetings held in the browser. It records your microphone and the other participants into one Ogg/Opus file, with level meters while it runs, and stops when you press `Ctrl`+`C`. Upload the file to Chatterbox afterwards. It needs PipeWire, `pactl`, FFmpeg with Opus, and Go to build:
 
 ```bash
 go build -o meetrec ./cmd/meetrec && ./meetrec

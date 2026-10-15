@@ -3,7 +3,7 @@ title: Claude and Claude Code
 description: Let people ask Claude (claude.ai, Desktop, Cowork) and Claude Code about their recordings, signed in through your Keycloak realm and limited by their roles.
 ---
 
-The [external MCP server](./mcp) lets AI clients read what Riffado knows.
+The [external MCP server](./mcp) lets AI clients read what Chatterbox knows.
 This page connects Anthropic's two Claude products to it:
 
 - **Claude**: claude.ai, Claude Desktop, the mobile apps and Cowork. They
@@ -13,9 +13,9 @@ This page connects Anthropic's two Claude products to it:
   over your internal network.
 
 Nobody gets in without signing in on your realm's login page, and nobody
-sees more than their Keycloak roles and Riffado's own rules allow. For
+sees more than their Keycloak roles and Chatterbox's own rules allow. For
 what people do once it is connected, send them to
-[Riffado in Claude](../user-guide/claude.md).
+[Chatterbox in Claude](../user-guide/claude.md).
 
 ## How it works
 
@@ -28,20 +28,20 @@ what people do once it is connected, send them to
    realm's token endpoint with the `claude` client's secret. It gets an
    access token (15 minutes) and an offline refresh token (valid while
    it is used at least once in 30 days).
-4. Every call to `/api/mcp` carries the access token. Riffado checks it
+4. Every call to `/api/mcp` carries the access token. Chatterbox checks it
    against the realm's signing keys, finds the person (`sub`) and their
    roles, and lists only the tools those roles open.
 5. Claude refreshes the token in the background. Each refresh reads the
    person's roles in Keycloak again.
 
-Riffado never sees a password. Keycloak never sees what Claude asks.
+Chatterbox never sees a password. Keycloak never sees what Claude asks.
 
 ## Before you start
 
 - The [external MCP server](./mcp) works on your internal network:
-  `MCP_AUDIENCE` set, the `riffado-mcp` resource client with its six
+  `MCP_AUDIENCE` set, the `chatterbox-mcp` resource client with its six
   roles in place, and people holding the roles they should have.
-- Keycloak 26.6 or later is recommended; Riffado's tests run against
+- Keycloak 26.6 or later is recommended; Chatterbox's tests run against
   26.6.4. The realm's discovery document and token endpoint must be
   reachable from Anthropic's cloud, and its login page from the browsers
   of the people who connect.
@@ -50,7 +50,7 @@ Riffado never sees a password. Keycloak never sees what Claude asks.
 - For the whole organization: a Claude Team or Enterprise plan, whose
   Owner adds the connector once. People with a personal plan (Free, Pro,
   Max) add it themselves, each with a client of their own (Step 1).
-- Everyone who connects has signed in to Riffado once. Accounts are
+- Everyone who connects has signed in to Chatterbox once. Accounts are
   never created from a token.
 
 ## Step 1: Keycloak clients
@@ -71,7 +71,7 @@ In the realm's admin console, **Clients → Create client**:
    carry role mappings: each adds its roles, and the applications behind
    them as audiences, to every token Claude holds.
 6. **Client scopes → `claude-dedicated` → Scope:** turn **Full scope
-   allowed** off, then **Assign role** and pick the `riffado-mcp` roles
+   allowed** off, then **Assign role** and pick the `chatterbox-mcp` roles
    Claude may carry. All six let each person's own roles decide; leave
    out `tasks:write` if Claude should never change a task.
 7. **Credentials:** copy the **Client secret** for the Claude Owner.
@@ -91,7 +91,7 @@ The same as `claude`, except:
   local callback works.
 - No consent screen needed.
 
-Riffado serves `claude-code` tokens on the internal network only (Step 3):
+Chatterbox serves `claude-code` tokens on the internal network only (Step 3):
 the same token arriving from Anthropic's cloud would have been taken from
 someone's computer.
 
@@ -121,14 +121,16 @@ delete the client.
   permission, as on the [external MCP server](./mcp) page.
 - **Clients → `claude` → Client scopes → Evaluate**, for a test user who
   holds some of the roles: the access token's `aud` is exactly
-  `riffado-mcp`, `sub` is there, and `resource_access.riffado-mcp.roles`
+  `chatterbox-mcp`, `sub` is there, and `resource_access.chatterbox-mcp.roles`
   lists that user's roles. There is no `preferred_username` with only
-  `basic` and `roles`; Riffado does not need it.
+  `basic` and `roles`; Chatterbox does not need it.
 
-## Step 2: Riffado
+<span id="step-2-riffado" />
+
+## Step 2: Chatterbox
 
 ```bash
-MCP_AUDIENCE=riffado-mcp
+MCP_AUDIENCE=chatterbox-mcp
 MCP_ALLOWED_CLIENTS=claude,claude-jdoe,claude-code,acme-reports
 MCP_PUBLIC_INGRESS_HEADER=X-MCP-Ingress
 MCP_PUBLIC_CLIENTS=claude,claude-jdoe
@@ -158,7 +160,7 @@ other secrets.
 Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 
 - A public DNS record for the `APP_URL` host. People inside keep reaching
-  Riffado over the internal network (split-horizon DNS).
+  Chatterbox over the internal network (split-horizon DNS).
 - Block direct internet access to the app and database ports. The bundled
   `docker-compose.yml` publishes ports 3000 and 5432 on all host interfaces;
   use a cloud firewall or Docker-aware host firewall to restrict them to
@@ -169,13 +171,13 @@ Publish the MCP endpoint, and nothing else, to Anthropic's addresses:
 - From `160.79.104.0/21` only, two exact paths:
   `/api/mcp` and `/.well-known/oauth-protected-resource/api/mcp`.
   Not a prefix: `/api/mcp/learn` must stay internal. Pass `GET` and
-  `DELETE` on `/api/mcp` through as well (Riffado answers 405, which is
+  `DELETE` on `/api/mcp` through as well (Chatterbox answers 405, which is
   what Claude expects).
 - The public proxy sets the header named in `MCP_PUBLIC_INGRESS_HEADER`
   on every request it forwards, overwriting whatever came in. The
   internal route removes it.
 - Limit the volume of requests at the proxy before token verification.
-  Riffado counts authenticated requests per person and client; every
+  Chatterbox counts authenticated requests per person and client; every
   Claude user arrives from the same few Anthropic addresses. Use a coarse
   aggregate cap sized for your instance, rather than a small per-IP cap.
 
@@ -194,13 +196,13 @@ location = /api/mcp {
     limit_req_status 429;
     proxy_set_header X-MCP-Ingress public;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_pass http://riffado:3000;
+    proxy_pass http://app:3000;
 }
 location = /.well-known/oauth-protected-resource/api/mcp {
     allow 160.79.104.0/21;
     deny all;
     proxy_set_header X-MCP-Ingress public;
-    proxy_pass http://riffado:3000;
+    proxy_pass http://app:3000;
 }
 location / {
     return 404;
@@ -210,7 +212,7 @@ location / {
 proxy_set_header X-MCP-Ingress "";
 ```
 
-Riffado records the client IP in its access log when
+Chatterbox records the client IP in its access log when
 `RATE_LIMIT_TRUST_PROXY_HEADERS=true` and the proxy overwrites
 `X-Real-IP` (see [Environment variables](./environment-variables)).
 
@@ -220,7 +222,7 @@ Riffado records the client IP in its access log when
 
 1. **Organization settings → Connectors → Add → Custom** (type **Web**
    if asked).
-2. **Name:** Riffado. **MCP server URL:** `<APP_URL>/api/mcp`, exactly.
+2. **Name:** Chatterbox. **MCP server URL:** `<APP_URL>/api/mcp`, exactly.
 3. **Authentication:** Sign in now. **OAuth client:** Use your own OAuth
    client, with client ID `claude` and the secret from Step 1 (under
    **Advanced settings** if the dialog is a single screen).
@@ -230,7 +232,7 @@ Riffado records the client IP in its access log when
    leave `claude` out of `MCP_CONNECTOR_KEYS`.
 5. **Add.**
 
-Members then open **Customize → Connectors**, find Riffado with the
+Members then open **Customize → Connectors**, find Chatterbox with the
 **Custom** label, click **Connect** and sign in on your realm's page.
 
 **Personal plans.** The person opens **Customize → Connectors → Add
@@ -240,10 +242,10 @@ secret under **Advanced settings**. **Add**, then **Connect**.
 **Claude Code**, on the internal network or VPN:
 
 ```bash
-claude mcp add --transport http --client-id claude-code riffado <APP_URL>/api/mcp
+claude mcp add --transport http --client-id claude-code chatterbox <APP_URL>/api/mcp
 ```
 
-Then `/mcp` in Claude Code, pick `riffado` and sign in in the browser
+Then `/mcp` in Claude Code, pick `chatterbox` and sign in in the browser
 that opens.
 
 Claude does not let anyone change a connector's client, secret or
@@ -268,7 +270,7 @@ From a machine outside Anthropic's range, the public entrance must answer
 to the host's public IP on ports 3000 and 5432 fail. An HTTP response from
 port 3000 means the proxy can be bypassed.
 
-In Claude, connect and ask "Which Riffado tools can you use?". The answer
+In Claude, connect and ask "Which Chatterbox tools can you use?". The answer
 should list the tools of your roles. Then look at the access log:
 
 ```sql
@@ -288,15 +290,15 @@ and `mcp_access_log` has a `denied` row with the person's `sub`.
 
 | Reason | Meaning | Fix |
 | --- | --- | --- |
-| `no-account` | The person has never signed in to Riffado. | They sign in to Riffado once, then connect again. |
-| `no-roles` | The token carries none of the six roles. | Give the person a role on `riffado-mcp`, and the client its scope mapping. |
+| `no-account` | The person has never signed in to Chatterbox. | They sign in to Chatterbox once, then connect again. |
+| `no-roles` | The token carries none of the six roles. | Give the person a role on `chatterbox-mcp`, and the client its scope mapping. |
 | `client-not-allowed` | The client is not in `MCP_ALLOWED_CLIENTS`. | Add it. |
 | `client-not-public` | A client outside `MCP_PUBLIC_CLIENTS` came through the public entrance. | Expected for `claude-code` from outside; add a personal client you forgot. |
 | `connector-key` | `X-API-Key` is missing or wrong. | Check the connector's request header; re-add the connector. |
-| `suspended` | The Riffado account is suspended. | |
+| `suspended` | The Chatterbox account is suspended. | |
 | `no-organization` | A service account while the Organization is off. | |
 
-Errors on the realm's side end the sign-in before Riffado sees a token:
+Errors on the realm's side end the sign-in before Chatterbox sees a token:
 
 | Keycloak says | Fix |
 | --- | --- |
@@ -304,7 +306,7 @@ Errors on the realm's side end the sign-in before Riffado sees a token:
 | Offline tokens not allowed for the user or client | Give the person the realm role `offline_access` (default roles). |
 | `unauthorized_client` | The connector's client secret is wrong: re-add the connector. |
 | Invalid parameter: redirect_uri | Check the client's redirect URIs (Step 1). |
-| `invalid_target` | With resource indicators on: `resource_url` on `riffado-mcp` must equal `<APP_URL>/api/mcp`. |
+| `invalid_target` | With resource indicators on: `resource_url` on `chatterbox-mcp` must equal `<APP_URL>/api/mcp`. |
 
 A tool that does not show up after a role was added appears once the
 person refreshes the connector in Claude or connects again: Claude keeps
@@ -319,7 +321,7 @@ answers "Unknown tool" until then.
 - **Cutting someone off at once:** disable the user in Keycloak, or sign
   out their sessions (**Users → the person → Sessions**, offline ones
   included). The access token they already hold works until it expires,
-  15 minutes at most: Riffado checks tokens locally and does not ask
+  15 minutes at most: Chatterbox checks tokens locally and does not ask
   Keycloak on every call.
 - **A personal client:** disable or delete it in Keycloak and take it
   out of the three lists.
@@ -337,17 +339,17 @@ Keycloak 26.6 and later can bind a token to the URL it was requested for
 (RFC 8707). It is an experimental feature:
 
 1. Start Keycloak with `--features=resource-indicators`.
-2. Set the attribute `resource_url` of the `riffado-mcp` client to
+2. Set the attribute `resource_url` of the `chatterbox-mcp` client to
    `<APP_URL>/api/mcp`.
-3. Set `MCP_RESOURCE_AUDIENCE=true` in Riffado and restart.
+3. Set `MCP_RESOURCE_AUDIENCE=true` in Chatterbox and restart.
 
 A token Claude asks for this server then carries `<APP_URL>/api/mcp` as
 its audience, and a sign-in for another server's URL is refused with
 `invalid_target`. Refreshed tokens and requests without `resource` (the
-realm's other applications, service accounts) keep `riffado-mcp`, which
-Riffado still accepts. Requests without `resource` are not affected.
+realm's other applications, service accounts) keep `chatterbox-mcp`, which
+Chatterbox still accepts. Requests without `resource` are not affected.
 Known on Keycloak 26.6.4: a person without any of the six roles gets a
-Keycloak server error when connecting, instead of Riffado's 403. Try it
+Keycloak server error when connecting, instead of Chatterbox's 403. Try it
 on a test realm first; the end-to-end stack has an override for it (see
 [Trying it locally](./mcp#trying-it-locally)).
 
@@ -355,11 +357,11 @@ on a test realm first; the end-to-end stack has an override for it (see
 
 - **A confidential client for Claude.** A public client id is only a
   name. Without resource indicators, Keycloak gives a token for `claude`
-  the `riffado-mcp` audience whatever server Claude was connecting to.
+  the `chatterbox-mcp` audience whatever server Claude was connecting to.
   Anyone could add a connector of their own that names your realm and
   the client id `claude`; your people would sign in on the real page,
   and Claude would hand that connector real tokens, which it could replay
-  to Riffado from the same Anthropic addresses. With a secret, only the
+  to Chatterbox from the same Anthropic addresses. With a secret, only the
   connector that holds it can redeem a sign-in, so `azp: claude` means
   your organization's connector.
 - **Claude Code inside only.** Its client cannot keep a secret, so a
@@ -367,17 +369,17 @@ on a test realm first; the end-to-end stack has an override for it (see
 - **The connector key.** It ties each request to the connector your Owner
   set up, on top of the secret that ties the sign-in to it.
 - **No limit per IP address.** All of Claude shares a few addresses; a
-  per-address limit would let one busy person block everyone. Riffado
+  per-address limit would let one busy person block everyone. Chatterbox
   counts 60 requests a minute per person and client, and 10 searches.
 - **What stays with you to judge.** Transcripts are what people said, and
-  Cowork acts on its own. Riffado tells the model that tool results are
+  Cowork acts on its own. Chatterbox tells the model that tool results are
   data, not instructions, and the only thing Claude can change is a
   task's status or assignee (`tasks:write`). People can block single
   tools in Claude (**Customize → Connectors →** the connector), and you
   can leave `tasks:write` out of the `claude` client's scope.
 - **Anthropic holds the tokens.** Claude stores each person's tokens on
-  Anthropic's side. They are good only for Riffado, the access token for
+  Anthropic's side. They are good only for Chatterbox, the access token for
   15 minutes, and the refresh token works only with the client's secret,
-  which Anthropic also holds. The answers Claude gets from Riffado reach
+  which Anthropic also holds. The answers Claude gets from Chatterbox reach
   Anthropic like anything else in a conversation, under your Claude
   plan's data terms.

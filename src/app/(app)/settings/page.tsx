@@ -1,6 +1,11 @@
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
+import { accessManagementAvailable } from "@/lib/access/service";
 import { listUserProviders } from "@/lib/ai/list-providers";
-import { requireAuth, requireCompletedOnboarding } from "@/lib/auth-server";
+import {
+    getSessionActor,
+    requireAuth,
+    requireCompletedOnboarding,
+} from "@/lib/auth-server";
 import { env } from "@/lib/env";
 import { isMailEnabled } from "@/lib/mail/config";
 import { isOrgAccount } from "@/lib/org/config";
@@ -9,9 +14,10 @@ export default async function SettingsPage() {
     const session = await requireAuth();
     await requireCompletedOnboarding(session);
 
-    const [providers, orgAccount] = await Promise.all([
+    const [providers, orgAccount, actor] = await Promise.all([
         listUserProviders(session.user.id),
         isOrgAccount(session.user.id),
+        getSessionActor(),
     ]);
 
     return (
@@ -19,6 +25,7 @@ export default async function SettingsPage() {
             initialProviders={providers}
             isHosted={env.IS_HOSTED}
             mailEnabled={isMailEnabled() && !orgAccount}
+            accessManagement={accessManagementAvailable(actor)}
         />
     );
 }

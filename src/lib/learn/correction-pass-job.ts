@@ -22,6 +22,7 @@ import {
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -261,6 +262,11 @@ async function runPass({
         reportProgress({ phase: "writing" });
 
         const knownIds = new Set(view.items.map((item) => item.id));
+        // Decided before the transaction: it may ask the identity provider.
+        const curatesNow =
+            pass.view === "org" && actorUserId
+                ? await userCuratesOrganizationNow(actorUserId)
+                : false;
         const outcome = await db.transaction(async (tx) => {
             await lockOrgPeopleShared(tx);
             const finish = (
@@ -298,7 +304,11 @@ async function runPass({
                         userId: pass.userId,
                         transcriptionId: pass.transcriptionId,
                     },
-                    { actorUserId, orgUserId },
+                    {
+                        actorUserId,
+                        orgUserId,
+                        actsForOrganization: curatesNow,
+                    },
                 );
             } catch (error) {
                 if (error instanceof AppError && error.statusCode < 500) {
@@ -334,7 +344,7 @@ async function runPass({
                             transcriptCorrections.transcriptionId,
                             pass.transcriptionId,
                         ),
-                        eq(transcriptCorrections.userId, actorUserId),
+                        eq(transcriptCorrections.userId, locked.scopeUserId),
                     ),
                 );
             const { planned, dropped } = planFixes(result.fixes, {
@@ -349,7 +359,7 @@ async function runPass({
                     try {
                         target = await resolveTargetInTx(
                             tx,
-                            actorUserId,
+                            locked.scopeUserId,
                             target,
                         );
                     } catch {
@@ -357,7 +367,7 @@ async function runPass({
                     }
                 }
                 rows.push({
-                    userId: actorUserId,
+                    userId: locked.scopeUserId,
                     transcriptionId: pass.transcriptionId,
                     transcriptRevision: locked.revision,
                     turnIndex: fix.turnIndex,
@@ -377,7 +387,7 @@ async function runPass({
             }
             if (rows.length > 0) {
                 await tx.insert(transcriptCorrections).values(rows);
-                await bumpScopeInTx(tx, [actorUserId]);
+                await bumpScopeInTx(tx, [locked.scopeUserId]);
             }
             await finish("finished", {
                 ...baseStats,

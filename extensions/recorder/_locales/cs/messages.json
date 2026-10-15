@@ -151,5 +151,7 @@
   "connectFirst": {"message": "Nejprve propojte rozšíření s Klepnou (otevřete Možnosti)."},
   "couldNotCapture": {"message": "Nelze spustit zachytávání zvuku"},
   "keyRejected": {"message": "Klíč pro nahrávání byl odmítnut. Znovu ho nastavte v Možnostech."},
+  "accessWithdrawn": {"message": "Váš přístup do Klepny byl odebrán. Nahrávka zůstává šifrovaně uložená v tomto prohlížeči: až vám přístup obnoví, zvolte „Opakovat odeslání“, nebo se znovu přihlaste a nahrávání spárujte."},
+  "accessUnverifiable": {"message": "Server teď nemůže ověřit váš přístup; nahrávka zůstává uložená a nahrávání se samo obnoví."},
   "finalizeFailed": {"message": "Nahrávání nelze dokončit. Šifrované části zůstávají v prohlížeči pro obnovení."}
 }

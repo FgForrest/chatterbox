@@ -145,6 +145,48 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         expect(await titleStillGenerated(ALICE, REC)).toBe(false);
     });
 
+    it("replaces a manual title only when explicitly requested with its current edit time", async () => {
+        await db()
+            .update(chatterItems)
+            .set(renamed)
+            .where(eq(chatterItems.id, REC));
+
+        expect(
+            await storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Quarterly planning",
+                renamed.titleEditedAt,
+            ),
+        ).toBe(true);
+        expect(await title()).toBe("Quarterly planning");
+        expect(await titleStillGenerated(ALICE, REC)).toBe(true);
+    });
+
+    it("does not replace a newer manual edit requested during generation", async () => {
+        await db()
+            .update(chatterItems)
+            .set(renamed)
+            .where(eq(chatterItems.id, REC));
+        await db()
+            .update(chatterItems)
+            .set({
+                title: encryptText("Newer choice"),
+                titleEditedAt: new Date(Date.now() + 1000),
+            })
+            .where(eq(chatterItems.id, REC));
+
+        expect(
+            await storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Quarterly planning",
+                renamed.titleEditedAt,
+            ),
+        ).toBe(false);
+        expect(await title()).toBe("Newer choice");
+    });
+
     it("keeps a rename that commits while the title is being stored", async () => {
         let commit = () => {};
         const committed = new Promise<void>((resolve) => {

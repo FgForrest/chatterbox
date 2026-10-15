@@ -8,6 +8,22 @@ export enum ErrorCode {
     ACCOUNT_SUSPENDED = "ACCOUNT_SUSPENDED",
     ACCOUNT_LOCKED = "ACCOUNT_LOCKED",
     AUTH_SESSION_MISSING = "AUTH_SESSION_MISSING",
+    /** The identity provider grants this person no `use` of Chatterbox (403). */
+    ACCESS_NOT_GRANTED = "ACCESS_NOT_GRANTED",
+    /** The person's access could not be verified with the identity provider now (503). */
+    ACCESS_UNVERIFIABLE = "ACCESS_UNVERIFIABLE",
+    /** The caller lacks the capability the action needs, e.g. `access.manage` (403). */
+    CAPABILITY_REQUIRED = "CAPABILITY_REQUIRED",
+    /** The identity provider refused the administrator's delegated change (403). */
+    PROVIDER_DENIED = "PROVIDER_DENIED",
+    /** Access management needs a fresher sign-in at the identity provider (401). */
+    REAUTHENTICATION_REQUIRED = "REAUTHENTICATION_REQUIRED",
+    /** The capability is inherited and cannot be switched off here (409). */
+    ACCESS_INHERITED = "ACCESS_INHERITED",
+    /** The access changed since the screen was loaded (409). */
+    ACCESS_STALE = "ACCESS_STALE",
+    /** The change would lock the administrator out (409). */
+    ACCESS_LOCKOUT = "ACCESS_LOCKOUT",
 
     INVALID_INPUT = "INVALID_INPUT",
     MISSING_REQUIRED_FIELD = "MISSING_REQUIRED_FIELD",

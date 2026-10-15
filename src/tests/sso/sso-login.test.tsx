@@ -36,6 +36,11 @@ describe("SsoLogin", () => {
         ["signup_disabled", "does not accept new accounts"],
         ["email_is_missing", "did not share an email address"],
         ["access_denied", "cancelled at the identity provider"],
+        ["SSO_ACCESS_DENIED", "has no access to this application"],
+        ["SSO_UNAVAILABLE", "could not be verified with the identity provider"],
+        ["SSO_TOKEN_INVALID", "answer could not be verified"],
+        ["SSO_ISSUER_MISMATCH", "belongs to a different identity provider"],
+        ["SSO_SESSION_ENDED", "Your session has ended"],
         ["anything_else", "Sign-in failed. Please try again."],
     ])("explains the %s error", (code, text) => {
         render(<SsoLogin providerName="Acme SSO" error={code} />);

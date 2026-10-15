@@ -48,11 +48,16 @@ vi.mock("@/db", () => {
     return { db };
 });
 
-vi.mock("@/lib/auth-server", () => ({
-    requireApiSession: vi.fn().mockResolvedValue({
-        user: { id: "user-1" },
-    }),
-}));
+vi.mock("@/lib/auth-server", async () => {
+    const { withSessionActor } = await vi.importActual<
+        typeof import("@/tests/helpers/session-actor")
+    >("@/tests/helpers/session-actor");
+    return withSessionActor({
+        requireApiSession: vi.fn().mockResolvedValue({
+            user: { id: "user-1" },
+        }),
+    });
+});
 
 vi.mock("@/lib/encryption/fields", () => ({
     decryptText: vi.fn((value: string | null | undefined) =>

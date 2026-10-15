@@ -4,6 +4,7 @@ import type { SettingsSection } from "@/types/settings";
 import { ApiKeysSection } from "./settings/api-keys-section";
 import { RecorderSection } from "./settings/recorder-section";
 import { WebhooksSection } from "./settings/webhooks-section";
+import { AccessSection } from "./settings-sections/access-section";
 import { BillingSection } from "./settings-sections/billing-section";
 import { DevSection } from "./settings-sections/dev-section";
 import { DisplaySection } from "./settings-sections/display-section";
@@ -37,6 +38,7 @@ interface SettingsContentProps {
     onReRunOnboarding?: () => void;
     isHosted?: boolean;
     mailEnabled?: boolean;
+    accessManagement?: boolean;
     /** Forwarded to `PlaudAccountSection`; see its prop doc. */
     onPlaudReconnected?: () => void;
 }
@@ -47,6 +49,7 @@ export function SettingsContent({
     onReRunOnboarding,
     isHosted = false,
     mailEnabled = false,
+    accessManagement = false,
     onPlaudReconnected,
 }: SettingsContentProps) {
     switch (activeSection) {
@@ -94,6 +97,9 @@ export function SettingsContent({
         case "mail":
             if (!mailEnabled) return null;
             return <MailSection />;
+        case "access":
+            if (!accessManagement) return null;
+            return <AccessSection />;
         case "dev":
             if (process.env.NODE_ENV === "production") return null;
             return <DevSection />;

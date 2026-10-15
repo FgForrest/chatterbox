@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
@@ -123,6 +123,31 @@ export function WorkstationDetailPane({
 }: Props) {
     const i18n = useExtracted();
     const playerRef = useRef<RecordingPlayerHandle>(null);
+    const playedLink = useRef<string | null>(null);
+    useEffect(() => {
+        if (
+            !currentRecording ||
+            currentRecording.kind === "mail" ||
+            currentRecording.audioReaped
+        )
+            return;
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("recording") !== currentRecording.id) return;
+        if (
+            (params.get("view") === "org") !==
+            (currentRecording.view === "org")
+        )
+            return;
+        const raw = params.get("playFrom");
+        if (raw === null || !/^\d+$/.test(raw)) return;
+        const startMs = Number(raw);
+        if (!Number.isSafeInteger(startMs)) return;
+        const link = `${currentRecording.id}:${currentRecording.view}:${raw}`;
+        if (playedLink.current === link) return;
+        if (!playerRef.current) return;
+        playedLink.current = link;
+        playerRef.current.playFrom(startMs / 1000);
+    }, [currentRecording]);
     const hasTranscript =
         currentRecording?.hasTranscript ??
         Boolean(
