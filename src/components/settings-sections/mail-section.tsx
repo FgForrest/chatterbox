@@ -14,9 +14,9 @@ import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
+import { ProfilesSettingsLink } from "@/components/settings/profiles-settings-link";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { ToggleRow } from "@/components/settings/toggle-row";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -102,7 +102,6 @@ export function MailSection() {
     const [view, setView] = useState<MailSettingsView | null>(null);
     const [log, setLog] = useState<DeliveryLogEntry[]>([]);
     const [failed, setFailed] = useState(false);
-    const [autoProcess, setAutoProcess] = useState(true);
     const [creating, setCreating] = useState(false);
     const [baseId, setBaseId] = useState("");
     const [label, setLabel] = useState("");
@@ -111,10 +110,9 @@ export function MailSection() {
 
     const load = useCallback(async () => {
         try {
-            const [addresses, deliveries, settings] = await Promise.all([
+            const [addresses, deliveries] = await Promise.all([
                 fetch("/api/mail/addresses"),
                 fetch("/api/mail/delivery-log"),
-                fetch("/api/settings/user"),
             ]);
             if (!addresses.ok || !deliveries.ok) {
                 throw new Error("Failed to load mail settings");
@@ -124,12 +122,6 @@ export function MailSection() {
                 ((await deliveries.json()) as { entries: DeliveryLogEntry[] })
                     .entries,
             );
-            if (settings.ok) {
-                const data = (await settings.json()) as {
-                    mailAutoProcess?: boolean;
-                };
-                setAutoProcess(data.mailAutoProcess ?? true);
-            }
         } catch {
             setFailed(true);
         }
@@ -138,19 +130,6 @@ export function MailSection() {
     useEffect(() => {
         void load();
     }, [load]);
-
-    const changeAutoProcess = async (checked: boolean) => {
-        setAutoProcess(checked);
-        const response = await fetch("/api/settings/user", {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mailAutoProcess: checked }),
-        }).catch(() => null);
-        if (!response?.ok) {
-            setAutoProcess(!checked);
-            toast.error(i18n("Could not save the setting"));
-        }
-    };
 
     const addresses = view?.addresses ?? [];
     const mailbox = addresses.find((address) => address.kind === "mailbox");
@@ -509,17 +488,7 @@ export function MailSection() {
                     </SettingsCard>
 
                     <SettingsCard title={i18n("Processing")}>
-                        <ToggleRow
-                            id="mail-auto-process"
-                            label={i18n("Process mail automatically")}
-                            description={i18n(
-                                "Summarize new mail and learn from it as recordings are. Mail sent by machines (auto-replies, lists, notices) is kept but never processed.",
-                            )}
-                            checked={autoProcess}
-                            onCheckedChange={(checked) =>
-                                void changeAutoProcess(checked)
-                            }
-                        />
+                        <ProfilesSettingsLink />
                     </SettingsCard>
 
                     <SettingsCard title={i18n("How to send mail here")}>

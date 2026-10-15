@@ -2,10 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import {
-    normalizeSummaryPromptConfig,
-    type SummaryPromptConfiguration,
-} from "@/lib/ai/summary-presets";
+import type { ProfileChannel } from "@/lib/profiles/settings";
 import {
     addSummarizingId,
     bumpContentGeneration,
@@ -16,18 +13,10 @@ import {
     shouldApplyFetchedSummary,
     shouldApplySummaryToView,
 } from "@/lib/summary/job-scope";
-
-export interface SummaryPromptOption {
-    id: string;
-    /** null: a built-in template's name, localized by the caller. */
-    name: string | null;
-}
-
-function promptOptions(
-    config: SummaryPromptConfiguration,
-): SummaryPromptOption[] {
-    return config.templates.map((t) => ({ id: t.id, name: t.name }));
-}
+import type {
+    SettingsProfileSummary,
+    SettingsProfilesPage,
+} from "@/types/settings";
 
 export type SummarySource = "plaud" | "riffado";
 
@@ -117,6 +106,8 @@ interface UseTranscriptionSummaryOptions {
     transcriptionText: string | null | undefined;
     /** `org` reads and writes the Organization view of a shared recording. */
     view?: RecordingView;
+    /** Profile channel of the item being summarized. */
+    profileChannel?: ProfileChannel;
 }
 
 /**
@@ -133,6 +124,7 @@ export function useTranscriptionSummary({
     summarySource = "riffado",
     transcriptionText,
     view,
+    profileChannel = "audio",
 }: UseTranscriptionSummaryOptions) {
     const summaryUrl = useCallback(
         (targetId: string, query = "") =>
@@ -183,44 +175,57 @@ export function useTranscriptionSummary({
         useState<SummaryStatusProgress | null>(null);
     const [summaryElapsedMs, setSummaryElapsedMs] = useState(0);
     const [summaryExpanded, setSummaryExpanded] = useState(true);
-    const [summaryPreset, setSummaryPresetState] = useState("general");
-    // Set the moment the caller (the per-recording dropdown) makes an
-    // explicit choice. Guards the settings-fetch effect below from
-    // clobbering that choice if the fetch resolves afterwards -- without
-    // this, picking a prompt right after the page loads could get silently
-    // reverted back to the saved default a moment later.
-    const userSelectedPresetRef = useRef(false);
-    const setSummaryPreset = useCallback((preset: string) => {
-        userSelectedPresetRef.current = true;
-        setSummaryPresetState(preset);
+    const [summaryProfileId, setSummaryProfileIdState] = useState("");
+    const [summaryProfileOptions, setSummaryProfileOptions] = useState<
+        SettingsProfileSummary[]
+    >([]);
+    const [summaryProfilesLoading, setSummaryProfilesLoading] = useState(true);
+    const userSelectedProfileRef = useRef(false);
+    const setSummaryProfileId = useCallback((profileId: string) => {
+        userSelectedProfileRef.current = true;
+        setSummaryProfileIdState(profileId);
     }, []);
-    const [summaryPromptOptions, setSummaryPromptOptions] = useState<
-        SummaryPromptOption[]
-    >(() => promptOptions(normalizeSummaryPromptConfig(null)));
 
     // Re-fetch trigger separate from the URL/id key so callers can
     // bump it imperatively (e.g. right after a re-transcribe finishes,
     // before the new text has propagated through props).
     const [summaryFetchKey, setSummaryFetchKey] = useState(0);
 
-    // Load the user's templates once so the per-recording dropdown
-    // initializes to their actual default (not a hardcoded "general") and
-    // lists the same templates, in the same order, as the settings.
     useEffect(() => {
         const controller = new AbortController();
-        fetch("/api/settings/user", { signal: controller.signal })
+        userSelectedProfileRef.current = false;
+        setSummaryProfileIdState("");
+        setSummaryProfilesLoading(true);
+        fetch(
+            `/api/settings/profiles?channel=${encodeURIComponent(profileChannel)}&pageSize=100`,
+            { signal: controller.signal },
+        )
             .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
+            .then((data: SettingsProfilesPage | null) => {
                 if (!data) return;
-                const config = normalizeSummaryPromptConfig(data.summaryPrompt);
-                if (!userSelectedPresetRef.current) {
-                    setSummaryPresetState(config.selectedPrompt);
+                setSummaryProfileOptions(data.profiles);
+                if (!userSelectedProfileRef.current) {
+                    const resolvedScope =
+                        view === "org" ? "organization" : "personal";
+                    const resolved =
+                        data.profiles.find(
+                            (profile) =>
+                                profile.scope === resolvedScope &&
+                                profile.isDefault,
+                        ) ??
+                        data.profiles.find((profile) => profile.isDefault) ??
+                        data.profiles[0];
+                    setSummaryProfileIdState(resolved?.id ?? "");
                 }
-                setSummaryPromptOptions(promptOptions(config));
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => {
+                if (!controller.signal.aborted) {
+                    setSummaryProfilesLoading(false);
+                }
+            });
         return () => controller.abort();
-    }, []);
+    }, [profileChannel, view]);
 
     const recordingIdRef = useRef(recordingId);
     const summarySourceRef = useRef(summarySource);
@@ -516,13 +521,7 @@ export function useTranscriptionSummary({
             setAvailableSummarySources((current) =>
                 current.includes("riffado") ? current : [...current, "riffado"],
             );
-            if (data.promptFallback) {
-                toast.warning(
-                    "Selected summary prompt is no longer available -- used your default prompt instead.",
-                );
-            } else {
-                toast.success("Summary generated");
-            }
+            toast.success("Summary generated");
         };
 
         /**
@@ -589,10 +588,8 @@ export function useTranscriptionSummary({
                     // below still handles.
                     Accept: "text/event-stream, application/json",
                 },
-                // The Organization view always uses the organization's
-                // own template, whatever this user's presets are.
                 body: JSON.stringify(
-                    view === "org" ? {} : { preset: summaryPreset },
+                    summaryProfileId ? { profileId: summaryProfileId } : {},
                 ),
             });
 
@@ -678,10 +675,9 @@ export function useTranscriptionSummary({
     }, [
         recordingId,
         setSummaryFor,
-        summaryPreset,
+        summaryProfileId,
         summarySource,
         summaryUrl,
-        view,
     ]);
 
     const handleDeleteSummary = useCallback(async () => {
@@ -767,9 +763,10 @@ export function useTranscriptionSummary({
         summaryElapsedMs,
         summaryExpanded,
         setSummaryExpanded,
-        summaryPreset,
-        setSummaryPreset,
-        summaryPromptOptions,
+        summaryProfileId,
+        setSummaryProfileId,
+        summaryProfileOptions,
+        summaryProfilesLoading,
         handleSummarize,
         handleDeleteSummary,
         refetchSummary,

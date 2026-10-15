@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { AddProviderDialog } from "@/components/settings/add-provider-dialog";
 import { EditProviderDialog } from "@/components/settings/edit-provider-dialog";
+import { OrganizationProvidersCard } from "@/components/settings/organization-providers-card";
 import { ProviderPriceLine } from "@/components/settings/provider-pricing-fields";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
@@ -185,6 +186,7 @@ export function ProvidersSection({
                     onDuplicate={handleDuplicate}
                     onDelete={handleDelete}
                 />
+                <OrganizationProvidersCard isHosted={isHosted} />
             </div>
 
             <AddProviderDialog

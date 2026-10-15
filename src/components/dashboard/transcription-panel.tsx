@@ -42,7 +42,6 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
-import { useSummaryPresetCopy } from "@/hooks/use-preset-copy";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import {
@@ -247,7 +246,6 @@ export function TranscriptionPanel({
     readOnly = false,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
-    const summaryPresetCopy = useSummaryPresetCopy();
     const transcriptList = toTranscriptList(transcripts, transcription);
     // The Organization view of a shared recording: the one recording, its
     // summaries made with the Organization's templates.
@@ -570,9 +568,10 @@ export function TranscriptionPanel({
         summaryElapsedMs,
         summaryExpanded,
         setSummaryExpanded,
-        summaryPreset,
-        setSummaryPreset,
-        summaryPromptOptions,
+        summaryProfileId = "",
+        setSummaryProfileId,
+        summaryProfileOptions = [],
+        summaryProfilesLoading = false,
         handleSummarize,
         recheckSummary,
     } = useTranscriptionSummary({
@@ -580,6 +579,7 @@ export function TranscriptionPanel({
         summarySource,
         transcriptionText: summaryTranscript?.text,
         view,
+        profileChannel: recording.kind ?? "audio",
     });
 
     // The title, summary and topics automatic Learn held back are made by
@@ -1095,28 +1095,29 @@ export function TranscriptionPanel({
                                     />
                                 )}
                                 {summarySource === "riffado" &&
-                                    !orgView &&
                                     !readOnly &&
-                                    !isSummarizing && (
+                                    !isSummarizing &&
+                                    summaryProfileOptions.length > 0 && (
                                         <Select
-                                            value={summaryPreset}
-                                            onValueChange={setSummaryPreset}
+                                            value={summaryProfileId}
+                                            onValueChange={setSummaryProfileId}
                                         >
-                                            <SelectTrigger className="w-[160px] h-8 text-xs">
+                                            <SelectTrigger
+                                                className="h-8 w-[180px] text-xs"
+                                                aria-label={i18n(
+                                                    "Processing profile",
+                                                )}
+                                            >
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {summaryPromptOptions.map(
-                                                    (preset) => (
+                                                {summaryProfileOptions.map(
+                                                    (profile) => (
                                                         <SelectItem
-                                                            key={preset.id}
-                                                            value={preset.id}
+                                                            key={profile.id}
+                                                            value={profile.id}
                                                         >
-                                                            {preset.name ??
-                                                                summaryPresetCopy[
-                                                                    preset.id as keyof typeof summaryPresetCopy
-                                                                ]?.name ??
-                                                                preset.id}
+                                                            {profile.name}
                                                         </SelectItem>
                                                     ),
                                                 )}
@@ -1132,6 +1133,8 @@ export function TranscriptionPanel({
                                         }
                                         disabled={
                                             isSummarizing ||
+                                            summaryProfilesLoading ||
+                                            !summaryProfileId ||
                                             (!summaryTranscript &&
                                                 !(
                                                     orgView &&
