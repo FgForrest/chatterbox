@@ -45,6 +45,18 @@ requires your agreement. See the [extension privacy policy](PRIVACY.md)
 details about the encrypted browser buffer, recorder key, downloads, and the
 responsibilities of the server operator.
 
+## Install and connect
+
+1. Install [Chatterbox Meeting Recorder from the Chrome Web Store](https://chromewebstore.google.com/detail/chatterbox-meeting-record/pojdfnhpfijfolehkjidbomgjemonkge)
+   in desktop Chrome or a compatible browser, and pin it to the toolbar.
+2. Open the extension's **Options**, review and accept the data-use disclosure,
+   and allow microphone access.
+3. Return to **Settings → Meeting Recorder** in Chatterbox and click **Re-check**.
+   If site access is needed, open the extension's toolbar icon on this page and
+   choose **Connect to** this site.
+4. Click **Set up recorder**, then confirm the server in the extension's Options
+   and allow site access when prompted.
+
 ## Load it for development
 
 1. Open `chrome://extensions`.
@@ -52,6 +64,10 @@ responsibilities of the server operator.
 3. **Load unpacked** and select this `extensions/recorder` folder.
 4. Open the extension's **Options**, grant microphone access, and pair it with
    your Chatterbox instance (see below).
+
+The unpacked build uses a different ID from the published extension. Set
+`NEXT_PUBLIC_RECORDER_EXTENSION_ID=hiipabbdnlhdkgldhkdndmohejoaecnh` when running
+Chatterbox against this development build.
 
 No build step is required: the extension is plain ES-module JavaScript loaded
 directly by Chrome.
@@ -78,10 +94,11 @@ node extensions/recorder/pack.mjs
 
 This writes `dist/chatterbox-recorder-<version>.zip`.
 
-The extension ID is pinned by the `key` in `manifest.json`:
-`hiipabbdnlhdkgldhkdndmohejoaecnh`. It is the same whether loaded unpacked,
-packed, or from the store, and the Chatterbox web app uses it to detect and
-message the extension. The matching private key lives outside this folder in
+The published Chrome Web Store extension ID is
+`pojdfnhpfijfolehkjidbomgjemonkge`, which Chatterbox detects by default.
+The development extension ID is pinned by the `key` in `manifest.json`:
+`hiipabbdnlhdkgldhkdndmohejoaecnh`. The matching private key lives outside this
+folder in
 `extensions/signing-keys/` (git-ignored) so Chrome does not warn about a
 `.pem` inside the loaded extension; keep it if you ever sign a `.crx`
 yourself. Rebuilding with a different key changes the ID, in which case set

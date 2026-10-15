@@ -1,4 +1,12 @@
+import { readFileSync } from "node:fs";
 import { parse } from "@formatjs/icu-messageformat-parser";
+import {
+    isExpressionStatement,
+    isObjectLiteralExpression,
+    isPropertyAssignment,
+    isStringLiteral,
+    parseJsonText,
+} from "typescript";
 import { describe, expect, it } from "vitest";
 import { localeFromAcceptLanguage, normalizeLocale } from "@/lib/i18n/config";
 import { createEmailTranslator } from "@/lib/i18n/email-messages";
@@ -43,6 +51,38 @@ describe("locale selection", () => {
 });
 
 describe("message catalogs", () => {
+    it.each([
+        "en.json",
+        "cs-CZ.json",
+    ])("rejects duplicate keys in %s before JSON parsing discards them", (catalog) => {
+        const source = readFileSync(
+            new URL(`../../../messages/${catalog}`, import.meta.url),
+            "utf8",
+        );
+        const statement = parseJsonText(catalog, source).statements[0];
+        if (
+            !statement ||
+            !isExpressionStatement(statement) ||
+            !isObjectLiteralExpression(statement.expression)
+        ) {
+            throw new Error(`${catalog} must contain a JSON object`);
+        }
+        const seen = new Set<string>();
+        const duplicates: string[] = [];
+        for (const property of statement.expression.properties) {
+            if (
+                !isPropertyAssignment(property) ||
+                !isStringLiteral(property.name)
+            ) {
+                throw new Error(`${catalog} must contain string keys`);
+            }
+            const key = property.name.text;
+            if (seen.has(key)) duplicates.push(key);
+            seen.add(key);
+        }
+        expect(duplicates).toEqual([]);
+    });
+
     it("keeps the application catalogs complete and valid", () => {
         expect(sortedKeys(csCzMessages)).toEqual(sortedKeys(enMessages));
         validateCatalog(enMessages);
