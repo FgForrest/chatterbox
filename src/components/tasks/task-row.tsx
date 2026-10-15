@@ -7,6 +7,7 @@ import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
+import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
@@ -25,6 +26,7 @@ export function TaskRow({
     organizationOnly,
     onPlay,
     onChange,
+    onMerge,
 }: {
     task: TaskView;
     /** The recording it came from, on the Tasks page. */
@@ -35,6 +37,9 @@ export function TaskRow({
     /** Play the recording where the task was said. */
     onPlay?: (startMs: number) => void;
     onChange: TaskRowChange;
+    onMerge?: (
+        targetTaskId: string,
+    ) => Promise<{ ownerNotified?: boolean } | boolean>;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -144,6 +149,16 @@ export function TaskRow({
                             {i18n("Dropped")}
                         </span>
                     )}
+                    {recording &&
+                        task.status === "open" &&
+                        task.canEdit &&
+                        onMerge && (
+                            <MergeTaskPicker
+                                itemId={recording.id}
+                                sourceTaskId={task.id}
+                                onMerge={onMerge}
+                            />
+                        )}
                     {task.canEdit && (
                         <button
                             type="button"

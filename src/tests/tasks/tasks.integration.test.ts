@@ -109,6 +109,7 @@ import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { gatherFacts } from "@/lib/pipeline/facts";
 import { eraseLocalArtifact } from "@/lib/recordings/erase";
+import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
 import { deleteItemTaskDataInTx } from "@/lib/tasks/mentions";
@@ -878,7 +879,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([]);
     });
 
-    it("suppresses an earlier completion after a manual status edit", async () => {
+    it("shows an earlier completion as informational after a manual status edit", async () => {
         await db()
             .update(chatterItems)
             .set({ occurredAt: new Date("2026-10-08T08:00:00.000Z") })
@@ -913,7 +914,24 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         });
 
         await summarize(LATER, [], { updates: [completion] });
-        expect((await review(alice, LATER)).updates).toEqual([]);
+        expect((await review(alice, LATER)).updates).toEqual([
+            expect.objectContaining({
+                kind: "done",
+                earlierMention: true,
+                ticked: false,
+            }),
+        ]);
+        expect(
+            (await loadShareGate(db(), LATER, ALICE)).some(
+                (problem) => problem.kind === "tasks_unreviewed",
+            ),
+        ).toBe(false);
+        expect((await gatherFacts(LATER, "private", ALICE)).taskReview).toEqual(
+            {
+                proposals: 0,
+                followUps: 0,
+            },
+        );
         const [stored] = await db()
             .select({
                 statusEffectiveAt: recordingTasks.statusEffectiveAt,
@@ -2254,7 +2272,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(updates).toEqual([]);
     });
 
-    it("keeps an awaiting source decision blocking after its task moved on", async () => {
+    it("settles an earlier source decision after its task moved on", async () => {
         const task = await addTask(alice, LATER, {
             text: "Send the partner email",
             status: "open",
@@ -2269,7 +2287,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             version: task.version,
             status: "done",
         });
-        expect((await review(alice)).updates).toHaveLength(1);
+        expect((await review(alice, REC)).updates).toHaveLength(1);
         await expect(share(REC)).rejects.toMatchObject({ statusCode: 409 });
         await acceptReview(alice, REC);
         expect(
@@ -2279,7 +2297,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                     reason: taskUpdateProposals.obsoleteReason,
                 })
                 .from(taskUpdateProposals),
-        ).toEqual([{ state: "rejected", reason: null }]);
+        ).toEqual([{ state: "obsolete", reason: "earlier_statement" }]);
         await share(REC);
     });
 

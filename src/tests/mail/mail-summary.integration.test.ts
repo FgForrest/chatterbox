@@ -26,6 +26,7 @@ import {
     recordingFolders,
     recordingTasks,
     taskMentions,
+    taskUpdateProposals,
     userSettings,
     users,
 } from "@/db/schema";
@@ -119,6 +120,7 @@ import { ensureMailbox } from "@/lib/mail/addresses";
 import { collectArchivedMail } from "@/lib/mail/archive";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
+import { mailShareProblems } from "@/lib/mail/share-gate";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
@@ -781,7 +783,42 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             });
         });
         const listed = await listRecordingTasks(viewer, itemId);
-        expect(listed?.updates).toEqual([]);
+        expect(listed?.updates).toEqual([
+            expect.objectContaining({
+                kind: "done",
+                earlierMention: true,
+                ticked: false,
+            }),
+        ]);
+        expect(await recordingsAwaitingTaskReview(viewer)).not.toContainEqual(
+            expect.objectContaining({ recordingId: itemId }),
+        );
+        const mailProblems = await db().transaction((tx) =>
+            mailShareProblems(tx, itemId, "u-jan"),
+        );
+        expect(
+            mailProblems.some((problem) => problem.kind === "tasks_unreviewed"),
+        ).toBe(false);
+        const [proposal] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                obsoleteReason: taskUpdateProposals.obsoleteReason,
+                decidedByUserId: taskUpdateProposals.decidedByUserId,
+                ticked: taskUpdateProposals.ticked,
+            })
+            .from(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, itemId),
+                    eq(taskUpdateProposals.taskId, contract?.id ?? ""),
+                ),
+            );
+        expect(proposal).toEqual({
+            state: "obsolete",
+            obsoleteReason: "earlier_statement",
+            decidedByUserId: null,
+            ticked: false,
+        });
         const [mention] = await db()
             .select({
                 provenance: taskMentions.provenance,

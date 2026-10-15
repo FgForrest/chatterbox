@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, notExists } from "drizzle-orm";
 import type { db } from "@/db";
 import { recordingTasks, taskMentions, taskUpdateProposals } from "@/db/schema";
 
@@ -48,6 +48,27 @@ export async function waitingTaskDecisions(
                     eq(taskMentions.userId, ownerUserId),
                     eq(taskMentions.matchDecision, "suggested"),
                     view ? eq(taskMentions.view, view) : undefined,
+                    notExists(
+                        executor
+                            .select({ id: taskUpdateProposals.id })
+                            .from(taskUpdateProposals)
+                            .where(
+                                and(
+                                    eq(taskUpdateProposals.itemId, itemId),
+                                    eq(taskUpdateProposals.userId, ownerUserId),
+                                    eq(
+                                        taskUpdateProposals.taskId,
+                                        taskMentions.taskId,
+                                    ),
+                                    eq(taskUpdateProposals.state, "obsolete"),
+                                    eq(
+                                        taskUpdateProposals.obsoleteReason,
+                                        "earlier_statement",
+                                    ),
+                                    isNull(taskUpdateProposals.decidedByUserId),
+                                ),
+                            ),
+                    ),
                 ),
             ),
     ]);

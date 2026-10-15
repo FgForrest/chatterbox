@@ -48,6 +48,12 @@ export interface RoutedTaskProposalView {
     dueDate: string | null;
     duePhrase: string | null;
     quote: string | null;
+    evidenceStartMs: number | null;
+    evidenceText: {
+        segmentIndex: number;
+        charStart: number;
+        charEnd: number;
+    } | null;
     version: number;
     sourceItem: {
         id: string;
@@ -429,6 +435,19 @@ export async function settleSourceTaskUpdatesInTx(
     const acceptedTaskIds = new Set<string>();
     const touched = new Map<string, string>();
     for (const proposal of input.updates) {
+        const target = await targetFor(tx, input.viewer, proposal.taskId);
+        const statementAt =
+            input.statementAtByTask.get(proposal.taskId) ??
+            input.sourceOccurredAt;
+        if (target && !chronologyAllows(proposal, target, statementAt)) {
+            await setProposalState(tx, proposal.id, "obsolete", {
+                actorUserId: input.viewer.userId,
+                routedTo: null,
+                obsoleteReason: "earlier_statement",
+            });
+            skipped += 1;
+            continue;
+        }
         if (!proposal.ticked) {
             await setProposalState(tx, proposal.id, "rejected", {
                 actorUserId: input.viewer.userId,
@@ -436,10 +455,6 @@ export async function settleSourceTaskUpdatesInTx(
             });
             continue;
         }
-        const target = await targetFor(tx, input.viewer, proposal.taskId);
-        const statementAt =
-            input.statementAtByTask.get(proposal.taskId) ??
-            input.sourceOccurredAt;
         if (!target?.visible) {
             await setProposalState(tx, proposal.id, "obsolete", {
                 actorUserId: input.viewer.userId,
@@ -595,6 +610,10 @@ export async function listRoutedTaskProposals(
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
             quote: taskUpdateProposals.quote,
+            evidenceStartMs: taskUpdateProposals.evidenceStartMs,
+            evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
+            evidenceCharStart: taskUpdateProposals.evidenceCharStart,
+            evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             version: taskUpdateProposals.version,
             sourceItemKind: routedSourceItem.kind,
             sourceItemTitle: routedSourceItem.title,
@@ -634,6 +653,16 @@ export async function listRoutedTaskProposals(
         taskText: decryptText(row.taskText),
         duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
         quote: row.quote ? decryptText(row.quote) : null,
+        evidenceText:
+            row.evidenceSegmentIndex !== null &&
+            row.evidenceCharStart !== null &&
+            row.evidenceCharEnd !== null
+                ? {
+                      segmentIndex: row.evidenceSegmentIndex,
+                      charStart: row.evidenceCharStart,
+                      charEnd: row.evidenceCharEnd,
+                  }
+                : null,
         sourceItem: {
             id: row.sourceItemId,
             kind: row.sourceItemKind,

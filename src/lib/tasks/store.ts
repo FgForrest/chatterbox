@@ -190,6 +190,17 @@ export async function writeTaskProposalsInTx(
                     sql`${taskUpdateProposals.updatedAt} = ${taskUpdateProposals.createdAt}`,
                 ),
             );
+        await tx
+            .delete(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, recordingId),
+                    eq(taskUpdateProposals.userId, ownerUserId),
+                    eq(taskUpdateProposals.state, "obsolete"),
+                    eq(taskUpdateProposals.obsoleteReason, "earlier_statement"),
+                    isNull(taskUpdateProposals.decidedByUserId),
+                ),
+            );
     }
 
     const rejected = new Set(
@@ -454,39 +465,50 @@ export async function writeTaskProposalsInTx(
         );
     }
 
-    const updates = proposals.updates.filter((update) => {
-        const target = openTasks.get(update.taskId);
-        if (!target || existingMentions.has(update.taskId)) return false;
-        const effectiveAt =
-            update.kind === "done"
-                ? target.statusEffectiveAt
-                : target.dueEffectiveAt;
-        return fieldProposalIsLater(
-            statementAt(item.occurredAt, update),
-            effectiveAt,
-        );
-    });
+    const updates = proposals.updates.filter(
+        (update) =>
+            openTasks.has(update.taskId) &&
+            !existingMentions.has(update.taskId),
+    );
     if (updates.length > 0) {
+        const now = new Date();
         await tx
             .insert(taskUpdateProposals)
             .values(
-                updates.map((update) => ({
-                    taskId: update.taskId,
-                    itemId: recordingId,
-                    userId: ownerUserId,
-                    kind: update.kind,
-                    dueDate: update.dueDate,
-                    duePhrase: encryptText(update.duePhrase),
-                    quote: encryptText(update.quote),
-                    evidenceStartMs: update.evidenceStartMs,
-                    evidenceSegmentIndex:
-                        update.evidenceText?.segmentIndex ?? null,
-                    evidenceCharStart: update.evidenceText?.charStart ?? null,
-                    evidenceCharEnd: update.evidenceText?.charEnd ?? null,
-                    evidenceProvenance: update.evidenceProvenance ?? null,
-                    ticked: false,
-                    version: openTasks.get(update.taskId)?.version ?? 0,
-                })),
+                updates.map((update) => {
+                    const statement = statementAt(item.occurredAt, update);
+                    const target = openTasks.get(update.taskId);
+                    const earlier = !fieldProposalIsLater(
+                        statement,
+                        update.kind === "done"
+                            ? target?.statusEffectiveAt
+                            : target?.dueEffectiveAt,
+                    );
+                    return {
+                        taskId: update.taskId,
+                        itemId: recordingId,
+                        userId: ownerUserId,
+                        kind: update.kind,
+                        dueDate: update.dueDate,
+                        duePhrase: encryptText(update.duePhrase),
+                        quote: encryptText(update.quote),
+                        evidenceStartMs: update.evidenceStartMs,
+                        evidenceSegmentIndex:
+                            update.evidenceText?.segmentIndex ?? null,
+                        evidenceCharStart:
+                            update.evidenceText?.charStart ?? null,
+                        evidenceCharEnd: update.evidenceText?.charEnd ?? null,
+                        evidenceProvenance: update.evidenceProvenance ?? null,
+                        state: earlier
+                            ? ("obsolete" as const)
+                            : ("awaiting_source_review" as const),
+                        decidedAt: earlier ? now : null,
+                        decidedByUserId: null,
+                        obsoleteReason: earlier ? "earlier_statement" : null,
+                        ticked: false,
+                        version: target?.version ?? 0,
+                    };
+                }),
             )
             .onConflictDoNothing();
     }

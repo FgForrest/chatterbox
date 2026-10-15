@@ -16,6 +16,7 @@ import {
     chatterItems,
     type EvidenceProvenance,
     mailPendingShares,
+    people,
     recordingFolderAssignments,
     recordingTasks,
     taskMentions,
@@ -121,11 +122,13 @@ interface CandidateTask extends TaskRankingCandidate {
     homeItemId: string;
     homeItemKind: "audio" | "mail";
     homeItemTitle: string;
+    assigneeName: string | null;
     shared: boolean;
 }
 
 const candidateMentionItem = alias(chatterItems, "candidate_mention_item");
 const candidateHomeItem = alias(chatterItems, "candidate_home_item");
+const candidateAssignee = alias(people, "candidate_assignee");
 
 function confirmedSpeakerMap(
     rows: Awaited<ReturnType<typeof getTranscriptSpeakers>>,
@@ -196,6 +199,7 @@ async function scopedCandidates(
             userId: recordingTasks.userId,
             text: recordingTasks.text,
             assigneePersonId: recordingTasks.assigneePersonId,
+            assigneeName: candidateAssignee.displayName,
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: candidateHomeItem.id,
@@ -216,6 +220,10 @@ async function scopedCandidates(
         .innerJoin(
             candidateMentionItem,
             eq(candidateMentionItem.id, taskMentions.itemId),
+        )
+        .leftJoin(
+            candidateAssignee,
+            eq(candidateAssignee.id, recordingTasks.assigneePersonId),
         )
         .where(
             and(
@@ -255,6 +263,9 @@ async function scopedCandidates(
             ...row,
             text: decryptText(row.text),
             duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            assigneeName: row.assigneeName
+                ? decryptText(row.assigneeName)
+                : null,
             homeItemTitle: decryptText(row.homeItemTitle),
         });
     }
@@ -327,6 +338,7 @@ async function unfiledCandidates(
             userId: recordingTasks.userId,
             text: recordingTasks.text,
             assigneePersonId: recordingTasks.assigneePersonId,
+            assigneeName: candidateAssignee.displayName,
             dueDate: recordingTasks.dueDate,
             duePhrase: recordingTasks.duePhrase,
             homeItemId: chatterItems.id,
@@ -340,6 +352,10 @@ async function unfiledCandidates(
         })
         .from(recordingTasks)
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(
+            candidateAssignee,
+            eq(candidateAssignee.id, recordingTasks.assigneePersonId),
+        )
         .where(
             and(
                 eq(recordingTasks.status, "open"),
@@ -361,6 +377,7 @@ async function unfiledCandidates(
         userId: row.userId,
         text: decryptText(row.text),
         assigneePersonId: row.assigneePersonId,
+        assigneeName: row.assigneeName ? decryptText(row.assigneeName) : null,
         dueDate: row.dueDate,
         duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
         homeItemId: row.homeItemId,
@@ -536,6 +553,7 @@ export interface MergeCandidateView {
     text: string;
     dueDate: string | null;
     duePhrase: string | null;
+    assignee: { personId: string; name: string } | null;
     homeItem: {
         id: string;
         kind: "audio" | "mail";
@@ -659,6 +677,13 @@ export async function searchMergeCandidates(
             text: candidate.text,
             dueDate: candidate.dueDate,
             duePhrase: candidate.duePhrase,
+            assignee:
+                candidate.assigneePersonId && candidate.assigneeName
+                    ? {
+                          personId: candidate.assigneePersonId,
+                          name: candidate.assigneeName,
+                      }
+                    : null,
             homeItem: {
                 id: candidate.homeItemId,
                 kind: candidate.homeItemKind,

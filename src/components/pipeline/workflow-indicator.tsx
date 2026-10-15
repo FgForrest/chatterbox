@@ -229,6 +229,12 @@ export function WorkflowIndicator({
             return i18n("Learn review pending; summary made without it");
         }
         if (
+            phase.name === "summary" &&
+            phase.record?.reason === "plaud_tasks"
+        ) {
+            return i18n("Tasks from Plaud's summary");
+        }
+        if (
             phase.name === "taskReview" &&
             (phase.state === "pending" || phase.state === "waiting") &&
             !data.outputs.summary

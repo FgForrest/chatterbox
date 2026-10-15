@@ -11,6 +11,8 @@ import {
     lte,
     ne,
     not,
+    notExists,
+    or,
     type SQL,
     sql,
 } from "drizzle-orm";
@@ -120,8 +122,15 @@ export interface TaskUpdateView {
     duePhrase: string | null;
     quote: string | null;
     evidenceStartMs: number | null;
+    evidenceText: {
+        segmentIndex: number;
+        charStart: number;
+        charEnd: number;
+    } | null;
     /** As on a task proposal of a mail. */
     evidenceProvenance: EvidenceProvenance | null;
+    /** Informational only: a newer statement already set this field. */
+    earlierMention: boolean;
     ticked: boolean;
     version: number;
     task: {
@@ -130,6 +139,7 @@ export interface TaskUpdateView {
         recordingTitle: string;
         text: string;
         dueDate: string | null;
+        duePhrase: string | null;
         assigneeName: string | null;
     };
 }
@@ -375,7 +385,7 @@ export async function listRecordingTasks(
 
     const [updates, matches] = recording.canEdit
         ? await Promise.all([
-              listUpdateProposals(viewer, recordingId),
+              listUpdateProposals(viewer, recordingId, recording.ownerUserId),
               listSuggestedMatches(
                   viewer,
                   recordingId,
@@ -529,6 +539,7 @@ async function listSuggestedMatches(
 async function listUpdateProposals(
     viewer: TaskViewer,
     recordingId: string,
+    ownerUserId: string,
 ): Promise<TaskUpdateView[]> {
     const rows = await db
         .select({
@@ -538,14 +549,23 @@ async function listUpdateProposals(
             duePhrase: taskUpdateProposals.duePhrase,
             quote: taskUpdateProposals.quote,
             evidenceStartMs: taskUpdateProposals.evidenceStartMs,
+            evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
+            evidenceCharStart: taskUpdateProposals.evidenceCharStart,
+            evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+            state: taskUpdateProposals.state,
+            obsoleteReason: taskUpdateProposals.obsoleteReason,
+            decidedByUserId: taskUpdateProposals.decidedByUserId,
             ticked: taskUpdateProposals.ticked,
             version: taskUpdateProposals.version,
             taskId: recordingTasks.id,
             taskRecordingId: recordingTasks.itemId,
             taskText: recordingTasks.text,
             taskDueDate: recordingTasks.dueDate,
+            taskDuePhrase: recordingTasks.duePhrase,
             taskStatus: recordingTasks.status,
+            taskStatusEffectiveAt: recordingTasks.statusEffectiveAt,
+            taskDueEffectiveAt: recordingTasks.dueEffectiveAt,
             recordingTitle: chatterItems.title,
             assigneeName: people.displayName,
         })
@@ -559,31 +579,99 @@ async function listUpdateProposals(
         .where(
             and(
                 eq(taskUpdateProposals.itemId, recordingId),
-                eq(taskUpdateProposals.state, "awaiting_source_review"),
+                eq(taskUpdateProposals.userId, ownerUserId),
+                or(
+                    eq(taskUpdateProposals.state, "awaiting_source_review"),
+                    and(
+                        eq(taskUpdateProposals.state, "obsolete"),
+                        eq(
+                            taskUpdateProposals.obsoleteReason,
+                            "earlier_statement",
+                        ),
+                        isNull(taskUpdateProposals.decidedByUserId),
+                    ),
+                ),
                 isNull(chatterItems.deletedAt),
                 taskVisible(viewer, ANY_TASK_ITEM),
             ),
         )
         .orderBy(asc(taskUpdateProposals.createdAt));
-    return rows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        dueDate: row.dueDate,
-        duePhrase: decryptOptional(row.duePhrase),
-        quote: decryptOptional(row.quote),
-        evidenceStartMs: row.evidenceStartMs,
-        evidenceProvenance: row.evidenceProvenance ?? null,
-        ticked: row.ticked,
-        version: row.version,
-        task: {
-            id: row.taskId,
-            recordingId: row.taskRecordingId,
-            recordingTitle: decryptText(row.recordingTitle),
-            text: decryptText(row.taskText),
-            dueDate: row.taskDueDate,
-            assigneeName: decryptOptional(row.assigneeName),
-        },
-    }));
+    const [[source], mentionRows] = await Promise.all([
+        db
+            .select({ occurredAt: chatterItems.occurredAt })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, recordingId),
+                    eq(chatterItems.userId, ownerUserId),
+                ),
+            )
+            .limit(1),
+        rows.length > 0
+            ? db
+                  .select({
+                      taskId: taskMentions.taskId,
+                      statementAt: taskMentions.statementAt,
+                  })
+                  .from(taskMentions)
+                  .where(
+                      and(
+                          eq(taskMentions.itemId, recordingId),
+                          eq(taskMentions.userId, ownerUserId),
+                          inArray(
+                              taskMentions.taskId,
+                              rows.map((row) => row.taskId),
+                          ),
+                      ),
+                  )
+            : Promise.resolve([]),
+    ]);
+    const statementAt = new Map(
+        mentionRows.map((row) => [row.taskId, row.statementAt] as const),
+    );
+    return rows.map((row) => {
+        const earlierMention =
+            row.state === "obsolete" ||
+            !fieldProposalIsLater(
+                statementAt.get(row.taskId) ??
+                    source?.occurredAt ??
+                    new Date(0),
+                row.kind === "done"
+                    ? row.taskStatusEffectiveAt
+                    : row.taskDueEffectiveAt,
+            );
+        return {
+            id: row.id,
+            kind: row.kind,
+            dueDate: row.dueDate,
+            duePhrase: decryptOptional(row.duePhrase),
+            quote: decryptOptional(row.quote),
+            evidenceStartMs: row.evidenceStartMs,
+            evidenceText:
+                row.evidenceSegmentIndex !== null &&
+                row.evidenceCharStart !== null &&
+                row.evidenceCharEnd !== null
+                    ? {
+                          segmentIndex: row.evidenceSegmentIndex,
+                          charStart: row.evidenceCharStart,
+                          charEnd: row.evidenceCharEnd,
+                      }
+                    : null,
+            evidenceProvenance: row.evidenceProvenance ?? null,
+            earlierMention,
+            ticked: earlierMention ? false : row.ticked,
+            version: row.version,
+            task: {
+                id: row.taskId,
+                recordingId: row.taskRecordingId,
+                recordingTitle: decryptText(row.recordingTitle),
+                text: decryptText(row.taskText),
+                dueDate: row.taskDueDate,
+                duePhrase: decryptOptional(row.taskDuePhrase),
+                assigneeName: decryptOptional(row.assigneeName),
+            },
+        };
+    });
 }
 
 interface LockedTask {
@@ -1286,7 +1374,7 @@ export async function mergeTaskIntoTask(
     sourceTaskId: string,
     targetTaskId: string,
     options: { reviewItemId?: string } = {},
-): Promise<TaskView> {
+): Promise<TaskView & { mergeOwnerNotified: boolean }> {
     if (sourceTaskId === targetTaskId) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -1415,7 +1503,11 @@ export async function mergeTaskIntoTask(
     if (changed.targetItemId !== changed.sourceItemId) {
         await tasksChanged(changed.targetOwnerUserId, changed.targetItemId);
     }
-    return requireTaskView(viewer, targetTaskId);
+    return {
+        ...(await requireTaskView(viewer, targetTaskId)),
+        mergeOwnerNotified:
+            changed.sourceOwnerUserId !== changed.targetOwnerUserId,
+    };
 }
 
 /**
@@ -1613,7 +1705,11 @@ export interface AcceptResult {
 export async function acceptReview(
     viewer: TaskViewer,
     recordingId: string,
-    shown?: { proposals: readonly string[]; updates: readonly string[] },
+    shown?: {
+        proposals: readonly string[];
+        updates: readonly string[];
+        matches?: readonly string[];
+    },
 ): Promise<AcceptResult> {
     const result = await db.transaction(async (tx) => {
         const [source] = await tx
@@ -1641,7 +1737,7 @@ export async function acceptReview(
                     eq(recordingTasks.status, "proposed"),
                 ),
             );
-        const updates = await tx
+        const updateRows = await tx
             .select({
                 id: taskUpdateProposals.id,
                 taskId: taskUpdateProposals.taskId,
@@ -1650,15 +1746,41 @@ export async function acceptReview(
                 duePhrase: taskUpdateProposals.duePhrase,
                 ticked: taskUpdateProposals.ticked,
                 version: taskUpdateProposals.version,
+                state: taskUpdateProposals.state,
+                obsoleteReason: taskUpdateProposals.obsoleteReason,
+                decidedByUserId: taskUpdateProposals.decidedByUserId,
             })
             .from(taskUpdateProposals)
             .where(
                 and(
                     eq(taskUpdateProposals.itemId, recordingId),
                     eq(taskUpdateProposals.userId, recording.ownerUserId),
-                    eq(taskUpdateProposals.state, "awaiting_source_review"),
+                    or(
+                        eq(taskUpdateProposals.state, "awaiting_source_review"),
+                        and(
+                            eq(taskUpdateProposals.state, "obsolete"),
+                            eq(
+                                taskUpdateProposals.obsoleteReason,
+                                "earlier_statement",
+                            ),
+                            isNull(taskUpdateProposals.decidedByUserId),
+                        ),
+                    ),
                 ),
             );
+        const systemUpdateIds = new Set(
+            updateRows
+                .filter(
+                    (row) =>
+                        row.state === "obsolete" &&
+                        row.obsoleteReason === "earlier_statement" &&
+                        row.decidedByUserId === null,
+                )
+                .map((row) => row.id),
+        );
+        const updates = updateRows.filter(
+            (row) => row.state === "awaiting_source_review",
+        );
         const suggestedMatches = await tx
             .select({
                 id: taskMentions.id,
@@ -1684,9 +1806,14 @@ export async function acceptReview(
                 proposals.map((row) => row.id),
             ) ||
                 !sameIds(
-                    shown.updates,
+                    shown.updates.filter((id) => !systemUpdateIds.has(id)),
                     updates.map((row) => row.id),
-                ))
+                ) ||
+                (shown.matches !== undefined &&
+                    !sameIds(
+                        shown.matches,
+                        suggestedMatches.map((row) => row.id),
+                    )))
         ) {
             throw new AppError(
                 ErrorCode.CONFLICT,
@@ -1983,6 +2110,33 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
                         id: taskMentions.itemId,
                         userId: taskMentions.userId,
                     }),
+                    notExists(
+                        db
+                            .select({ id: taskUpdateProposals.id })
+                            .from(taskUpdateProposals)
+                            .where(
+                                and(
+                                    eq(
+                                        taskUpdateProposals.itemId,
+                                        taskMentions.itemId,
+                                    ),
+                                    eq(
+                                        taskUpdateProposals.userId,
+                                        taskMentions.userId,
+                                    ),
+                                    eq(
+                                        taskUpdateProposals.taskId,
+                                        taskMentions.taskId,
+                                    ),
+                                    eq(taskUpdateProposals.state, "obsolete"),
+                                    eq(
+                                        taskUpdateProposals.obsoleteReason,
+                                        "earlier_statement",
+                                    ),
+                                    isNull(taskUpdateProposals.decidedByUserId),
+                                ),
+                            ),
+                    ),
                 ),
             ),
     ]);

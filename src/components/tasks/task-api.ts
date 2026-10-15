@@ -13,6 +13,7 @@ export class TaskRequestError extends Error {
     constructor(
         message: string,
         readonly conflict: boolean,
+        readonly status: number,
     ) {
         super(message);
     }
@@ -33,7 +34,11 @@ async function send<T>(
     });
     if (!response.ok) {
         const body = await parseApiError(response);
-        throw new TaskRequestError(body.error, response.status === 409);
+        throw new TaskRequestError(
+            body.error,
+            response.status === 409,
+            response.status,
+        );
     }
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
@@ -85,7 +90,7 @@ export function mergeTaskProposals(
 /** Accept the review the reviewer saw: its proposals' and follow-ups' ids. */
 export function acceptTaskReview(
     recordingId: string,
-    shown: { proposals: string[]; updates: string[] },
+    shown: { proposals: string[]; updates: string[]; matches: string[] },
 ): Promise<AcceptResult> {
     return send(recordingUrl(recordingId, "/accept"), {
         method: "POST",
@@ -103,6 +108,27 @@ export function tickTaskUpdate(
         recordingUrl(recordingId, `/updates/${encodeURIComponent(updateId)}`),
         { method: "PATCH", json: { ticked, version } },
     );
+}
+
+export function mergeTaskIntoTarget(
+    sourceTaskId: string,
+    targetTaskId: string,
+): Promise<TaskView & { mergeOwnerNotified?: boolean }> {
+    return send(`/api/tasks/${encodeURIComponent(sourceTaskId)}/merge`, {
+        method: "POST",
+        json: { targetTaskId },
+    });
+}
+
+export function mergeProposalIntoTarget(
+    recordingId: string,
+    sourceTaskId: string,
+    targetTaskId: string,
+): Promise<TaskView & { mergeOwnerNotified?: boolean }> {
+    return send(recordingUrl(recordingId, "/merge"), {
+        method: "POST",
+        json: { sourceTaskId, targetTaskId },
+    });
 }
 
 /** Tell whatever counts tasks (the nav badges) to count again. */

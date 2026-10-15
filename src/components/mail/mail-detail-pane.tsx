@@ -11,8 +11,9 @@ import {
     ShieldAlert,
     Trash2,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
@@ -83,6 +84,22 @@ function withRole(
     );
 }
 
+function evidenceRange(params: URLSearchParams) {
+    const segmentIndex = Number(params.get("evidenceSegment"));
+    const charStart = Number(params.get("evidenceStart"));
+    const charEnd = Number(params.get("evidenceEnd"));
+    if (
+        !Number.isInteger(segmentIndex) ||
+        !Number.isInteger(charStart) ||
+        !Number.isInteger(charEnd) ||
+        charStart < 0 ||
+        charEnd <= charStart
+    ) {
+        return null;
+    }
+    return { segmentIndex, charStart, charEnd };
+}
+
 /**
  * A mail in the Chatter pile: who it is from and to, its own text, its
  * signature, the quoted and forwarded messages (folded), attachments as
@@ -107,6 +124,7 @@ export function MailDetailPane({
     canCurate = false,
 }: Props) {
     const i18n = useExtracted();
+    const searchParams = useSearchParams();
     const locale = useLocale();
     const confirm = useConfirm();
     const [detail, setDetail] = useState<MailDetailResponse | null>(null);
@@ -114,6 +132,17 @@ export function MailDetailPane({
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
+    const highlight = useMemo(
+        () => evidenceRange(searchParams),
+        [searchParams],
+    );
+
+    useEffect(() => {
+        if (!detail || !highlight) return;
+        document
+            .getElementById("mail-evidence-highlight")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [detail, highlight]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -569,9 +598,35 @@ export function MailDetailPane({
                                 const author = segment.participantRef
                                     ? byRef.get(segment.participantRef)
                                     : undefined;
+                                const range =
+                                    highlight?.segmentIndex === segment.index &&
+                                    highlight.charEnd <= segment.text.length
+                                        ? highlight
+                                        : null;
                                 const text = (
                                     <p className="whitespace-pre-wrap break-words text-sm">
-                                        {segment.text}
+                                        {range ? (
+                                            <>
+                                                {segment.text.slice(
+                                                    0,
+                                                    range.charStart,
+                                                )}
+                                                <mark
+                                                    id="mail-evidence-highlight"
+                                                    className="rounded bg-amber-200 px-0.5 text-inherit dark:bg-amber-700"
+                                                >
+                                                    {segment.text.slice(
+                                                        range.charStart,
+                                                        range.charEnd,
+                                                    )}
+                                                </mark>
+                                                {segment.text.slice(
+                                                    range.charEnd,
+                                                )}
+                                            </>
+                                        ) : (
+                                            segment.text
+                                        )}
                                     </p>
                                 );
                                 if (segment.role === "body") {
@@ -612,6 +667,7 @@ export function MailDetailPane({
                                         style={{
                                             marginLeft: `${Math.max(0, segment.depth - 1) * 12}px`,
                                         }}
+                                        open={range ? true : undefined}
                                     >
                                         <summary className="cursor-pointer text-xs text-muted-foreground">
                                             {label}

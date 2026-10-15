@@ -10,6 +10,7 @@ import {
     announceTasksChanged,
     changeTask,
     fetchRecordingTasks,
+    mergeProposalIntoTarget,
     mergeTaskProposals,
     TaskRequestError,
     tickTaskUpdate,
@@ -17,6 +18,7 @@ import {
 import type {
     RecordingTasks,
     TaskChange,
+    TaskMatchView,
     TaskUpdateView,
     TaskView,
 } from "@/lib/tasks/tasks";
@@ -27,8 +29,40 @@ export type TaskRowChange = (
     optimistic: Partial<TaskView>,
 ) => void;
 
+function reviewEvidenceKey(value: {
+    quote: string | null;
+    evidenceStartMs: number | null;
+    evidenceText: {
+        segmentIndex: number;
+        charStart: number;
+        charEnd: number;
+    } | null;
+}) {
+    return JSON.stringify([
+        value.quote,
+        value.evidenceStartMs,
+        value.evidenceText?.segmentIndex ?? null,
+        value.evidenceText?.charStart ?? null,
+        value.evidenceText?.charEnd ?? null,
+    ]);
+}
+
+function waitingDecisions(data: RecordingTasks): number {
+    const ambiguousKeys = new Set(
+        data.matches.filter((match) => match.ambiguous).map(reviewEvidenceKey),
+    );
+    const exactMatches = data.matches.filter(
+        (match) => !match.ambiguous,
+    ).length;
+    const newTasks = data.proposals.filter(
+        (proposal) => !ambiguousKeys.has(reviewEvidenceKey(proposal)),
+    ).length;
+    return data.updates.length + exactMatches + ambiguousKeys.size + newTasks;
+}
+
 /** One recording's tasks and the writes on them, shared by its views. */
 export interface RecordingTasksState {
+    itemId: string;
     data: RecordingTasks | null;
     failed: boolean;
     /** The reviewer has proposals or follow-ups to decide on. */
@@ -44,6 +78,8 @@ export interface RecordingTasksState {
     add: (status: "proposed" | "open") => Promise<void>;
     merge: (ids: readonly string[]) => Promise<boolean>;
     tickUpdate: (update: TaskUpdateView, ticked: boolean) => void;
+    tickMatch: (match: TaskMatchView, ticked: boolean) => void;
+    mergeInto: (sourceTaskId: string, targetTaskId: string) => Promise<boolean>;
     /** Accept what is ticked; true when the review is done. */
     accept: () => Promise<boolean>;
 }
@@ -76,6 +112,9 @@ export function useRecordingTasks(
                 ),
                 ...loaded.updates.map(
                     (row) => [`update:${row.id}`, row.version] as const,
+                ),
+                ...loaded.matches.map(
+                    (row) => [`match:${row.id}`, row.version] as const,
                 ),
             ]);
             setData(loaded);
@@ -223,8 +262,60 @@ export function useRecordingTasks(
         void enqueue(key, async () => {
             const version = versions.current.get(key) ?? update.version;
             await tickTaskUpdate(recordingId, update.id, ticked, version);
-            versions.current.set(key, version + 1);
         });
+    };
+
+    const tickMatch = (match: TaskMatchView, ticked: boolean) => {
+        const key = `match:${match.id}`;
+        setData((current) =>
+            current
+                ? {
+                      ...current,
+                      matches: current.matches.map((row) =>
+                          row.id === match.id ? { ...row, ticked } : row,
+                      ),
+                  }
+                : current,
+        );
+        void enqueue(key, async () => {
+            await tickTaskUpdate(
+                recordingId,
+                match.id,
+                ticked,
+                versions.current.get(key) ?? match.version,
+            );
+        });
+    };
+
+    const mergeInto = async (sourceTaskId: string, targetTaskId: string) => {
+        const snapshot = dataRef.current;
+        setData((current) =>
+            current
+                ? {
+                      ...current,
+                      proposals: current.proposals.filter(
+                          (row) => row.id !== sourceTaskId,
+                      ),
+                      matches: current.matches.filter(
+                          (row) => row.candidate.id !== targetTaskId,
+                      ),
+                  }
+                : current,
+        );
+        try {
+            await Promise.all(pending.current.values());
+            await mergeProposalIntoTarget(
+                recordingId,
+                sourceTaskId,
+                targetTaskId,
+            );
+            announceTasksChanged();
+            return true;
+        } catch (error) {
+            setData(snapshot);
+            await failure(error);
+            return false;
+        }
     };
 
     const accept = async () => {
@@ -236,6 +327,7 @@ export function useRecordingTasks(
             const result = await acceptTaskReview(recordingId, {
                 proposals: shown?.proposals.map((row) => row.id) ?? [],
                 updates: shown?.updates.map((row) => row.id) ?? [],
+                matches: shown?.matches.map((row) => row.id) ?? [],
             });
             toast.success(
                 i18n(
@@ -272,8 +364,9 @@ export function useRecordingTasks(
         }
     };
 
-    const waiting = data ? data.proposals.length + data.updates.length : 0;
+    const waiting = data ? waitingDecisions(data) : 0;
     return {
+        itemId: recordingId,
         data,
         failed,
         reviewing: Boolean(data?.canEdit) && waiting > 0,
@@ -283,6 +376,8 @@ export function useRecordingTasks(
         add,
         merge,
         tickUpdate,
+        tickMatch,
+        mergeInto,
         accept,
     };
 }

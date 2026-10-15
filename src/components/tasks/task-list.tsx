@@ -5,9 +5,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
 import {
     announceTasksChanged,
     changeTask,
+    mergeTaskIntoTarget,
     TaskRequestError,
 } from "@/components/tasks/task-api";
 import { localToday } from "@/components/tasks/task-fields";
@@ -71,6 +73,36 @@ export function TaskList({ organization }: { organization: boolean }) {
 
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
     const [folders, setFolders] = useState<RecordingFolder[]>([]);
+    const localizedMergeRule = (message: string) => {
+        switch (message) {
+            case "Merge rule: both tasks must be visible to the person merging":
+                return i18n("Merge rule: you must be able to see both tasks.");
+            case "Merge rule: the target must be an open task":
+                return i18n("Merge rule: the target must be an open task.");
+            case "Merge rule: an Organization task can be merged only into an Organization task":
+                return i18n(
+                    "Merge rule: an Organization task can only join another Organization task.",
+                );
+            case "Merge rule: merging someone else's task into your own requires a curator":
+                return i18n(
+                    "Merge rule: a curator must merge someone else's task into yours.",
+                );
+            case "Merge rule: only the home owner or a curator may merge that owner's tasks":
+                return i18n(
+                    "Merge rule: only the task's home owner or a curator may merge it.",
+                );
+            case "Merge rule: only the merged task's home owner may attach it to someone else's task":
+                return i18n(
+                    "Merge rule: only the merged task's home owner may attach it to someone else's task.",
+                );
+            case "Merge rule: a private task can join an Organization task only after its home item is shared":
+                return i18n(
+                    "Merge rule: share the private task's home item before merging it into an Organization task.",
+                );
+            default:
+                return message;
+        }
+    };
 
     const setParam = (key: string, value: string | null) => {
         const next = new URLSearchParams(params.toString());
@@ -182,6 +214,30 @@ export function TaskList({ organization }: { organization: boolean }) {
         pending.current.set(task.id, run);
     };
 
+    const merge = async (task: TaskListItem, targetTaskId: string) => {
+        const snapshot = tasks;
+        setTasks(
+            (current) => current?.filter((row) => row.id !== task.id) ?? null,
+        );
+        try {
+            const result = await mergeTaskIntoTarget(task.id, targetTaskId);
+            announceTasksChanged();
+            return { ownerNotified: result.mergeOwnerNotified };
+        } catch (error) {
+            setTasks(snapshot);
+            if (error instanceof TaskRequestError && error.status === 403) {
+                toast.error(localizedMergeRule(error.message));
+            } else {
+                toast.error(
+                    error instanceof Error && error.message
+                        ? error.message
+                        : i18n("Could not merge the tasks"),
+                );
+            }
+            return false;
+        }
+    };
+
     const tabs = organization
         ? []
         : [
@@ -238,6 +294,8 @@ export function TaskList({ organization }: { organization: boolean }) {
                     </nav>
                 )}
             </div>
+
+            <RoutedProposalsInbox />
 
             <div className="flex flex-wrap items-center gap-2">
                 <Select
@@ -368,6 +426,9 @@ export function TaskList({ organization }: { organization: boolean }) {
                             organizationOnly={task.recording.view === "org"}
                             onChange={(change, optimistic) =>
                                 update(task, change, optimistic)
+                            }
+                            onMerge={(targetTaskId) =>
+                                merge(task, targetTaskId)
                             }
                         />
                     ))}

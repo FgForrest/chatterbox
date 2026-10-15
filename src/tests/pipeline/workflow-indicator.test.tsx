@@ -79,6 +79,26 @@ describe("workflow indicator", () => {
         ).toContain(label);
     });
 
+    it("names Plaud action items in the Summary step", () => {
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    phases: {
+                        summary: {
+                            state: "done",
+                            reason: "plaud_tasks",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                })}
+            />,
+        );
+        expect(
+            screen.getByText("Summary").parentElement?.textContent,
+        ).toContain("Tasks from Plaud's summary");
+    });
+
     it("renders waiting actions and the Learn timeout copy", async () => {
         vi.stubGlobal(
             "ResizeObserver",
