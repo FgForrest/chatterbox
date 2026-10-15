@@ -17,7 +17,10 @@ import {
     folderDefaultProfiles,
     itemProcessing,
     learnRuns,
+    mailContents,
+    mailMessages,
     mailPendingShares,
+    processingProfileRevisions,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -29,6 +32,8 @@ import {
 import { addRecordingToFolder } from "@/lib/folders/folders";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import * as summaryRefresh from "@/lib/learn/summary-refresh";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { planAdvance } from "@/lib/pipeline/plan";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import {
     PIPELINE_ADVANCE_JOB_KIND,
@@ -38,6 +43,7 @@ import {
     resolveDefaultProfile,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
 import { insertRecordings } from "@/tests/integration/items";
 import {
     createMigratedTestDatabase,
@@ -86,6 +92,9 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/lib/encryption", () => ({
+    decrypt: vi.fn((value: string) => value),
+}));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 vi.mock("@/lib/encryption/fields", () => ({
     decryptJsonField: vi.fn((value: unknown) => value),
@@ -97,6 +106,7 @@ vi.mock("@/lib/mail/auto-process", () => ({
     autoLearnMail: mocks.autoLearnMail,
 }));
 vi.mock("@/lib/recordings/title-job", () => ({
+    TITLE_JOB_KIND: "title.generate",
     enqueueTitleJob: mocks.enqueueTitleJob,
 }));
 vi.mock("@/lib/posthog-server", () => ({
@@ -107,12 +117,14 @@ vi.mock("@/lib/summary/auto-summary", () => ({
     queueAutoSummary: mocks.queueAutoSummary,
 }));
 vi.mock("@/lib/topics/topics-job", () => ({
+    TOPICS_JOB_KIND: "topics",
     queueAutoTopics: mocks.queueAutoTopics,
 }));
 
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import {
     sweepAutomaticTranscriptionRetries,
+    sweepOrphanedPipelineSteps,
     sweepStalledPipelines,
 } from "@/lib/pipeline/sweep";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
@@ -680,11 +692,13 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             USER_ID,
             ITEM_ID,
             "riffado",
+            { strict: true },
         );
         expect(mocks.queueAutoSummary).toHaveBeenLastCalledWith(
             USER_ID,
             ITEM_ID,
             null,
+            { strict: true },
         );
     });
 
@@ -1161,6 +1175,232 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+    });
+
+    it("queues a mail summary pinned to an Organization provider for a member without keys", async () => {
+        const mailId = "mail-with-org-provider";
+        const orgUserId = "pipeline-org-provider-owner";
+        const credentialId = "pipeline-org-summary-provider";
+        await db()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, USER_ID));
+        await db().insert(users).values({
+            id: orgUserId,
+            email: "org@example.test",
+            role: "org",
+        });
+        await db().insert(apiCredentials).values({
+            id: credentialId,
+            userId: orgUserId,
+            provider: "openai",
+            apiKey: "organization-key",
+            defaultModel: "organization-model",
+            isDefaultEnhancement: true,
+        });
+        const profile = await resolveDefaultProfile(USER_ID, "mail");
+        const settings = defaultProfileSettings("mail");
+        settings.steps.summary = {
+            ...settings.steps.summary,
+            automatic: true,
+            provider: { credentialId, scope: "organization" },
+        };
+        await db()
+            .update(processingProfileRevisions)
+            .set({ settings: JSON.stringify(settings) })
+            .where(eq(processingProfileRevisions.id, profile.revisionId));
+        await db().insert(chatterItems).values({
+            id: mailId,
+            userId: USER_ID,
+            kind: "mail",
+            title: "Organization provider mail",
+            occurredAt: new Date(),
+        });
+        await db().insert(mailMessages).values({
+            id: mailId,
+            userId: USER_ID,
+            rawHash: "org-provider-mail-hash",
+            receivedAt: new Date(),
+            sizeBytes: 100,
+            auth: {},
+            senderVerified: true,
+        });
+        await db()
+            .insert(mailContents)
+            .values({
+                id: `content-${mailId}`,
+                itemId: mailId,
+                userId: USER_ID,
+                revision: 1,
+                parserVersion: 1,
+                segments: [],
+            });
+        await db().insert(recordingFolderAssignments).values({
+            userId: USER_ID,
+            itemId: mailId,
+            folderId: "pipeline-folder",
+        });
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: mailId,
+                userId: USER_ID,
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+                requestedGeneration: 1,
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 1,
+                        at: new Date().toISOString(),
+                    },
+                },
+            });
+
+        const mailFacts = await gatherFacts(mailId, "private", USER_ID);
+        expect(mailFacts.hasEnhancementCredential).toBe(false);
+        expect(mailFacts.stepAvailability?.summary).toBe("available");
+        expect(mailFacts.profile?.automatic.summary).toBe(true);
+        expect(planAdvance(mailFacts).actions).toContainEqual({
+            type: "queueSummary",
+            presetId: null,
+            strict: true,
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext(mailId, "categorized"));
+
+        expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
+            USER_ID,
+            mailId,
+            null,
+            { strict: true },
+        );
+    });
+
+    it("settles running pipeline steps whose terminal jobs were buried", async () => {
+        const steps = ["summary", "title", "topics"] as const;
+        const old = new Date(Date.now() - 31 * 60_000);
+        const failedAt = new Date(old.getTime() + 60_000);
+        const transcribeItem = "orphaned-transcribe";
+        await seedAudio(transcribeItem);
+        await db()
+            .delete(transcriptions)
+            .where(eq(transcriptions.recordingId, transcribeItem));
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 0,
+                        at: old.toISOString(),
+                    },
+                    transcribe: {
+                        state: "running",
+                        reason: "started",
+                        automatic: true,
+                        generation: 1,
+                        at: old.toISOString(),
+                    },
+                },
+                requestedGeneration: 1,
+                processedGeneration: 1,
+            })
+            .where(eq(itemProcessing.itemId, transcribeItem));
+
+        for (const step of steps) {
+            const itemId = `orphaned-${step}`;
+            await seedAudio(itemId);
+            await db()
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            reason: "categorized",
+                            generation: 0,
+                            at: old.toISOString(),
+                        },
+                        summary: {
+                            state: "pending",
+                            reason: "requested",
+                            generation: 1,
+                            at: old.toISOString(),
+                            steps: {
+                                [step]: {
+                                    contentId: `transcription-${itemId}`,
+                                    contentRevision: 1,
+                                    generation: 1,
+                                    state: "running",
+                                    reason: "started",
+                                    at: old.toISOString(),
+                                },
+                            },
+                        },
+                    },
+                    requestedGeneration: 1,
+                    processedGeneration: 1,
+                })
+                .where(eq(itemProcessing.itemId, itemId));
+        }
+
+        await db()
+            .insert(asyncJobs)
+            .values([
+                {
+                    userId: USER_ID,
+                    kind: TRANSCRIPTION_JOB_KIND,
+                    subjectId: transcribeItem,
+                    payload: {
+                        recordingId: transcribeItem,
+                        trigger: "pipeline",
+                        force: false,
+                    },
+                    status: "failed",
+                    errorCode: "TRANSCRIPTION_CRASHED",
+                    completedAt: failedAt,
+                },
+                ...steps.map((step) => ({
+                    userId: USER_ID,
+                    kind:
+                        step === "summary"
+                            ? "summary"
+                            : step === "title"
+                              ? "title.generate"
+                              : "topics",
+                    subjectId: `orphaned-${step}`,
+                    payload: {
+                        recordingId: `orphaned-${step}`,
+                        trigger: "auto",
+                        ...(step === "topics" ? { source: "riffado" } : {}),
+                    },
+                    status: "failed" as const,
+                    errorCode: `${step.toUpperCase()}_CRASHED`,
+                    completedAt: failedAt,
+                })),
+            ]);
+
+        await expect(sweepOrphanedPipelineSteps()).resolves.toBe(4);
+        await expect(sweepOrphanedPipelineSteps()).resolves.toBe(0);
+        expect(
+            (await processing(transcribeItem))?.phases.transcribe,
+        ).toMatchObject({
+            state: "failed",
+            reason: "TRANSCRIPTION_CRASHED",
+            automatic: true,
+        });
+        for (const step of steps) {
+            expect(
+                (await processing(`orphaned-${step}`))?.phases.summary?.steps?.[
+                    step
+                ],
+            ).toMatchObject({
+                state: "failed",
+                reason: `${step.toUpperCase()}_CRASHED`,
+            });
+        }
     });
 
     it("retries an old automatic transcription failure within the daily bound", async () => {

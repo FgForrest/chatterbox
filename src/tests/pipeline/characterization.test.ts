@@ -779,11 +779,13 @@ describe("transcribeRecording post-write triggers", () => {
             USER_ID,
             ITEM_ID,
             "riffado",
+            { strict: true },
         );
         expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
             USER_ID,
             ITEM_ID,
             null,
+            { strict: true },
         );
         expect(mocks.enqueueTitleJob.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0,
@@ -908,21 +910,24 @@ describe("processNewMail triggers", () => {
             USER_ID,
             ITEM_ID,
             null,
+            { strict: true },
         );
         expect(mocks.autoLearnMail).not.toHaveBeenCalled();
     });
 
-    it("records the real skipped outcome when the Learn rate limit refuses", async () => {
+    it("defers the pipeline when the Learn rate limit refuses", async () => {
         mountMail({ autoLearn: true });
         mocks.autoLearnMail.mockResolvedValue({
-            status: "skipped",
-            reason: "rate_limited",
+            status: "deferred",
+            delayMs: 60_000,
         });
 
-        await processMailAndAdvance();
+        await expect(processMailAndAdvance()).rejects.toThrow(
+            "hourly cap on automatic Learn is full",
+        );
 
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
-        expect(mocks.updatePhaseInTx).toHaveBeenCalledWith(
+        expect(mocks.updatePhaseInTx).not.toHaveBeenCalledWith(
             expect.anything(),
             ITEM_ID,
             "private",
@@ -962,6 +967,7 @@ describe("processNewMail triggers", () => {
             USER_ID,
             ITEM_ID,
             null,
+            { strict: true },
         );
         expect(mocks.startLearnRun).not.toHaveBeenCalled();
     });
@@ -1001,6 +1007,7 @@ describe("processNewMail triggers", () => {
                 USER_ID,
                 ITEM_ID,
                 null,
+                { strict: true },
             );
         }
         expect(mocks.autoLearnMail).toHaveBeenCalledTimes(expectedLearnCalls);

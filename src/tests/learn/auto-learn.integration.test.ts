@@ -478,7 +478,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await kinds()).toEqual([]);
     });
 
-    it("refuses hosted, shared, and rate-limited automatic Learn", async () => {
+    it("refuses hosted and shared Learn, but defers rate-limited work", async () => {
         mockEnv.IS_HOSTED = true;
         await expect(
             startAutomaticLearn({
@@ -537,7 +537,10 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                 source: "riffado",
                 timed: true,
             }),
-        ).resolves.toEqual({ status: "skipped", reason: "rate_limited" });
+        ).resolves.toEqual({
+            status: "deferred",
+            delayMs: expect.any(Number),
+        });
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual([]);
     });

@@ -26,6 +26,15 @@ export interface AutomaticTranscriptionRetryRow
     requestedGeneration: number;
 }
 
+export interface OrphanedPipelineStepRow extends Record<string, unknown> {
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+    phase: "transcribe" | "summary";
+    step: "summary" | "title" | "topics" | null;
+    errorCode: string;
+}
+
 /** Increment one owner-scoped processing request, creating its row if needed. */
 export async function incrementProcessingRequestInTx(
     tx: Tx,
@@ -287,6 +296,118 @@ export async function listAutomaticTranscriptionRetryRows(
                 and async_jobs.completed_at >= now() - interval '24 hours'
           ) < 3
         order by (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz asc
+        limit ${limit}
+    `);
+    return rows;
+}
+
+/** Running pipeline steps whose worker job ended without settling the phase. */
+export async function listOrphanedPipelineStepRows(
+    limit: number,
+): Promise<OrphanedPipelineStepRow[]> {
+    const rows = await db.execute<OrphanedPipelineStepRow>(sql`
+        select *
+        from (
+            select
+                item_processing.item_id as "itemId",
+                item_processing.user_id as "userId",
+                item_processing.view as "view",
+                'transcribe'::text as phase,
+                null::text as step,
+                coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED') as "errorCode",
+                failed.completed_at as failed_at
+            from item_processing
+            cross join lateral (
+                select async_jobs.error_code, async_jobs.completed_at
+                from async_jobs
+                where async_jobs.user_id = item_processing.user_id
+                  and async_jobs.kind = 'transcription'
+                  and async_jobs.subject_id = case
+                        when item_processing.view = 'org'
+                            then 'org:' || item_processing.item_id
+                        else item_processing.item_id
+                      end
+                  and async_jobs.status = 'failed'
+                  and async_jobs.payload ->> 'trigger' <> 'manual'
+                  and async_jobs.completed_at >=
+                        (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz
+                order by async_jobs.completed_at desc, async_jobs.created_at desc
+                limit 1
+            ) failed
+            where item_processing.phases -> 'transcribe' ->> 'state' = 'running'
+              and coalesce(
+                    (item_processing.phases -> 'transcribe' ->> 'automatic')::boolean,
+                    false
+                  )
+              and not exists (
+                  select 1
+                  from async_jobs
+                  where async_jobs.user_id = item_processing.user_id
+                    and async_jobs.kind = 'transcription'
+                    and async_jobs.subject_id = case
+                          when item_processing.view = 'org'
+                              then 'org:' || item_processing.item_id
+                          else item_processing.item_id
+                        end
+                    and async_jobs.status in ('pending', 'processing')
+              )
+
+            union all
+
+            select
+                item_processing.item_id as "itemId",
+                item_processing.user_id as "userId",
+                item_processing.view as "view",
+                'summary'::text as phase,
+                summary_step.step,
+                coalesce(failed.error_code, 'JOB_STALE_EXHAUSTED') as "errorCode",
+                failed.completed_at as failed_at
+            from item_processing
+            cross join (
+                values
+                    ('summary'::text, 'summary'::text),
+                    ('title'::text, 'title.generate'::text),
+                    ('topics'::text, 'topics'::text)
+            ) summary_step(step, job_kind)
+            cross join lateral (
+                select async_jobs.error_code, async_jobs.completed_at
+                from async_jobs
+                where async_jobs.user_id = item_processing.user_id
+                  and async_jobs.kind = summary_step.job_kind
+                  and async_jobs.subject_id = case
+                        when item_processing.view = 'org'
+                            then 'org:' || item_processing.item_id
+                        else item_processing.item_id
+                      end
+                  and async_jobs.status = 'failed'
+                  and (
+                      summary_step.step = 'title'
+                      or async_jobs.payload ->> 'trigger' <> 'manual'
+                  )
+                  and async_jobs.completed_at >=
+                        (item_processing.phases -> 'summary' ->> 'at')::timestamptz
+                order by async_jobs.completed_at desc, async_jobs.created_at desc
+                limit 1
+            ) failed
+            where item_processing.phases -> 'summary' -> 'steps' -> summary_step.step is not null
+              and coalesce(
+                    item_processing.phases -> 'summary' -> 'steps' -> summary_step.step ->> 'state',
+                    'pending'
+                  ) not in ('done', 'failed', 'skipped', 'outdated')
+              and not exists (
+                  select 1
+                  from async_jobs
+                  where async_jobs.user_id = item_processing.user_id
+                    and async_jobs.kind = summary_step.job_kind
+                    and async_jobs.subject_id = case
+                          when item_processing.view = 'org'
+                              then 'org:' || item_processing.item_id
+                          else item_processing.item_id
+                        end
+                    and async_jobs.status in ('pending', 'processing')
+              )
+        ) orphaned
+        order by failed_at asc
         limit ${limit}
     `);
     return rows;

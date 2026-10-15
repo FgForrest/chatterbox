@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
+import { markSummaryStepFailed } from "@/lib/pipeline/state";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import { readTitleInput } from "@/lib/recordings/title-input";
@@ -24,6 +25,16 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
     timeoutMs: 5 * 60 * 1000,
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseTitleJobPayload,
+
+    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
+        await markSummaryStepFailed({
+            itemId: payload.recordingId,
+            userId,
+            view: "private",
+            step: "title",
+            errorCode,
+        });
+    },
 
     async run({ userId, payload }): Promise<JobResult> {
         // A newer transcript is held for Learn: its release titles it.

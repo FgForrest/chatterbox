@@ -25,7 +25,7 @@ import {
     type TestPostgresDatabase,
 } from "@/tests/integration/postgres";
 
-const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
+const { dbProxy, dbRef, mockEnv, authzState } = vi.hoisted(() => {
     const ref: { current: Record<PropertyKey, unknown> | null } = {
         current: null,
     };
@@ -51,18 +51,31 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             IS_HOSTED: false,
             SELF_HOST_MODE: "shared" as const,
             ORG_ACCOUNT_EMAIL: "org@example.test",
-            ORG_ACCOUNT_PASSWORD: "organization-password",
+            ORG_ACCOUNT_PASSWORD: "organization-password" as string | undefined,
             ORG_ACCOUNT_NAME: undefined as string | undefined,
             ENCRYPTION_KEY:
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
             DATABASE_URL: "postgres://unused",
+            AUTHZ_MODE: "local" as "local" | "idp",
         },
+        authzState: { holderMayUse: true },
     };
 });
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
+vi.mock("@/lib/authz/access-state", () => ({
+    holderAccess: vi.fn(async () =>
+        authzState.holderMayUse
+            ? {
+                  ok: true,
+                  capabilities: new Set(["use"]),
+                  verifiedAt: new Date(),
+              }
+            : { ok: false, reason: "not-granted" },
+    ),
+}));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
     captureServerException: vi.fn(),
@@ -82,6 +95,7 @@ import { mailShareProblems } from "@/lib/mail/share-gate";
 import {
     cancelIntendedPlacement,
     executeIntendedShares,
+    executeIntendedSharesWithOutcome,
     recordIntendedPlacementInTx,
 } from "@/lib/pipeline/share-intent";
 import { insertRecordings } from "@/tests/integration/items";
@@ -231,6 +245,8 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
     }, 30_000);
 
     beforeEach(async () => {
+        mockEnv.AUTHZ_MODE = "local";
+        authzState.holderMayUse = true;
         await db().delete(users);
         await db()
             .insert(users)
@@ -343,6 +359,86 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
             state: "skipped",
             reason: "cancelled",
         });
+    });
+
+    it("does not share when cancellation commits while Share waits for the Organization tree", async () => {
+        const itemId = "concurrent-cancelled-audio-intent";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        await recordIntent(itemId);
+        if (!database) throw new Error("test database was not initialized");
+
+        let releaseTreeLock = () => {};
+        const release = new Promise<void>((resolve) => {
+            releaseTreeLock = resolve;
+        });
+        let treeLocked = () => {};
+        const locked = new Promise<void>((resolve) => {
+            treeLocked = resolve;
+        });
+        const blocker = database.sql.begin(async (sql) => {
+            await sql`select pg_advisory_xact_lock(hashtext('riffado:org-tree'))`;
+            treeLocked();
+            await release;
+        });
+        await locked;
+
+        const sharing = executeIntendedSharesWithOutcome(ALICE, itemId);
+        for (;;) {
+            const [waiting] = await database.sql<{ waiting: number }[]>`
+                select count(*)::int as waiting
+                from pg_locks
+                where locktype = 'advisory' and not granted
+            `;
+            if ((waiting?.waiting ?? 0) > 0) break;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        await cancelIntendedPlacement(ALICE, itemId, orgFolderId);
+        releaseTreeLock();
+        await blocker;
+
+        await expect(sharing).resolves.toMatchObject({
+            shared: false,
+            remaining: false,
+        });
+        expect(await assignments(itemId)).toEqual([]);
+        expect(await intents(itemId)).toEqual([]);
+    });
+
+    it("leaves intents waiting while the Organization is read-only", async () => {
+        const itemId = "read-only-org-intent";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        await recordIntent(itemId);
+        mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
+
+        try {
+            await expect(
+                executeIntendedSharesWithOutcome(ALICE, itemId),
+            ).resolves.toMatchObject({
+                shared: false,
+                remaining: true,
+            });
+        } finally {
+            mockEnv.ORG_ACCOUNT_PASSWORD = "organization-password";
+        }
+        expect(await assignments(itemId)).toEqual([]);
+        expect(await intents(itemId)).toEqual([orgFolderId]);
+    });
+
+    it("leaves intents waiting when IdP access to the Organization was revoked", async () => {
+        const itemId = "revoked-org-intent";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        await recordIntent(itemId);
+        mockEnv.AUTHZ_MODE = "idp";
+        authzState.holderMayUse = false;
+
+        await expect(
+            executeIntendedSharesWithOutcome(ALICE, itemId),
+        ).resolves.toMatchObject({ shared: false, remaining: true });
+        expect(await assignments(itemId)).toEqual([]);
+        expect(await intents(itemId)).toEqual([orgFolderId]);
     });
 
     it("refuses both roots and another owner's folder", async () => {

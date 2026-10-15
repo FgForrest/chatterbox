@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -35,9 +35,11 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
+import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 async function readShared(itemId: string, userId: string): Promise<boolean> {
@@ -293,7 +295,8 @@ export async function gatherFacts(
         content,
         [mail],
         [summary],
-        [summaryJob],
+        activeSummaryJobs,
+        failedSummaryJobs,
         shared,
         placements,
         intents,
@@ -321,17 +324,44 @@ export async function gatherFacts(
             )
             .limit(1),
         db
-            .select({ id: asyncJobs.id })
+            .select({ kind: asyncJobs.kind })
             .from(asyncJobs)
             .where(
                 and(
                     eq(asyncJobs.userId, userId),
-                    eq(asyncJobs.kind, SUMMARY_JOB_KIND),
+                    inArray(asyncJobs.kind, [
+                        SUMMARY_JOB_KIND,
+                        TITLE_JOB_KIND,
+                        TOPICS_JOB_KIND,
+                    ]),
                     eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
+            ),
+        db
+            .select({
+                kind: asyncJobs.kind,
+                errorCode: asyncJobs.errorCode,
+                completedAt: asyncJobs.completedAt,
+            })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, userId),
+                    inArray(asyncJobs.kind, [
+                        SUMMARY_JOB_KIND,
+                        TITLE_JOB_KIND,
+                        TOPICS_JOB_KIND,
+                    ]),
+                    eq(asyncJobs.subjectId, recordingJobSubject(itemId, view)),
+                    eq(asyncJobs.status, "failed"),
+                    or(
+                        eq(asyncJobs.kind, TITLE_JOB_KIND),
+                        sql`${asyncJobs.payload} ->> 'trigger' <> 'manual'`,
+                    ),
+                ),
             )
-            .limit(1),
+            .orderBy(desc(asyncJobs.completedAt), desc(asyncJobs.createdAt)),
         readShared(itemId, userId),
         db
             .select({ folderId: recordingFolderAssignments.folderId })
@@ -604,6 +634,36 @@ export async function gatherFacts(
             learnAvailability = "no_provider";
         }
     }
+    const stepAvailability: NonNullable<PipelineFacts["stepAvailability"]> = {};
+    if (!processing?.manualOnly && resolvedProfile) {
+        const checks = [
+            ["summary", resolvedProfile.settings.steps.summary.provider],
+            ["title", resolvedProfile.settings.steps.title.provider],
+            ...(item.kind === "audio" &&
+            "topics" in resolvedProfile.settings.steps
+                ? [
+                      [
+                          "topics",
+                          resolvedProfile.settings.steps.topics.provider,
+                      ] as const,
+                  ]
+                : []),
+        ] as const;
+        await Promise.all(
+            checks.map(async ([step, pin]) => {
+                try {
+                    await resolveStepProvider({
+                        step,
+                        pin,
+                        actorUserId: userId,
+                    });
+                    stepAvailability[step] = "available";
+                } catch {
+                    stepAvailability[step] = "no_provider";
+                }
+            }),
+        );
+    }
     const shareProblems =
         intendedFolderIds.length === 0
             ? []
@@ -692,13 +752,40 @@ export async function gatherFacts(
         hasEnhancementCredential: Boolean(
             pickEnhancementCredential(credentials),
         ),
+        stepAvailability,
         learnAvailability,
         learnRunOpen: openLearnRun !== undefined,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,
             stale: summaryExists ? await isSummaryStale(userId, itemId) : false,
-            jobActive: summaryJob !== undefined,
+            jobActive: activeSummaryJobs.some(
+                (job) => job.kind === SUMMARY_JOB_KIND,
+            ),
+            phaseJobActive: activeSummaryJobs.length > 0,
+            failed: Object.fromEntries(
+                [...failedSummaryJobs].reverse().flatMap((job) => {
+                    const step =
+                        job.kind === SUMMARY_JOB_KIND
+                            ? "summary"
+                            : job.kind === TITLE_JOB_KIND
+                              ? "title"
+                              : job.kind === TOPICS_JOB_KIND
+                                ? "topics"
+                                : null;
+                    if (!step || !job.completedAt) return [];
+                    return [
+                        [
+                            step,
+                            {
+                                errorCode:
+                                    job.errorCode ?? "JOB_TERMINAL_FAILURE",
+                                completedAt: job.completedAt.toISOString(),
+                            },
+                        ],
+                    ];
+                }),
+            ),
         },
         taskReview: {
             proposals: proposals.length,

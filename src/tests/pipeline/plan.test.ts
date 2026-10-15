@@ -389,12 +389,12 @@ describe("planAdvance audio", () => {
         expect(planAdvance(facts).actions).toEqual([
             { type: "queueTitleJob" },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
-            { type: "queueTopics", strict: false },
+            { type: "queueTopics", strict: true },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
             {
                 type: "queueSummary",
                 presetId: null,
-                strict: false,
+                strict: true,
             },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
         ]);
@@ -991,11 +991,11 @@ describe("planAdvance audio", () => {
             "queueSummary",
             "markPhase",
         ]);
-        expect(actions[2]).toEqual({ type: "queueTopics", strict: false });
+        expect(actions[2]).toEqual({ type: "queueTopics", strict: true });
         expect(actions[4]).toEqual({
             type: "queueSummary",
             presetId: null,
-            strict: false,
+            strict: true,
         });
         expect(actions[5]).toEqual(
             expect.objectContaining({
@@ -1240,11 +1240,11 @@ describe("planAdvance mail", () => {
         );
     });
 
-    it("queues mail summary with no preset and non-strict delivery", () => {
+    it("queues mail summary with no preset and retryable delivery", () => {
         expect(planAdvance(mailFacts()).actions[2]).toEqual({
             type: "queueSummary",
             presetId: null,
-            strict: false,
+            strict: true,
         });
     });
 

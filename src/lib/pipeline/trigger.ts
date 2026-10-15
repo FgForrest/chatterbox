@@ -25,6 +25,7 @@ export type PipelineAdvanceReason =
     | "task-review"
     | "share-gate"
     | "transcription-failed"
+    | "summary-step-failed"
     | "transcription-retry"
     | "process-again";
 

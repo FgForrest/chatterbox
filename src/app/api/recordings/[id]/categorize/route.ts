@@ -12,6 +12,7 @@ import {
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
+    lockItemForFolderMutation,
     pruneRedundantAssignmentsInTx,
     scheduleFolderExportProjection,
 } from "@/lib/folders/folders";
@@ -138,6 +139,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const orgUserId = await getOrgUserId();
     const result = await db.transaction(async (tx) => {
+        await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const [current] = await tx
             .select({
                 profileId: itemProcessing.profileId,
@@ -231,7 +233,8 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                     eq(mailPendingShares.itemId, itemId),
                     eq(mailPendingShares.userId, ownerUserId),
                 ),
-            );
+            )
+            .for("update");
         const sharedFolderIds = new Set<string>();
         const organizationRootPlacementIds: string[] = [];
         if (orgUserId) {

@@ -338,7 +338,64 @@ export async function claimDueJobs(
     limit: number,
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
-    const result = await db.execute(sql`
+    const result =
+        kind === "pipeline.advance"
+            ? await db.execute(sql`
+        with eligible_users as (
+            select
+                queued.user_id,
+                min(queued.next_attempt_at) as oldest_waiting
+            from ${asyncJobs} queued
+            where queued.status = 'pending'
+              and queued.kind = ${kind}
+              and queued.next_attempt_at <= now()
+              and not exists (
+                  select 1
+                  from ${asyncJobs} running
+                  where running.kind = ${kind}
+                    and running.user_id = queued.user_id
+                    and running.status = 'processing'
+              )
+            group by queued.user_id
+            order by oldest_waiting asc
+        ), locked_users as (
+            select user_id, oldest_waiting
+            from eligible_users
+            where pg_try_advisory_xact_lock(
+                hashtext('riffado:pipeline.advance'),
+                hashtext(user_id)
+            )
+            order by oldest_waiting asc
+            limit ${limit}
+        ), picked as (
+            select picked_job.id
+            from locked_users
+            cross join lateral (
+                select queued.id
+                from ${asyncJobs} queued
+                where queued.status = 'pending'
+                  and queued.kind = ${kind}
+                  and queued.user_id = locked_users.user_id
+                  and queued.next_attempt_at <= now()
+                order by
+                    queued.priority desc,
+                    queued.next_attempt_at asc,
+                    queued.created_at asc
+                limit 1
+                for update skip locked
+            ) picked_job
+        )
+        update ${asyncJobs}
+        set status = 'processing',
+            started_at = now(),
+            heartbeat_at = now(),
+            updated_at = now(),
+            attempts = attempts + 1,
+            claim_token = gen_random_uuid()::text
+        where id in (select id from picked)
+        returning id, user_id, kind, subject_id, payload, attempts, max_attempts, claim_token
+    `)
+            : await db.execute(sql`
         update ${asyncJobs}
         set status = 'processing',
             started_at = now(),

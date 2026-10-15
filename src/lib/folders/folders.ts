@@ -9,11 +9,13 @@ import {
     recordings,
     users,
 } from "@/db/schema";
+import { holderAccess } from "@/lib/authz/access-state";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
@@ -304,7 +306,19 @@ export async function assertCategorizableFolder(
         );
     }
     const scope = orgUserId && folder.userId === orgUserId ? "org" : "personal";
-    if (scope === "org") assertOrgScopeWritable();
+    if (scope === "org") {
+        assertOrgScopeWritable();
+        if (isIdpAuthorization()) {
+            const access = await holderAccess(ownerUserId);
+            if (!access.ok || !access.capabilities.has("use")) {
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "You can no longer file items into the Organization",
+                    403,
+                );
+            }
+        }
+    }
     return { folderId: folder.id, ownerId: folder.userId, scope };
 }
 
@@ -355,7 +369,7 @@ export async function lockOrgTree(tx: Tx): Promise<void> {
  * that is about to commit and an unshare cannot pass each other. A mail has
  * no recording row: its item row is locked instead.
  */
-async function lockRecording(
+export async function lockItemForFolderMutation(
     tx: Tx,
     recordingId: string,
     ownerUserId?: string,
@@ -1004,7 +1018,7 @@ export async function shareItemToOrganizationFolderInTx(
 ): Promise<ShareGateProblem[]> {
     await lockOrgTree(tx);
     await lockOrgPeople(tx);
-    await lockRecording(tx, input.itemId, input.ownerUserId);
+    await lockItemForFolderMutation(tx, input.itemId, input.ownerUserId);
     const [folder] = await tx
         .select({ id: recordingFolders.id })
         .from(recordingFolders)
@@ -1165,7 +1179,11 @@ export async function addRecordingToFolder(input: {
                     orgUserId: target.ownerId,
                 });
             }
-            await lockRecording(tx, input.recordingId, input.userId);
+            await lockItemForFolderMutation(
+                tx,
+                input.recordingId,
+                input.userId,
+            );
             // Deleted, or given away, since the check above.
             await requireOwnedRecording(tx, input.userId, input.recordingId);
             await tx
@@ -1263,7 +1281,7 @@ export async function removeRecordingFromFolder(input: {
     await requireMayWithdraw(input.userId, input.recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
-        await lockRecording(tx, input.recordingId);
+        await lockItemForFolderMutation(tx, input.recordingId);
         // Not shared (any more): nothing to take out, and nothing withdrawn.
         // To the organization account it is then a recording it cannot see.
         if (!(await isRecordingShared(input.recordingId, target.ownerId, tx))) {
@@ -1331,7 +1349,7 @@ export async function unshareRecording(
     await requireMayWithdraw(userId, recordingId, orgUserId);
     const withdrew = await db.transaction(async (tx) => {
         await lockOrgTree(tx);
-        await lockRecording(tx, recordingId);
+        await lockItemForFolderMutation(tx, recordingId);
         // Not shared (any more): nothing to withdraw.
         if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
             if (userId === orgUserId) throw notSharedForCurator();

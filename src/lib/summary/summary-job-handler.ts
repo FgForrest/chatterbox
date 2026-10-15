@@ -22,6 +22,7 @@ import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
+import { markSummaryStepFailed } from "@/lib/pipeline/state";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
@@ -49,6 +50,17 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
     // provider rate limit or an outage, and neither clears in twenty seconds.
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseSummaryJobPayload,
+
+    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
+        if (payload.trigger === "manual") return;
+        await markSummaryStepFailed({
+            itemId: payload.recordingId,
+            userId,
+            view: payload.view ?? "private",
+            step: "summary",
+            errorCode,
+        });
+    },
 
     async run({
         payload,

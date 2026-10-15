@@ -79,6 +79,7 @@ export type AutoLearnSkipReason =
 
 export type AutoLearnOutcome =
     | { status: "started" }
+    | { status: "deferred"; delayMs: number }
     | { status: "skipped"; reason: AutoLearnSkipReason };
 
 /** Start automatic Learn and establish its three-day Summary hold. */
@@ -154,7 +155,13 @@ export async function startAutomaticLearn(input: {
             },
         );
         if (!rateLimit.allowed) {
-            return { status: "skipped", reason: "rate_limited" };
+            return {
+                status: "deferred",
+                delayMs: Math.max(
+                    1_000,
+                    rateLimit.resetAt.getTime() - Date.now(),
+                ),
+            };
         }
 
         try {

@@ -378,6 +378,11 @@ describe("Auto-summarize integration with transcribeRecording", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        (enqueueSummaryJob as Mock).mockReset();
+        (enqueueSummaryJob as Mock).mockResolvedValue({
+            job: { id: "job-1" },
+            created: true,
+        });
         pipelineMocks.requestAdvance.mockResolvedValue({
             requestedGeneration: 1,
             enqueued: true,
@@ -483,7 +488,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         });
     });
 
-    it("keeps transcript success and emits summary.failed when queueing throws", async () => {
+    it("retries the pipeline when queueing fails after the transcript succeeds", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -497,27 +502,22 @@ describe("Auto-summarize integration with transcribeRecording", () => {
             new Error("Provider down"),
         );
 
-        const result = await transcribeAndAdvance(mockUserId, mockRecordingId);
+        await expect(
+            transcribeAndAdvance(mockUserId, mockRecordingId),
+        ).rejects.toThrow("Provider down");
 
-        expect(result.success).toBe(true);
         expect(emitEvent).toHaveBeenCalledWith(
             "transcription.completed",
             mockUserId,
             mockRecordingId,
         );
-        expect(emitEvent).toHaveBeenCalledWith(
-            "summary.failed",
-            mockUserId,
-            mockRecordingId,
-            { error: "Provider down" },
+        const summaryEvents = (emitEvent as Mock).mock.calls.filter((c) =>
+            String(c[0]).startsWith("summary."),
         );
-        const completedSummary = (emitEvent as Mock).mock.calls.find(
-            (c) => c[0] === "summary.completed",
-        );
-        expect(completedSummary).toBeUndefined();
+        expect(summaryEvents).toEqual([]);
     });
 
-    it("drops a fresh summary behind a backlog the cap put off, as a full cap does", async () => {
+    it("defers a fresh pipeline summary behind a capped backlog", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -535,20 +535,24 @@ describe("Auto-summarize integration with transcribeRecording", () => {
             `auto-summary:user:${mockUserId}`,
             expect.anything(),
         );
-        expect(enqueueSummaryJob).not.toHaveBeenCalled();
-        expect(emitEvent).toHaveBeenCalledWith(
+        expect(enqueueSummaryJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId: mockUserId,
+                recordingId: mockRecordingId,
+                trigger: "auto",
+                rateLimited: true,
+                delayMs: expect.any(Number),
+            }),
+        );
+        expect(emitEvent).not.toHaveBeenCalledWith(
             "summary.failed",
-            mockUserId,
-            mockRecordingId,
-            {
-                error: expect.stringContaining(
-                    "Auto-summary rate limit exceeded",
-                ),
-            },
+            expect.anything(),
+            expect.anything(),
+            expect.anything(),
         );
     });
 
-    it("keeps transcript success when the backlog cannot be counted", async () => {
+    it("retries the pipeline when the deferred backlog cannot be counted", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -560,14 +564,14 @@ describe("Auto-summarize integration with transcribeRecording", () => {
             new Error("Connection reset"),
         );
 
-        const result = await transcribeAndAdvance(mockUserId, mockRecordingId);
+        await expect(
+            transcribeAndAdvance(mockUserId, mockRecordingId),
+        ).rejects.toThrow("Connection reset");
 
-        expect(result.success).toBe(true);
         expect(emitEvent).toHaveBeenCalledWith(
-            "summary.failed",
+            "transcription.completed",
             mockUserId,
             mockRecordingId,
-            { error: "Connection reset" },
         );
         const failedTranscription = (emitEvent as Mock).mock.calls.find(
             (c) => c[0] === "transcription.failed",
@@ -575,7 +579,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         expect(failedTranscription).toBeUndefined();
     });
 
-    it("skips auto-summary and emits summary.failed when rate limit is exhausted", async () => {
+    it("defers the pipeline summary when the hourly cap is exhausted", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -593,7 +597,15 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         const result = await transcribeAndAdvance(mockUserId, mockRecordingId);
 
         expect(result.success).toBe(true);
-        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+        expect(enqueueSummaryJob).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId: mockUserId,
+                recordingId: mockRecordingId,
+                trigger: "auto",
+                rateLimited: true,
+                delayMs: expect.any(Number),
+            }),
+        );
         expect(emitEvent).toHaveBeenCalledWith(
             "transcription.completed",
             mockUserId,
@@ -602,8 +614,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         const failedCall = (emitEvent as Mock).mock.calls.find(
             (c) => c[0] === "summary.failed",
         );
-        expect(failedCall).toBeDefined();
-        expect(String(failedCall?.[3]?.error)).toMatch(/rate limit/i);
+        expect(failedCall).toBeUndefined();
     });
 
     it("deletes the existing summary row on a forced re-transcribe", async () => {

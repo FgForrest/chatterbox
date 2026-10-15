@@ -10,11 +10,14 @@ import {
     mailContents,
     transcriptions,
 } from "@/db/schema";
+import { nudge } from "@/lib/jobs/nudge";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type {
     PhaseName,
     PhaseRecord,
     PipelinePhases,
     PipelineView,
+    SummaryStepName,
 } from "@/lib/pipeline/types";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -60,6 +63,87 @@ export function updatePhaseInTx(
     record: PhaseRecord,
 ): Promise<boolean> {
     return updateProcessingPhaseInTx(tx, itemId, view, userId, phase, record);
+}
+
+/** Mark a pipeline-queued Summary step terminal and request the next decision. */
+export async function markSummaryStepFailedInTx(
+    tx: Tx,
+    input: {
+        itemId: string;
+        userId: string;
+        view: PipelineView;
+        step: SummaryStepName;
+        errorCode: string;
+    },
+): Promise<boolean> {
+    const [processing] = await tx
+        .select({ phases: itemProcessing.phases })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, input.itemId),
+                eq(itemProcessing.userId, input.userId),
+                eq(itemProcessing.view, input.view),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    const summary = processing?.phases.summary;
+    const step = summary?.steps?.[input.step];
+    if (
+        !summary ||
+        !step ||
+        step.state === "done" ||
+        step.state === "failed" ||
+        step.state === "skipped" ||
+        step.state === "outdated"
+    ) {
+        return false;
+    }
+    const advance = await requestAdvanceInTx(tx, {
+        itemId: input.itemId,
+        userId: input.userId,
+        view: input.view,
+        reason: "summary-step-failed",
+    });
+    if (!advance) return false;
+    const now = new Date().toISOString();
+    return updatePhaseInTx(
+        tx,
+        input.itemId,
+        input.view,
+        input.userId,
+        "summary",
+        {
+            ...summary,
+            generation: advance.requestedGeneration,
+            at: now,
+            steps: {
+                ...summary.steps,
+                [input.step]: {
+                    ...step,
+                    generation: advance.requestedGeneration,
+                    state: "failed",
+                    reason: input.errorCode,
+                },
+            },
+        },
+    );
+}
+
+/** Mark a failed Summary step atomically with its pipeline wake-up. */
+export async function markSummaryStepFailed(input: {
+    itemId: string;
+    userId: string;
+    view: PipelineView;
+    step: SummaryStepName;
+    errorCode: string;
+}): Promise<boolean> {
+    const marked = await db.transaction((tx) =>
+        markSummaryStepFailedInTx(tx, input),
+    );
+    if (marked) nudge();
+    return marked;
 }
 
 /**

@@ -115,6 +115,9 @@ export interface PipelineFacts {
         };
     };
     hasEnhancementCredential: boolean;
+    stepAvailability?: Partial<
+        Record<SummaryStepName, "available" | "no_provider">
+    >;
     learnAvailability?: "available" | "hosted" | "no_provider";
     learnRunOpen?: boolean;
     mail: {
@@ -126,6 +129,10 @@ export interface PipelineFacts {
         exists: boolean;
         stale: boolean;
         jobActive: boolean;
+        phaseJobActive?: boolean;
+        failed?: Partial<
+            Record<SummaryStepName, { errorCode: string; completedAt: string }>
+        >;
     };
     taskReview: {
         proposals: number;

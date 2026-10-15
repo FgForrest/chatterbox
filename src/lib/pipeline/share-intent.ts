@@ -5,11 +5,14 @@ import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     assertCategorizableFolder,
+    lockItemForFolderMutation,
+    lockOrgTree,
     orgTreeChanged,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
-import { getOrgUserId } from "@/lib/org/config";
+import { lockOrgPeople } from "@/lib/knowledge/org-people";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
@@ -94,7 +97,7 @@ export async function executeIntendedSharesWithOutcome(
     itemId: string,
 ): Promise<IntendedShareOutcome> {
     const orgUserId = await getOrgUserId();
-    if (!orgUserId) {
+    if (!orgUserId || !isOrgScopeEnabled()) {
         const [remaining] = await db
             .select({ folderId: mailPendingShares.folderId })
             .from(mailPendingShares)
@@ -137,31 +140,40 @@ export async function executeIntendedSharesWithOutcome(
     for (const intent of intents) {
         const result = await retryOnDeadlock(() =>
             db.transaction(async (tx) => {
+                await lockOrgTree(tx);
+                await lockOrgPeople(tx);
+                await lockItemForFolderMutation(tx, itemId, ownerUserId);
                 const [current] = await tx
                     .select({ folderId: mailPendingShares.folderId })
                     .from(mailPendingShares)
-                    .innerJoin(
-                        chatterItems,
-                        and(
-                            eq(chatterItems.id, mailPendingShares.itemId),
-                            eq(chatterItems.userId, mailPendingShares.userId),
-                        ),
-                    )
-                    .innerJoin(
-                        recordingFolders,
-                        eq(recordingFolders.id, mailPendingShares.folderId),
-                    )
                     .where(
                         and(
                             eq(mailPendingShares.userId, ownerUserId),
                             eq(mailPendingShares.itemId, itemId),
                             eq(mailPendingShares.folderId, intent.folderId),
-                            eq(chatterItems.userId, ownerUserId),
-                            eq(recordingFolders.userId, orgUserId),
                         ),
                     )
+                    .for("update")
                     .limit(1);
                 if (!current) return { problems: [], shared: false };
+                try {
+                    const folder = await assertCategorizableFolder(
+                        ownerUserId,
+                        current.folderId,
+                        tx,
+                    );
+                    if (
+                        folder.scope !== "org" ||
+                        folder.ownerId !== orgUserId
+                    ) {
+                        return { problems: [], shared: false };
+                    }
+                } catch (error) {
+                    if (error instanceof AppError) {
+                        return { problems: [], shared: false };
+                    }
+                    throw error;
+                }
                 const problems = await shareItemToOrganizationFolderInTx(tx, {
                     ownerUserId,
                     itemId,
@@ -214,6 +226,7 @@ export async function cancelIntendedPlacement(
     folderId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await lockItemForFolderMutation(tx, itemId, ownerUserId);
         const deleted = await tx
             .delete(mailPendingShares)
             .where(

@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { itemProcessing } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
+import { JobDeferredError } from "@/lib/jobs/retryable";
 import {
     releaseAutoLearnHold,
     startAutomaticLearn,
@@ -88,6 +89,12 @@ export async function executePipelineAction(
                           timed: true,
                       });
             if (outcome.status === "started") return;
+            if (outcome.status === "deferred") {
+                throw new JobDeferredError(
+                    outcome.delayMs,
+                    "The hourly cap on automatic Learn is full",
+                );
+            }
             const requested = await db.transaction(async (tx) => {
                 await updatePhaseInTx(tx, itemId, view, userId, "learn", {
                     state: "skipped",
