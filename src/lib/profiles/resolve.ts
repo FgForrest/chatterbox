@@ -8,7 +8,7 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { getOrgUserId } from "@/lib/org/config";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { mayUseProfile } from "@/lib/profiles/access";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import {
@@ -16,7 +16,7 @@ import {
     type ProfileSettings,
     parseProfileSettings,
 } from "@/lib/profiles/settings";
-import type { ProfileRecord } from "@/lib/profiles/store";
+import { getProfile, type ProfileRecord } from "@/lib/profiles/store";
 import type { RecordingView } from "@/lib/sharing/view";
 
 type StoredProfile = typeof processingProfiles.$inferSelect;
@@ -105,6 +105,99 @@ async function readProfileRevision(input: {
     }
     const resolved = present(row.profile, row.settings);
     return { ...resolved, revisionId: row.revisionId };
+}
+
+/** Resolve a live profile selected explicitly by an actor. */
+export async function resolveSelectedProfile(input: {
+    profileId: string;
+    actorUserId: string;
+}): Promise<ResolvedItemProfile | null> {
+    await ensureProfiles(input.actorUserId);
+    const personal = await getProfile(
+        input.actorUserId,
+        input.profileId,
+        input.actorUserId,
+    );
+    if (personal?.currentRevisionId) {
+        return {
+            profile: personal,
+            revisionId: personal.currentRevisionId,
+            settings: personal.settings,
+        };
+    }
+
+    const orgUserId = await getOrgUserId();
+    if (!isOrgScopeEnabled() || !orgUserId || orgUserId === input.actorUserId) {
+        return null;
+    }
+    await ensureProfiles(orgUserId);
+    const organization = await getProfile(
+        orgUserId,
+        input.profileId,
+        input.actorUserId,
+    );
+    if (!organization?.currentRevisionId) return null;
+    return {
+        profile: organization,
+        revisionId: organization.currentRevisionId,
+        settings: organization.settings,
+    };
+}
+
+/** Load an explicitly selected immutable revision and recheck use access. */
+export async function loadSelectedProfileRevision(input: {
+    revisionId: string;
+    actorUserId: string;
+    channel: ProfileChannel;
+}): Promise<ResolvedItemProfile> {
+    const orgUserId = await getOrgUserId();
+    const candidates = [
+        {
+            ownerUserId: input.actorUserId,
+            scope:
+                orgUserId === input.actorUserId
+                    ? ("organization" as const)
+                    : ("personal" as const),
+        },
+        ...(orgUserId && orgUserId !== input.actorUserId
+            ? [{ ownerUserId: orgUserId, scope: "organization" as const }]
+            : []),
+    ];
+    for (const candidate of candidates) {
+        const [revision] = await db
+            .select({ profileId: processingProfileRevisions.profileId })
+            .from(processingProfileRevisions)
+            .innerJoin(
+                processingProfiles,
+                and(
+                    eq(
+                        processingProfiles.id,
+                        processingProfileRevisions.profileId,
+                    ),
+                    eq(processingProfiles.ownerUserId, candidate.ownerUserId),
+                    eq(processingProfiles.scope, candidate.scope),
+                    eq(processingProfiles.channel, input.channel),
+                ),
+            )
+            .where(eq(processingProfileRevisions.id, input.revisionId))
+            .limit(1);
+        if (!revision) continue;
+        const resolved = await readProfileRevision({
+            profileId: revision.profileId,
+            ownerUserId: candidate.ownerUserId,
+            actorUserId: input.actorUserId,
+            channel: input.channel,
+            revisionId: input.revisionId,
+            scope: candidate.scope,
+            allowArchived: true,
+        });
+        if (resolved) return resolved;
+    }
+    throw new AppError(
+        ErrorCode.NOT_FOUND,
+        "The selected processing profile revision is unavailable",
+        404,
+    );
 }
 
 async function defaultProfile(input: {

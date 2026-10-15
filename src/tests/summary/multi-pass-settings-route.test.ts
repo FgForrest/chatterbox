@@ -21,8 +21,29 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
+vi.mock("@/lib/profiles/legacy-settings", () => ({
+    readLegacySettingsFromProfiles: vi.fn(async () => ({
+        autoSummarize: false,
+    })),
+    writeLegacySettingsToProfiles: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
+    requireApiSessionActor: vi.fn(async () => ({
+        session: { user: { id: "user-1" } },
+        actor: {
+            kind: "user",
+            actorId: "user-1",
+            issuer: null,
+            subject: null,
+            capabilities: new Set(["use"]),
+            clientId: null,
+            clientPermissions: new Set(),
+            verifiedAt: null,
+        },
+        authTime: null,
+    })),
 }));
 
 vi.mock("@/lib/encryption/fields", () => ({
@@ -126,5 +147,30 @@ describe("PUT /api/settings/user — multi-pass fields", () => {
         expect(written.summaryMultiPassRounds).toBe(3);
         expect(written.summaryMultiPassAuto).toBe(false);
         expect(written.summaryMergePrompt).toBeNull();
+    });
+
+    it("reads multi-pass preferences from user_settings, not a profile", async () => {
+        existingRow.value = [
+            {
+                userId: "user-1",
+                summaryMultiPass: true,
+                summaryMultiPassRounds: 5,
+                summaryMultiPassAuto: true,
+                summaryMergePrompt: "account value",
+            },
+        ];
+
+        const { GET } = await import("@/app/api/settings/user/route");
+        const res = await GET(
+            new Request("http://localhost/api/settings/user"),
+        );
+
+        expect(res.status).toBe(200);
+        await expect(res.json()).resolves.toMatchObject({
+            summaryMultiPass: true,
+            summaryMultiPassRounds: 5,
+            summaryMultiPassAuto: true,
+            summaryMergePrompt: "account value",
+        });
     });
 });

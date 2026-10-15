@@ -70,6 +70,9 @@ vi.mock("@/db/queries/async-jobs", () => ({ getActiveJob: vi.fn() }));
 vi.mock("@/lib/pipeline/pending", () => ({
     pipelineMayQueue: vi.fn(),
 }));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveSelectedProfile: vi.fn(),
+}));
 
 const { recordingAccess } = vi.hoisted(() => ({
     recordingAccess: { exists: true },
@@ -100,6 +103,7 @@ vi.mock("@/lib/sharing/access", async () => {
                 ownerUserId: userId,
                 contentUserId: userId,
                 role: "owner",
+                kind: "audio",
                 shared: false,
                 orgUserId: null,
                 view: "private",
@@ -133,6 +137,7 @@ import { GET, POST } from "@/app/api/recordings/[id]/summary/route";
 import { getActiveJob } from "@/db/queries/async-jobs";
 import { watchJob } from "@/lib/jobs/watch";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
+import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     readStoredSummaries,
     readStoredSummary,
@@ -178,6 +183,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             multiPass: undefined,
             createdAt: new Date(0),
         });
+        (resolveSelectedProfile as Mock).mockResolvedValue(null);
     });
 
     function makeRequest(body: unknown): Request {
@@ -228,6 +234,67 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             trigger: "manual",
             view: "private",
         });
+    });
+
+    it("queues the selected profile's immutable current revision", async () => {
+        (resolveSelectedProfile as Mock).mockResolvedValue({
+            revisionId: "profile-revision-1",
+            profile: { id: "profile-1", channel: "audio" },
+        });
+
+        const response = await POST(
+            makeRequest({ profileId: "profile-1" }),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(resolveSelectedProfile).toHaveBeenCalledWith({
+            profileId: "profile-1",
+            actorUserId: "user-1",
+        });
+        expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            userId: "user-1",
+            recordingId: "rec-1",
+            presetId: undefined,
+            profileRevisionId: "profile-revision-1",
+            trigger: "manual",
+            view: "private",
+        });
+    });
+
+    it("rejects preset and profileId together", async () => {
+        const response = await POST(
+            makeRequest({ preset: "general", profileId: "profile-1" }),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(400);
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unavailable profile or one for the other channel", async () => {
+        expect(
+            (
+                await POST(
+                    makeRequest({ profileId: "hidden-profile" }),
+                    makeContext(),
+                )
+            ).status,
+        ).toBe(400);
+
+        (resolveSelectedProfile as Mock).mockResolvedValue({
+            revisionId: "mail-revision",
+            profile: { id: "mail-profile", channel: "mail" },
+        });
+        expect(
+            (
+                await POST(
+                    makeRequest({ profileId: "mail-profile" }),
+                    makeContext(),
+                )
+            ).status,
+        ).toBe(400);
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
     });
 
     it("tolerates a non-JSON body (parses to empty object)", async () => {

@@ -19,7 +19,7 @@ import {
     isRiffadoIncludedProviderId,
     RIFFADO_INCLUDED_PROVIDER_LABEL,
 } from "@/lib/transcription/included-provider";
-import type { ProviderPin } from "./settings";
+import type { ProfileScope, ProfileSettings, ProviderPin } from "./settings";
 
 export type ProcessingStep =
     | "transcription"
@@ -109,6 +109,81 @@ function assertEnabled(credential: CredentialRow): void {
             `The pinned provider ${credential.provider} is disabled. Ask an administrator to enable it or choose another provider.`,
             409,
         );
+    }
+}
+
+interface SubmittedPin {
+    path: string[];
+    pin: ProviderPin;
+}
+
+function submittedPins(settings: ProfileSettings): SubmittedPin[] {
+    const pins: SubmittedPin[] = [];
+    for (const [stepName, value] of Object.entries(settings.steps)) {
+        if (!("provider" in value) || value.provider === null) continue;
+        pins.push({
+            path: ["settings", "steps", stepName, "provider"],
+            pin: value.provider,
+        });
+    }
+    return pins;
+}
+
+function invalidPin(message: string, path: string[]): AppError {
+    return new AppError(ErrorCode.INVALID_INPUT, message, 400, {
+        field: path.join("."),
+        path,
+    });
+}
+
+/** Validate every provider pin before profile settings are saved. */
+export async function validateProfileProviderPins(input: {
+    actorUserId: string;
+    profileOwnerUserId: string;
+    profileScope: ProfileScope;
+    settings: ProfileSettings;
+}): Promise<void> {
+    for (const { path, pin } of submittedPins(input.settings)) {
+        if (pin.scope === "personal") {
+            if (input.profileScope !== "personal") {
+                throw invalidPin(
+                    "Organization profiles may only pin Organization providers",
+                    path,
+                );
+            }
+            if (input.profileOwnerUserId !== input.actorUserId) {
+                throw invalidPin(
+                    "A personal profile may only pin its owner's providers",
+                    path,
+                );
+            }
+            const credential = await credentialByOwner(
+                pin.credentialId,
+                input.actorUserId,
+            );
+            if (!credential) {
+                throw invalidPin(
+                    "The pinned personal provider does not belong to you",
+                    path,
+                );
+            }
+            continue;
+        }
+
+        const orgUserId = await getOrgUserId();
+        if (!orgUserId) {
+            throw invalidPin(
+                "Organization providers are not available on this instance",
+                path,
+            );
+        }
+        const credential = await credentialByOwner(pin.credentialId, orgUserId);
+        if (!credential) {
+            throw invalidPin(
+                "The pinned Organization provider does not exist",
+                path,
+            );
+        }
     }
 }
 

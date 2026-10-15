@@ -17,8 +17,27 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 
+vi.mock("@/lib/profiles/legacy-settings", () => ({
+    readLegacySettingsFromProfiles: vi.fn(async () => ({})),
+    writeLegacySettingsToProfiles: vi.fn(async () => {}),
+}));
+
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn(async () => ({ user: { id: "user-1" } })),
+    requireApiSessionActor: vi.fn(async () => ({
+        session: { user: { id: "user-1" } },
+        actor: {
+            kind: "user",
+            actorId: "user-1",
+            issuer: null,
+            subject: null,
+            capabilities: new Set(["use"]),
+            clientId: null,
+            clientPermissions: new Set(),
+            verifiedAt: null,
+        },
+        authTime: null,
+    })),
 }));
 
 vi.mock("@/lib/encryption/fields", () => ({

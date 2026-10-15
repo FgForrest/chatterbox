@@ -64,10 +64,12 @@ import { defaultProfileSettings } from "@/lib/profiles/settings";
 import {
     archiveProfile,
     createProfile,
+    DefaultProfileArchiveError,
     duplicateProfile,
     getProfile,
     listProfiles,
     ProfileVersionConflictError,
+    setDefaultProfile,
     updateProfile,
 } from "@/lib/profiles/store";
 
@@ -212,6 +214,74 @@ describeWithDatabase("profile store", () => {
                 includeArchived: true,
             }),
         ).toMatchObject({ id: created.id, isDefault: false });
+    });
+
+    it("refuses to archive the default profile", async () => {
+        await ensureProfiles(ALICE);
+        const defaults = await db()
+            .select()
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            );
+
+        await expect(
+            archiveProfile({
+                ownerUserId: ALICE,
+                profileId: defaults[0]?.id ?? "missing",
+                actor: actor(ALICE),
+            }),
+        ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
+    });
+
+    it("serializes parallel default switches without leaving zero or two defaults", async () => {
+        await ensureProfiles(ALICE);
+        const first = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "First candidate",
+            settings: defaultProfileSettings("audio"),
+        });
+        const second = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Second candidate",
+            settings: defaultProfileSettings("audio"),
+        });
+
+        await Promise.all([
+            setDefaultProfile({
+                ownerUserId: ALICE,
+                profileId: first.id,
+                actor: actor(ALICE),
+            }),
+            setDefaultProfile({
+                ownerUserId: ALICE,
+                profileId: second.id,
+                actor: actor(ALICE),
+            }),
+        ]);
+
+        const defaults = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            );
+        expect(defaults).toHaveLength(1);
+        expect([first.id, second.id]).toContain(defaults[0]?.id);
     });
 
     it("duplicates into the actor's personal scope", async () => {

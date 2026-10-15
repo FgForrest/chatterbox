@@ -91,6 +91,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             const generate = (presetId: string | undefined) =>
                 generateSummaryForRecording(userId, payload.recordingId, {
                     presetId,
+                    profileRevisionId: payload.profileRevisionId,
                     trigger: payload.trigger,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
@@ -108,7 +109,11 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     view: "private",
                 });
                 if (due)
-                    result = await generate(payload.presetId ?? due.presetId);
+                    result = await generate(
+                        payload.profileRevisionId
+                            ? undefined
+                            : (payload.presetId ?? due.presetId),
+                    );
             }
 
             if (!orgView) {

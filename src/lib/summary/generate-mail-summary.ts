@@ -28,7 +28,10 @@ import {
     BUILTIN_PROMPTS_VERSION,
     resolveSummaryPrompt,
 } from "@/lib/profiles/prompts";
-import { resolveItemProfile } from "@/lib/profiles/resolve";
+import {
+    loadSelectedProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import {
     MAIL_SUMMARY_PROMPT_ID,
     type MailProfileSettings,
@@ -144,12 +147,18 @@ export async function generateMailSummary(
 
     const profile = opts.presetId
         ? null
-        : await resolveItemProfile(
-              itemId,
-              ctx.view,
-              ctx.ownerUserId,
-              ctx.actorUserId,
-          );
+        : opts.profileRevisionId
+          ? await loadSelectedProfileRevision({
+                revisionId: opts.profileRevisionId,
+                actorUserId: ctx.actorUserId,
+                channel: "mail",
+            })
+          : await resolveItemProfile(
+                itemId,
+                ctx.view,
+                ctx.ownerUserId,
+                ctx.actorUserId,
+            );
     const profileSettings = profile?.settings as
         | MailProfileSettings
         | undefined;

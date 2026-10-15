@@ -27,7 +27,10 @@ import {
     BUILTIN_PROMPTS_VERSION,
     resolveSummaryPrompt,
 } from "@/lib/profiles/prompts";
-import { resolveItemProfile } from "@/lib/profiles/resolve";
+import {
+    loadSelectedProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -57,6 +60,8 @@ export interface GenerateSummaryOptions {
      * user's saved preset (which itself falls back to "general").
      */
     presetId?: string;
+    /** Exact immutable profile revision selected for this manual run. */
+    profileRevisionId?: string;
     /** Analytics `trigger` property on the `summary_generated` event. */
     trigger?: "manual" | "auto";
     /**
@@ -266,12 +271,18 @@ export async function generateSummaryForRecording(
 
     const profile = opts.presetId
         ? null
-        : await resolveItemProfile(
-              recordingId,
-              ctx.view,
-              ctx.ownerUserId,
-              ctx.actorUserId,
-          );
+        : opts.profileRevisionId
+          ? await loadSelectedProfileRevision({
+                revisionId: opts.profileRevisionId,
+                actorUserId: ctx.actorUserId,
+                channel: "audio",
+            })
+          : await resolveItemProfile(
+                recordingId,
+                ctx.view,
+                ctx.ownerUserId,
+                ctx.actorUserId,
+            );
     const profileSettings = profile?.settings as
         | AudioProfileSettings
         | undefined;

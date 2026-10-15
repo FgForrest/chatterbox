@@ -16,6 +16,7 @@ import {
     userSettings,
 } from "@/db/schema";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { loadSelectedProfileRevision } from "@/lib/profiles/resolve";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
 import { DEFAULT_MERGE_PROMPT } from "@/lib/summary/multi-pass";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
@@ -74,6 +75,12 @@ const { createMock, profileLegacy } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/profiles/resolve", () => ({
+    loadSelectedProfileRevision: vi.fn(
+        async ({ revisionId }: { revisionId: string }) => ({
+            ...resolvedAudioProfile(profileLegacy.current),
+            revisionId,
+        }),
+    ),
     resolveItemProfile: vi.fn(async () =>
         resolvedAudioProfile(profileLegacy.current),
     ),
@@ -198,11 +205,17 @@ function stage(settings: Settings) {
     });
 }
 
-async function generate(trigger: "manual" | "auto") {
+async function generate(
+    trigger: "manual" | "auto",
+    profileRevisionId?: string,
+) {
     const { generateSummaryForRecording } = await import(
         "@/lib/summary/generate-summary"
     );
-    return generateSummaryForRecording("user-1", "rec-1", { trigger });
+    return generateSummaryForRecording("user-1", "rec-1", {
+        trigger,
+        profileRevisionId,
+    });
 }
 
 /** The system prompt of every completion call, in order. */
@@ -220,6 +233,7 @@ function systemPrompts(): string[] {
 describe("multi-pass gating", () => {
     beforeEach(() => {
         createMock.mockReset();
+        vi.mocked(loadSelectedProfileRevision).mockClear();
         selectResults.clear();
         written.length = 0;
     });
@@ -309,6 +323,20 @@ describe("multi-pass gating", () => {
             },
             outputLanguage: null,
             outputFormatLocale: "en",
+        });
+    });
+
+    it("persists the explicitly selected immutable profile revision", async () => {
+        stage({ summaryMultiPass: false });
+        await generate("manual", "selected-profile-revision");
+
+        expect(loadSelectedProfileRevision).toHaveBeenCalledWith({
+            revisionId: "selected-profile-revision",
+            actorUserId: "user-1",
+            channel: "audio",
+        });
+        expect(written.at(-1)).toMatchObject({
+            profileRevisionId: "selected-profile-revision",
         });
     });
 

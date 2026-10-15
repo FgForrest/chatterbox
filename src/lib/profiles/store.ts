@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { processingProfileRevisions, processingProfiles } from "@/db/schema";
@@ -44,6 +44,13 @@ export class ProfilePermissionError extends Error {
     constructor() {
         super("Profile access denied");
         this.name = "ProfilePermissionError";
+    }
+}
+
+export class DefaultProfileArchiveError extends Error {
+    constructor() {
+        super("Choose another default profile before archiving this one");
+        this.name = "DefaultProfileArchiveError";
     }
 }
 
@@ -164,6 +171,78 @@ export async function listProfiles(
     };
 }
 
+export interface ListActorProfilesInput {
+    actor: ActorContext;
+    search?: string;
+    channel?: ProfileChannel;
+    scope?: ProfileScope;
+    offset?: number;
+    limit?: number;
+}
+
+/** List the actor's personal profiles and Organization profiles they may use. */
+export async function listActorProfiles(
+    input: ListActorProfilesInput,
+): Promise<ProfilePage> {
+    const orgUserId = await getOrgUserId();
+    const actorUserId = input.actor.actorId;
+    const permittedOwners = or(
+        and(
+            eq(processingProfiles.ownerUserId, actorUserId),
+            eq(processingProfiles.scope, "personal"),
+        ),
+        orgUserId
+            ? and(
+                  eq(processingProfiles.ownerUserId, orgUserId),
+                  eq(processingProfiles.scope, "organization"),
+              )
+            : undefined,
+    );
+    const rows = await db
+        .select({
+            profile: processingProfiles,
+            revisionSettings: processingProfileRevisions.settings,
+        })
+        .from(processingProfiles)
+        .leftJoin(
+            processingProfileRevisions,
+            and(
+                eq(
+                    processingProfileRevisions.id,
+                    processingProfiles.currentRevisionId,
+                ),
+                eq(processingProfileRevisions.profileId, processingProfiles.id),
+            ),
+        )
+        .where(and(permittedOwners, isNull(processingProfiles.archivedAt)))
+        .orderBy(asc(processingProfiles.createdAt), asc(processingProfiles.id));
+    const search = input.search?.trim().toLocaleLowerCase();
+    const permitted = await Promise.all(
+        rows.map(async (row) => {
+            const profile = present(row);
+            return (await mayUseProfile(actorUserId, profile)) ? profile : null;
+        }),
+    );
+    const filtered = permitted.filter(
+        (profile): profile is ProfileRecord =>
+            profile !== null &&
+            (!input.channel || profile.channel === input.channel) &&
+            (!input.scope || profile.scope === input.scope) &&
+            (!search ||
+                profile.name.toLocaleLowerCase().includes(search) ||
+                (profile.description?.toLocaleLowerCase().includes(search) ??
+                    false)),
+    );
+    const offset = Math.max(0, input.offset ?? 0);
+    const limit = Math.min(100, Math.max(1, input.limit ?? 25));
+    return {
+        items: filtered.slice(offset, offset + limit),
+        total: filtered.length,
+        offset,
+        limit,
+    };
+}
+
 /** Read one profile only through its owner. */
 export async function getProfile(
     ownerUserId: string,
@@ -194,6 +273,42 @@ export async function getProfile(
                 options.includeArchived
                     ? undefined
                     : isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!row) return null;
+    const profile = present(row);
+    return (await mayUseProfile(actorUserId, profile)) ? profile : null;
+}
+
+/** Read one owner's live default profile for a channel. */
+export async function getDefaultProfile(
+    ownerUserId: string,
+    channel: ProfileChannel,
+    actorUserId: string,
+): Promise<ProfileRecord | null> {
+    const [row] = await db
+        .select({
+            profile: processingProfiles,
+            revisionSettings: processingProfileRevisions.settings,
+        })
+        .from(processingProfiles)
+        .leftJoin(
+            processingProfileRevisions,
+            and(
+                eq(
+                    processingProfileRevisions.id,
+                    processingProfiles.currentRevisionId,
+                ),
+                eq(processingProfileRevisions.profileId, processingProfiles.id),
+            ),
+        )
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, ownerUserId),
+                eq(processingProfiles.channel, channel),
+                eq(processingProfiles.isDefault, true),
+                isNull(processingProfiles.archivedAt),
             ),
         )
         .limit(1);
@@ -336,7 +451,20 @@ export async function updateProfile(
             )
             .returning();
         if (!updated) {
-            throw new ProfileVersionConflictError(input.expectedVersion, null);
+            const [latest] = await tx
+                .select({ version: processingProfiles.version })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, input.ownerUserId),
+                        eq(processingProfiles.id, input.profileId),
+                    ),
+                )
+                .limit(1);
+            throw new ProfileVersionConflictError(
+                input.expectedVersion,
+                latest?.version ?? null,
+            );
         }
         const encryptedSettings = encryptText(JSON.stringify(settings));
         await tx.insert(processingProfileRevisions).values({
@@ -390,6 +518,72 @@ export interface ArchiveProfileInput {
     actor: ActorContext;
 }
 
+export interface SetDefaultProfileInput {
+    ownerUserId: string;
+    profileId: string;
+    actor: ActorContext;
+}
+
+/** Atomically replace an owner's default profile for one channel. */
+export async function setDefaultProfile(
+    input: SetDefaultProfileInput,
+): Promise<boolean> {
+    return db.transaction(async (tx) => {
+        const profiles = await tx
+            .select()
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            )
+            .orderBy(processingProfiles.id)
+            .for("update");
+        const target = profiles.find(
+            (profile) => profile.id === input.profileId,
+        );
+        if (!target) return false;
+        await assertEditAccess(input.actor, target);
+        if (target.isDefault) return true;
+
+        const now = new Date();
+        await tx
+            .update(processingProfiles)
+            .set({
+                isDefault: false,
+                version: sql`${processingProfiles.version} + 1`,
+                updatedBy: input.actor.actorId,
+                updatedAt: now,
+            })
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    eq(processingProfiles.channel, target.channel),
+                    eq(processingProfiles.isDefault, true),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            );
+        const changed = await tx
+            .update(processingProfiles)
+            .set({
+                isDefault: true,
+                version: sql`${processingProfiles.version} + 1`,
+                updatedBy: input.actor.actorId,
+                updatedAt: now,
+            })
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, input.ownerUserId),
+                    eq(processingProfiles.id, input.profileId),
+                    isNull(processingProfiles.archivedAt),
+                ),
+            )
+            .returning({ id: processingProfiles.id });
+        return changed.length > 0;
+    });
+}
+
 /** Archive an owner-scoped profile without changing its immutable revisions. */
 export async function archiveProfile(
     input: ArchiveProfileInput,
@@ -399,6 +593,7 @@ export async function archiveProfile(
             .select({
                 ownerUserId: processingProfiles.ownerUserId,
                 scope: processingProfiles.scope,
+                isDefault: processingProfiles.isDefault,
             })
             .from(processingProfiles)
             .where(
@@ -408,9 +603,11 @@ export async function archiveProfile(
                     isNull(processingProfiles.archivedAt),
                 ),
             )
+            .for("update")
             .limit(1);
         if (!current) return false;
         await assertEditAccess(input.actor, current);
+        if (current.isDefault) throw new DefaultProfileArchiveError();
         const archived = await tx
             .update(processingProfiles)
             .set({

@@ -14,6 +14,7 @@ import { watchJob } from "@/lib/jobs/watch";
 import { llmRendering } from "@/lib/learn/llm-input";
 import { pipelineMayQueue } from "@/lib/pipeline/pending";
 import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -96,8 +97,37 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const userId = session.user.id;
 
     const { id } = await (context as IdContext).params;
-    const body = await request.json().catch(() => ({}));
-    const presetId = (body.preset as string) || undefined;
+    const rawBody: unknown = await request.json().catch(() => ({}));
+    const body =
+        rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+            ? (rawBody as Record<string, unknown>)
+            : {};
+    if (body.preset !== undefined && typeof body.preset !== "string") {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "preset must be a string",
+            400,
+            { field: "preset" },
+        );
+    }
+    if (body.profileId !== undefined && typeof body.profileId !== "string") {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "profileId must be a string",
+            400,
+            { field: "profileId" },
+        );
+    }
+    const presetId = body.preset || undefined;
+    const profileId = body.profileId || undefined;
+    if (presetId && profileId) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Choose either a preset or a profile, not both",
+            400,
+            { fields: ["preset", "profileId"] },
+        );
+    }
     const view = requestedRecordingView(request);
 
     // Checked here rather than left to the handler: a recording that does not
@@ -108,10 +138,36 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     });
     assertMayChange(access, userId, await actsForOrganization(actor));
 
+    const selectedProfile = profileId
+        ? await resolveSelectedProfile({
+              profileId,
+              actorUserId: userId,
+          })
+        : null;
+    if (profileId && !selectedProfile) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "The selected profile is unavailable",
+            400,
+            { field: "profileId" },
+        );
+    }
+    if (selectedProfile && selectedProfile.profile.channel !== access.kind) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "The selected profile is for the other channel",
+            400,
+            { field: "profileId" },
+        );
+    }
+
     const { job } = await enqueueSummaryJob({
         userId,
         recordingId: id,
         presetId,
+        ...(selectedProfile
+            ? { profileRevisionId: selectedProfile.revisionId }
+            : {}),
         trigger: "manual",
         view,
     });
