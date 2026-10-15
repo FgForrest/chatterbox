@@ -21,6 +21,8 @@ type Executor = Pick<typeof db, "select">;
  * The share gate over a recording's transcripts, which its owner holds,
  * and their speaker rows: a shared recording is one recording, so these
  * are exactly what the Organization will read.
+ * Proposal-state filtering follows specification section 7.8; Stage 4
+ * narrows both share gates to `awaiting_source_review`.
  */
 export async function loadShareGate(
     executor: Executor,

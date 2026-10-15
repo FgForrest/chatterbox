@@ -4234,8 +4234,7 @@ export const mailDeliveryLog = pgTable(
     }),
 );
 
-// A mail sent to an Organization address waits in its sender's pile until
-// they share it into that folder through the share gate (D2).
+/** Intended Organization folder placements of items of any kind, pending the share gate. */
 export const mailPendingShares = pgTable(
     "mail_pending_shares",
     {

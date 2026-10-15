@@ -23,7 +23,7 @@ import {
 } from "@/lib/knowledge/share-knowledge";
 import { blockFolderAddressesInTx } from "@/lib/mail/address-blocking";
 import { ensureFolderAddress } from "@/lib/mail/addresses";
-import { shareMailInTx } from "@/lib/mail/share-gate";
+import { mailShareProblems, shareMailInTx } from "@/lib/mail/share-gate";
 import {
     assertOrgScopeWritable,
     getOrgUserId,
@@ -33,6 +33,7 @@ import {
 import { notifyOrgChange } from "@/lib/org/events";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import {
     publishSpeakerNamesInTx,
     publishTaskAssigneesInTx,
@@ -262,6 +263,46 @@ export async function reachableCustomFolder(
     };
 }
 
+/**
+ * Return a non-root folder the owner may categorize an item into.
+ * Private and Organization roots are deliberately not categorization targets.
+ */
+export async function assertCategorizableFolder(
+    ownerUserId: string,
+    folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+): Promise<{ folderId: string; ownerId: string; scope: FolderScope }> {
+    const orgUserId = await getOrgUserId();
+    const allowedOwners = orgUserId
+        ? [...new Set([ownerUserId, orgUserId])]
+        : [ownerUserId];
+    const [folder] = await executor
+        .select({
+            id: recordingFolders.id,
+            userId: recordingFolders.userId,
+            parentId: recordingFolders.parentId,
+        })
+        .from(recordingFolders)
+        .where(
+            and(
+                eq(recordingFolders.id, folderId),
+                inArray(recordingFolders.userId, allowedOwners),
+            ),
+        )
+        .limit(1);
+    if (!folder) throw folderNotFound();
+    if (folder.parentId === null) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Choose a folder below Private or Organization; root folders cannot categorize items",
+            400,
+        );
+    }
+    const scope = orgUserId && folder.userId === orgUserId ? "org" : "personal";
+    if (scope === "org") assertOrgScopeWritable();
+    return { folderId: folder.id, ownerId: folder.userId, scope };
+}
+
 /** Changes to the Organization tree need the scope to be writable. */
 function assertWritable(target: AccessibleFolder): void {
     if (target.scope === "org") assertOrgScopeWritable();
@@ -286,17 +327,31 @@ export async function lockOrgTree(tx: Tx): Promise<void> {
  * that is about to commit and an unshare cannot pass each other. A mail has
  * no recording row: its item row is locked instead.
  */
-async function lockRecording(tx: Tx, recordingId: string): Promise<void> {
+async function lockRecording(
+    tx: Tx,
+    recordingId: string,
+    ownerUserId?: string,
+): Promise<void> {
     const locked = await tx
         .select({ id: recordings.id })
         .from(recordings)
-        .where(eq(recordings.id, recordingId))
+        .where(
+            and(
+                eq(recordings.id, recordingId),
+                ownerUserId ? eq(recordings.userId, ownerUserId) : undefined,
+            ),
+        )
         .for("update");
     if (locked.length > 0) return;
     await tx
         .select({ id: chatterItems.id })
         .from(chatterItems)
-        .where(eq(chatterItems.id, recordingId))
+        .where(
+            and(
+                eq(chatterItems.id, recordingId),
+                ownerUserId ? eq(chatterItems.userId, ownerUserId) : undefined,
+            ),
+        )
         .for("update");
 }
 
@@ -906,6 +961,105 @@ async function pruneRedundantAssignments(
 }
 
 /**
+ * Share an owner's item into one Organization folder in the caller's
+ * transaction. Takes the Organization tree, people and item locks in the
+ * established order. A refused gate returns its problems without writing.
+ */
+export async function shareItemToOrganizationFolderInTx(
+    tx: Tx,
+    input: {
+        ownerUserId: string;
+        itemId: string;
+        folderId: string;
+        orgUserId: string;
+    },
+): Promise<ShareGateProblem[]> {
+    await lockOrgTree(tx);
+    await lockOrgPeople(tx);
+    await lockRecording(tx, input.itemId, input.ownerUserId);
+    const [folder] = await tx
+        .select({ id: recordingFolders.id })
+        .from(recordingFolders)
+        .where(
+            and(
+                eq(recordingFolders.id, input.folderId),
+                eq(recordingFolders.userId, input.orgUserId),
+            ),
+        )
+        .limit(1);
+    if (!folder) throw folderNotFound();
+    const kind = await requireOwnedRecording(
+        tx,
+        input.ownerUserId,
+        input.itemId,
+    );
+    const wasShared = await isRecordingShared(
+        input.itemId,
+        input.orgUserId,
+        tx,
+    );
+    const problems = wasShared
+        ? []
+        : kind === "mail"
+          ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
+          : await loadShareGate(tx, input.itemId, input.ownerUserId);
+    if (problems.length > 0) return problems;
+
+    if (kind === "mail") {
+        try {
+            await shareMailInTx(tx, {
+                ownerUserId: input.ownerUserId,
+                itemId: input.itemId,
+                folderId: folder.id,
+                orgUserId: input.orgUserId,
+            });
+        } catch (error) {
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.SHARE_REQUIREMENTS_UNMET
+            ) {
+                return mailShareProblems(tx, input.itemId, input.ownerUserId);
+            }
+            throw error;
+        }
+        await pruneRedundantAssignments(tx, input.orgUserId, input.itemId);
+        return [];
+    }
+
+    await tx
+        .insert(recordingFolderAssignments)
+        .values({
+            userId: input.ownerUserId,
+            itemId: input.itemId,
+            folderId: folder.id,
+        })
+        .onConflictDoNothing();
+    await pruneRedundantAssignments(tx, input.orgUserId, input.itemId);
+    if (wasShared) return [];
+
+    const names = await publishSpeakerNamesInTx(tx, {
+        recordingId: input.itemId,
+        ownerUserId: input.ownerUserId,
+        orgUserId: input.orgUserId,
+    });
+    const knowledge = await publishKnowledgeInTx(tx, {
+        recordingId: input.itemId,
+        ownerUserId: input.ownerUserId,
+        orgUserId: input.orgUserId,
+    });
+    const assignees = await publishTaskAssigneesInTx(tx, {
+        recordingId: input.itemId,
+        orgUserId: input.orgUserId,
+    });
+    await bumpScopeInTx(tx, [
+        ...names.scopes,
+        ...knowledge.scopes,
+        ...assignees,
+    ]);
+    return [];
+}
+
+/**
  * File a recording in a folder.
  *
  * Filing in the Organization tree is sharing, so only the owner may do it.
@@ -935,7 +1089,11 @@ export async function addRecordingToFolder(input: {
             404,
         );
     }
-    await requireOwnedRecording(db, input.userId, input.recordingId);
+    const kind = await requireOwnedRecording(
+        db,
+        input.userId,
+        input.recordingId,
+    );
     if (target.folder.kind === "private") {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -945,42 +1103,19 @@ export async function addRecordingToFolder(input: {
     }
     assertWritable(target);
 
-    await retryOnDeadlock(() =>
+    const problems = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             if (target.scope === "org") {
-                await lockOrgTree(tx);
-                // Before the recording: sharing promotes people, and a
-                // promotion may merge them, which locks recordings.
-                await lockOrgPeople(tx);
-            }
-            await lockRecording(tx, input.recordingId);
-            // Deleted, or given away, since the check above.
-            const kind = await requireOwnedRecording(
-                tx,
-                input.userId,
-                input.recordingId,
-            );
-            if (target.scope === "org" && kind === "mail") {
-                await shareMailInTx(tx, {
+                return shareItemToOrganizationFolderInTx(tx, {
                     ownerUserId: input.userId,
                     itemId: input.recordingId,
                     folderId: target.folder.id,
                     orgUserId: target.ownerId,
                 });
-                await pruneRedundantAssignments(
-                    tx,
-                    target.ownerId,
-                    input.recordingId,
-                );
-                return;
             }
-            const wasShared =
-                target.scope === "org" &&
-                (await isRecordingShared(
-                    input.recordingId,
-                    target.ownerId,
-                    tx,
-                ));
+            await lockRecording(tx, input.recordingId, input.userId);
+            // Deleted, or given away, since the check above.
+            await requireOwnedRecording(tx, input.userId, input.recordingId);
             await tx
                 .insert(recordingFolderAssignments)
                 .values({
@@ -994,45 +1129,19 @@ export async function addRecordingToFolder(input: {
                 target.ownerId,
                 input.recordingId,
             );
-            if (target.scope !== "org" || wasShared) return;
-
-            // A shared recording is one recording: the Organization reads
-            // the owner's rows, so those are what must pass.
-            const problems = await loadShareGate(
-                tx,
-                input.recordingId,
-                input.userId,
-            );
-            if (problems.length > 0) {
-                throw new AppError(
-                    ErrorCode.SHARE_REQUIREMENTS_UNMET,
-                    "Name every speaker and finish the review before sharing",
-                    409,
-                    { problems },
-                );
-            }
-            const names = await publishSpeakerNamesInTx(tx, {
-                recordingId: input.recordingId,
-                ownerUserId: input.userId,
-                orgUserId: target.ownerId,
-            });
-            // The knowledge on it: corrections, heard-as forms and facts.
-            const knowledge = await publishKnowledgeInTx(tx, {
-                recordingId: input.recordingId,
-                ownerUserId: input.userId,
-                orgUserId: target.ownerId,
-            });
-            const assignees = await publishTaskAssigneesInTx(tx, {
-                recordingId: input.recordingId,
-                orgUserId: target.ownerId,
-            });
-            await bumpScopeInTx(tx, [
-                ...names.scopes,
-                ...knowledge.scopes,
-                ...assignees,
-            ]);
+            return [];
         }),
     );
+    if (problems.length > 0) {
+        throw new AppError(
+            ErrorCode.SHARE_REQUIREMENTS_UNMET,
+            kind === "mail"
+                ? "Finish the review before sharing"
+                : "Name every speaker and finish the review before sharing",
+            409,
+            { problems },
+        );
+    }
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
