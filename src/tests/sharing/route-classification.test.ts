@@ -91,6 +91,10 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "jobs/[id]/route.ts": { GET: "job" },
     "folders/route.ts": { GET: "folders", POST: "folders" },
     "folders/[id]/route.ts": { PATCH: "folders", DELETE: "folders" },
+    "folders/[id]/default-profiles/route.ts": {
+        GET: "folders",
+        PUT: "folders",
+    },
     "folders/[id]/exports/route.ts": { GET: "owner", POST: "owner" },
     "folders/[id]/exports/[exportId]/route.ts": {
         PATCH: "owner",

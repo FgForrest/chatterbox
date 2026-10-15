@@ -122,6 +122,9 @@ describe("folder recording pane", () => {
         renderPane(meetings);
         expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
         expect(
+            screen.getByRole("button", { name: "Default profiles" }),
+        ).toBeTruthy();
+        expect(
             screen.queryByRole("button", { name: "Synchronize" }),
         ).toBeNull();
     });
