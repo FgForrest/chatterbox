@@ -1,55 +1,19 @@
-import { type AnyColumn, and, eq, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, or, type SQL, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-    chatterItems,
-    people,
-    recordings,
-    recordingTasks,
-    users,
-} from "@/db/schema";
+    ANY_TASK_ITEM,
+    RECORDING_TASK_ITEM,
+    type TaskItemColumns,
+    type TaskViewer,
+    taskRecordingShared,
+    taskVisible,
+} from "@/db/queries/task-visibility";
+import { people, recordingTasks, users } from "@/db/schema";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { getOrgUserId } from "@/lib/org/config";
-import { sharedItemCondition } from "@/lib/sharing/shared";
 
-/**
- * Who may do what with a task (Johnny, 2026-10-07):
- *
- * | action                   | private recording | shared recording                          |
- * |--------------------------|-------------------|-------------------------------------------|
- * | edit, add, drop, review  | owner             | organization account                      |
- * | done, reopen             | owner             | organization account, owner, assignee     |
- * | see                      | owner             | everyone; in a list: owner, assignee, org |
- *
- * A task on a private recording reaches nobody but its owner, even when it
- * names someone else: tasks travel only through the Organization. The
- * assignee is a user when their person's email is that user's login email.
- */
-export interface TaskViewer {
-    userId: string;
-    /** `lookupHash` of the viewer's login email. */
-    emailHash: string;
-    isOrg: boolean;
-    /** The organization account this instance shows, or null. */
-    orgUserId: string | null;
-}
-
-/** The id and owner columns of the table a task's item is joined as. */
-export interface TaskItemColumns {
-    id: AnyColumn;
-    userId: AnyColumn;
-}
-
-/** `recordings` joined: the tasks of recordings only. */
-export const RECORDING_TASK_ITEM: TaskItemColumns = {
-    id: recordings.id,
-    userId: recordings.userId,
-};
-
-/** `chatter_items` joined: the tasks of every kind of item. */
-export const ANY_TASK_ITEM: TaskItemColumns = {
-    id: chatterItems.id,
-    userId: chatterItems.userId,
-};
+export { ANY_TASK_ITEM, RECORDING_TASK_ITEM, taskRecordingShared, taskVisible };
+export type { TaskItemColumns, TaskViewer };
 
 /** The viewer for a signed-in user. */
 export async function taskViewer(user: {
@@ -75,16 +39,6 @@ export async function taskViewerById(userId: string): Promise<TaskViewer> {
     return taskViewer(user ?? { id: userId, email: "" });
 }
 
-/** SQL: the task's recording (`recordings` joined, or `item`) is shared. */
-export function taskRecordingShared(
-    viewer: TaskViewer,
-    item: TaskItemColumns = RECORDING_TASK_ITEM,
-): SQL {
-    return viewer.orgUserId
-        ? sharedItemCondition(viewer.orgUserId, item.id)
-        : sql`false`;
-}
-
 /** SQL: the task is assigned to the viewer (needs nothing joined). */
 export function assignedToViewer(viewer: TaskViewer): SQL {
     return sql`exists (
@@ -92,16 +46,6 @@ export function assignedToViewer(viewer: TaskViewer): SQL {
         where ${people.id} = ${recordingTasks.assigneePersonId}
             and ${people.primaryEmailHash} = ${viewer.emailHash}
     )`;
-}
-
-/** SQL: the viewer may see the task (`recordings` joined, or `item`). */
-export function taskVisible(
-    viewer: TaskViewer,
-    item: TaskItemColumns = RECORDING_TASK_ITEM,
-): SQL {
-    const shared = taskRecordingShared(viewer, item);
-    if (viewer.isOrg) return shared;
-    return or(eq(item.userId, viewer.userId), shared) as SQL;
 }
 
 /**

@@ -13,6 +13,7 @@ import {
     recordingFolders,
     recordings,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
     transcriptions,
     users,
@@ -302,6 +303,7 @@ export async function gatherFacts(
         intents,
         proposals,
         followUps,
+        matches,
         plaudTranscript,
         [transcriptionJob],
         [failedTranscriptionJob],
@@ -403,6 +405,17 @@ export async function gatherFacts(
                 and(
                     eq(taskUpdateProposals.itemId, itemId),
                     eq(taskUpdateProposals.userId, userId),
+                ),
+            ),
+        db
+            .select({ id: taskMentions.id })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, itemId),
+                    eq(taskMentions.userId, userId),
+                    eq(taskMentions.view, view),
+                    eq(taskMentions.matchDecision, "suggested"),
                 ),
             ),
         plaudTranscriptPromise,
@@ -788,7 +801,7 @@ export async function gatherFacts(
             ),
         },
         taskReview: {
-            proposals: proposals.length,
+            proposals: proposals.length + matches.length,
             followUps: followUps.length,
         },
         share: { problems: shareProblems },

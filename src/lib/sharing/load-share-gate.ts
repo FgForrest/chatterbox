@@ -3,6 +3,7 @@ import type { db } from "@/db";
 import {
     learnRuns,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
     transcriptions,
     transcriptSpeakers,
@@ -100,6 +101,16 @@ export async function loadShareGate(
                 liveFollowUpCondition(),
             ),
         );
+    const [matches] = await executor
+        .select({ count: sql<number>`count(*)::int` })
+        .from(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.itemId, recordingId),
+                eq(taskMentions.userId, ownerUserId),
+                eq(taskMentions.matchDecision, "suggested"),
+            ),
+        );
     return evaluateShareGate({
         transcripts: transcripts.map((transcript) => ({
             id: transcript.id,
@@ -108,6 +119,9 @@ export async function loadShareGate(
         })),
         attributions,
         unfinishedLearnRuns: unfinished?.count ?? 0,
-        waitingTaskProposals: (proposals?.count ?? 0) + (followUps?.count ?? 0),
+        waitingTaskProposals:
+            (proposals?.count ?? 0) +
+            (followUps?.count ?? 0) +
+            (matches?.count ?? 0),
     });
 }

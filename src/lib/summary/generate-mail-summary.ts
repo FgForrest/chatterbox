@@ -354,6 +354,9 @@ export async function generateMailSummary(
         turns: null,
         language: content.language,
         orgView,
+        reviewer: await taskViewerById(
+            orgView ? ctx.settingsUserId : ctx.ownerUserId,
+        ),
         summaryText: summary,
         mail: content,
     }).catch((error: unknown) => {

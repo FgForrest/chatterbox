@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import type { db } from "@/db";
+import { ANY_TASK_ITEM, taskVisible } from "@/db/queries/task-visibility";
 import { liveFollowUpCondition } from "@/db/queries/tasks";
 import {
     aiEnhancements,
@@ -12,7 +13,12 @@ import {
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
-import { linkedTaskMentionCondition } from "@/lib/tasks/mentions";
+import type { TaskViewer } from "@/lib/tasks/access";
+import {
+    fieldProposalIsLater,
+    plausibleQuotedStatementTime,
+} from "@/lib/tasks/chronology";
+import { shouldPreselectTaskOutcome } from "@/lib/tasks/summary-items";
 
 export { liveFollowUpCondition } from "@/db/queries/tasks";
 
@@ -37,6 +43,10 @@ export interface ProposedTask {
      * starts unticked.
      */
     evidenceProvenance?: EvidenceProvenance | null;
+    /** A quoted mail header's claimed time, bounded when it is stored. */
+    quotedAt?: Date | null;
+    /** Existing tasks this ambiguous commitment may be, if any. */
+    candidateTaskIds?: string[];
 }
 
 /** A range of one segment of a mail's content. */
@@ -48,26 +58,60 @@ export interface TextEvidence {
 
 export interface ProposedTaskUpdate {
     taskId: string;
-    kind: "done" | "due";
+    kind: "done" | "due" | "due_phrase";
     dueDate: string | null;
     duePhrase: string | null;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceText?: TextEvidence | null;
     evidenceProvenance?: EvidenceProvenance | null;
+    quotedAt?: Date | null;
+    /** Field changes never start selected. */
+    ticked?: false;
+}
+
+export interface ProposedTaskMatch {
+    taskId: string;
+    quote: string | null;
+    evidenceStartMs: number | null;
+    evidenceText?: TextEvidence | null;
+    evidenceProvenance?: EvidenceProvenance | null;
+    quotedAt?: Date | null;
+    /** Derived from the one-candidate, trustworthy-evidence rule. */
+    ticked: boolean;
 }
 
 /** What one summary proposes, ready to store. */
 export interface TaskProposals {
     source: "riffado" | "plaud";
     tasks: ProposedTask[];
+    matches?: ProposedTaskMatch[];
     updates: ProposedTaskUpdate[];
+    /** Reviewer whose candidate visibility is rechecked when output commits. */
+    reviewer?: TaskViewer;
     /**
      * The keyed fingerprint of a task text (`taskFingerprint`), passed in so
      * this module needs no secret of its own: the write compares the
      * recording's tasks under its lock.
      */
     fingerprintOf: (text: string) => string;
+}
+
+type ProposedEvidence = Pick<
+    ProposedTaskMatch,
+    | "quote"
+    | "evidenceStartMs"
+    | "evidenceText"
+    | "evidenceProvenance"
+    | "quotedAt"
+>;
+
+type ProposedMatchEvidence = ProposedEvidence & { ticked: boolean };
+
+function statementAt(itemOccurredAt: Date, evidence: ProposedEvidence): Date {
+    return evidence.evidenceProvenance === "quoted"
+        ? plausibleQuotedStatementTime(itemOccurredAt, evidence.quotedAt)
+        : itemOccurredAt;
 }
 
 /**
@@ -197,29 +241,104 @@ export async function writeTaskProposalsInTx(
               ).map((row) => row.id)
             : [],
     );
-    const targets = [...new Set(proposals.updates.map((u) => u.taskId))];
-    const openTasks = new Set(
+    const ambiguousMatches = proposals.tasks.flatMap((task) => {
+        const candidateTaskIds = [...new Set(task.candidateTaskIds ?? [])];
+        return candidateTaskIds.map(
+            (taskId): ProposedTaskMatch => ({
+                taskId,
+                quote: task.quote,
+                evidenceStartMs: task.evidenceStartMs,
+                evidenceText: task.evidenceText,
+                evidenceProvenance: task.evidenceProvenance,
+                quotedAt: task.quotedAt,
+                ticked: shouldPreselectTaskOutcome(
+                    "match",
+                    candidateTaskIds.length,
+                    task.evidenceProvenance,
+                ),
+            }),
+        );
+    });
+    const proposedMatches = [
+        ...(proposals.matches ?? []).map((match) => ({
+            ...match,
+            ticked: shouldPreselectTaskOutcome(
+                "match",
+                1,
+                match.evidenceProvenance,
+            ),
+        })),
+        ...ambiguousMatches,
+    ];
+    const targets = [
+        ...new Set([
+            ...proposedMatches.map((match) => match.taskId),
+            ...proposals.updates.map((update) => update.taskId),
+        ]),
+    ];
+    const openTasks = new Map(
         targets.length > 0
             ? (
                   await tx
-                      .select({ id: recordingTasks.id })
+                      .select({
+                          id: recordingTasks.id,
+                          statusEffectiveAt: recordingTasks.statusEffectiveAt,
+                          dueEffectiveAt: recordingTasks.dueEffectiveAt,
+                      })
                       .from(recordingTasks)
+                      .innerJoin(
+                          chatterItems,
+                          eq(chatterItems.id, recordingTasks.itemId),
+                      )
                       .where(
                           and(
                               inArray(recordingTasks.id, targets),
                               eq(recordingTasks.status, "open"),
+                              isNull(chatterItems.deletedAt),
+                              proposals.reviewer
+                                  ? taskVisible(
+                                        proposals.reviewer,
+                                        ANY_TASK_ITEM,
+                                    )
+                                  : undefined,
                           ),
                       )
-              ).map((row) => row.id)
+              ).map((row) => [row.id, row] as const)
+            : [],
+    );
+    for (const taskId of targets) {
+        if (!openTasks.has(taskId)) {
+            console.warn(
+                `[tasks] ignored task candidate ${taskId}: it is no longer available`,
+            );
+        }
+    }
+    const existingMentions = new Set(
+        targets.length > 0
+            ? (
+                  await tx
+                      .select({ taskId: taskMentions.taskId })
+                      .from(taskMentions)
+                      .where(
+                          and(
+                              inArray(taskMentions.taskId, targets),
+                              eq(taskMentions.itemId, recordingId),
+                              eq(taskMentions.userId, ownerUserId),
+                              eq(taskMentions.view, view),
+                          ),
+                      )
+              ).map((row) => row.taskId)
             : [],
     );
 
     const rows: (typeof recordingTasks.$inferInsert)[] = [];
+    const rowStatements: Date[] = [];
     for (const task of proposals.tasks) {
         const { fingerprint } = task;
         if (rejected.has(fingerprint) || known.has(fingerprint)) continue;
         known.add(fingerprint);
         position += 1;
+        rowStatements.push(statementAt(item.occurredAt, task));
         rows.push({
             itemId: recordingId,
             userId: ownerUserId,
@@ -240,7 +359,10 @@ export async function writeTaskProposalsInTx(
             evidenceCharEnd: task.evidenceText?.charEnd ?? null,
             evidenceProvenance: task.evidenceProvenance ?? null,
             source: proposals.source,
-            ticked: !task.assigneeCheck && !task.evidenceProvenance,
+            ticked:
+                !task.assigneeCheck &&
+                !task.evidenceProvenance &&
+                (task.candidateTaskIds?.length ?? 0) === 0,
             position,
             createdByUserId: actorUserId,
             originItemId: recordingId,
@@ -270,18 +392,74 @@ export async function writeTaskProposalsInTx(
                     provenance: stored?.evidenceProvenance ?? null,
                     contentSourceId,
                     contentRevision,
-                    statementAt: item.occurredAt,
+                    statementAt: rowStatements[index] ?? item.occurredAt,
                     matchDecision: "home" as const,
                 };
             }),
         );
     }
 
-    const updates = proposals.updates.filter((update) =>
-        openTasks.has(update.taskId),
-    );
+    const mentionByTask = new Map<string, ProposedMatchEvidence>();
+    for (const match of proposedMatches) {
+        if (
+            !openTasks.has(match.taskId) ||
+            existingMentions.has(match.taskId) ||
+            mentionByTask.has(match.taskId)
+        ) {
+            continue;
+        }
+        mentionByTask.set(match.taskId, {
+            ...match,
+            ticked: match.ticked,
+        });
+    }
+    for (const update of proposals.updates) {
+        if (
+            !openTasks.has(update.taskId) ||
+            existingMentions.has(update.taskId) ||
+            mentionByTask.has(update.taskId)
+        ) {
+            continue;
+        }
+        mentionByTask.set(update.taskId, { ...update, ticked: false });
+    }
+    if (mentionByTask.size > 0) {
+        await tx.insert(taskMentions).values(
+            [...mentionByTask].map(([taskId, evidence]) => ({
+                taskId,
+                itemId: recordingId,
+                userId: ownerUserId,
+                view,
+                evidenceStartMs: evidence.evidenceStartMs,
+                evidenceSegmentIndex:
+                    evidence.evidenceText?.segmentIndex ?? null,
+                evidenceCharStart: evidence.evidenceText?.charStart ?? null,
+                evidenceCharEnd: evidence.evidenceText?.charEnd ?? null,
+                quote: encryptText(evidence.quote),
+                provenance: evidence.evidenceProvenance ?? null,
+                contentSourceId,
+                contentRevision,
+                statementAt: statementAt(item.occurredAt, evidence),
+                matchDecision: "suggested" as const,
+                ticked: evidence.ticked,
+            })),
+        );
+    }
+
+    const updates = proposals.updates.filter((update) => {
+        const target = openTasks.get(update.taskId);
+        if (!target || existingMentions.has(update.taskId)) return false;
+        const effectiveAt =
+            update.kind === "done"
+                ? target.statusEffectiveAt
+                : target.dueEffectiveAt;
+        return fieldProposalIsLater(
+            statementAt(item.occurredAt, update),
+            effectiveAt,
+        );
+    });
     if (updates.length > 0) {
-        const insertedUpdates = await tx
+        await tx
             .insert(taskUpdateProposals)
             .values(
                 updates.map((update) => ({
@@ -298,46 +476,10 @@ export async function writeTaskProposalsInTx(
                     evidenceCharStart: update.evidenceText?.charStart ?? null,
                     evidenceCharEnd: update.evidenceText?.charEnd ?? null,
                     evidenceProvenance: update.evidenceProvenance ?? null,
+                    ticked: false,
                 })),
             )
-            .onConflictDoNothing()
-            .returning({
-                id: taskUpdateProposals.id,
-                taskId: taskUpdateProposals.taskId,
-                kind: taskUpdateProposals.kind,
-            });
-        if (insertedUpdates.length > 0) {
-            await tx.insert(taskMentions).values(
-                insertedUpdates.map((row) => {
-                    const update = updates.find(
-                        (candidate) =>
-                            candidate.taskId === row.taskId &&
-                            candidate.kind === row.kind,
-                    );
-                    if (!update)
-                        throw new Error("inserted follow-up was not found");
-                    return {
-                        id: row.id,
-                        taskId: row.taskId,
-                        itemId: recordingId,
-                        userId: ownerUserId,
-                        view,
-                        evidenceStartMs: update.evidenceStartMs,
-                        evidenceSegmentIndex:
-                            update.evidenceText?.segmentIndex ?? null,
-                        evidenceCharStart:
-                            update.evidenceText?.charStart ?? null,
-                        evidenceCharEnd: update.evidenceText?.charEnd ?? null,
-                        quote: encryptText(update.quote),
-                        provenance: update.evidenceProvenance ?? null,
-                        contentSourceId,
-                        contentRevision,
-                        statementAt: item.occurredAt,
-                        matchDecision: "suggested" as const,
-                    };
-                }),
-            );
-        }
+            .onConflictDoNothing();
     }
 }
 
@@ -441,7 +583,10 @@ export async function dropTasksWithoutSummaryInTx(
                             .where(
                                 and(
                                     eq(taskMentions.taskId, recordingTasks.id),
-                                    linkedTaskMentionCondition(),
+                                    inArray(taskMentions.matchDecision, [
+                                        "home",
+                                        "accepted",
+                                    ]),
                                 ),
                             ),
                     ),

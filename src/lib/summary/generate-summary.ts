@@ -507,6 +507,9 @@ export async function generateSummaryForRecording(
         turns: input.turns,
         language: transcription.detectedLanguage,
         orgView,
+        reviewer: await taskViewerById(
+            orgView ? ctx.settingsUserId : ctx.ownerUserId,
+        ),
         summaryText: summary,
     }).catch((error: unknown) => {
         console.error("[summary] task proposals unavailable:", error);

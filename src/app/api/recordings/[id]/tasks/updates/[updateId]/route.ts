@@ -10,7 +10,7 @@ import { tickUpdateProposal } from "@/lib/tasks/tasks";
 
 type UpdateContext = { params: Promise<{ id: string; updateId: string }> };
 
-/** Tick or untick a follow-up of the review: `{ticked, version}`. */
+/** Tick or untick a field proposal or match: `{ticked, version}`. */
 export const PATCH = apiHandler<UpdateContext>(async (request, context) => {
     const { id, updateId } = await (context as UpdateContext).params;
     const viewer = await requireTaskViewer(request);

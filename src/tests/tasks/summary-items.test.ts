@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseSummaryPayload } from "@/lib/summary/payload";
 import {
     buildTasksContext,
@@ -11,6 +11,8 @@ import {
     isoDateOrNull,
     readTaskItems,
     readTaskUpdates,
+    resolveOfferedTaskReference,
+    shouldPreselectTaskOutcome,
     taskItemLine,
 } from "@/lib/tasks/summary-items";
 
@@ -31,6 +33,7 @@ describe("readTaskItems", () => {
             assignee: null,
             due: { phrase: "by next Friday", date: "2026-10-16" },
             quote: "I'll have a draft by next Friday",
+            candidates: null,
         });
     });
 
@@ -75,6 +78,17 @@ describe("readTaskItems", () => {
         expect(soon?.due).toEqual({ phrase: "soon", date: null });
         expect(impossible?.due).toEqual({ phrase: "the 31st", date: null });
     });
+
+    it("keeps unique candidate references for an ambiguous commitment", () => {
+        const [item] = readTaskItems([
+            {
+                text: "Send the contract",
+                candidates: ["T2", "T1", "T2", "not-a-ref"],
+            },
+        ]);
+
+        expect(item?.candidates).toEqual(["T2", "T1"]);
+    });
 });
 
 describe("readTaskUpdates", () => {
@@ -106,10 +120,16 @@ describe("readTaskUpdates", () => {
         ]);
     });
 
-    it("tolerates the match and vague-due outcomes until their parser lands", () => {
+    it("keeps matches and vague deadlines separate from field changes", () => {
         expect(
             readTaskUpdates([
-                { ref: "T1", kind: "match", quote: "same commitment" },
+                {
+                    ref: "T1",
+                    kind: "match",
+                    quote: "same commitment",
+                    due: { phrase: "must not leak", date: "2026-10-20" },
+                },
+                { ref: "T1", kind: "match", quote: "duplicate match" },
                 {
                     ref: "T1",
                     kind: "due_phrase",
@@ -117,7 +137,48 @@ describe("readTaskUpdates", () => {
                 },
                 { ref: "T1", kind: "done", quote: "hotovo" },
             ]),
-        ).toEqual([{ ref: "T1", kind: "done", due: null, quote: "hotovo" }]);
+        ).toEqual([
+            {
+                ref: "T1",
+                kind: "match",
+                due: null,
+                quote: "same commitment",
+            },
+            {
+                ref: "T1",
+                kind: "due_phrase",
+                due: { phrase: "později", date: null },
+                quote: null,
+            },
+            { ref: "T1", kind: "done", due: null, quote: "hotovo" },
+        ]);
+    });
+});
+
+describe("task outcome preselection", () => {
+    it("preselects only one trustworthy match", () => {
+        expect(shouldPreselectTaskOutcome("match", 1, null)).toBe(true);
+        expect(shouldPreselectTaskOutcome("match", 2, null)).toBe(false);
+        expect(shouldPreselectTaskOutcome("match", 1, "quoted")).toBe(false);
+        expect(shouldPreselectTaskOutcome("match", 1, "unverified")).toBe(
+            false,
+        );
+        expect(shouldPreselectTaskOutcome("done", 1, null)).toBe(false);
+        expect(shouldPreselectTaskOutcome("due", 1, null)).toBe(false);
+        expect(shouldPreselectTaskOutcome("due_phrase", 1, null)).toBe(false);
+    });
+});
+
+describe("resolveOfferedTaskReference", () => {
+    it("drops a reference that was not offered with a warning", () => {
+        const warning = vi.fn();
+        const refs = new Map([["T1", "task-one"]]);
+
+        expect(resolveOfferedTaskReference("T1", refs, warning)).toBe(
+            "task-one",
+        );
+        expect(resolveOfferedTaskReference("T9", refs, warning)).toBeNull();
+        expect(warning).toHaveBeenCalledOnce();
     });
 });
 
@@ -130,6 +191,7 @@ describe("taskItemLine", () => {
                 assignee: null,
                 due: { phrase: "by Friday", date: null },
                 quote: null,
+                candidates: null,
             }),
         ).toBe("[Speaker 1](#speaker-1): Draft the pricing page (by Friday)");
         expect(
@@ -139,6 +201,7 @@ describe("taskItemLine", () => {
                 assignee: "Carol",
                 due: null,
                 quote: null,
+                candidates: null,
             }),
         ).toBe("Carol: Write the press release");
     });
@@ -170,7 +233,12 @@ describe("parseSummaryPayload", () => {
         );
         expect(payload.actionItems).toEqual(["Carol: Book the venue"]);
         expect(payload.taskItems[0]?.assignee).toBe("Carol");
-        expect(payload.taskUpdates).toHaveLength(1);
+        expect(payload.taskItems[0]?.candidates).toEqual(["T1", "T2"]);
+        expect(payload.taskUpdates.map((update) => update.kind)).toEqual([
+            "match",
+            "due_phrase",
+            "done",
+        ]);
     });
 });
 

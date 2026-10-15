@@ -11,6 +11,7 @@ export const SUMMARY_TASKS_DIRECTIVE = `ACTION ITEMS: whatever the instructions 
 
 - One entry per deliverable per person. Fold the steps of one deliverable (prepare it, draft it, share the draft, send it) into a single entry; do not list each step. Leave out what was only discussed, offered without agreement, or is already done. A recording rarely holds more than about ten per hour of conversation.
 - "actionItems" contains new commitments only. When an entry could be the same commitment as several listed earlier tasks, keep it as an action item and put every plausible reference in "candidates". Otherwise "candidates" is null.
+- A new occurrence of recurring work is a new commitment, not a match to the completed occurrence before it.
 - "text": the action as one short line, without the person who does it ("Draft the pricing page", not "Speaker 1 drafts the pricing page").
 - "speaker": the transcript label of the speaker who has to do it, when they speak in the recording; otherwise null.
 - "assignee": when the person who has to do it does not speak in the recording, their name as it was said; otherwise null. Both null when nobody was named.
@@ -18,7 +19,7 @@ export const SUMMARY_TASKS_DIRECTIVE = `ACTION ITEMS: whatever the instructions 
 - "quote": up to 12 words copied exactly from the transcript where the action was agreed.`;
 
 /** Appended to the multi-pass merge, which receives the passes' objects. */
-export const SUMMARY_TASKS_MERGE_DIRECTIVE = `ACTION ITEMS: every "actionItems" entry is an object {"text", "speaker", "assignee", "due", "quote", "candidates"}; return it in that shape. Entries for the same deliverable and person are one entry, also when one version split it into steps: keep the most complete text, the speaker or assignee most versions agree on, the most specific "due", one quote, and the union of plausible candidate references. Return "taskUpdates" as the union of the versions' entries, one per "ref" and "kind". A "match" entry states identity only; keep deadline and completion entries separate.`;
+export const SUMMARY_TASKS_MERGE_DIRECTIVE = `ACTION ITEMS: every "actionItems" entry is an object {"text", "speaker", "assignee", "due", "quote", "candidates"}; return it in that shape. Entries for the same deliverable and person are one entry, also when one version split it into steps: keep the most complete text, the speaker or assignee most versions agree on, the most specific "due", one quote, and the union of plausible candidate references. Return "taskUpdates" as the union of the versions' entries, one per "ref" and "kind", with the same match from several versions only once. A match never carries a field change: a "match" entry states identity only, while deadline and completion entries stay separate.`;
 
 export interface TasksContextTask {
     /** `T<n>`, the reference a reply uses for it. */
@@ -114,6 +115,7 @@ export function buildTasksContext(context: TasksContext): string {
             "",
             "Open tasks in this item's folder scope, from earlier items. Compare every commitment with them:",
             '- When the same commitment is mentioned again, add {"ref": "T1", "kind": "match", "quote": string} to "taskUpdates" instead of listing it as new. This entry states identity only.',
+            '- Partial progress adds only that "match" entry. It does not complete or otherwise change the task.',
             '- Add field changes as separate entries for the same ref: {"ref": "T1", "kind": "due", "due": {"phrase": string, "date": "YYYY-MM-DD"}, "quote": string} for a stated date; {"ref": "T1", "kind": "due_phrase", "due": {"phrase": string, "date": null}, "quote": string} for vague postponement; or {"ref": "T1", "kind": "done", "quote": string} for completion. Never invent a date for a vague phrase.',
             '- When a new-looking commitment could be several of these tasks, keep it in "actionItems" and put those references in its "candidates" list so the reviewer may keep it new.',
             ...context.open.map((task) => {

@@ -25,6 +25,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskMentions,
     userSettings,
     users,
 } from "@/db/schema";
@@ -732,7 +733,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         }
     });
 
-    it("keeps where a follow-up was read in a mail, and how far to trust it", async () => {
+    it("keeps an earlier quoted follow-up as a mention without a field proposal", async () => {
         const viewer = await taskViewerById("u-jan");
         const [contract] = (
             await db()
@@ -772,6 +773,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                                 charEnd: 10,
                             },
                             evidenceProvenance: "quoted",
+                            quotedAt: new Date("2026-10-08T17:40:00.000Z"),
                         },
                     ],
                     fingerprintOf: taskFingerprint,
@@ -779,12 +781,25 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             });
         });
         const listed = await listRecordingTasks(viewer, itemId);
-        expect(listed?.updates).toEqual([
-            expect.objectContaining({
-                kind: "done",
-                evidenceProvenance: "quoted",
-            }),
-        ]);
+        expect(listed?.updates).toEqual([]);
+        const [mention] = await db()
+            .select({
+                provenance: taskMentions.provenance,
+                statementAt: taskMentions.statementAt,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, itemId),
+                    eq(taskMentions.taskId, contract?.id ?? ""),
+                ),
+            );
+        expect(mention).toEqual({
+            provenance: "quoted",
+            statementAt: new Date("2026-10-08T17:40:00.000Z"),
+            decision: "suggested",
+        });
     });
 
     it("queues a summary of new mail, unless machine-sent or switched off", async () => {

@@ -150,7 +150,7 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
 
     it("backfills one mention per existing task with evidence and chronology", async () => {
         const mentions = await db().execute<Record<string, unknown>>(sql`
-            SELECT task_id, item_id, user_id, view, quote, provenance,
+            SELECT task_id, item_id, user_id, view, quote, provenance, ticked,
                    evidence_start_ms, evidence_segment_index,
                    evidence_char_start, evidence_char_end,
                    content_source_id, content_revision, statement_at,
@@ -170,6 +170,7 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             content_source_id: "riffado",
             content_revision: 3,
             match_decision: "home",
+            ticked: false,
         });
         expect(String(mentions[0]?.statement_at)).toContain("2026-10-01");
         expect(mentions[1]).toMatchObject({
@@ -186,6 +187,7 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             content_source_id: "riffado",
             content_revision: 4,
             match_decision: "home",
+            ticked: false,
         });
         expect(String(mentions[1]?.statement_at)).toContain("2026-10-02");
         expect(mentions[2]).toMatchObject({
@@ -202,6 +204,7 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             content_source_id: "riffado",
             content_revision: 3,
             match_decision: "home",
+            ticked: false,
         });
         expect(String(mentions[2]?.statement_at)).toContain("2026-10-01");
 

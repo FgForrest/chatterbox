@@ -64,12 +64,17 @@ import {
 } from "@/lib/tasks/ranking";
 import type {
     ProposedTask,
+    ProposedTaskMatch,
     ProposedTaskUpdate,
     TaskProposals,
 } from "@/lib/tasks/store";
 import type {
     SummaryTaskItem,
     SummaryTaskUpdate,
+} from "@/lib/tasks/summary-items";
+import {
+    resolveOfferedTaskReference,
+    shouldPreselectTaskOutcome,
 } from "@/lib/tasks/summary-items";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -595,6 +600,7 @@ export async function resolveTaskProposals({
     turns,
     language,
     orgView,
+    reviewer,
     summaryText,
     mail = null,
 }: {
@@ -607,6 +613,7 @@ export async function resolveTaskProposals({
     turns: readonly TranscriptTurn[] | null;
     language: string | null;
     orgView: boolean;
+    reviewer: TaskViewer;
     /** The summary's Markdown, to tell how its speaker numbers count. */
     summaryText: string;
     /** The content of the mail the summary is of. */
@@ -619,7 +626,7 @@ export async function resolveTaskProposals({
     const evidence = (quote: string | null) =>
         mail
             ? mailEvidence(mail, quote)
-            : { evidenceStartMs: locateQuote(turns, quote) };
+            : { evidenceStartMs: locateQuote(turns, quote), quotedAt: null };
     const speakers = transcriptionId
         ? await confirmedSpeakers(ownerUserId, transcriptionId, orgView)
         : new Map<string, { label: string; personId: string; name: string }>();
@@ -696,6 +703,15 @@ export async function resolveTaskProposals({
                 assigneeHint = item.assignee;
             }
         }
+        const candidateTaskIds = [
+            ...new Set(
+                (item.candidates ?? []).flatMap((ref) => {
+                    const taskId = resolveOfferedTaskReference(ref, refs);
+                    if (taskId) return [taskId];
+                    return [];
+                }),
+            ),
+        ];
         tasks.push({
             text,
             fingerprint: taskFingerprint(text),
@@ -705,28 +721,52 @@ export async function resolveTaskProposals({
             dueDate: item.due?.date ?? null,
             duePhrase: item.due?.phrase ?? null,
             quote: item.quote,
+            candidateTaskIds,
             ...evidence(item.quote),
         });
     }
 
+    const matches: ProposedTaskMatch[] = [];
     const proposedUpdates: ProposedTaskUpdate[] = [];
+    const matched = new Set<string>();
     for (const update of updates) {
-        const taskId = refs.get(update.ref);
-        if (!taskId) continue;
+        const taskId = resolveOfferedTaskReference(update.ref, refs);
+        if (!taskId) {
+            continue;
+        }
+        const located = evidence(update.quote);
+        if (update.kind === "match") {
+            if (matched.has(taskId)) continue;
+            matched.add(taskId);
+            matches.push({
+                taskId,
+                quote: update.quote,
+                ...located,
+                ticked: shouldPreselectTaskOutcome(
+                    "match",
+                    1,
+                    located.evidenceProvenance,
+                ),
+            });
+            continue;
+        }
         proposedUpdates.push({
             taskId,
             kind: update.kind,
             dueDate: update.due?.date ?? null,
             duePhrase: update.due?.phrase ?? null,
             quote: update.quote,
-            ...evidence(update.quote),
+            ...located,
+            ticked: false,
         });
     }
 
     return {
         source,
         tasks,
+        matches,
         updates: proposedUpdates,
+        reviewer,
         fingerprintOf: taskFingerprint,
     };
 }
@@ -742,7 +782,7 @@ function mailEvidence(
     quote: string | null,
 ): Pick<
     ProposedTask,
-    "evidenceStartMs" | "evidenceText" | "evidenceProvenance"
+    "evidenceStartMs" | "evidenceText" | "evidenceProvenance" | "quotedAt"
 > {
     const readable = mail.segments.filter(
         (segment) => !segment.knownItemId && segment.role !== "disclaimer",
@@ -781,6 +821,7 @@ function mailEvidence(
         evidenceStartMs: null,
         evidenceText: range,
         evidenceProvenance: provenance,
+        quotedAt: provenance === "quoted" ? (segment?.at ?? null) : null,
     };
 }
 

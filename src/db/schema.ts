@@ -2821,6 +2821,7 @@ export const taskMentions = pgTable(
                 | "kept_new"
             >()
             .notNull(),
+        ticked: boolean("ticked").notNull().default(false),
         decidedByUserId: text("decided_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),

@@ -5,6 +5,8 @@
  * Pure, so the payload parser and the tests use it without the database.
  */
 
+import type { EvidenceProvenance } from "@/db/schema";
+
 export interface SummaryTaskDue {
     /** The deadline as it was said. */
     phrase: string;
@@ -24,13 +26,15 @@ export interface SummaryTaskItem {
     due: SummaryTaskDue | null;
     /** A few words of the transcript it was heard in. */
     quote: string | null;
+    /** Plausible earlier-task references when the identity is ambiguous. */
+    candidates: string[] | null;
 }
 
 export interface SummaryTaskUpdate {
     /** The `T<n>` reference of an open task the prompt listed. */
     ref: string;
-    kind: "done" | "due";
-    /** The new deadline, for `due`. */
+    kind: "match" | "done" | "due" | "due_phrase";
+    /** The new deadline, for `due` or `due_phrase`. */
     due: SummaryTaskDue | null;
     quote: string | null;
 }
@@ -41,6 +45,7 @@ const MAX_ITEMS = 60;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const SPEAKER_LABEL = /^speaker[_ -]?(\d+)$/i;
 const PARTICIPANT_REF = /^p(\d{1,3})$/i;
+const TASK_REF = /^T\d{1,3}$/;
 const LEADING_SPEAKER = /^\s*\[Speaker (\d+)\]\(#speaker-\1\)\s*/;
 const SPEAKER_PLACEHOLDER = /^\[?Speaker (\d+)\]?(?:\(#speaker-\1\))?$/i;
 
@@ -92,6 +97,17 @@ function readDue(value: unknown): SummaryTaskDue | null {
     return phrase ? { phrase, date } : null;
 }
 
+function readCandidates(value: unknown): string[] | null {
+    if (!Array.isArray(value)) return null;
+    const candidates: string[] = [];
+    for (const entry of value) {
+        const ref = cleanString(entry, 16);
+        if (!ref || !TASK_REF.test(ref) || candidates.includes(ref)) continue;
+        candidates.push(ref);
+    }
+    return candidates.length > 0 ? candidates : null;
+}
+
 /**
  * One item from a string: a leading speaker reference names who does it
  * ("[Speaker 2](#speaker-2) to draft the page"), and stays in the text.
@@ -106,6 +122,7 @@ function itemFromString(entry: string): SummaryTaskItem | null {
         assignee: null,
         due: null,
         quote: null,
+        candidates: null,
     };
 }
 
@@ -125,6 +142,7 @@ function itemFromObject(
         assignee: speaker ? null : cleanString(owner, MAX_FIELD),
         due: readDue(record.due ?? record.dueDate ?? record.deadline),
         quote: cleanString(record.quote, MAX_FIELD),
+        candidates: readCandidates(record.candidates),
     };
 }
 
@@ -165,9 +183,21 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
         const record = entry as Record<string, unknown>;
         const ref = cleanString(record.ref, 16);
         const kind = record.kind;
-        if (!ref || (kind !== "done" && kind !== "due")) continue;
-        const due = kind === "due" ? readDue(record.due ?? record.date) : null;
+        if (
+            !ref ||
+            (kind !== "match" &&
+                kind !== "done" &&
+                kind !== "due" &&
+                kind !== "due_phrase")
+        ) {
+            continue;
+        }
+        const due =
+            kind === "due" || kind === "due_phrase"
+                ? readDue(record.due ?? record.date)
+                : null;
         if (kind === "due" && !due?.date) continue;
+        if (kind === "due_phrase" && (!due || due.date !== null)) continue;
         const key = `${ref}\u0000${kind}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -179,6 +209,27 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
         });
     }
     return updates;
+}
+
+/** Whether one parsed outcome starts selected in task review. */
+export function shouldPreselectTaskOutcome(
+    kind: SummaryTaskUpdate["kind"],
+    candidateCount: number,
+    provenance: EvidenceProvenance | null | undefined,
+): boolean {
+    return kind === "match" && candidateCount === 1 && !provenance;
+}
+
+/** Resolve one model reference only when it was among the visible candidates. */
+export function resolveOfferedTaskReference(
+    ref: string,
+    offered: ReadonlyMap<string, string>,
+    warn: (message: string) => void = console.warn,
+): string | null {
+    const taskId = offered.get(ref);
+    if (taskId) return taskId;
+    warn(`[tasks] ignored task reference ${ref}: it was not offered`);
+    return null;
 }
 
 /**

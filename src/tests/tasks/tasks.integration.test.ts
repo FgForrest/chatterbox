@@ -105,12 +105,17 @@ import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { gatherFacts } from "@/lib/pipeline/facts";
 import { eraseLocalArtifact } from "@/lib/recordings/erase";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
 import { deleteItemTaskDataInTx } from "@/lib/tasks/mentions";
 import { loadTasksPromptContext, taskFingerprint } from "@/lib/tasks/proposals";
-import type { ProposedTask, TaskProposals } from "@/lib/tasks/store";
+import type {
+    ProposedTask,
+    ProposedTaskMatch,
+    TaskProposals,
+} from "@/lib/tasks/store";
 import {
     acceptReview,
     addTask,
@@ -152,6 +157,19 @@ function proposal(
         duePhrase: null,
         quote: null,
         evidenceStartMs: null,
+        ...extra,
+    };
+}
+
+function match(
+    taskId: string,
+    extra: Partial<ProposedTaskMatch> = {},
+): ProposedTaskMatch {
+    return {
+        taskId,
+        quote: null,
+        evidenceStartMs: null,
+        ticked: true,
         ...extra,
     };
 }
@@ -459,6 +477,443 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         );
     });
 
+    it("stores ambiguous candidates beside a Keep as new proposal", async () => {
+        const first = await addTask(alice, REC, {
+            text: "Send the signed contract",
+            status: "open",
+        });
+        const second = await addTask(alice, REC, {
+            text: "Send the supplier contract",
+            status: "open",
+        });
+
+        await summarize(LATER, [
+            proposal("Send the contract", {
+                quote: "I will send the contract",
+                evidenceStartMs: 2_000,
+                candidateTaskIds: [first.id, second.id],
+            }),
+        ]);
+
+        const review = await listRecordingTasks(alice, LATER);
+        expect(
+            review?.proposals.map((row) => ({
+                text: row.text,
+                ticked: row.ticked,
+            })),
+        ).toEqual([{ text: "Send the contract", ticked: false }]);
+        const candidates = await db()
+            .select({
+                taskId: taskMentions.taskId,
+                decision: taskMentions.matchDecision,
+                quote: taskMentions.quote,
+                ticked: taskMentions.ticked,
+            })
+            .from(taskMentions)
+            .where(eq(taskMentions.itemId, LATER));
+        expect(
+            candidates
+                .filter((row) => row.decision === "suggested")
+                .map((row) => ({
+                    taskId: row.taskId,
+                    quote: row.quote ? decryptText(row.quote) : null,
+                    ticked: row.ticked,
+                })),
+        ).toEqual(
+            expect.arrayContaining([
+                {
+                    taskId: first.id,
+                    quote: "I will send the contract",
+                    ticked: false,
+                },
+                {
+                    taskId: second.id,
+                    quote: "I will send the contract",
+                    ticked: false,
+                },
+            ]),
+        );
+        expect(review?.matches).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    ticked: false,
+                    ambiguous: true,
+                    candidate: expect.objectContaining({
+                        id: first.id,
+                        text: "Send the signed contract",
+                        assignee: null,
+                        dueDate: null,
+                        duePhrase: null,
+                        homeItem: expect.objectContaining({ id: REC }),
+                    }),
+                }),
+                expect.objectContaining({
+                    ticked: false,
+                    ambiguous: true,
+                    candidate: expect.objectContaining({ id: second.id }),
+                }),
+            ]),
+        );
+        expect(
+            await db()
+                .select()
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, LATER)),
+        ).toEqual([]);
+    });
+
+    it("stores one match mention separately from its field proposal", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            matches: [
+                match(task.id, {
+                    quote: "the same partner email",
+                    evidenceStartMs: 1_000,
+                }),
+            ],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "due",
+                    dueDate: "2026-10-20",
+                    duePhrase: "by next Tuesday",
+                    quote: "by next Tuesday",
+                    evidenceStartMs: 2_000,
+                },
+            ],
+        });
+
+        const [mention] = await db()
+            .select({
+                id: taskMentions.id,
+                quote: taskMentions.quote,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, task.id),
+                ),
+            );
+        const [field] = await db()
+            .select({
+                id: taskUpdateProposals.id,
+                kind: taskUpdateProposals.kind,
+                dueDate: taskUpdateProposals.dueDate,
+                ticked: taskUpdateProposals.ticked,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.itemId, LATER));
+        expect(mention).toMatchObject({ decision: "suggested" });
+        expect(mention?.quote ? decryptText(mention.quote) : null).toBe(
+            "the same partner email",
+        );
+        expect(field).toMatchObject({
+            kind: "due",
+            dueDate: "2026-10-20",
+            ticked: false,
+        });
+        expect(field?.id).not.toBe(mention?.id);
+    });
+
+    it("accepts a preselected pure match on Apply", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            matches: [match(task.id, { quote: "the same partner email" })],
+        });
+
+        const listed = await review(alice, LATER);
+        expect(listed.matches).toEqual([
+            expect.objectContaining({
+                ticked: true,
+                ambiguous: false,
+                evidenceProvenance: null,
+                candidate: expect.objectContaining({
+                    id: task.id,
+                    text: "Send the partner email",
+                    homeItem: expect.objectContaining({ id: REC }),
+                }),
+            }),
+        ]);
+
+        await acceptReview(alice, LATER);
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, task.id),
+                ),
+            );
+        expect(mention?.decision).toBe("accepted");
+    });
+
+    it("rejects a pure match unticked before Apply", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], { matches: [match(task.id)] });
+        const [suggestion] = (await review(alice, LATER)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            false,
+            suggestion.version,
+        );
+        await acceptReview(alice, LATER);
+
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(eq(taskMentions.id, suggestion.id));
+        expect(mention?.decision).toBe("rejected");
+    });
+
+    it("accepts one ambiguous candidate and rejects the alternatives", async () => {
+        const first = await addTask(alice, REC, {
+            text: "Send the signed contract",
+            status: "open",
+        });
+        const second = await addTask(alice, REC, {
+            text: "Send the supplier contract",
+            status: "open",
+        });
+        await summarize(LATER, [
+            proposal("Send the contract", {
+                quote: "I will send the contract",
+                candidateTaskIds: [first.id, second.id],
+            }),
+        ]);
+        const listed = await review(alice, LATER);
+        const chosen = listed.matches.find(
+            (candidate) => candidate.candidate.id === first.id,
+        );
+        if (!chosen) throw new Error("missing ambiguous candidate");
+        await tickUpdateProposal(alice, LATER, chosen.id, true, chosen.version);
+
+        expect(await acceptReview(alice, LATER)).toMatchObject({
+            accepted: 0,
+            rejected: 1,
+        });
+        const decisions = await db()
+            .select({
+                taskId: taskMentions.taskId,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    inArray(taskMentions.taskId, [first.id, second.id]),
+                ),
+            );
+        expect(decisions).toEqual(
+            expect.arrayContaining([
+                { taskId: first.id, decision: "accepted" },
+                { taskId: second.id, decision: "rejected" },
+            ]),
+        );
+        expect((await review(alice, LATER)).proposals).toEqual([]);
+    });
+
+    it("accepts an unticked match when its field proposal applies", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            matches: [
+                match(task.id, {
+                    evidenceProvenance: "quoted",
+                    ticked: false,
+                }),
+            ],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "due",
+                    dueDate: "2026-10-20",
+                    duePhrase: null,
+                    quote: "by October 20",
+                    evidenceStartMs: null,
+                    ticked: false,
+                },
+            ],
+        });
+        const listed = await review(alice, LATER);
+        expect(listed.matches[0]?.ticked).toBe(false);
+        const [update] = listed.updates;
+        if (!update) throw new Error("missing field proposal");
+        await tickUpdateProposal(alice, LATER, update.id, true, update.version);
+
+        await acceptReview(alice, LATER);
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, task.id),
+                ),
+            );
+        expect(mention?.decision).toBe("accepted");
+    });
+
+    it("skips and rejects a selected match whose task closed meanwhile", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], { matches: [match(task.id)] });
+        await updateTask(alice, task.id, {
+            version: task.version,
+            status: "done",
+        });
+
+        expect(await acceptReview(alice, LATER)).toMatchObject({
+            updatesSkipped: 1,
+        });
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, task.id),
+                ),
+            );
+        expect(mention?.decision).toBe("rejected");
+    });
+
+    it("counts an undecided suggested match in the share and phase gates", async () => {
+        const task = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(REC, [], { matches: [match(task.id)] });
+
+        await expect(share(REC)).rejects.toMatchObject({
+            statusCode: 409,
+            details: {
+                problems: [{ kind: "tasks_unreviewed", proposals: 1 }],
+            },
+        });
+        expect((await gatherFacts(REC, "private", ALICE)).taskReview).toEqual({
+            proposals: 1,
+            followUps: 0,
+        });
+    });
+
+    it("drops a task that is no longer visible to the proposal reviewer", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Private task",
+            status: "open",
+        });
+        const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+            await summarize(LATER, [], {
+                reviewer: bob,
+                matches: [match(task.id)],
+                updates: [
+                    {
+                        taskId: task.id,
+                        kind: "done",
+                        dueDate: null,
+                        duePhrase: null,
+                        quote: "done",
+                        evidenceStartMs: 1_000,
+                    },
+                ],
+            });
+            expect(warning).toHaveBeenCalledOnce();
+        } finally {
+            warning.mockRestore();
+        }
+
+        expect(
+            await db()
+                .select()
+                .from(taskMentions)
+                .where(eq(taskMentions.itemId, LATER)),
+        ).toEqual([]);
+        expect(
+            await db()
+                .select()
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, LATER)),
+        ).toEqual([]);
+    });
+
+    it("suppresses an earlier completion after a manual status edit", async () => {
+        await db()
+            .update(chatterItems)
+            .set({ occurredAt: new Date("2026-10-08T08:00:00.000Z") })
+            .where(eq(chatterItems.id, REC));
+        await db()
+            .update(chatterItems)
+            .set({ occurredAt: new Date("2026-10-08T09:00:00.000Z") })
+            .where(eq(chatterItems.id, LATER));
+        await summarize(REC, [proposal("Send the partner email")]);
+        await acceptReview(alice, REC);
+        const [task] = (await review(alice, REC)).tasks;
+        if (!task) throw new Error("missing accepted task");
+
+        const completion = {
+            taskId: task.id,
+            kind: "done" as const,
+            dueDate: null,
+            duePhrase: null,
+            quote: "the partner email is sent",
+            evidenceStartMs: 3_000,
+        };
+        await summarize(LATER, [], { updates: [completion] });
+        expect((await review(alice, LATER)).updates).toHaveLength(1);
+
+        const done = await updateTask(alice, task.id, {
+            version: task.version,
+            status: "done",
+        });
+        await updateTask(alice, task.id, {
+            version: done.version,
+            status: "open",
+        });
+
+        await summarize(LATER, [], { updates: [completion] });
+        expect((await review(alice, LATER)).updates).toEqual([]);
+        const [stored] = await db()
+            .select({
+                statusEffectiveAt: recordingTasks.statusEffectiveAt,
+            })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored?.statusEffectiveAt?.getTime()).toBeGreaterThan(
+            new Date("2026-10-08T09:00:00.000Z").getTime(),
+        );
+        expect(
+            await db()
+                .select()
+                .from(taskMentions)
+                .where(
+                    and(
+                        eq(taskMentions.itemId, LATER),
+                        eq(taskMentions.taskId, task.id),
+                    ),
+                ),
+        ).toHaveLength(1);
+    });
+
     it("replaces the same view's proposed and follow-up mentions on re-summary", async () => {
         const target = await addTask(alice, LATER, {
             text: "Send the partner email",
@@ -731,6 +1186,38 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ]);
     });
 
+    it("sets field effective times on manual edits", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Call Dana",
+            status: "open",
+        });
+        const due = await updateTask(alice, task.id, {
+            version: task.version,
+            dueDate: "2026-10-20",
+        });
+        const assigned = await updateTask(alice, task.id, {
+            version: due.version,
+            assigneePersonId: bobPrivate,
+        });
+        await updateTask(alice, task.id, {
+            version: assigned.version,
+            status: "done",
+        });
+
+        const [stored] = await db()
+            .select({
+                status: recordingTasks.statusEffectiveAt,
+                due: recordingTasks.dueEffectiveAt,
+                assignee: recordingTasks.assigneeEffectiveAt,
+            })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        const itemTime = new Date("2026-10-06T10:00:00.000Z").getTime();
+        expect(stored?.status?.getTime()).toBeGreaterThan(itemTime);
+        expect(stored?.due?.getTime()).toBeGreaterThan(itemTime);
+        expect(stored?.assignee?.getTime()).toBeGreaterThan(itemTime);
+    });
+
     it("keeps a private recording's tasks to its owner, whoever they name", async () => {
         const task = await addTask(alice, REC, {
             text: "Draft the pricing page",
@@ -879,6 +1366,54 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 .from(taskUpdateProposals)
                 .where(eq(taskUpdateProposals.itemId, LATER)),
         ).toEqual([]);
+    });
+
+    it("applies a vague deadline without inventing a date", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            dueDate: "2026-10-16",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "due_phrase",
+                    dueDate: null,
+                    duePhrase: "later this month",
+                    quote: "let us do it later this month",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
+        const [update] = (await review(alice, LATER)).updates;
+        if (!update) throw new Error("missing vague deadline");
+        expect(update).toMatchObject({
+            kind: "due_phrase",
+            dueDate: null,
+            duePhrase: "later this month",
+            ticked: false,
+            task: { dueDate: "2026-10-16" },
+        });
+
+        await tickUpdateProposal(alice, LATER, update.id, true, update.version);
+        await acceptReview(alice, LATER);
+
+        const [stored] = await db()
+            .select({
+                dueDate: recordingTasks.dueDate,
+                duePhrase: recordingTasks.duePhrase,
+                dueEffectiveAt: recordingTasks.dueEffectiveAt,
+            })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored).toMatchObject({
+            dueDate: null,
+            dueEffectiveAt: new Date("2026-10-08T10:00:00.000Z"),
+        });
+        expect(stored?.duePhrase ? decryptText(stored.duePhrase) : null).toBe(
+            "later this month",
+        );
     });
 
     it("decides follow-up mentions and keeps only accepted evidence", async () => {

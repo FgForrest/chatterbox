@@ -1,0 +1,1 @@
+ALTER TABLE "task_mentions" ADD COLUMN "ticked" boolean DEFAULT false NOT NULL;

@@ -5,6 +5,7 @@ import {
     mailPendingShares,
     recordingFolderAssignments,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
 } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
@@ -28,43 +29,56 @@ export async function mailShareProblems(
     itemId: string,
     ownerUserId: string,
 ): Promise<ShareGateProblem[]> {
-    const [[openRuns], [proposals], [followUps]] = await Promise.all([
-        tx
-            .select({ n: count() })
-            .from(learnRuns)
-            .where(
-                and(
-                    eq(learnRuns.itemId, itemId),
-                    eq(learnRuns.userId, ownerUserId),
-                    learnRunOpen(),
+    const [[openRuns], [proposals], [followUps], [matches]] = await Promise.all(
+        [
+            tx
+                .select({ n: count() })
+                .from(learnRuns)
+                .where(
+                    and(
+                        eq(learnRuns.itemId, itemId),
+                        eq(learnRuns.userId, ownerUserId),
+                        learnRunOpen(),
+                    ),
                 ),
-            ),
-        tx
-            .select({ n: count() })
-            .from(recordingTasks)
-            .where(
-                and(
-                    eq(recordingTasks.itemId, itemId),
-                    eq(recordingTasks.userId, ownerUserId),
-                    eq(recordingTasks.status, "proposed"),
+            tx
+                .select({ n: count() })
+                .from(recordingTasks)
+                .where(
+                    and(
+                        eq(recordingTasks.itemId, itemId),
+                        eq(recordingTasks.userId, ownerUserId),
+                        eq(recordingTasks.status, "proposed"),
+                    ),
                 ),
-            ),
-        tx
-            .select({ n: count() })
-            .from(taskUpdateProposals)
-            .where(
-                and(
-                    eq(taskUpdateProposals.itemId, itemId),
-                    eq(taskUpdateProposals.userId, ownerUserId),
-                    liveFollowUpCondition(),
+            tx
+                .select({ n: count() })
+                .from(taskUpdateProposals)
+                .where(
+                    and(
+                        eq(taskUpdateProposals.itemId, itemId),
+                        eq(taskUpdateProposals.userId, ownerUserId),
+                        liveFollowUpCondition(),
+                    ),
                 ),
-            ),
-    ]);
+            tx
+                .select({ n: count() })
+                .from(taskMentions)
+                .where(
+                    and(
+                        eq(taskMentions.itemId, itemId),
+                        eq(taskMentions.userId, ownerUserId),
+                        eq(taskMentions.matchDecision, "suggested"),
+                    ),
+                ),
+        ],
+    );
     const problems: ShareGateProblem[] = [];
     if ((openRuns?.n ?? 0) > 0) {
         problems.push({ kind: "learn_unfinished", runs: openRuns?.n ?? 0 });
     }
-    const waitingProposals = (proposals?.n ?? 0) + (followUps?.n ?? 0);
+    const waitingProposals =
+        (proposals?.n ?? 0) + (followUps?.n ?? 0) + (matches?.n ?? 0);
     if (waitingProposals > 0) {
         problems.push({
             kind: "tasks_unreviewed",
