@@ -1,13 +1,31 @@
-import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import {
+    and,
+    asc,
+    desc,
+    eq,
+    exists,
+    inArray,
+    isNull,
+    ne,
+    or,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     chatterItems,
     type EvidenceProvenance,
+    mailPendingShares,
+    recordingFolderAssignments,
     recordingTasks,
+    taskMentions,
+    taskVectors,
 } from "@/db/schema";
 import type { ItemContent } from "@/lib/content/types";
-import { decryptText } from "@/lib/encryption/fields";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { getTranscriptSpeakers } from "@/lib/knowledge/attribution";
+import { embeddingClient } from "@/lib/knowledge/embeddings";
+import { vectorGenerationFor } from "@/lib/knowledge/knowledge-embed";
 import { findByName, knowledgeView } from "@/lib/knowledge/knowledge-loader";
 import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import {
@@ -16,6 +34,7 @@ import {
     projectSummarySpeakerReferencesForExport,
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
+import { decodeVector, encodeVector } from "@/lib/knowledge/vector-search";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
@@ -29,10 +48,20 @@ import {
     type TasksContextTask,
 } from "@/lib/tasks/directive";
 import {
+    linkedTaskMentionCondition,
+    taskMentionVisible,
+} from "@/lib/tasks/mentions";
+import {
     locateQuote,
     locateTextQuote,
     normalizeTaskText,
 } from "@/lib/tasks/quote";
+import {
+    rankTaskCandidates,
+    rankTaskCandidatesWithEmbeddings,
+    TASK_CANDIDATE_LIMIT,
+    type TaskRankingCandidate,
+} from "@/lib/tasks/ranking";
 import type {
     ProposedTask,
     ProposedTaskUpdate,
@@ -44,8 +73,6 @@ import type {
 } from "@/lib/tasks/summary-items";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
-/** Open tasks of a recording's speakers shown to its summary, at most. */
-const MAX_OPEN_IN_PROMPT = 30;
 /** Already-decided tasks of a recording shown to its summary, at most. */
 const MAX_DECIDED_IN_PROMPT = 60;
 /** A name match at least this good names the person (exact or every word). */
@@ -73,15 +100,16 @@ interface RecordingRow {
     zonemins: number | null;
 }
 
-/** Confirmed people on a transcript, by the anchor of their label. */
-async function confirmedSpeakers(
-    ownerUserId: string,
-    transcriptionId: string,
-    orgPeopleOnly: boolean,
-): Promise<Map<string, { label: string; personId: string; name: string }>> {
-    const rows = await getTranscriptSpeakers(ownerUserId, transcriptionId, {
-        orgPeopleOnly,
-    });
+interface CandidateTask extends TaskRankingCandidate {
+    userId: string;
+    dueDate: string | null;
+}
+
+const candidateMentionItem = alias(chatterItems, "candidate_mention_item");
+
+function confirmedSpeakerMap(
+    rows: Awaited<ReturnType<typeof getTranscriptSpeakers>>,
+): Map<string, { label: string; personId: string; name: string }> {
     const byAnchor = new Map<
         string,
         { label: string; personId: string; name: string }
@@ -99,12 +127,344 @@ async function confirmedSpeakers(
     return byAnchor;
 }
 
+/** Confirmed people on a transcript, by the anchor of their label. */
+async function confirmedSpeakers(
+    ownerUserId: string,
+    transcriptionId: string,
+    orgPeopleOnly: boolean,
+): Promise<Map<string, { label: string; personId: string; name: string }>> {
+    const rows = await getTranscriptSpeakers(ownerUserId, transcriptionId, {
+        orgPeopleOnly,
+    });
+    return confirmedSpeakerMap(rows);
+}
+
+async function scopedCandidates(
+    recording: RecordingRow,
+    reviewer: TaskViewer,
+    scopeFolderIds: readonly string[],
+): Promise<CandidateTask[]> {
+    const inActualPlacement = exists(
+        db
+            .select({ itemId: recordingFolderAssignments.itemId })
+            .from(recordingFolderAssignments)
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, taskMentions.itemId),
+                    eq(recordingFolderAssignments.userId, taskMentions.userId),
+                    inArray(recordingFolderAssignments.folderId, [
+                        ...scopeFolderIds,
+                    ]),
+                ),
+            ),
+    );
+    const inIntendedPlacement = exists(
+        db
+            .select({ itemId: mailPendingShares.itemId })
+            .from(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.itemId, taskMentions.itemId),
+                    eq(mailPendingShares.userId, taskMentions.userId),
+                    inArray(mailPendingShares.folderId, [...scopeFolderIds]),
+                ),
+            ),
+    );
+    const rows = await db
+        .select({
+            id: recordingTasks.id,
+            userId: recordingTasks.userId,
+            text: recordingTasks.text,
+            assigneePersonId: recordingTasks.assigneePersonId,
+            dueDate: recordingTasks.dueDate,
+            statementAt: taskMentions.statementAt,
+        })
+        .from(recordingTasks)
+        .innerJoin(taskMentions, eq(taskMentions.taskId, recordingTasks.id))
+        .innerJoin(
+            candidateMentionItem,
+            eq(candidateMentionItem.id, taskMentions.itemId),
+        )
+        .where(
+            and(
+                eq(recordingTasks.status, "open"),
+                ne(recordingTasks.itemId, recording.id),
+                linkedTaskMentionCondition(),
+                taskMentionVisible(
+                    reviewer,
+                    {
+                        itemId: taskMentions.itemId,
+                        userId: taskMentions.userId,
+                        view: taskMentions.view,
+                    },
+                    {
+                        id: candidateMentionItem.id,
+                        userId: candidateMentionItem.userId,
+                        deletedAt: candidateMentionItem.deletedAt,
+                    },
+                ),
+                or(inActualPlacement, inIntendedPlacement),
+            ),
+        )
+        .orderBy(
+            desc(taskMentions.statementAt),
+            asc(recordingTasks.id),
+            asc(taskMentions.id),
+        );
+    const candidates = new Map<string, CandidateTask>();
+    for (const row of rows) {
+        if (candidates.has(row.id)) continue;
+        candidates.set(row.id, {
+            ...row,
+            text: decryptText(row.text),
+        });
+    }
+    const values = [...candidates.values()];
+    const statements = await visibleStatementTimes(
+        reviewer,
+        values.map((candidate) => candidate.id),
+    );
+    return values.map((candidate) => ({
+        ...candidate,
+        statementAt: statements.get(candidate.id) ?? candidate.statementAt,
+    }));
+}
+
+async function visibleStatementTimes(
+    reviewer: TaskViewer,
+    taskIds: readonly string[],
+): Promise<Map<string, Date>> {
+    const result = new Map<string, Date>();
+    if (taskIds.length === 0) return result;
+    const rows = await db
+        .select({
+            taskId: taskMentions.taskId,
+            statementAt: taskMentions.statementAt,
+        })
+        .from(taskMentions)
+        .innerJoin(
+            candidateMentionItem,
+            eq(candidateMentionItem.id, taskMentions.itemId),
+        )
+        .where(
+            and(
+                inArray(taskMentions.taskId, [...taskIds]),
+                linkedTaskMentionCondition(),
+                taskMentionVisible(
+                    reviewer,
+                    {
+                        itemId: taskMentions.itemId,
+                        userId: taskMentions.userId,
+                        view: taskMentions.view,
+                    },
+                    {
+                        id: candidateMentionItem.id,
+                        userId: candidateMentionItem.userId,
+                        deletedAt: candidateMentionItem.deletedAt,
+                    },
+                ),
+            ),
+        )
+        .orderBy(
+            desc(taskMentions.statementAt),
+            asc(taskMentions.taskId),
+            asc(taskMentions.id),
+        );
+    for (const row of rows) {
+        if (!result.has(row.taskId)) result.set(row.taskId, row.statementAt);
+    }
+    return result;
+}
+
+async function unfiledCandidates(
+    recording: RecordingRow,
+    reviewer: TaskViewer,
+    participantPersonIds: readonly string[],
+): Promise<CandidateTask[]> {
+    if (participantPersonIds.length === 0) return [];
+    const rows = await db
+        .select({
+            id: recordingTasks.id,
+            userId: recordingTasks.userId,
+            text: recordingTasks.text,
+            assigneePersonId: recordingTasks.assigneePersonId,
+            dueDate: recordingTasks.dueDate,
+            createdAt: recordingTasks.createdAt,
+        })
+        .from(recordingTasks)
+        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                eq(recordingTasks.status, "open"),
+                inArray(recordingTasks.assigneePersonId, [
+                    ...participantPersonIds,
+                ]),
+                ne(recordingTasks.itemId, recording.id),
+                isNull(chatterItems.deletedAt),
+                taskClosable(reviewer, ANY_TASK_ITEM),
+            ),
+        )
+        .orderBy(desc(recordingTasks.createdAt), asc(recordingTasks.id));
+    const statements = await visibleStatementTimes(
+        reviewer,
+        rows.map((row) => row.id),
+    );
+    return rows.map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        text: decryptText(row.text),
+        assigneePersonId: row.assigneePersonId,
+        dueDate: row.dueDate,
+        statementAt: statements.get(row.id) ?? row.createdAt,
+    }));
+}
+
+async function currentTaskVectors(
+    candidates: readonly CandidateTask[],
+    generation: string,
+): Promise<Map<string, Float32Array>> {
+    if (candidates.length === 0) return new Map();
+    const byUser = new Map<string, string[]>();
+    for (const candidate of candidates) {
+        byUser.set(candidate.userId, [
+            ...(byUser.get(candidate.userId) ?? []),
+            candidate.id,
+        ]);
+    }
+    const rows = (
+        await Promise.all(
+            [...byUser].map(([userId, taskIds]) =>
+                db
+                    .select({
+                        taskId: taskVectors.taskId,
+                        inputHmac: taskVectors.inputHmac,
+                        vector: taskVectors.vector,
+                    })
+                    .from(taskVectors)
+                    .where(
+                        and(
+                            eq(taskVectors.userId, userId),
+                            inArray(taskVectors.taskId, taskIds),
+                            eq(taskVectors.vectorGeneration, generation),
+                        ),
+                    ),
+            ),
+        )
+    ).flat();
+    const textById = new Map(
+        candidates.map((candidate) => [candidate.id, candidate.text]),
+    );
+    const vectors = new Map<string, Float32Array>();
+    for (const row of rows) {
+        const text = textById.get(row.taskId);
+        if (text && row.inputHmac === domainLookupHash("vector-input", text)) {
+            vectors.set(row.taskId, decodeVector(decryptText(row.vector)));
+        }
+    }
+    return vectors;
+}
+
+async function persistTaskVectors(
+    candidates: readonly CandidateTask[],
+    generation: string,
+    vectors: ReadonlyMap<string, Float32Array>,
+): Promise<void> {
+    const byId = new Map(
+        candidates.map((candidate) => [candidate.id, candidate]),
+    );
+    for (const [taskId, vector] of vectors) {
+        const candidate = byId.get(taskId);
+        if (!candidate) continue;
+        await db
+            .insert(taskVectors)
+            .values({
+                userId: candidate.userId,
+                taskId,
+                vectorGeneration: generation,
+                dim: vector.length,
+                vector: encryptText(encodeVector(vector)),
+                inputHmac: domainLookupHash("vector-input", candidate.text),
+            })
+            .onConflictDoUpdate({
+                target: [taskVectors.taskId, taskVectors.vectorGeneration],
+                set: {
+                    userId: candidate.userId,
+                    dim: vector.length,
+                    vector: encryptText(encodeVector(vector)),
+                    inputHmac: domainLookupHash("vector-input", candidate.text),
+                    createdAt: new Date(),
+                },
+            });
+    }
+}
+
+async function rankedCandidates(
+    candidates: readonly CandidateTask[],
+    itemText: string,
+    participantPersonIds: readonly string[],
+): Promise<CandidateTask[]> {
+    const client = embeddingClient();
+    if (!client) {
+        return rankTaskCandidates({
+            itemText,
+            participantPersonIds,
+            candidates,
+        })
+            .slice(0, TASK_CANDIDATE_LIMIT)
+            .map((entry) => entry.candidate);
+    }
+    try {
+        const generation = vectorGenerationFor(client.model);
+        const held = await currentTaskVectors(candidates, generation);
+        const withVectors = candidates.map((candidate) => ({
+            ...candidate,
+            vector: held.get(candidate.id) ?? null,
+        }));
+        const result = await rankTaskCandidatesWithEmbeddings(
+            {
+                itemText,
+                participantPersonIds,
+                candidates: withVectors,
+            },
+            {
+                embed: (texts) => client.embed(texts),
+                onEmbeddingFailure: (error) => {
+                    console.warn(
+                        "[tasks] embedding ranking unavailable; using word overlap:",
+                        error,
+                    );
+                },
+            },
+        );
+        if (result.usedEmbeddings && result.generatedVectors.size > 0) {
+            await persistTaskVectors(
+                candidates,
+                generation,
+                result.generatedVectors,
+            );
+        }
+        return result.ranked
+            .slice(0, TASK_CANDIDATE_LIMIT)
+            .map((entry) => entry.candidate);
+    } catch (error) {
+        console.warn(
+            "[tasks] task vectors unavailable; using word overlap:",
+            error,
+        );
+        return rankTaskCandidates({
+            itemText,
+            participantPersonIds,
+            candidates,
+        })
+            .slice(0, TASK_CANDIDATE_LIMIT)
+            .map((entry) => entry.candidate);
+    }
+}
+
 /**
- * What a summary of `recording` is told about tasks: its date, the tasks
- * already decided on it, and the open tasks of the people speaking in it
- * that its reviewer may close (the organization account on a shared
- * recording, its owner otherwise), so whatever it hears about them can be
- * applied.
+ * What a summary of `recording` is told about tasks: its date, tasks already
+ * decided on it, and ranked open tasks with linked visible mentions in its
+ * folder scope. Before filing, the earlier participant-based set is used.
  */
 export async function loadTasksPromptContext({
     recording,
@@ -113,6 +473,7 @@ export async function loadTasksPromptContext({
     reviewer,
     noun,
     participants = [],
+    itemText = "",
 }: {
     recording: RecordingRow;
     /** The transcript its speakers are confirmed on; null for a mail. */
@@ -124,6 +485,8 @@ export async function loadTasksPromptContext({
         ItemContent["participants"][number],
         "ref" | "personId"
     >[];
+    /** Plain item content used only to rank visible candidate tasks. */
+    itemText?: string;
 }): Promise<TasksPromptContext> {
     const decidedRows = await db
         .select({ text: recordingTasks.text })
@@ -138,9 +501,12 @@ export async function loadTasksPromptContext({
         .orderBy(recordingTasks.position, recordingTasks.createdAt)
         .limit(MAX_DECIDED_IN_PROMPT);
 
-    const speakers = transcriptionId
-        ? await confirmedSpeakers(recording.userId, transcriptionId, orgView)
-        : new Map<string, { label: string; personId: string; name: string }>();
+    const transcriptSpeakerRows = transcriptionId
+        ? await getTranscriptSpeakers(recording.userId, transcriptionId, {
+              orgPeopleOnly: orgView,
+          })
+        : [];
+    const speakers = confirmedSpeakerMap(transcriptSpeakerRows);
     const labelOf = new Map(
         [...speakers.values()].map((speaker) => [
             speaker.personId,
@@ -152,44 +518,44 @@ export async function loadTasksPromptContext({
             labelOf.set(participant.personId, participant.ref);
         }
     }
+    const participantPersonIds = [
+        ...new Set([
+            ...transcriptSpeakerRows.flatMap((speaker) =>
+                speaker.personId ? [speaker.personId] : [],
+            ),
+            ...participants.flatMap((participant) =>
+                participant.personId ? [participant.personId] : [],
+            ),
+        ]),
+    ];
     const refs = new Map<string, string>();
     const open: TasksContextTask[] = [];
-    if (labelOf.size > 0) {
-        const rows = await db
-            .select({
-                id: recordingTasks.id,
-                text: recordingTasks.text,
-                assigneePersonId: recordingTasks.assigneePersonId,
-                dueDate: recordingTasks.dueDate,
-            })
-            .from(recordingTasks)
-            .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
-            .where(
-                and(
-                    eq(recordingTasks.status, "open"),
-                    inArray(recordingTasks.assigneePersonId, [
-                        ...labelOf.keys(),
-                    ]),
-                    ne(recordingTasks.itemId, recording.id),
-                    isNull(chatterItems.deletedAt),
-                    taskClosable(reviewer, ANY_TASK_ITEM),
-                ),
-            )
-            .orderBy(desc(recordingTasks.createdAt))
-            .limit(MAX_OPEN_IN_PROMPT);
-        rows.forEach((row, index) => {
-            const ref = `T${index + 1}`;
-            refs.set(ref, row.id);
-            open.push({
-                ref,
-                text: decryptText(row.text),
-                speaker: row.assigneePersonId
-                    ? (labelOf.get(row.assigneePersonId) ?? null)
-                    : null,
-                dueDate: row.dueDate,
-            });
+    const scopeFolderIds = await itemScopeFolderIds(
+        recording.id,
+        orgView ? "org" : "private",
+        recording.userId,
+    );
+    const eligible =
+        scopeFolderIds.length > 0
+            ? await scopedCandidates(recording, reviewer, scopeFolderIds)
+            : await unfiledCandidates(recording, reviewer, [...labelOf.keys()]);
+    const rows = await rankedCandidates(
+        eligible,
+        itemText,
+        participantPersonIds,
+    );
+    rows.forEach((row, index) => {
+        const ref = `T${index + 1}`;
+        refs.set(ref, row.id);
+        open.push({
+            ref,
+            text: row.text,
+            speaker: row.assigneePersonId
+                ? (labelOf.get(row.assigneePersonId) ?? null)
+                : null,
+            dueDate: row.dueDate,
         });
-    }
+    });
 
     return {
         text: buildTasksContext({

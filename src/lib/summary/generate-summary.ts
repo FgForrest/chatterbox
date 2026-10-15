@@ -262,6 +262,9 @@ export async function generateSummaryForRecording(
         );
     }
 
+    const input = await modelInput(transcription);
+    const transcriptText = input.text;
+
     // What the summary is told about tasks: the recording's date, the tasks
     // already decided on it, and open tasks its reviewer may close. Tasks
     // never cost the summary: without them it is made as before.
@@ -272,6 +275,7 @@ export async function generateSummaryForRecording(
         reviewer: await taskViewerById(
             orgView ? ctx.settingsUserId : ctx.ownerUserId,
         ),
+        itemText: transcriptText,
     }).catch(async (error: unknown) => {
         console.error("[summary] task context unavailable:", error);
         return {
@@ -390,13 +394,6 @@ export async function generateSummaryForRecording(
         profileSettings?.steps.summary.provider ?? null,
     );
     const { credentials, model } = summaryModel;
-
-    // Decrypt the transcript before sending it to the LLM. Plaintext is
-    // the LLM's input contract; ciphertext lives only in the DB. Its
-    // corrections applied, and the fingerprint of that kept, so the summary
-    // can tell when they moved on.
-    const input = await modelInput(transcription);
-    const transcriptText = input.text;
 
     // Apply the AI output language directive via the system message rather
     // than the user prompt. This separates concerns: the user prompt carries

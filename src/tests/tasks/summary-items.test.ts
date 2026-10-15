@@ -4,6 +4,7 @@ import {
     buildTasksContext,
     localDay,
     recordingOffsetMinutes,
+    SUMMARY_TASKS_DIRECTIVE,
 } from "@/lib/tasks/directive";
 import { locateQuote, normalizeTaskText } from "@/lib/tasks/quote";
 import {
@@ -104,6 +105,20 @@ describe("readTaskUpdates", () => {
             },
         ]);
     });
+
+    it("tolerates the match and vague-due outcomes until their parser lands", () => {
+        expect(
+            readTaskUpdates([
+                { ref: "T1", kind: "match", quote: "same commitment" },
+                {
+                    ref: "T1",
+                    kind: "due_phrase",
+                    due: { phrase: "později", date: null },
+                },
+                { ref: "T1", kind: "done", quote: "hotovo" },
+            ]),
+        ).toEqual([{ ref: "T1", kind: "done", due: null, quote: "hotovo" }]);
+    });
 });
 
 describe("taskItemLine", () => {
@@ -135,8 +150,22 @@ describe("parseSummaryPayload", () => {
             JSON.stringify({
                 summary: "s",
                 keyPoints: [],
-                actionItems: [{ text: "Book the venue", assignee: "Carol" }],
-                taskUpdates: [{ ref: "T1", kind: "done" }],
+                actionItems: [
+                    {
+                        text: "Book the venue",
+                        assignee: "Carol",
+                        candidates: ["T1", "T2"],
+                    },
+                ],
+                taskUpdates: [
+                    { ref: "T1", kind: "match", quote: "the same venue" },
+                    {
+                        ref: "T1",
+                        kind: "due_phrase",
+                        due: { phrase: "later", date: null },
+                    },
+                    { ref: "T1", kind: "done" },
+                ],
             }),
         );
         expect(payload.actionItems).toEqual(["Carol: Book the venue"]);
@@ -188,6 +217,35 @@ describe("buildTasksContext", () => {
         expect(text).toContain(
             "- T1 (speaker_0): Send the partner email, due 2026-10-20",
         );
+    });
+
+    it("keeps English and Czech candidate text as data under the new outcome directive", () => {
+        const text = buildTasksContext({
+            recordedAt: new Date("2026-10-06T10:00:00Z"),
+            offsetMinutes: 0,
+            decided: [],
+            open: [
+                {
+                    ref: "T1",
+                    text: "Send the signed contract",
+                    speaker: null,
+                    dueDate: null,
+                },
+                {
+                    ref: "T2",
+                    text: "Poslat podepsanou smlouvu",
+                    speaker: null,
+                    dueDate: null,
+                },
+            ],
+        });
+
+        expect(text).toContain("- T1: Send the signed contract");
+        expect(text).toContain("- T2: Poslat podepsanou smlouvu");
+        expect(text).toContain('"kind": "match"');
+        expect(text).toContain('"kind": "due_phrase"');
+        expect(text).not.toContain("reopen");
+        expect(SUMMARY_TASKS_DIRECTIVE).toContain('"candidates"');
     });
 
     it("says nothing of tasks when there are none", () => {

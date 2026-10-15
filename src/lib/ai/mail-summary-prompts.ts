@@ -72,9 +72,10 @@ export const MAIL_PARTICIPANT_DIRECTIVE = `PEOPLE AND PARTS OF A MAIL:
 
 /** The action-item contract for a mail; replaces the recording's. */
 export const MAIL_TASKS_DIRECTIVE = `ACTION ITEMS: whatever the instructions above say about "actionItems", every entry in it is an object of this shape, and the reply also carries "taskUpdates" (an empty array unless told otherwise below):
-{"text": string, "speaker": "pN" | null, "assignee": string | null, "due": {"phrase": string, "date": "YYYY-MM-DD" | null} | null, "quote": string | null}
+{"text": string, "speaker": "pN" | null, "assignee": string | null, "due": {"phrase": string, "date": "YYYY-MM-DD" | null} | null, "quote": string | null, "candidates": ["T1", ...] | null}
 
 - One entry per deliverable per person. Fold the steps of one deliverable into a single entry. Leave out what was only mentioned, offered without agreement, or is already done.
+- "actionItems" contains new commitments only. When an entry could be the same commitment as several listed earlier tasks, keep it as an action item and put every plausible reference in "candidates". Otherwise "candidates" is null.
 - "text": the action as one short line, without the person who does it ("Send the signed contract", not "p2 sends the signed contract").
 - "speaker": the participant reference (p1, p2, ...) of the person who has to do it, when they take part in the mail; otherwise null.
 - "assignee": when the person who has to do it is not a participant, their name as the mail gives it; otherwise null. Both null when nobody was named.

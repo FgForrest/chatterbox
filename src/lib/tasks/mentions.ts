@@ -1,4 +1,14 @@
-import { and, asc, desc, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import {
+    type AnyColumn,
+    and,
+    asc,
+    desc,
+    eq,
+    inArray,
+    isNull,
+    or,
+    type SQL,
+} from "drizzle-orm";
 import { db } from "@/db";
 import {
     chatterItems,
@@ -19,19 +29,19 @@ import type { TaskViewer } from "@/lib/tasks/access";
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 interface MentionColumns {
-    itemId: typeof taskMentions.itemId;
-    userId: typeof taskMentions.userId;
-    view: typeof taskMentions.view;
+    itemId: AnyColumn;
+    userId: AnyColumn;
+    view: AnyColumn;
 }
 
 interface MentionDecisionColumn {
-    matchDecision: typeof taskMentions.matchDecision;
+    matchDecision: AnyColumn;
 }
 
 interface ItemColumns {
-    id: typeof chatterItems.id;
-    userId: typeof chatterItems.userId;
-    deletedAt: typeof chatterItems.deletedAt;
+    id: AnyColumn;
+    userId: AnyColumn;
+    deletedAt: AnyColumn;
 }
 
 const DEFAULT_MENTION_COLUMNS: MentionColumns = {

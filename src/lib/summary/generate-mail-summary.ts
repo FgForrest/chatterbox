@@ -128,6 +128,9 @@ export async function generateMailSummary(
     }
     const content = await maskedContentForModel(stored);
     const sentAt = mail.sentAt ?? mail.occurredAt;
+    const title = decryptText(mail.title);
+    const subject = (await secretAddressMasker([title]))(title);
+    const mailText = renderMailForModel(content, { subject, sentAt });
 
     const tasksContext = await loadTasksPromptContext({
         recording: {
@@ -144,6 +147,7 @@ export async function generateMailSummary(
         ),
         noun: "mail",
         participants: content.participants,
+        itemText: mailText,
     }).catch(async (error: unknown) => {
         console.error("[summary] task context unavailable:", error);
         return {
@@ -264,9 +268,6 @@ export async function generateMailSummary(
     );
     const { credentials, model } = summaryModel;
 
-    const title = decryptText(mail.title);
-    const subject = (await secretAddressMasker([title]))(title);
-    const mailText = renderMailForModel(content, { subject, sentAt });
     const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     const mergeLanguageDirective = getAiOutputLanguageDirective(
         outputLanguage,
