@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { folderDefaultProfiles, recordingFolders } from "@/db/schema";
 import { requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
+import { decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import {
@@ -126,12 +127,27 @@ async function channelDefaults(
         folder.scope === "personal"
             ? await getDefaultProfile(folder.ownerUserId, channel, actorUserId)
             : null;
+    const inheritedFolder = defaults?.inheritedFromFolderId
+        ? await db
+              .select({ name: recordingFolders.name })
+              .from(recordingFolders)
+              .where(
+                  and(
+                      eq(recordingFolders.id, defaults.inheritedFromFolderId),
+                      eq(recordingFolders.userId, folder.ownerUserId),
+                  ),
+              )
+              .limit(1)
+        : [];
     return {
         own: profileSummary(defaults?.own ?? null),
         ownManualOnly: defaults?.ownManualOnly ?? false,
         effective: profileSummary(defaults?.effective ?? null),
         effectiveManualOnly: defaults?.effectiveManualOnly ?? false,
         inheritedFromFolderId: defaults?.inheritedFromFolderId ?? null,
+        inheritedFromFolderName: inheritedFolder[0]
+            ? decryptText(inheritedFolder[0].name)
+            : null,
         inherited: profileSummary(inherited?.effective ?? null),
         inheritedManualOnly: inherited?.effectiveManualOnly ?? false,
         accountDefault: profileSummary(accountDefault),

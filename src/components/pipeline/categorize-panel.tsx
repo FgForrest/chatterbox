@@ -3,6 +3,10 @@
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import {
+    type CreatedFolder,
+    NewFolderForm,
+} from "@/components/pipeline/new-folder-form";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -12,7 +16,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -39,6 +42,7 @@ interface CategorizePanelProps {
     data: CategorizePanelData;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     onCategorized?: (folderIds: string[]) => void;
     onOptimisticCategorize?: (submission: CategorizeSubmission) => () => void;
 }
@@ -67,6 +71,7 @@ export function CategorizePanel({
     data,
     open,
     onOpenChange,
+    onFolderCreated,
     onCategorized,
     onOptimisticCategorize,
 }: CategorizePanelProps) {
@@ -81,10 +86,7 @@ export function CategorizePanel({
     );
     const [previewing, setPreviewing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [creatingFolder, setCreatingFolder] = useState(false);
     const [newFolderOpen, setNewFolderOpen] = useState(false);
-    const [newFolderName, setNewFolderName] = useState("");
-    const [newFolderParentId, setNewFolderParentId] = useState("");
     const previewError = i18n("The profile preview could not be loaded.");
 
     useEffect(() => {
@@ -94,8 +96,6 @@ export function CategorizePanel({
         setPreview(data.resolution);
         setProfileChoice(initialProfileChoice(data));
         setNewFolderOpen(false);
-        setNewFolderName("");
-        setNewFolderParentId("");
     }, [data, open]);
 
     useEffect(() => {
@@ -191,56 +191,24 @@ export function CategorizePanel({
         return [...byId.values()];
     }, [data.currentProfile, data.profiles, preview]);
 
-    const createFolder = async () => {
-        const name = newFolderName.trim();
+    const handleFolderCreated = (folder: CreatedFolder) => {
         const parent = folders.find(
-            (folder) => folder.id === newFolderParentId,
+            (candidate) => candidate.id === folder.parentId,
         );
-        if (!name || !parent) return;
-        setCreatingFolder(true);
-        try {
-            const response = await fetch("/api/folders", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parentId: parent.id, name }),
-            });
-            if (!response.ok) {
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("The folder could not be created."),
-                    ),
-                );
-                return;
-            }
-            const { folder } = (await response.json()) as {
-                folder: {
-                    id: string;
-                    parentId: string | null;
-                    name: string;
-                    scope: "personal" | "org";
-                };
-            };
-            const created = {
-                ...folder,
-                path: `${parent.path} › ${folder.name}`,
-            };
-            setFolders((current) => [...current, created]);
-            setFolderIds((current) =>
-                current.includes(folder.id) ? current : [...current, folder.id],
-            );
-            if (!data.currentProfile) {
-                setPreviewing(true);
-                setProfileChoice("");
-            }
-            setNewFolderName("");
-            setNewFolderOpen(false);
-            toast.success(i18n("Folder created."));
-        } catch {
-            toast.error(i18n("The folder could not be created."));
-        } finally {
-            setCreatingFolder(false);
+        if (!parent) return;
+        onFolderCreated?.(folder);
+        setFolders((current) => [
+            ...current,
+            { ...folder, path: `${parent.path} › ${folder.name}` },
+        ]);
+        setFolderIds((current) =>
+            current.includes(folder.id) ? current : [...current, folder.id],
+        );
+        if (!data.currentProfile) {
+            setPreviewing(true);
+            setProfileChoice("");
         }
+        setNewFolderOpen(false);
     };
 
     const submit = async () => {
@@ -338,80 +306,25 @@ export function CategorizePanel({
                             </Label>
                         );
                     })}
+                    <p className="px-2 text-xs text-muted-foreground">
+                        {i18n(
+                            "Top-level folders hold no items; choose or create a folder inside them.",
+                        )}
+                    </p>
                     {newFolderOpen ? (
-                        <div className="space-y-3 border-t pt-3">
-                            <div className="space-y-1.5">
-                                <Label htmlFor="categorize-new-folder-name">
-                                    {i18n("Folder name")}
-                                </Label>
-                                <Input
-                                    id="categorize-new-folder-name"
-                                    value={newFolderName}
-                                    onChange={(event) =>
-                                        setNewFolderName(event.target.value)
-                                    }
-                                />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label>{i18n("Parent folder")}</Label>
-                                <Select
-                                    value={newFolderParentId}
-                                    onValueChange={setNewFolderParentId}
-                                >
-                                    <SelectTrigger
-                                        className="w-full"
-                                        aria-label={i18n("Parent folder")}
-                                    >
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {folderParents.map((folder) => (
-                                            <SelectItem
-                                                key={folder.id}
-                                                value={folder.id}
-                                            >
-                                                {folder.path}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="flex justify-end gap-2">
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() => setNewFolderOpen(false)}
-                                    disabled={creatingFolder}
-                                >
-                                    {i18n("Cancel")}
-                                </Button>
-                                <Button
-                                    type="button"
-                                    onClick={() => void createFolder()}
-                                    disabled={
-                                        creatingFolder ||
-                                        !newFolderName.trim() ||
-                                        !newFolderParentId
-                                    }
-                                >
-                                    {creatingFolder
-                                        ? i18n("Creating…")
-                                        : i18n("Create folder")}
-                                </Button>
-                            </div>
-                        </div>
+                        <NewFolderForm
+                            parents={folderParents}
+                            idPrefix="categorize"
+                            onCancel={() => setNewFolderOpen(false)}
+                            onCreated={handleFolderCreated}
+                        />
                     ) : (
                         <Button
                             type="button"
                             variant="outline"
                             className="mt-2 w-full"
                             disabled={folderParents.length === 0}
-                            onClick={() => {
-                                setNewFolderParentId(
-                                    folderParents[0]?.id ?? "",
-                                );
-                                setNewFolderOpen(true);
-                            }}
+                            onClick={() => setNewFolderOpen(true)}
                         >
                             {i18n("New folder")}
                         </Button>
@@ -437,6 +350,9 @@ export function CategorizePanel({
                             {profileOptions.map((profile) => (
                                 <SelectItem key={profile.id} value={profile.id}>
                                     {profile.name}
+                                    {profile.scope === "organization"
+                                        ? ` · ${i18n("Organization")}`
+                                        : ""}
                                 </SelectItem>
                             ))}
                             <SelectItem value={MANUAL_ONLY}>
@@ -444,15 +360,16 @@ export function CategorizePanel({
                             </SelectItem>
                         </SelectContent>
                     </Select>
-                    {preview.status === "resolved" && (
-                        <p className="text-xs text-muted-foreground">
-                            {data.currentProfile
-                                ? i18n("Current profile")
-                                : preview.source === "folder"
-                                  ? i18n("From the folder's default")
-                                  : i18n("Your default")}
-                        </p>
-                    )}
+                    {preview.status === "resolved" &&
+                        profileChoice === prefilledChoice && (
+                            <p className="text-xs text-muted-foreground">
+                                {data.currentProfile
+                                    ? i18n("Current profile")
+                                    : preview.source === "folder"
+                                      ? i18n("From the folder's default")
+                                      : i18n("Your default")}
+                            </p>
+                        )}
                     {selectedOrganization && (
                         <p className="text-xs text-muted-foreground">
                             {i18n("Organization folders share after review.")}

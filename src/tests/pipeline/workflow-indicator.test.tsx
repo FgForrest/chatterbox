@@ -32,6 +32,7 @@ function processing(
         profile: {
             id: "profile-1",
             name: "Meetings",
+            scope: "personal",
             revisionId: "revision-1",
             automatic: { transcribe: true, learn: true, summary: true },
         },
@@ -78,7 +79,15 @@ describe("workflow indicator", () => {
         ).toContain(label);
     });
 
-    it("renders waiting actions and the Learn timeout copy", () => {
+    it("renders waiting actions and the Learn timeout copy", async () => {
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                unobserve() {}
+                disconnect() {}
+            },
+        );
         render(
             <WorkflowIndicator
                 initialData={processing({
@@ -113,16 +122,100 @@ describe("workflow indicator", () => {
             />,
         );
         expect(screen.getAllByRole("button", { name: "File it" })).toHaveLength(
-            2,
+            1,
         );
         expect(
             screen.getByRole("button", { name: "Review Learn" }),
         ).toBeTruthy();
         expect(
-            screen.getByRole("button", { name: "Review tasks" }),
-        ).toBeTruthy();
+            screen.queryByRole("button", { name: "Review tasks" }),
+        ).toBeNull();
         expect(
             screen.getByText("Learn review pending; summary made without it"),
+        ).toBeTruthy();
+        expect(
+            screen.getByText("Task review").parentElement?.textContent,
+        ).toContain("Not started");
+        const taskReview = screen.getByText("Task review").parentElement;
+        expect(taskReview).not.toBeNull();
+        if (taskReview) fireEvent.pointerMove(taskReview);
+        expect(
+            await screen.findByRole("tooltip", {
+                name: "Starts after the summary.",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("shows a skipped task review reason when tasks are off", async () => {
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                unobserve() {}
+                disconnect() {}
+            },
+        );
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    phases: {
+                        taskReview: {
+                            state: "skipped",
+                            reason: "profile_off",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                })}
+            />,
+        );
+
+        expect(
+            screen.getByText("Task review").parentElement?.textContent,
+        ).toContain("Skipped");
+        const taskReview = screen.getByText("Task review").parentElement;
+        expect(taskReview).not.toBeNull();
+        if (taskReview) fireEvent.pointerMove(taskReview);
+        expect(
+            await screen.findByRole("tooltip", {
+                name: "This step is not automatic for this profile.",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("shows pending task review as not started before the summary", async () => {
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe() {}
+                unobserve() {}
+                disconnect() {}
+            },
+        );
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    phases: {
+                        taskReview: {
+                            state: "pending",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                })}
+            />,
+        );
+
+        expect(
+            screen.getByText("Task review").parentElement?.textContent,
+        ).toContain("Not started");
+        const taskReview = screen.getByText("Task review").parentElement;
+        expect(taskReview).not.toBeNull();
+        if (taskReview) fireEvent.pointerMove(taskReview);
+        expect(
+            await screen.findByRole("tooltip", {
+                name: "Starts after the summary.",
+            }),
         ).toBeTruthy();
     });
 
@@ -176,6 +269,7 @@ describe("workflow indicator", () => {
                     profile: {
                         id: "profile-1",
                         name: "Meetings",
+                        scope: "personal",
                         revisionId: "revision-1",
                         automatic: {
                             transcribe: false,
@@ -224,6 +318,7 @@ describe("workflow indicator", () => {
                     profile: {
                         id: "profile-1",
                         name: "Meetings",
+                        scope: "personal",
                         revisionId: "revision-1",
                         automatic: {
                             transcribe: true,

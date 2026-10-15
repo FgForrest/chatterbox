@@ -22,6 +22,7 @@ import { parseProfileSettings } from "@/lib/profiles/settings";
 export interface ProcessingProfileSummary {
     id: string;
     name: string;
+    scope: "personal" | "organization";
 }
 
 export interface ProcessingFolderSummary {
@@ -159,6 +160,7 @@ export async function loadPrivateItemProcessing(
             phases: itemProcessing.phases,
             profileId: processingProfiles.id,
             profileName: processingProfiles.name,
+            profileScope: processingProfiles.scope,
             profileRevisionId: processingProfileRevisions.id,
             profileSettings: processingProfileRevisions.settings,
         })
@@ -359,10 +361,12 @@ export async function loadPrivateItemProcessing(
         item.profileId &&
         item.profileName &&
         item.profileRevisionId &&
+        item.profileScope &&
         automatic
             ? {
                   id: item.profileId,
                   name: decryptText(item.profileName),
+                  scope: item.profileScope,
                   revisionId: item.profileRevisionId,
                   automatic: {
                       transcribe: automatic.transcribe,

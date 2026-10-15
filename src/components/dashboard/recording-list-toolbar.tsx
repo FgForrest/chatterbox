@@ -92,7 +92,10 @@ export function RecordingListToolbar({
                 <span>
                     {filteredCount}
                     {query ? i18n(" matching") : ""} {i18n("of")} {totalCount}{" "}
-                    {i18n("recording")} {totalCount !== 1 ? i18n("s") : ""}
+                    {i18n(
+                        "{count, plural, one {# recording} other {# recordings}}",
+                        { count: totalCount },
+                    )}
                 </span>
                 <div className="flex items-center gap-1">
                     {kindFilter && onKindFilterChange && (

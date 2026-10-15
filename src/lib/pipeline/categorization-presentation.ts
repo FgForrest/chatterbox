@@ -18,6 +18,7 @@ import type { RecordingFolder } from "@/types/folder";
 export interface ProcessingProfileSummary {
     id: string;
     name: string;
+    scope: "personal" | "organization";
 }
 
 export type ProcessingResolution =
@@ -56,7 +57,7 @@ export interface CategorizationPanelPresentation {
 }
 
 function profileSummary(profile: ProfileRecord): ProcessingProfileSummary {
-    return { id: profile.id, name: profile.name };
+    return { id: profile.id, name: profile.name, scope: profile.scope };
 }
 
 function folderPath(
@@ -110,6 +111,7 @@ export async function loadPrivateCategorizationPanel(
             kind: chatterItems.kind,
             currentProfileId: itemProcessing.profileId,
             currentProfileName: processingProfiles.name,
+            currentProfileScope: processingProfiles.scope,
             currentManualOnly: itemProcessing.manualOnly,
         })
         .from(chatterItems)
@@ -202,10 +204,13 @@ export async function loadPrivateCategorizationPanel(
         ...intents.map((intent) => intent.folderId),
     ].filter((folderId) => selectableFolderIds.has(folderId));
     const currentProfile =
-        item.currentProfileId && item.currentProfileName
+        item.currentProfileId &&
+        item.currentProfileName &&
+        item.currentProfileScope
             ? {
                   id: item.currentProfileId,
                   name: decryptText(item.currentProfileName),
+                  scope: item.currentProfileScope,
               }
             : null;
     const resolution: ProcessingResolution = currentProfile

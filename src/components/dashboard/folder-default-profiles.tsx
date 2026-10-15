@@ -30,6 +30,7 @@ interface ChannelDefault {
     effective: ProfileOption | null;
     effectiveManualOnly: boolean;
     inheritedFromFolderId: string | null;
+    inheritedFromFolderName?: string | null;
     inherited: ProfileOption | null;
     inheritedManualOnly: boolean;
     accountDefault: ProfileOption | null;
@@ -43,6 +44,15 @@ interface DefaultsResponse {
 
 const INHERIT_VALUE = "__inherit__";
 const MANUAL_ONLY_VALUE = "__manual_only__";
+
+function profileName(
+    profile: ProfileOption,
+    organizationLabel: string,
+): string {
+    return profile.scope === "organization"
+        ? `${profile.name} · ${organizationLabel}`
+        : profile.name;
+}
 
 export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     const i18n = useExtracted();
@@ -142,9 +152,9 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
         }
         return value.inheritedFromFolderId
             ? i18n("{profile} (inherited)", {
-                  profile: value.effective.name,
+                  profile: profileName(value.effective, i18n("Organization")),
               })
-            : value.effective.name;
+            : profileName(value.effective, i18n("Organization"));
     };
 
     const inheritLabel = (channel: ProfileChannel) => {
@@ -155,13 +165,27 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
             });
         }
         if (value?.inherited) {
-            return i18n("Inherit ({setting})", {
-                setting: value.inherited.name,
-            });
+            return value.inheritedFromFolderName
+                ? i18n("Inherit from {folder}: {profile}", {
+                      folder: value.inheritedFromFolderName,
+                      profile: profileName(
+                          value.inherited,
+                          i18n("Organization"),
+                      ),
+                  })
+                : i18n("Inherit ({setting})", {
+                      setting: profileName(
+                          value.inherited,
+                          i18n("Organization"),
+                      ),
+                  });
         }
         if (value?.accountDefault) {
             return i18n("Inherit (your default: {profile})", {
-                profile: value.accountDefault.name,
+                profile: profileName(
+                    value.accountDefault,
+                    i18n("Organization"),
+                ),
             });
         }
         if (defaults?.scope === "org") {
@@ -207,7 +231,7 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                                 !defaults?.canEdit || savingChannel === channel
                             }
                         >
-                            {profile.name}
+                            {profileName(profile, i18n("Organization"))}
                         </DropdownMenuRadioItem>
                     ))}
                     <DropdownMenuRadioItem

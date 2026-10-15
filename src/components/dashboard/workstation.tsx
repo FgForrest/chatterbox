@@ -19,12 +19,14 @@ import { TrialBanner } from "@/components/dashboard/trial-banner";
 import {
     UploadDialog,
     uploadFolderOptions,
+    uploadFolderParents,
 } from "@/components/dashboard/upload-dialog";
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { WorkstationHeader } from "@/components/dashboard/workstation-header";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
@@ -352,7 +354,10 @@ export function Workstation({
             if (initialSettings.syncNotifications !== false) {
                 if (newRecordings > 0) {
                     toast.success(
-                        `Synced ${newRecordings} new recording${newRecordings !== 1 ? i18n("s") : ""}`,
+                        i18n(
+                            "Synced {count, plural, one {# new recording} other {# new recordings}}",
+                            { count: newRecordings },
+                        ),
                     );
                 } else {
                     toast.success(i18n("Sync complete - no new recordings"));
@@ -437,6 +442,22 @@ export function Workstation({
             ),
         [folderOrganization.folders, organizationLibrary],
     );
+    const uploadFolderParentOptions = useMemo(
+        () => uploadFolderParents(folderOrganization.folders, canCurate),
+        [canCurate, folderOrganization.folders],
+    );
+
+    const handleFolderCreated = useCallback((folder: CreatedFolder) => {
+        setFolderOrganization((current) => {
+            if (current.folders.some((item) => item.id === folder.id)) {
+                return current;
+            }
+            return {
+                ...current,
+                folders: [...current.folders, folder],
+            };
+        });
+    }, []);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
@@ -595,13 +616,10 @@ export function Workstation({
             const { folder } = (await response.json()) as {
                 folder: RecordingFolder;
             };
-            setFolderOrganization((current) => ({
-                ...current,
-                folders: [...current.folders, folder],
-            }));
+            handleFolderCreated(folder);
             toast.success(i18n("Folder created"));
         },
-        [i18n],
+        [handleFolderCreated, i18n],
     );
 
     const handleRenameFolder = useCallback(
@@ -1119,6 +1137,7 @@ export function Workstation({
                                     onBackToList={() => setMobileView("list")}
                                     hiddenOnMobile={mobileView === "list"}
                                     onChanged={refresh}
+                                    onFolderCreated={handleFolderCreated}
                                     folders={folderOrganization.folders}
                                     folderAssignments={
                                         folderOrganization.assignments
@@ -1168,6 +1187,7 @@ export function Workstation({
                                     onTranscribe={handleTranscribe}
                                     onTranscribeComplete={refresh}
                                     onTranscriptStale={refresh}
+                                    onFolderCreated={handleFolderCreated}
                                     transcriptReadOnly={
                                         selectedTranscriptReadOnly
                                     }
@@ -1271,6 +1291,8 @@ export function Workstation({
             <UploadDialog
                 file={selectedFile}
                 folders={uploadFolders}
+                folderParents={uploadFolderParentOptions}
+                onFolderCreated={handleFolderCreated}
                 open={selectedFile !== null}
                 onOpenChange={(open) => {
                     if (!open) cancelUpload();

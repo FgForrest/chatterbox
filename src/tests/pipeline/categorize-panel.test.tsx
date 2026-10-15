@@ -55,14 +55,14 @@ const base: CategorizePanelData = {
     ],
     selectedFolderIds: ["notes"],
     profiles: [
-        { id: "profile-1", name: "Meetings" },
-        { id: "profile-2", name: "Sales calls" },
+        { id: "profile-1", name: "Meetings", scope: "personal" },
+        { id: "profile-2", name: "Sales calls", scope: "personal" },
     ],
     currentProfile: null,
     currentManualOnly: false,
     resolution: {
         status: "resolved",
-        profile: { id: "profile-1", name: "Meetings" },
+        profile: { id: "profile-1", name: "Meetings", scope: "personal" },
         manualOnly: false,
         source: "folder",
     },
@@ -106,10 +106,34 @@ describe("categorization panel", () => {
             (screen.getByLabelText("Organization") as HTMLInputElement)
                 .disabled,
         ).toBe(true);
+        expect(
+            screen.getByText(
+                "Top-level folders hold no items; choose or create a folder inside them.",
+            ),
+        ).toBeTruthy();
 
         fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
         expect(screen.getByText("Sales calls")).toBeTruthy();
         expect(screen.getByText("Nothing automatic")).toBeTruthy();
+    });
+
+    it("includes Organization in profile choices and hides the prefill hint after a change", () => {
+        renderPanel({
+            ...base,
+            profiles: [
+                ...base.profiles,
+                {
+                    id: "organization-recordings",
+                    name: "Recordings",
+                    scope: "organization",
+                },
+            ],
+        });
+
+        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
+        expect(screen.getByText("Recordings · Organization")).toBeTruthy();
+        fireEvent.click(screen.getByText("Nothing automatic"));
+        expect(screen.queryByText("From the folder's default")).toBeNull();
     });
 
     it("keeps the item's current profile when folders resolve differently", async () => {
@@ -117,7 +141,11 @@ describe("categorization panel", () => {
         vi.stubGlobal("fetch", fetchMock);
         renderPanel({
             ...base,
-            currentProfile: { id: "profile-2", name: "Sales calls" },
+            currentProfile: {
+                id: "profile-2",
+                name: "Sales calls",
+                scope: "personal",
+            },
         });
 
         expect(
@@ -139,7 +167,11 @@ describe("categorization panel", () => {
             name: "resolved",
             resolution: {
                 status: "resolved" as const,
-                profile: { id: "profile-2", name: "Sales calls" },
+                profile: {
+                    id: "profile-2",
+                    name: "Sales calls",
+                    scope: "personal" as const,
+                },
                 manualOnly: false,
                 source: "folder" as const,
             },
@@ -149,7 +181,11 @@ describe("categorization panel", () => {
             name: "Nothing automatic",
             resolution: {
                 status: "resolved" as const,
-                profile: { id: "profile-1", name: "Meetings" },
+                profile: {
+                    id: "profile-1",
+                    name: "Meetings",
+                    scope: "personal" as const,
+                },
                 manualOnly: true,
                 source: "folder" as const,
             },
@@ -162,7 +198,11 @@ describe("categorization panel", () => {
                 candidates: [
                     {
                         kind: "profile" as const,
-                        profile: { id: "profile-1", name: "Meetings" },
+                        profile: {
+                            id: "profile-1",
+                            name: "Meetings",
+                            scope: "personal" as const,
+                        },
                     },
                     { kind: "manual_only" as const },
                 ],

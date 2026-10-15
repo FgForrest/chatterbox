@@ -28,6 +28,7 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
@@ -115,6 +116,7 @@ interface TranscriptionPanelProps {
      * re-transcribed in another tab.
      */
     onTranscriptStale?: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
     /** Seek and start playback for speaker navigation, up to `endMs` if given. */
@@ -240,6 +242,7 @@ export function TranscriptionPanel({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
+    onFolderCreated,
     onSeekToTurn,
     onPlayFromTurn,
     getPlaybackMs,
@@ -734,6 +737,7 @@ export function TranscriptionPanel({
                             ?.scrollIntoView({ behavior: "smooth" })
                     }
                     onChanged={onTranscriptStale}
+                    onFolderCreated={onFolderCreated}
                 />
             )}
             {correcting && (

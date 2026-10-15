@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ interface Props {
     hiddenOnMobile: boolean;
     /** The mail was deleted or shared: reload the pile. */
     onChanged: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     folders: RecordingFolder[];
     folderAssignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
@@ -94,6 +96,7 @@ export function MailDetailPane({
     onBackToList,
     hiddenOnMobile,
     onChanged,
+    onFolderCreated,
     folders,
     folderAssignments,
     onSelectFolder,
@@ -342,6 +345,7 @@ export function MailDetailPane({
                                     ?.scrollIntoView({ behavior: "smooth" })
                             }
                             onChanged={onChanged}
+                            onFolderCreated={onFolderCreated}
                         />
                     )}
                     {failed && (

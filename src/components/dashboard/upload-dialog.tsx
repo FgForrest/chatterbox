@@ -2,6 +2,11 @@
 
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
+import {
+    type CreatedFolder,
+    NewFolderForm,
+    type NewFolderParent,
+} from "@/components/pipeline/new-folder-form";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -27,6 +32,32 @@ export interface UploadFolderOption {
     name: string;
     path: string;
     scope: FolderScope;
+}
+
+export function uploadFolderParents(
+    folders: readonly RecordingFolder[],
+    includeOrganization: boolean,
+): NewFolderParent[] {
+    const byId = new Map(folders.map((folder) => [folder.id, folder]));
+    return folders
+        .filter(
+            (folder) =>
+                (folder.scope === "personal" && folder.parentId === null) ||
+                (folder.scope === "org" && includeOrganization),
+        )
+        .map((folder) => {
+            const names = [folder.name];
+            const seen = new Set([folder.id]);
+            let parentId = folder.parentId;
+            while (parentId && !seen.has(parentId)) {
+                seen.add(parentId);
+                const parent = byId.get(parentId);
+                if (!parent) break;
+                names.unshift(parent.name);
+                parentId = parent.parentId;
+            }
+            return { id: folder.id, path: names.join(" / ") };
+        });
 }
 
 /** Build non-root picker options with their full visible tree paths. */
@@ -67,20 +98,28 @@ export function uploadFolderOptions(
 export function UploadDialog({
     file,
     folders,
+    folderParents,
     open,
     onOpenChange,
     onUpload,
+    onFolderCreated,
     selectedFolderId,
 }: {
     file: File | null;
     folders: readonly UploadFolderOption[];
+    folderParents: readonly NewFolderParent[];
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onUpload: (folderId: string | null) => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     selectedFolderId: string | null;
 }) {
     const i18n = useExtracted();
     const [folderId, setFolderId] = useState("");
+    const [availableFolders, setAvailableFolders] = useState(folders);
+    const [newFolderOpen, setNewFolderOpen] = useState(false);
+
+    useEffect(() => setAvailableFolders(folders), [folders]);
 
     useEffect(() => {
         if (!open) return;
@@ -90,7 +129,27 @@ export function UploadDialog({
                 ? selectedFolderId
                 : FILE_LATER,
         );
+        setNewFolderOpen(false);
     }, [folders, open, selectedFolderId]);
+
+    const handleFolderCreated = (folder: CreatedFolder) => {
+        onFolderCreated?.(folder);
+        const parent = folderParents.find(
+            (candidate) => candidate.id === folder.parentId,
+        );
+        if (!parent) return;
+        setAvailableFolders((current) => [
+            ...current,
+            {
+                id: folder.id,
+                name: folder.name,
+                path: `${parent.path} / ${folder.name}`,
+                scope: folder.scope,
+            },
+        ]);
+        setFolderId(folder.id);
+        setNewFolderOpen(false);
+    };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -116,16 +175,31 @@ export function UploadDialog({
                             <SelectItem value={FILE_LATER}>
                                 {i18n("File later")}
                             </SelectItem>
-                            {folders.map((folder) => (
+                            {availableFolders.map((folder) => (
                                 <SelectItem key={folder.id} value={folder.id}>
                                     {folder.path}
                                 </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
-                    <p className="text-xs text-muted-foreground">
-                        {i18n("Create folders from the Folders sidebar.")}
-                    </p>
+                    {newFolderOpen ? (
+                        <NewFolderForm
+                            parents={folderParents}
+                            idPrefix="upload"
+                            onCancel={() => setNewFolderOpen(false)}
+                            onCreated={handleFolderCreated}
+                        />
+                    ) : (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full"
+                            disabled={folderParents.length === 0}
+                            onClick={() => setNewFolderOpen(true)}
+                        >
+                            {i18n("New folder")}
+                        </Button>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button

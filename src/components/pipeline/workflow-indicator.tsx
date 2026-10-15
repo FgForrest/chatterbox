@@ -17,6 +17,7 @@ import {
     CategorizePanel,
     type CategorizeSubmission,
 } from "@/components/pipeline/categorize-panel";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { Button } from "@/components/ui/button";
 import {
     Tooltip,
@@ -39,6 +40,7 @@ interface WorkflowIndicatorProps {
     onReviewLearn?: () => void;
     onReviewTasks?: () => void;
     onChanged?: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
 }
 
 interface DisplayPhase {
@@ -81,6 +83,7 @@ export function WorkflowIndicator({
     onReviewLearn,
     onReviewTasks,
     onChanged,
+    onFolderCreated,
 }: WorkflowIndicatorProps) {
     const i18n = useExtracted();
     const [data, setData] = useState(initialData ?? null);
@@ -225,6 +228,13 @@ export function WorkflowIndicator({
         ) {
             return i18n("Learn review pending; summary made without it");
         }
+        if (
+            phase.name === "taskReview" &&
+            (phase.state === "pending" || phase.state === "waiting") &&
+            !data.outputs.summary
+        ) {
+            return i18n("Not started");
+        }
         switch (phase.state) {
             case "pending":
                 return i18n("Pending");
@@ -294,7 +304,11 @@ export function WorkflowIndicator({
         if (phase.name === "learn" && phase.state === "waiting") {
             return { label: i18n("Review Learn"), action: onReviewLearn };
         }
-        if (phase.name === "taskReview" && phase.state === "waiting") {
+        if (
+            phase.name === "taskReview" &&
+            phase.state === "waiting" &&
+            data.outputs.summary
+        ) {
             return { label: i18n("Review tasks"), action: onReviewTasks };
         }
         if (phase.state !== "manual" && phase.state !== "outdated") return null;
@@ -309,6 +323,9 @@ export function WorkflowIndicator({
         }
         return null;
     };
+    const categorizeHasAction = phases.some(
+        (phase) => phase.name === "categorize" && actionFor(phase) !== null,
+    );
     const cancelIntent = async (folderId: string) => {
         const previous = data;
         setData({
@@ -423,22 +440,29 @@ export function WorkflowIndicator({
                     ) : data.profile ? (
                         <span className="rounded-full border px-2.5 py-1 text-xs">
                             {i18n("Profile")}: {data.profile.name}
+                            {data.profile.scope === "organization"
+                                ? ` · ${i18n("Organization")}`
+                                : ""}
                             {data.manualOnly
                                 ? ` · ${i18n("Nothing automatic")}`
                                 : ""}
                         </span>
                     ) : null}
-                    <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={openPanel}
-                        onMouseEnter={loadPanel}
-                        onFocus={loadPanel}
-                        disabled={panelLoading}
-                    >
-                        {i18n("File it")}
-                    </Button>
+                    {!categorizeHasAction && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={openPanel}
+                            onMouseEnter={loadPanel}
+                            onFocus={loadPanel}
+                            disabled={panelLoading}
+                        >
+                            {data.phases.categorize?.state === "done"
+                                ? i18n("Change folders")
+                                : i18n("File it")}
+                        </Button>
+                    )}
                     {data.processAgain && !data.manualOnly && (
                         <Button
                             type="button"
@@ -505,6 +529,18 @@ export function WorkflowIndicator({
                                         {skippedReason(phase.record?.reason)}
                                     </TooltipContent>
                                 </Tooltip>
+                            ) : phase.name === "taskReview" &&
+                              (phase.state === "pending" ||
+                                  phase.state === "waiting") &&
+                              !data.outputs.summary ? (
+                                <Tooltip key={phase.name}>
+                                    <TooltipTrigger asChild>
+                                        {content}
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                        {i18n("Starts after the summary.")}
+                                    </TooltipContent>
+                                </Tooltip>
                             ) : (
                                 content
                             );
@@ -517,6 +553,7 @@ export function WorkflowIndicator({
                     data={panelData}
                     open={panelOpen}
                     onOpenChange={setPanelOpen}
+                    onFolderCreated={onFolderCreated}
                     onOptimisticCategorize={optimisticallyCategorize}
                     onCategorized={() => {
                         setPanelOpen(false);

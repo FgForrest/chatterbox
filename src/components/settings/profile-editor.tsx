@@ -712,7 +712,9 @@ export function ProfileEditor({
                         )}
 
                         <div className="space-y-2">
-                            <Label htmlFor="profile-name">{i18n("Name")}</Label>
+                            <Label htmlFor="profile-name">
+                                {i18n("Profile name")}
+                            </Label>
                             <Input
                                 id="profile-name"
                                 value={profile.name}

@@ -13,6 +13,7 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ interface Props {
     onTranscribeComplete?: () => void;
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
     onTranscriptStale?: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
     transcriptReadOnly?: boolean;
     /** Whether the recording is in the Organization: erasing it withdraws it. */
@@ -101,6 +103,7 @@ export function WorkstationDetailPane({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
+    onFolderCreated,
     transcriptReadOnly,
     recordingShared = false,
     onSelectRecording,
@@ -252,6 +255,7 @@ export function WorkstationDetailPane({
                             onTranscribe={onTranscribe}
                             onTranscribeComplete={onTranscribeComplete}
                             onTranscriptStale={onTranscriptStale}
+                            onFolderCreated={onFolderCreated}
                             readOnly={transcriptReadOnly}
                             onSeekToTurn={
                                 currentRecording.audioReaped

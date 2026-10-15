@@ -38,6 +38,7 @@ describe("folder default profile picker", () => {
                                 },
                                 effectiveManualOnly: false,
                                 inheritedFromFolderId: "parent",
+                                inheritedFromFolderName: "Meetings",
                                 inherited: {
                                     id: "inherited-audio",
                                     name: "Team recordings",
@@ -53,10 +54,19 @@ describe("folder default profile picker", () => {
                             mail: {
                                 own: null,
                                 ownManualOnly: false,
-                                effective: null,
+                                effective: {
+                                    id: "inherited-mail",
+                                    name: "Team mail",
+                                    scope: "organization",
+                                },
                                 effectiveManualOnly: false,
-                                inheritedFromFolderId: null,
-                                inherited: null,
+                                inheritedFromFolderId: "parent",
+                                inheritedFromFolderName: "Meetings",
+                                inherited: {
+                                    id: "inherited-mail",
+                                    name: "Team mail",
+                                    scope: "organization",
+                                },
                                 inheritedManualOnly: false,
                                 accountDefault: {
                                     id: "personal-mail",
@@ -91,6 +101,11 @@ describe("folder default profile picker", () => {
                     return Response.json({
                         profiles: [
                             {
+                                id: "inherited-mail",
+                                name: "Team mail",
+                                scope: "organization",
+                            },
+                            {
                                 id: "personal-mail",
                                 name: "My mail",
                                 scope: "personal",
@@ -112,13 +127,15 @@ describe("folder default profile picker", () => {
         expect(
             await screen.findByText("Default profile for recordings"),
         ).toBeTruthy();
-        expect(screen.getByText("Team recordings (inherited)")).toBeTruthy();
+        expect(
+            screen.getByText("Team recordings · Organization (inherited)"),
+        ).toBeTruthy();
         expect(screen.getByText("Default profile for mail")).toBeTruthy();
 
         fireEvent.click(screen.getByText("Default profile for recordings"));
         expect(
             await screen.findByRole("menuitemradio", {
-                name: "Inherit (Team recordings)",
+                name: "Inherit from Meetings: Team recordings · Organization",
             }),
         ).toBeTruthy();
         expect(
@@ -148,7 +165,7 @@ describe("folder default profile picker", () => {
         fireEvent.click(screen.getByText("Default profile for mail"));
         expect(
             await screen.findByRole("menuitemradio", {
-                name: "Inherit (your default: My mail)",
+                name: "Inherit from Meetings: Team mail · Organization",
             }),
         ).toBeTruthy();
         fireEvent.click(
