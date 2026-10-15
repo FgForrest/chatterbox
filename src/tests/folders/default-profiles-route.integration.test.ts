@@ -183,6 +183,7 @@ describeWithDatabase("folder default profile routes", () => {
         ownerUserId: string;
         scope: "personal" | "organization";
         channel?: ProfileChannel;
+        isDefault?: boolean;
     }) {
         const channel = input.channel ?? "audio";
         const revisionId = `${input.id}-revision`;
@@ -197,6 +198,7 @@ describeWithDatabase("folder default profile routes", () => {
                 currentRevisionId: revisionId,
                 createdBy: input.ownerUserId,
                 updatedBy: input.ownerUserId,
+                isDefault: input.isDefault ?? false,
             });
         await db()
             .insert(processingProfileRevisions)
@@ -270,11 +272,13 @@ describeWithDatabase("folder default profile routes", () => {
             id: "personal-audio",
             ownerUserId: OWNER,
             scope: "personal",
+            isDefault: true,
         });
         await addProfile({
             id: "org-audio",
             ownerUserId: ORG,
             scope: "organization",
+            isDefault: true,
         });
     });
 
@@ -298,11 +302,15 @@ describeWithDatabase("folder default profile routes", () => {
             context("personal-child"),
         );
         expect(await inherited.json()).toMatchObject({
+            scope: "personal",
             defaults: {
                 audio: {
                     own: null,
+                    ownManualOnly: false,
                     effective: { id: "personal-audio" },
+                    effectiveManualOnly: false,
                     inheritedFromFolderId: "personal-parent",
+                    accountDefault: { id: "personal-audio" },
                 },
             },
         });
@@ -321,6 +329,44 @@ describeWithDatabase("folder default profile routes", () => {
                 .from(folderDefaultProfiles)
                 .where(eq(folderDefaultProfiles.folderId, "personal-parent")),
         ).toHaveLength(0);
+    });
+
+    it("stores and inherits Nothing automatic as a distinct mode", async () => {
+        const set = await PUT(
+            request("PUT", "personal-parent", {
+                channel: "audio",
+                profileId: null,
+                manualOnly: true,
+            }),
+            context("personal-parent"),
+        );
+        expect(set.status).toBe(200);
+        expect(
+            await db()
+                .select()
+                .from(folderDefaultProfiles)
+                .where(eq(folderDefaultProfiles.folderId, "personal-parent")),
+        ).toEqual([
+            expect.objectContaining({ profileId: null, manualOnly: true }),
+        ]);
+
+        const inherited = await GET(
+            request("GET", "personal-child"),
+            context("personal-child"),
+        );
+        expect(await inherited.json()).toMatchObject({
+            scope: "personal",
+            defaults: {
+                audio: {
+                    own: null,
+                    ownManualOnly: false,
+                    effective: null,
+                    effectiveManualOnly: true,
+                    inheritedFromFolderId: "personal-parent",
+                    accountDefault: { id: "personal-audio" },
+                },
+            },
+        });
     });
 
     it("does not let another user reach a personal folder", async () => {
@@ -349,6 +395,22 @@ describeWithDatabase("folder default profile routes", () => {
             context("org-folder"),
         );
         expect(response.status).toBe(200);
+    });
+
+    it("does not expose the Organization account default for an Organization folder", async () => {
+        const response = await GET(
+            request("GET", "org-folder"),
+            context("org-folder"),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            scope: "org",
+            defaults: {
+                audio: { accountDefault: null },
+                mail: { accountDefault: null },
+            },
+        });
     });
 
     it("refuses an Organization write from a member without curation", async () => {

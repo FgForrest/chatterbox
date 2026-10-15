@@ -834,6 +834,13 @@
       "when": 1792045072021,
       "tag": "0118_famous_spirit",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792046777471,
+      "tag": "0119_loose_norman_osborn",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, transcriptions } from "@/db/schema";
+import { chatterItems, itemProcessing, transcriptions } from "@/db/schema";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 
 export type PipelineQueueStep = "summary" | "topics";
@@ -12,24 +12,31 @@ export async function pipelineMayQueue(
     step: PipelineQueueStep,
 ): Promise<boolean> {
     const [item] = await db
-        .select({ summaryDueAt: chatterItems.summaryDueAt })
+        .select({
+            summaryDueAt: chatterItems.summaryDueAt,
+            manualOnly: itemProcessing.manualOnly,
+        })
         .from(chatterItems)
+        .leftJoin(
+            itemProcessing,
+            and(
+                eq(itemProcessing.itemId, chatterItems.id),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
         .where(
             and(eq(chatterItems.id, itemId), eq(chatterItems.userId, userId)),
         )
         .limit(1);
 
-    if (!item || item.summaryDueAt !== null) return false;
+    if (!item || item.summaryDueAt !== null || item.manualOnly) return false;
     const profile = await resolveItemProfile(itemId, "private", userId);
     if (step === "summary") {
-        return (
-            profile.settings.steps.summary.enabled &&
-            profile.settings.steps.summary.automatic
-        );
+        return profile.settings.steps.summary.automatic;
     }
     if (
         !("topics" in profile.settings.steps) ||
-        !profile.settings.steps.topics.enabled ||
         !profile.settings.steps.topics.automatic
     ) {
         return false;

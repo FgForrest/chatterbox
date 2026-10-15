@@ -72,7 +72,7 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
             userId,
         );
         const title = profile.settings.steps.title;
-        if (!title.enabled || !title.automatic) {
+        if (!title.automatic) {
             return { skipped: "off" };
         }
         const input = await readTitleInput(userId, payload.recordingId);

@@ -14,7 +14,7 @@ describe("profile settings", () => {
         const audio = defaultProfileSettings("audio");
 
         expect(audio).toMatchObject({
-            schemaVersion: 1,
+            schemaVersion: 2,
             steps: {
                 transcribe: { provider: null, quality: "balanced" },
                 title: { preset: "default", prompt: {}, fullPrompt: null },
@@ -31,12 +31,12 @@ describe("profile settings", () => {
         });
     });
 
-    it("omits audio-only steps and disables titles for mail", () => {
+    it("omits audio-only steps and keeps automatic titles off for mail", () => {
         const mail = defaultProfileSettings("mail");
 
         expect(mail.steps).not.toHaveProperty("transcribe");
         expect(mail.steps).not.toHaveProperty("topics");
-        expect(mail.steps.title.enabled).toBe(false);
+        expect(mail.steps.title.automatic).toBe(false);
         expect(mail.steps.summary).toMatchObject({
             preset: "mail",
             fullPrompt: null,
@@ -105,18 +105,6 @@ describe("profile settings", () => {
         ).toThrow();
     });
 
-    it("defaults a missing mail title enabled flag to false", () => {
-        const mail = defaultProfileSettings("mail");
-        const { enabled: _enabled, ...title } = mail.steps.title;
-
-        expect(
-            parseProfileSettings("mail", {
-                ...mail,
-                steps: { ...mail.steps, title },
-            }).steps.title.enabled,
-        ).toBe(false);
-    });
-
     it("defaults missing title and topic full prompts in stored v1 revisions", () => {
         const audio = defaultProfileSettings("audio");
         const { fullPrompt: _titlePrompt, ...title } = audio.steps.title;
@@ -129,7 +117,41 @@ describe("profile settings", () => {
 
         expect(parsed.steps.title.fullPrompt).toBeNull();
         expect(parsed.steps.topics.fullPrompt).toBeNull();
-        expect(parsed.schemaVersion).toBe(1);
+        expect(parsed.schemaVersion).toBe(2);
+    });
+
+    it("upgrades disabled v1 steps to non-automatic v2 steps", () => {
+        const audio = defaultProfileSettings("audio");
+        const v1 = {
+            ...audio,
+            schemaVersion: 1,
+            steps: Object.fromEntries(
+                Object.entries(audio.steps).map(([name, step]) => [
+                    name,
+                    name === "tasks"
+                        ? step
+                        : { ...step, enabled: name !== "summary" },
+                ]),
+            ),
+        };
+
+        const parsed = parseProfileSettings("audio", v1);
+
+        expect(parsed.schemaVersion).toBe(2);
+        expect(parsed.steps.summary.automatic).toBe(false);
+        expect(parsed.steps.title.automatic).toBe(true);
+        expect(parsed.steps.summary).not.toHaveProperty("enabled");
+        expect(parsed.steps.tasks.enabled).toBe(true);
+    });
+
+    it("round-trips v2 settings while preserving the tasks switch", () => {
+        const settings = defaultProfileSettings("audio");
+        settings.steps.summary.automatic = false;
+        settings.steps.tasks.enabled = false;
+
+        expect(
+            parseProfileSettings("audio", JSON.parse(JSON.stringify(settings))),
+        ).toEqual(settings);
     });
 
     it("accepts prompt overrides only for supported locales", () => {

@@ -96,7 +96,7 @@ const OTHER = "categorize-other";
 const ORG = "categorize-org";
 const ITEM = "categorize-item";
 
-function request(folderIds: string[], profileId?: string) {
+function request(folderIds: string[], profileId?: string, manualOnly = false) {
     return new Request(
         `https://app.example.test/api/recordings/${ITEM}/categorize`,
         {
@@ -105,6 +105,7 @@ function request(folderIds: string[], profileId?: string) {
             body: JSON.stringify({
                 folderIds,
                 ...(profileId ? { profileId } : {}),
+                ...(manualOnly ? { manualOnly: true } : {}),
             }),
         },
     );
@@ -143,6 +144,7 @@ describeWithDatabase("categorize route", () => {
         ownerUserId: string;
         scope: "personal" | "organization";
         channel: "audio" | "mail";
+        isDefault?: boolean;
     }) {
         const revisionId = `${input.id}-revision`;
         await db()
@@ -151,6 +153,7 @@ describeWithDatabase("categorize route", () => {
                 ...input,
                 name: input.id,
                 currentRevisionId: revisionId,
+                isDefault: input.isDefault ?? false,
                 createdBy: input.ownerUserId,
                 updatedBy: input.ownerUserId,
             });
@@ -298,6 +301,7 @@ describeWithDatabase("categorize route", () => {
             ownerUserId: OWNER,
             scope: "personal",
             channel: "audio",
+            isDefault: true,
         });
         await addProfile({
             id: "audio-b",
@@ -440,6 +444,7 @@ describeWithDatabase("categorize route", () => {
                 candidates: expect.arrayContaining([
                     expect.objectContaining({ id: "audio-a" }),
                     expect.objectContaining({ id: "audio-b" }),
+                    { manualOnly: true },
                 ]),
             },
         });
@@ -458,6 +463,25 @@ describeWithDatabase("categorize route", () => {
         expect(await processing()).toMatchObject({
             profileId: "audio-b",
             profileRevisionId: "audio-b-revision",
+        });
+    });
+
+    it("accepts Nothing automatic and freezes the owner's default profile", async () => {
+        await addItem();
+
+        const response = await POST(
+            request(["personal-b"], undefined, true),
+            context(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await processing()).toMatchObject({
+            profileId: "audio-a",
+            profileRevisionId: "audio-a-revision",
+            manualOnly: true,
+            phases: {
+                categorize: expect.objectContaining({ state: "done" }),
+            },
         });
     });
 

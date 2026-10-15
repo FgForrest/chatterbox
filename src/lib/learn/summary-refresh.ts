@@ -10,7 +10,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements } from "@/db/schema";
+import { aiEnhancements, itemProcessing } from "@/db/schema";
 import { env } from "@/lib/env";
 import { llmRendering } from "@/lib/learn/llm-input";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -96,13 +96,25 @@ export async function summaryRefreshDue(input: {
     if (!(await isSummaryStale(input.ownerUserId, input.recordingId))) {
         return null;
     }
+    const [processing] = await db
+        .select({ manualOnly: itemProcessing.manualOnly })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, input.recordingId),
+                eq(itemProcessing.userId, input.ownerUserId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
+        .limit(1);
+    if (processing?.manualOnly) return null;
     const profile = await resolveItemProfile(
         input.recordingId,
         "private",
         input.ownerUserId,
     );
     const summary = profile.settings.steps.summary;
-    if (!summary.enabled || !summary.automatic) return null;
+    if (!summary.automatic) return null;
     const allowed = await consumeRateLimitBucket(
         `auto-summary:user:${input.ownerUserId}`,
         {

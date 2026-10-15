@@ -470,16 +470,15 @@ describe("Transcription", () => {
         function stubTitledRun({
             syncTitleToPlaud,
             retitled,
-            title = { enabled: true, automatic: true },
+            title = { automatic: true },
         }: {
             syncTitleToPlaud: boolean;
             retitled: boolean;
-            title?: { enabled: boolean; automatic: boolean };
+            title?: { automatic: boolean };
         }) {
             const profile = resolvedAudioProfile({
                 autoGenerateTitle: title.automatic,
             });
-            profile.settings.steps.title.enabled = title.enabled;
             profileMocks.resolveItemProfile.mockResolvedValue(profile);
             const mockCreate = vi.fn().mockResolvedValue({
                 text: "Fresh transcript",
@@ -697,14 +696,11 @@ describe("Transcription", () => {
             expect(createPlaudClient).not.toHaveBeenCalled();
         });
 
-        it.each([
-            { enabled: true, automatic: false },
-            { enabled: false, automatic: true },
-        ])("does not generate a title when profile automation is $enabled/$automatic", async (title) => {
+        it("does not generate a title when profile automation is off", async () => {
             stubTitledRun({
                 syncTitleToPlaud: false,
                 retitled: true,
-                title,
+                title: { automatic: false },
             });
 
             await expect(

@@ -11,11 +11,16 @@ import {
     type FolderDefaultProfileDetails,
     folderDefaultProfileDetails,
 } from "@/lib/profiles/resolve-for-placement";
+import { ensureProfiles } from "@/lib/profiles/seed";
 import {
     type ProfileChannel,
     profileChannelSchema,
 } from "@/lib/profiles/settings";
-import { getProfile, type ProfileRecord } from "@/lib/profiles/store";
+import {
+    getDefaultProfile,
+    getProfile,
+    type ProfileRecord,
+} from "@/lib/profiles/store";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -23,8 +28,12 @@ const updateSchema = z
     .object({
         channel: profileChannelSchema,
         profileId: z.string().min(1).nullable(),
+        manualOnly: z.boolean().optional().default(false),
     })
-    .strict();
+    .strict()
+    .refine(({ profileId, manualOnly }) => !(profileId && manualOnly), {
+        message: "profileId and manualOnly are mutually exclusive",
+    });
 
 interface AccessibleFolder {
     id: string;
@@ -103,10 +112,29 @@ async function channelDefaults(
         channel,
         organizationOnly: folder.scope === "org",
     })) satisfies FolderDefaultProfileDetails | null;
+    const inherited = folder.parentId
+        ? await folderDefaultProfileDetails({
+              folderId: folder.parentId,
+              folderOwnerUserId: folder.ownerUserId,
+              actorUserId,
+              channel,
+              organizationOnly: folder.scope === "org",
+          })
+        : null;
+    await ensureProfiles(folder.ownerUserId);
+    const accountDefault =
+        folder.scope === "personal"
+            ? await getDefaultProfile(folder.ownerUserId, channel, actorUserId)
+            : null;
     return {
         own: profileSummary(defaults?.own ?? null),
+        ownManualOnly: defaults?.ownManualOnly ?? false,
         effective: profileSummary(defaults?.effective ?? null),
+        effectiveManualOnly: defaults?.effectiveManualOnly ?? false,
         inheritedFromFolderId: defaults?.inheritedFromFolderId ?? null,
+        inherited: profileSummary(inherited?.effective ?? null),
+        inheritedManualOnly: inherited?.effectiveManualOnly ?? false,
+        accountDefault: profileSummary(accountDefault),
     };
 }
 
@@ -120,6 +148,7 @@ async function responseBody(
         channelDefaults(folder, actorUserId, "mail"),
     ]);
     return {
+        scope: folder.scope,
         canEdit,
         defaults: { audio, mail },
     };
@@ -220,7 +249,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             },
         );
     }
-    const { channel, profileId } = parsed.data;
+    const { channel, profileId, manualOnly } = parsed.data;
     if (profileId) {
         await selectedProfile({
             folder,
@@ -230,13 +259,34 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         });
         await db
             .insert(folderDefaultProfiles)
-            .values({ folderId: folder.id, channel, profileId })
+            .values({
+                folderId: folder.id,
+                channel,
+                profileId,
+                manualOnly: false,
+            })
             .onConflictDoUpdate({
                 target: [
                     folderDefaultProfiles.folderId,
                     folderDefaultProfiles.channel,
                 ],
-                set: { profileId },
+                set: { profileId, manualOnly: false },
+            });
+    } else if (manualOnly) {
+        await db
+            .insert(folderDefaultProfiles)
+            .values({
+                folderId: folder.id,
+                channel,
+                profileId: null,
+                manualOnly: true,
+            })
+            .onConflictDoUpdate({
+                target: [
+                    folderDefaultProfiles.folderId,
+                    folderDefaultProfiles.channel,
+                ],
+                set: { profileId: null, manualOnly: true },
             });
     } else {
         await db

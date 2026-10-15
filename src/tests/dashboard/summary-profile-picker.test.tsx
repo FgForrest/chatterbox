@@ -125,6 +125,7 @@ describe("per-run summary profile picker", () => {
                         summary: null,
                         source: "riffado",
                         availableSources: [],
+                        itemProfileId: "interview-profile",
                     });
                 }
                 return Response.json({ speakers: [] });
@@ -137,7 +138,7 @@ describe("per-run summary profile picker", () => {
         vi.unstubAllGlobals();
     });
 
-    it("lists usable profiles for the item channel, defaults to the resolved one, and posts profileId", async () => {
+    it("lists usable profiles, preselects the item's profile, and posts profileId", async () => {
         render(
             <TranscriptionPanel
                 recording={{
@@ -165,10 +166,12 @@ describe("per-run summary profile picker", () => {
         const picker = await screen.findByRole("combobox", {
             name: "Processing profile",
         });
-        expect(picker.textContent).toContain("Everyday recordings");
+        expect(picker.textContent).toContain("Interviews");
         fireEvent.click(picker);
         fireEvent.click(
-            await screen.findByRole("option", { name: "Interviews" }),
+            await screen.findByRole("option", {
+                name: "Everyday recordings",
+            }),
         );
         fireEvent.click(screen.getByRole("button", { name: "Summarize" }));
 
@@ -179,7 +182,7 @@ describe("per-run summary profile picker", () => {
                         request.url.includes("/summary") &&
                         request.method === "POST",
                 )?.body,
-            ).toEqual({ profileId: "interview-profile" }),
+            ).toEqual({ profileId: "default-profile" }),
         );
     });
 });

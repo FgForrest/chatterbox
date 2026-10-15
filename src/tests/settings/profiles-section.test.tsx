@@ -386,10 +386,8 @@ describe("Settings Profiles", () => {
         expect(screen.getByRole("heading", { name: "Title" })).toBeTruthy();
         fireEvent.click(screen.getByRole("tab", { name: "Basic" }));
         expect(
-            screen.getByText(
-                "Titles are off for mail; turn them on in Advanced.",
-            ),
-        ).toBeTruthy();
+            screen.getAllByRole("switch", { name: "Run automatically" }),
+        ).toHaveLength(3);
     });
 
     it("shows an unavailable provider pin and requires another choice", async () => {

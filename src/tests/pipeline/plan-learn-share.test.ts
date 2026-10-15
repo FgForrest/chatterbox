@@ -22,16 +22,13 @@ function phase(
 }
 
 function profile(
-    learn: { enabled: boolean; automatic: boolean } = {
-        enabled: true,
-        automatic: true,
-    },
+    learn: { automatic: boolean } = { automatic: true },
 ): PipelineProfileFacts {
     return {
         revisionId: "profile-revision-1",
         learn,
         automatic: {
-            learn: learn.enabled && learn.automatic,
+            learn: learn.automatic,
             summary: true,
             title: false,
             topics: false,
@@ -92,7 +89,7 @@ describe("Learn prerequisite planning", () => {
         {
             reason: "profile_off",
             change: {
-                profile: profile({ enabled: false, automatic: false }),
+                profile: profile({ automatic: false }),
             },
         },
         {
@@ -370,7 +367,7 @@ describe("Share planning", () => {
                 profileAssigned: true,
                 resolution: "resolved",
             },
-            profile: profile({ enabled: false, automatic: false }),
+            profile: profile({ automatic: false }),
             phases: {
                 learn: { ...phase("skipped", "profile_off"), inputs: INPUT },
                 summary: {

@@ -240,10 +240,11 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
         });
     });
 
-    it("queues the selected profile's immutable current revision", async () => {
+    it("queues a manual summary when the selected profile's automatic summary is off", async () => {
         (resolveSelectedProfile as Mock).mockResolvedValue({
             revisionId: "profile-revision-1",
             profile: { id: "profile-1", channel: "audio" },
+            settings: { steps: { summary: { automatic: false } } },
         });
 
         const response = await POST(

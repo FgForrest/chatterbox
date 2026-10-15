@@ -317,7 +317,8 @@ export async function storeMailForOwner(input: {
             return requestArrivalInTx(tx, {
                 itemId,
                 userId: owner,
-                profile: arrivalProfile,
+                profile: arrivalProfile?.profile ?? null,
+                manualOnly: arrivalProfile?.manualOnly ?? false,
             });
         });
         if (advance) nudge();

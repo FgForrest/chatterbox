@@ -88,6 +88,7 @@ export type SeedProfile =
 
 interface ResolvedTemplate<P extends string> {
     id: string;
+    name: string;
     preset: P;
     prompt: string;
     fullPrompt: string | null;
@@ -108,6 +109,7 @@ function resolveStoredTemplate<P extends string>(
         : kind.fallbackId;
     return {
         id: resolved.id,
+        name: stored?.name ?? resolved.id,
         preset,
         prompt: stored ? templatePrompt(stored, kind) : resolved.prompt,
         fullPrompt: uneditedBuiltIn ? null : resolved.prompt,
@@ -191,22 +193,6 @@ function audioSettings(
     return parseProfileSettings("audio", settings);
 }
 
-function withoutAutomation(
-    settings: AudioProfileSettings,
-): AudioProfileSettings {
-    return {
-        ...settings,
-        steps: {
-            ...settings.steps,
-            transcribe: { ...settings.steps.transcribe, automatic: false },
-            learn: { ...settings.steps.learn, automatic: false },
-            title: { ...settings.steps.title, automatic: false },
-            topics: { ...settings.steps.topics, automatic: false },
-            summary: { ...settings.steps.summary, automatic: false },
-        },
-    };
-}
-
 function mailSettings(legacy: LegacyProfileSettings): MailProfileSettings {
     const settings = defaultProfileSettings("mail");
     const title = resolveStoredTemplate(
@@ -221,7 +207,6 @@ function mailSettings(legacy: LegacyProfileSettings): MailProfileSettings {
     };
     settings.steps.title = {
         ...settings.steps.title,
-        enabled: false,
         automatic: false,
         preset: title.preset as PromptPreset,
         prompt: {},
@@ -278,12 +263,31 @@ export function buildSeedProfiles(
         legacy.autoSummarizePreset !== null && automatic.id !== selected.id;
     const usedSummaryIds = new Set<string>();
     const result: SeedProfile[] = [];
+    const localizedTemplateName = (template: ResolvedTemplate<string>) => {
+        if (!isPresetId(SUMMARY_TEMPLATE_KIND, template.id)) {
+            return template.name;
+        }
+        const names = czech
+            ? {
+                  general: "Obecné shrnutí",
+                  "meeting-notes": "Zápis ze schůzky",
+                  "key-points": "Klíčové body",
+                  "action-items": "Úkoly",
+              }
+            : {
+                  general: "General summary",
+                  "meeting-notes": "Meeting notes",
+                  "key-points": "Key points",
+                  "action-items": "Action items",
+              };
+        return names[template.id];
+    };
 
     if (split) {
         usedSummaryIds.add(automatic.id);
         usedSummaryIds.add(selected.id);
         result.push({
-            name: czech ? "Automatický" : "Automatic",
+            name: localizedTemplateName(automatic),
             description: null,
             scope,
             channel: "audio",
@@ -295,14 +299,12 @@ export function buildSeedProfiles(
             ),
         });
         result.push({
-            name: czech ? "Ruční" : "Manual",
+            name: localizedTemplateName(selected),
             description: null,
             scope,
             channel: "audio",
             isDefault: false,
-            settings: withoutAutomation(
-                audioSettings(legacy, summaryConfig, undefined),
-            ),
+            settings: audioSettings(legacy, summaryConfig, undefined),
         });
     } else {
         usedSummaryIds.add(selected.id);
@@ -324,9 +326,7 @@ export function buildSeedProfiles(
             scope,
             channel: "audio",
             isDefault: false,
-            settings: withoutAutomation(
-                audioSettings(legacy, summaryConfig, custom.id),
-            ),
+            settings: audioSettings(legacy, summaryConfig, custom.id),
         });
     }
 

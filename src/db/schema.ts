@@ -681,6 +681,7 @@ export const itemProcessing = pgTable(
         }),
         // No FK: revisions live until their profile is deleted, while this item row must survive.
         profileRevisionId: text("profile_revision_id"),
+        manualOnly: boolean("manual_only").notNull().default(false),
         phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
         requestedGeneration: integer("requested_generation")
             .notNull()
@@ -899,6 +900,7 @@ export const folderDefaultProfiles = pgTable(
         profileId: text("profile_id").references(() => processingProfiles.id, {
             onDelete: "set null",
         }),
+        manualOnly: boolean("manual_only").notNull().default(false),
     },
     (table) => ({
         pk: primaryKey({ columns: [table.folderId, table.channel] }),

@@ -118,6 +118,7 @@ describeWithDatabase("profile resolution for placements", () => {
         scope?: "personal" | "organization";
         channel?: ProfileChannel;
         archived?: boolean;
+        isDefault?: boolean;
     }) {
         const channel = input.channel ?? "audio";
         const revisionId = `${input.id}-revision`;
@@ -133,6 +134,7 @@ describeWithDatabase("profile resolution for placements", () => {
                 createdBy: input.ownerUserId ?? OWNER,
                 updatedBy: input.ownerUserId ?? OWNER,
                 archivedAt: input.archived ? new Date() : null,
+                isDefault: input.isDefault ?? false,
             });
         await db()
             .insert(processingProfileRevisions)
@@ -151,6 +153,15 @@ describeWithDatabase("profile resolution for placements", () => {
             folderId,
             channel: "audio",
             profileId,
+        });
+    }
+
+    async function setFolderManualOnly(folderId: string) {
+        await db().insert(folderDefaultProfiles).values({
+            folderId,
+            channel: "audio",
+            profileId: null,
+            manualOnly: true,
         });
     }
 
@@ -234,6 +245,7 @@ describeWithDatabase("profile resolution for placements", () => {
         ).resolves.toMatchObject({
             status: "resolved",
             profile: { id: "own" },
+            manualOnly: false,
         });
     });
 
@@ -265,6 +277,7 @@ describeWithDatabase("profile resolution for placements", () => {
         ).resolves.toMatchObject({
             status: "resolved",
             profile: { id: "shared" },
+            manualOnly: false,
         });
     });
 
@@ -283,10 +296,71 @@ describeWithDatabase("profile resolution for placements", () => {
         });
         expect(result.status).toBe("choose");
         if (result.status === "choose") {
-            expect(result.candidates.map(({ id }) => id).sort()).toEqual([
-                "one",
-                "two",
-            ]);
+            expect(
+                result.candidates
+                    .filter((candidate) => candidate.kind === "profile")
+                    .map(({ profile }) => profile.id)
+                    .sort(),
+            ).toEqual(["one", "two"]);
+            expect(result.candidates).toContainEqual({ kind: "manual_only" });
+        }
+    });
+
+    it("resolves an own or inherited Nothing automatic default", async () => {
+        await addProfile({ id: "owner-default", isDefault: true });
+        await setFolderManualOnly("first");
+
+        await expect(
+            resolveProfileForPlacements({
+                ownerUserId: OWNER,
+                itemId: ITEM,
+                channel: "audio",
+                folderIds: ["first"],
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            status: "resolved",
+            profile: { id: "owner-default" },
+            manualOnly: true,
+        });
+
+        await db().delete(folderDefaultProfiles);
+        await setFolderManualOnly("parent");
+        await expect(
+            resolveProfileForPlacements({
+                ownerUserId: OWNER,
+                itemId: ITEM,
+                channel: "audio",
+                folderIds: ["first"],
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            status: "resolved",
+            profile: { id: "owner-default" },
+            manualOnly: true,
+        });
+    });
+
+    it("asks when profile and Nothing automatic placement defaults conflict", async () => {
+        await addProfile({ id: "one", isDefault: true });
+        await setFolderDefault("first", "one");
+        await setFolderManualOnly("second");
+
+        const result = await resolveProfileForPlacements({
+            ownerUserId: OWNER,
+            itemId: ITEM,
+            channel: "audio",
+            folderIds: ["first", "second"],
+            view: "private",
+        });
+
+        expect(result.status).toBe("choose");
+        if (result.status === "choose") {
+            expect(result.candidates).toContainEqual({ kind: "manual_only" });
+            expect(result.candidates).toContainEqual({
+                kind: "profile",
+                profile: expect.objectContaining({ id: "one" }),
+            });
         }
     });
 
@@ -306,19 +380,27 @@ describeWithDatabase("profile resolution for placements", () => {
         });
     });
 
-    it("asks among all usable profiles when no default exists", async () => {
-        await addProfile({ id: "one" });
+    it("uses the owner's default when no folder default exists", async () => {
+        await addProfile({ id: "one", isDefault: true });
         await addProfile({ id: "two" });
-        const result = await resolveProfileForPlacements({
-            ownerUserId: OWNER,
-            itemId: ITEM,
-            channel: "audio",
-            folderIds: ["first"],
-            view: "private",
+        await addProfile({
+            id: "org-choice",
+            ownerUserId: ORG,
+            scope: "organization",
         });
-        expect(result.status).toBe("choose");
-        if (result.status === "choose")
-            expect(result.candidates).toHaveLength(2);
+        await expect(
+            resolveProfileForPlacements({
+                ownerUserId: OWNER,
+                itemId: ITEM,
+                channel: "audio",
+                folderIds: ["first"],
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            status: "resolved",
+            profile: { id: "one" },
+            manualOnly: false,
+        });
     });
 
     it("ignores an archived folder default", async () => {
@@ -336,6 +418,7 @@ describeWithDatabase("profile resolution for placements", () => {
         ).resolves.toMatchObject({
             status: "resolved",
             profile: { id: "live" },
+            manualOnly: false,
         });
     });
 
@@ -362,6 +445,7 @@ describeWithDatabase("profile resolution for placements", () => {
         ).resolves.toMatchObject({
             status: "resolved",
             profile: { id: "org-item", scope: "organization" },
+            manualOnly: false,
         });
     });
 
@@ -383,6 +467,29 @@ describeWithDatabase("profile resolution for placements", () => {
         ).resolves.toMatchObject({
             status: "resolved",
             profile: { id: "org-default", scope: "organization" },
+            manualOnly: false,
+        });
+    });
+
+    it("falls back to the Organization account's default", async () => {
+        await addProfile({
+            id: "org-default",
+            ownerUserId: ORG,
+            scope: "organization",
+            isDefault: true,
+        });
+        await expect(
+            resolveProfileForPlacements({
+                ownerUserId: OWNER,
+                itemId: ITEM,
+                channel: "audio",
+                folderIds: ["org-folder"],
+                view: "org",
+            }),
+        ).resolves.toMatchObject({
+            status: "resolved",
+            profile: { id: "org-default", scope: "organization" },
+            manualOnly: false,
         });
     });
 

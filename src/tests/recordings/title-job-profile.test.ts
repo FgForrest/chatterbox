@@ -72,16 +72,14 @@ describe("title job profile switch", () => {
     });
 
     it.each([
-        { enabled: true, automatic: true, calls: 1 },
-        { enabled: true, automatic: false, calls: 0 },
-        { enabled: false, automatic: true, calls: 0 },
-    ])("generates $calls title when automation is $enabled/$automatic", async ({
-        enabled,
+        { automatic: true, calls: 1 },
+        { automatic: false, calls: 0 },
+    ])("generates $calls title when automatic is $automatic", async ({
         automatic,
         calls,
     }) => {
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: { steps: { title: { enabled, automatic } } },
+            settings: { steps: { title: { automatic } } },
         });
 
         await titleJobHandler.run(context());

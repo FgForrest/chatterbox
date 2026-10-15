@@ -732,7 +732,7 @@ describe("transcribeRecording post-write triggers", () => {
         pipelineFacts.profile = {
             ...pipelineFacts.profile,
             revisionId: "seeded-profile-revision",
-            learn: { enabled: true, automatic: true },
+            learn: { automatic: true },
             automatic: {
                 ...pipelineFacts.profile?.automatic,
                 learn: true,

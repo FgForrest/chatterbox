@@ -26,16 +26,23 @@ interface ProfileOption {
 
 interface ChannelDefault {
     own: ProfileOption | null;
+    ownManualOnly: boolean;
     effective: ProfileOption | null;
+    effectiveManualOnly: boolean;
     inheritedFromFolderId: string | null;
+    inherited: ProfileOption | null;
+    inheritedManualOnly: boolean;
+    accountDefault: ProfileOption | null;
 }
 
 interface DefaultsResponse {
+    scope: "personal" | "org";
     canEdit: boolean;
     defaults: Record<ProfileChannel, ChannelDefault>;
 }
 
 const INHERIT_VALUE = "__inherit__";
+const MANUAL_ONLY_VALUE = "__manual_only__";
 
 export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
     const i18n = useExtracted();
@@ -89,7 +96,14 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         channel,
-                        profileId: value === INHERIT_VALUE ? null : value,
+                        profileId:
+                            value === INHERIT_VALUE ||
+                            value === MANUAL_ONLY_VALUE
+                                ? null
+                                : value,
+                        ...(value === MANUAL_ONLY_VALUE
+                            ? { manualOnly: true }
+                            : {}),
                     }),
                 },
             );
@@ -110,12 +124,50 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
 
     const currentLabel = (channel: ProfileChannel) => {
         const value = defaults?.defaults[channel];
-        if (!value?.effective) return i18n("None");
+        if (!value) return i18n("None");
+        if (value.effectiveManualOnly) {
+            return value.inheritedFromFolderId
+                ? i18n("{setting} (inherited)", {
+                      setting: i18n("Nothing automatic"),
+                  })
+                : i18n("Nothing automatic");
+        }
+        if (!value.effective) {
+            return (
+                value.accountDefault?.name ??
+                (defaults?.scope === "org"
+                    ? i18n("Each person's default")
+                    : i18n("None"))
+            );
+        }
         return value.inheritedFromFolderId
             ? i18n("{profile} (inherited)", {
                   profile: value.effective.name,
               })
             : value.effective.name;
+    };
+
+    const inheritLabel = (channel: ProfileChannel) => {
+        const value = defaults?.defaults[channel];
+        if (value?.inheritedManualOnly) {
+            return i18n("Inherit ({setting})", {
+                setting: i18n("Nothing automatic"),
+            });
+        }
+        if (value?.inherited) {
+            return i18n("Inherit ({setting})", {
+                setting: value.inherited.name,
+            });
+        }
+        if (value?.accountDefault) {
+            return i18n("Inherit (your default: {profile})", {
+                profile: value.accountDefault.name,
+            });
+        }
+        if (defaults?.scope === "org") {
+            return i18n("Inherit (each person's default)");
+        }
+        return i18n("Inherit");
     };
 
     const channelPicker = (channel: ProfileChannel, label: string) => (
@@ -131,7 +183,12 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
             <DropdownMenuSubContent className="min-w-56">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
-                    value={defaults?.defaults[channel].own?.id ?? INHERIT_VALUE}
+                    value={
+                        defaults?.defaults[channel].ownManualOnly
+                            ? MANUAL_ONLY_VALUE
+                            : (defaults?.defaults[channel].own?.id ??
+                              INHERIT_VALUE)
+                    }
                     onValueChange={(value) => void save(channel, value)}
                 >
                     <DropdownMenuRadioItem
@@ -140,7 +197,7 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                             !defaults?.canEdit || savingChannel === channel
                         }
                     >
-                        {i18n("None (inherit)")}
+                        {inheritLabel(channel)}
                     </DropdownMenuRadioItem>
                     {profiles[channel].map((profile) => (
                         <DropdownMenuRadioItem
@@ -153,6 +210,14 @@ export function FolderDefaultProfiles({ folderId }: { folderId: string }) {
                             {profile.name}
                         </DropdownMenuRadioItem>
                     ))}
+                    <DropdownMenuRadioItem
+                        value={MANUAL_ONLY_VALUE}
+                        disabled={
+                            !defaults?.canEdit || savingChannel === channel
+                        }
+                    >
+                        {i18n("Nothing automatic")}
+                    </DropdownMenuRadioItem>
                 </DropdownMenuRadioGroup>
             </DropdownMenuSubContent>
         </DropdownMenuSub>

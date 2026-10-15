@@ -381,7 +381,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     async function setLearnAutomation(input: {
         automatic: boolean;
-        enabled: boolean;
         followUpsAutomatic?: boolean;
     }): Promise<void> {
         const resolved = await resolveDefaultProfile(OWNER, "audio");
@@ -409,7 +408,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
                     ...settings.steps,
                     learn: {
                         ...settings.steps.learn,
-                        enabled: input.enabled,
                         automatic: input.automatic,
                         correctAfterLearn: false,
                     },
@@ -458,7 +456,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(runs).toEqual([{ trigger: "auto", status: "queued" }]);
     });
 
-    it("refuses untimed and profile-disabled automatic Learn", async () => {
+    it("refuses untimed Learn and Learn with automation off", async () => {
         const tryStart = (timed = true) =>
             startAutomaticLearn({
                 userId: OWNER,
@@ -471,17 +469,11 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             status: "skipped",
             reason: "no_timings",
         });
-        await setLearnAutomation({ enabled: true, automatic: false });
+        await setLearnAutomation({ automatic: false });
         expect(await tryStart()).toEqual({
             status: "skipped",
             reason: "profile_off",
         });
-        await setLearnAutomation({ enabled: false, automatic: true });
-        expect(await tryStart()).toEqual({
-            status: "skipped",
-            reason: "profile_off",
-        });
-
         expect(await dueAt()).toBeNull();
         expect(await kinds()).toEqual([]);
     });
@@ -552,7 +544,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     it("starts one automatic Learn run and consumes its bucket once after a transcript write", async () => {
         await db().delete(apiRateLimitBuckets);
-        await setLearnAutomation({ enabled: true, automatic: true });
+        await setLearnAutomation({ automatic: true });
         await db()
             .delete(transcriptions)
             .where(eq(transcriptions.id, riffadoId));
@@ -707,7 +699,6 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
 
     it("reviews privately, decides proposals, and shares an intended placement once", async () => {
         await setLearnAutomation({
-            enabled: true,
             automatic: true,
             followUpsAutomatic: false,
         });

@@ -50,16 +50,14 @@ describe("summary refresh profile switch", () => {
     });
 
     it.each([
-        { enabled: true, automatic: true, due: true },
-        { enabled: true, automatic: false, due: false },
-        { enabled: false, automatic: true, due: false },
-    ])("due=$due when summary automation is $enabled/$automatic", async ({
-        enabled,
+        { automatic: true, due: true },
+        { automatic: false, due: false },
+    ])("due=$due when summary automatic is $automatic", async ({
         automatic,
         due,
     }) => {
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: { steps: { summary: { enabled, automatic } } },
+            settings: { steps: { summary: { automatic } } },
         });
 
         const result = await summaryRefreshDue({

@@ -44,16 +44,14 @@ describe("automatic topics profile switch", () => {
     });
 
     it.each([
-        { enabled: true, automatic: true, queued: true },
-        { enabled: true, automatic: false, queued: false },
-        { enabled: false, automatic: true, queued: false },
-    ])("queues=$queued when topics automation is $enabled/$automatic", async ({
-        enabled,
+        { automatic: true, queued: true },
+        { automatic: false, queued: false },
+    ])("queues=$queued when topics automatic is $automatic", async ({
         automatic,
         queued,
     }) => {
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: { steps: { topics: { enabled, automatic } } },
+            settings: { steps: { topics: { automatic } } },
         });
 
         await queueAutoTopics("user-1", "recording-1", "riffado");

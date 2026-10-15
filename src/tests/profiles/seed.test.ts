@@ -301,16 +301,18 @@ describe("legacy settings to profile seeds", () => {
         expect(
             audio.map(({ name, isDefault }) => ({ name, isDefault })),
         ).toEqual([
-            { name: "Automatic", isDefault: true },
-            { name: "Manual", isDefault: false },
+            { name: "Meeting notes", isDefault: true },
+            { name: "General summary", isDefault: false },
         ]);
         expect(audio[0]?.settings.steps.summary.preset).toBe("meeting-notes");
         expect(audio[1]?.settings.steps.summary.preset).toBe("general");
-        expect(audio[1]?.settings.steps.transcribe.automatic).toBe(false);
-        expect(audio[1]?.settings.steps.summary.automatic).toBe(false);
-        expect(audio[1]?.settings.steps.title.automatic).toBe(false);
-        expect(audio[1]?.settings.steps.topics.automatic).toBe(false);
-        expect(audio[1]?.settings.steps.learn.automatic).toBe(false);
+        for (const profile of audio) {
+            expect(profile.settings.steps.transcribe.automatic).toBe(true);
+            expect(profile.settings.steps.summary.automatic).toBe(true);
+            expect(profile.settings.steps.title.automatic).toBe(true);
+            expect(profile.settings.steps.topics.automatic).toBe(true);
+            expect(profile.settings.steps.learn.automatic).toBe(true);
+        }
     });
 
     it("seeds built-in profile names in Czech without translating custom names", () => {
@@ -328,8 +330,8 @@ describe("legacy settings to profile seeds", () => {
         );
 
         expect(profiles.map(({ name }) => name)).toEqual([
-            "Automatický",
-            "Ruční",
+            "Zápis ze schůzky",
+            "Vlastní šablona",
             "Custom stays",
             "Pošta",
         ]);
@@ -338,7 +340,7 @@ describe("legacy settings to profile seeds", () => {
         );
     });
 
-    it("adds unused custom summaries with their names and automation off", () => {
+    it("adds unused custom summaries with their names and the person's switches", () => {
         const summaryConfig = config(SUMMARY_TEMPLATE_KIND, "used", [
             template("used", "Used custom", "Used prompt"),
             template("extra", "Extra custom", "Extra prompt"),
@@ -356,6 +358,7 @@ describe("legacy settings to profile seeds", () => {
         const extra = profiles.find(({ name }) => name === "Extra custom");
         expect(extra?.settings.steps.summary.fullPrompt).toBe("Extra prompt");
         expect(extra?.settings.steps.summary.automatic).toBe(false);
+        expect(extra?.settings.steps.title.automatic).toBe(true);
     });
 
     it.each([
@@ -384,7 +387,6 @@ describe("legacy settings to profile seeds", () => {
         expect(mail?.settings.steps.summary.automatic).toBe(example.summary);
         expect(mail?.settings.steps.learn.automatic).toBe(example.learn);
         expect(mail?.settings.steps.title).toMatchObject({
-            enabled: false,
             automatic: false,
         });
         expect(mail?.settings.steps).not.toHaveProperty("transcribe");

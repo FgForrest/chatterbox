@@ -48,7 +48,6 @@ type PromptLocale = "en" | "cs-CZ";
 type CommonStepName = "transcribe" | "learn" | "title" | "topics" | "summary";
 
 interface CommonStep {
-    enabled: boolean;
     automatic: boolean;
     provider: ProviderPin | null;
 }
@@ -353,27 +352,15 @@ function CommonStepControls({
     if (!step) return null;
     const title = stepLabels[name];
     return (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3">
             <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                <Label htmlFor={`${name}-enabled`}>{i18n("Enabled")}</Label>
-                <Switch
-                    id={`${name}-enabled`}
-                    checked={step.enabled}
-                    disabled={readOnly}
-                    onCheckedChange={(checked) =>
-                        updateSettings((next) => {
-                            const target = getCommonStep(next, name);
-                            if (target) target.enabled = checked;
-                        })
-                    }
-                />
-            </div>
-            <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-                <Label htmlFor={`${name}-automatic`}>{i18n("Automatic")}</Label>
+                <Label htmlFor={`${name}-automatic`}>
+                    {i18n("Run automatically")}
+                </Label>
                 <Switch
                     id={`${name}-automatic`}
                     checked={step.automatic}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onCheckedChange={(checked) =>
                         updateSettings((next) => {
                             const target = getCommonStep(next, name);
@@ -382,7 +369,7 @@ function CommonStepControls({
                     }
                 />
             </div>
-            <div className="space-y-2 sm:col-span-2">
+            <div className="space-y-2">
                 <Label htmlFor={`${name}-provider`}>
                     {i18n("{step} provider", { step: title })}
                 </Label>
@@ -392,7 +379,7 @@ function CommonStepControls({
                     options={options}
                     purpose={name === "transcribe" ? "transcription" : "text"}
                     defaultLabel={i18n("Default for this role")}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(provider) =>
                         updateSettings((next) => {
                             const target = getCommonStep(next, name);
@@ -954,9 +941,6 @@ function BasicEditor({
             </div>
 
             <div className="space-y-2">
-                <h3 className="text-sm font-medium">
-                    {i18n("Runs automatically")}
-                </h3>
                 {automationSteps.map((name) => {
                     const step = getCommonStep(settings, name);
                     if (!step) return null;
@@ -965,22 +949,21 @@ function BasicEditor({
                             key={name}
                             className="flex items-center justify-between rounded-md border px-3 py-2"
                         >
-                            <Label htmlFor={`basic-${name}-automatic`}>
-                                {stepLabels[name]}
-                            </Label>
-                            {profile.channel === "mail" &&
-                                name === "title" &&
-                                !step.enabled && (
-                                    <p className="mr-auto text-xs text-muted-foreground">
-                                        {i18n(
-                                            "Titles are off for mail; turn them on in Advanced.",
-                                        )}
-                                    </p>
-                                )}
+                            <div>
+                                <p className="text-sm font-medium">
+                                    {stepLabels[name]}
+                                </p>
+                                <Label
+                                    className="text-xs text-muted-foreground"
+                                    htmlFor={`basic-${name}-automatic`}
+                                >
+                                    {i18n("Run automatically")}
+                                </Label>
+                            </div>
                             <Switch
                                 id={`basic-${name}-automatic`}
                                 checked={step.automatic}
-                                disabled={readOnly || !step.enabled}
+                                disabled={readOnly}
                                 onCheckedChange={(checked) =>
                                     updateSettings((next) => {
                                         const target = getCommonStep(
@@ -1083,9 +1066,7 @@ function AdvancedEditor({
                             <Switch
                                 id="correct-after-learn"
                                 checked={settings.steps.learn.correctAfterLearn}
-                                disabled={
-                                    readOnly || !settings.steps.learn.enabled
-                                }
+                                disabled={readOnly}
                                 onCheckedChange={(checked) =>
                                     updateSettings((next) => {
                                         next.steps.learn.correctAfterLearn =
@@ -1107,9 +1088,7 @@ function AdvancedEditor({
                             kind="topics-prompt"
                             values={settings.steps.topics.prompt}
                             builtins={TOPIC_PROMPTS_BY_LOCALE.default}
-                            disabled={
-                                readOnly || !settings.steps.topics.enabled
-                            }
+                            disabled={readOnly}
                             onChange={(prompt) =>
                                 updateSettings((next) => {
                                     if ("topics" in next.steps) {
@@ -1187,7 +1166,7 @@ function TranscribeSettings({
                     aria-label={i18n("Language")}
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.language ?? "auto"}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             if ("transcribe" in next.steps) {
@@ -1212,7 +1191,7 @@ function TranscribeSettings({
                     id="transcribe-quality"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.quality}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             if ("transcribe" in next.steps) {
@@ -1235,7 +1214,7 @@ function TranscribeSettings({
                     id="plaud-transcript"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.plaudTranscript}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             if ("transcribe" in next.steps) {
@@ -1275,7 +1254,7 @@ function TitleSettings({
                     id="title-preset"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.preset}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             next.steps.title.preset = event.target
@@ -1294,7 +1273,7 @@ function TitleSettings({
                 kind="title-prompt"
                 values={step.prompt}
                 builtins={TITLE_PROMPTS_BY_LOCALE[step.preset]}
-                disabled={readOnly || !step.enabled}
+                disabled={readOnly}
                 onChange={(prompt) =>
                     updateSettings((next) => {
                         next.steps.title.prompt = prompt;
@@ -1342,7 +1321,7 @@ function SummarySettings({
                     id="summary-preset"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.preset}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             if ("transcribe" in next.steps) {
@@ -1373,7 +1352,7 @@ function SummarySettings({
                     placeholder={
                         promptParts.focus[locale === "cs-CZ" ? "cs-CZ" : "en"]
                     }
-                    disabled={readOnly || !step.enabled || fullPromptActive}
+                    disabled={readOnly || fullPromptActive}
                     onChange={(event) =>
                         updateSettings((next) => {
                             next.steps.summary.focus =
@@ -1386,7 +1365,7 @@ function SummarySettings({
                 kind="output-format"
                 values={step.outputFormat}
                 builtins={promptParts.outputFormat}
-                disabled={readOnly || !step.enabled || fullPromptActive}
+                disabled={readOnly || fullPromptActive}
                 onChange={(outputFormat) =>
                     updateSettings((next) => {
                         next.steps.summary.outputFormat = outputFormat;
@@ -1407,7 +1386,7 @@ function SummarySettings({
                     aria-label={i18n("Full prompt")}
                     className="min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 text-sm"
                     value={step.fullPrompt ?? ""}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             next.steps.summary.fullPrompt =
@@ -1429,7 +1408,7 @@ function SummarySettings({
                     id="advanced-output-language"
                     className="h-9 w-full rounded-md border bg-background px-3 text-sm"
                     value={step.outputLanguage}
-                    disabled={readOnly || !step.enabled}
+                    disabled={readOnly}
                     onChange={(event) =>
                         updateSettings((next) => {
                             next.steps.summary.outputLanguage =
@@ -1461,7 +1440,7 @@ function SummarySettings({
                     <Switch
                         id="summary-multi-pass"
                         checked={step.multiPass.enabled}
-                        disabled={readOnly || !step.enabled}
+                        disabled={readOnly}
                         onCheckedChange={(checked) =>
                             updateSettings((next) => {
                                 next.steps.summary.multiPass.enabled = checked;

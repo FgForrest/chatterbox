@@ -133,15 +133,10 @@ export async function startLearnRun(input: {
         actorUserId,
     );
     const learnSettings = profile.settings.steps.learn;
-    if (
-        !learnSettings.enabled ||
-        (trigger === "auto" && !learnSettings.automatic)
-    ) {
+    if (trigger === "auto" && !learnSettings.automatic) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
-            trigger === "auto"
-                ? "Automatic Learn is off in this item's profile."
-                : "Learn is off in this item's profile.",
+            "Automatic Learn is off in this item's profile.",
             400,
         );
     }

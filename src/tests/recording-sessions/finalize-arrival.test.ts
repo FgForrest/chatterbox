@@ -35,9 +35,12 @@ const { requestArrivalInTx } = vi.hoisted(() => ({
 vi.mock("@/lib/pipeline/arrival", () => ({
     requestArrivalInTx,
     resolveArrivalProfile: vi.fn(async () => ({
-        id: "profile-1",
-        ownerUserId: "user-session",
-        channel: "audio",
+        profile: {
+            id: "profile-1",
+            ownerUserId: "user-session",
+            channel: "audio",
+        },
+        manualOnly: false,
     })),
 }));
 vi.mock("@/lib/recordings/filename", () => ({
@@ -125,6 +128,7 @@ describe("recording-session finalization arrival", () => {
                 scope: "personal",
             },
             profile: expect.objectContaining({ id: "profile-1" }),
+            manualOnly: false,
         });
     });
 
@@ -161,7 +165,11 @@ describe("recording-session finalization arrival", () => {
         );
         expect(requestArrivalInTx).toHaveBeenCalledWith(
             expect.anything(),
-            expect.objectContaining({ folder: null, profile: null }),
+            expect.objectContaining({
+                folder: null,
+                profile: null,
+                manualOnly: false,
+            }),
         );
         expect(warning).toHaveBeenCalledWith(
             "[recording session session-1] selected folder is unavailable; saved without placement",
@@ -207,7 +215,11 @@ describe("recording-session finalization arrival", () => {
         );
         expect(requestArrivalInTx).toHaveBeenCalledWith(
             expect.anything(),
-            expect.objectContaining({ folder: null, profile: null }),
+            expect.objectContaining({
+                folder: null,
+                profile: null,
+                manualOnly: false,
+            }),
         );
         expect(warning).toHaveBeenCalledWith(
             "[video extraction job job-1] selected folder is unavailable; saved without placement",

@@ -15,20 +15,14 @@ import {
     pipelineMayQueue,
 } from "@/lib/pipeline/pending";
 
-function profile(
-    step: PipelineQueueStep,
-    enabled: boolean,
-    automatic: boolean,
-) {
+function profile(step: PipelineQueueStep, automatic: boolean) {
     return {
         settings: {
             steps: {
                 summary: {
-                    enabled: step === "summary" ? enabled : true,
                     automatic: step === "summary" ? automatic : true,
                 },
                 topics: {
-                    enabled: step === "topics" ? enabled : true,
                     automatic: step === "topics" ? automatic : true,
                 },
             },
@@ -37,61 +31,58 @@ function profile(
 }
 
 describe("pipeline pending profile automation", () => {
+    let manualOnly = false;
+
     beforeEach(() => {
         vi.clearAllMocks();
-        mocks.select.mockImplementation((fields: Record<string, unknown>) => ({
-            from: () => ({
-                where: () => ({
-                    limit: () =>
-                        Promise.resolve(
-                            "summaryDueAt" in fields
-                                ? [{ summaryDueAt: null }]
-                                : [{ turns: [{ startMs: 0 }] }],
-                        ),
-                }),
-            }),
-        }));
+        manualOnly = false;
+        mocks.select.mockImplementation((fields: Record<string, unknown>) => {
+            const chain = {
+                from: () => chain,
+                leftJoin: () => chain,
+                where: () => chain,
+                limit: () =>
+                    Promise.resolve(
+                        "summaryDueAt" in fields
+                            ? [{ summaryDueAt: null, manualOnly }]
+                            : [{ turns: [{ startMs: 0 }] }],
+                    ),
+            };
+            return chain;
+        });
     });
 
     it.each([
-        { step: "summary" as const, enabled: true, automatic: true, due: true },
+        { step: "summary" as const, automatic: true, due: true },
         {
             step: "summary" as const,
-            enabled: true,
             automatic: false,
             due: false,
         },
-        {
-            step: "summary" as const,
-            enabled: false,
-            automatic: true,
-            due: false,
-        },
-        { step: "topics" as const, enabled: true, automatic: true, due: true },
+        { step: "topics" as const, automatic: true, due: true },
         {
             step: "topics" as const,
-            enabled: true,
             automatic: false,
             due: false,
         },
-        {
-            step: "topics" as const,
-            enabled: false,
-            automatic: true,
-            due: false,
-        },
-    ])("$step is $due when profile automation is $enabled/$automatic", async ({
+    ])("$step is $due when automatic is $automatic", async ({
         step,
-        enabled,
         automatic,
         due,
     }) => {
-        mocks.resolveItemProfile.mockResolvedValue(
-            profile(step, enabled, automatic),
-        );
+        mocks.resolveItemProfile.mockResolvedValue(profile(step, automatic));
 
         await expect(pipelineMayQueue("user-1", "item-1", step)).resolves.toBe(
             due,
         );
+    });
+
+    it("queues no automatic step for a manual-only item", async () => {
+        manualOnly = true;
+
+        await expect(
+            pipelineMayQueue("user-1", "item-1", "summary"),
+        ).resolves.toBe(false);
+        expect(mocks.resolveItemProfile).not.toHaveBeenCalled();
     });
 });

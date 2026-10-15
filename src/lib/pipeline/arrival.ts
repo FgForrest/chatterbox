@@ -18,19 +18,29 @@ export type ArrivalFolder = Awaited<
     ReturnType<typeof assertCategorizableFolder>
 >;
 
+export interface ArrivalProfileResolution {
+    profile: ProfileRecord;
+    manualOnly: boolean;
+}
+
 /** Resolve an unambiguous arrival placement to the profile frozen on the item. */
 export async function resolveArrivalProfile(input: {
     ownerUserId: string;
     itemId: string;
     channel: "audio" | "mail";
     folderIds: string[];
-}): Promise<ProfileRecord | null> {
+}): Promise<ArrivalProfileResolution | null> {
     if (input.folderIds.length === 0) return null;
     const resolution = await resolveProfileForPlacements({
         ...input,
         view: "private",
     });
-    return resolution.status === "resolved" ? resolution.profile : null;
+    return resolution.status === "resolved"
+        ? {
+              profile: resolution.profile,
+              manualOnly: resolution.manualOnly,
+          }
+        : null;
 }
 
 /** Request arrival and freeze a resolved placement profile in the creating transaction. */
@@ -41,6 +51,7 @@ export async function requestArrivalInTx(
         userId: string;
         view?: PipelineView;
         profile?: ProfileRecord | null;
+        manualOnly?: boolean;
         folder?: ArrivalFolder | null;
     },
 ) {
@@ -94,6 +105,7 @@ export async function requestArrivalInTx(
         .set({
             profileId: latest.id,
             profileRevisionId: latest.revisionId,
+            manualOnly: input.manualOnly ?? false,
             updatedAt: new Date(),
         })
         .where(

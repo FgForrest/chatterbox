@@ -22,7 +22,11 @@ import { getOrgUserId } from "@/lib/org/config";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
-import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+import { resolveSelectedProfile } from "@/lib/profiles/resolve";
+import {
+    resolveChannelDefaultProfile,
+    resolveProfileForPlacements,
+} from "@/lib/profiles/resolve-for-placement";
 import type { ProfileRecord } from "@/lib/profiles/store";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -31,8 +35,12 @@ const categorizeSchema = z
     .object({
         folderIds: z.array(z.string().min(1)).min(1),
         profileId: z.string().min(1).optional(),
+        manualOnly: z.boolean().optional(),
     })
-    .strict();
+    .strict()
+    .refine(({ profileId, manualOnly }) => !(profileId && manualOnly), {
+        message: "profileId and manualOnly are mutually exclusive",
+    });
 
 function profileSummary(profile: ProfileRecord) {
     return {
@@ -45,38 +53,22 @@ function profileSummary(profile: ProfileRecord) {
 
 async function usableExplicitProfile(input: {
     ownerUserId: string;
-    itemId: string;
     channel: "audio" | "mail";
     profileId: string;
-    placementResolution: Awaited<
-        ReturnType<typeof resolveProfileForPlacements>
-    >;
 }): Promise<ProfileRecord> {
-    const resolution =
-        input.placementResolution.status === "choose"
-            ? input.placementResolution
-            : await resolveProfileForPlacements({
-                  ownerUserId: input.ownerUserId,
-                  itemId: input.itemId,
-                  channel: input.channel,
-                  folderIds: [],
-                  view: "private",
-              });
-    const candidates =
-        resolution.status === "choose"
-            ? resolution.candidates
-            : resolution.status === "resolved"
-              ? [resolution.profile]
-              : [];
-    const profile = candidates.find(({ id }) => id === input.profileId);
-    if (!profile || profile.channel !== input.channel) {
+    const resolved = await resolveSelectedProfile({
+        profileId: input.profileId,
+        actorUserId: input.ownerUserId,
+        view: "private",
+    });
+    if (!resolved || resolved.profile.channel !== input.channel) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
             "The profile is not available for this item",
             400,
         );
     }
-    return profile;
+    return resolved.profile;
 }
 
 export const POST = apiHandler<IdContext>(async (request, context) => {
@@ -125,6 +117,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         .select({
             profileId: itemProcessing.profileId,
             profileRevisionId: itemProcessing.profileRevisionId,
+            manualOnly: itemProcessing.manualOnly,
         })
         .from(itemProcessing)
         .where(
@@ -144,14 +137,28 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     });
 
     let selectedProfile: ProfileRecord | null = null;
+    let selectedManualOnly: boolean | null = null;
     if (parsed.data.profileId) {
         selectedProfile = await usableExplicitProfile({
             ownerUserId,
-            itemId,
             channel: item.kind,
             profileId: parsed.data.profileId,
-            placementResolution,
         });
+        selectedManualOnly = false;
+    } else if (parsed.data.manualOnly) {
+        selectedProfile = await resolveChannelDefaultProfile({
+            ownerUserId,
+            channel: item.kind,
+            view: "private",
+        });
+        if (!selectedProfile) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The default processing profile is not available",
+                409,
+            );
+        }
+        selectedManualOnly = true;
     } else if (!current?.profileId || !current.profileRevisionId) {
         if (placementResolution.status === "choose") {
             throw new AppError(
@@ -159,8 +166,15 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 "Choose a processing profile",
                 409,
                 {
-                    candidates:
-                        placementResolution.candidates.map(profileSummary),
+                    candidates: placementResolution.candidates.map(
+                        (candidate) =>
+                            candidate.kind === "manual_only"
+                                ? { manualOnly: true }
+                                : {
+                                      ...profileSummary(candidate.profile),
+                                      manualOnly: false,
+                                  },
+                    ),
                 },
             );
         }
@@ -172,12 +186,14 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
         }
         selectedProfile = placementResolution.profile;
+        selectedManualOnly = placementResolution.manualOnly;
     }
 
     const orgUserId = await getOrgUserId();
     const result = await db.transaction(async (tx) => {
         let profileId = current?.profileId ?? null;
         let profileRevisionId = current?.profileRevisionId ?? null;
+        let manualOnly = current?.manualOnly ?? false;
         if (selectedProfile) {
             const [latest] = await tx
                 .select({
@@ -206,6 +222,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             }
             profileId = latest.id;
             profileRevisionId = latest.revisionId;
+            manualOnly = selectedManualOnly ?? false;
         }
 
         const existingIntents = await tx
@@ -341,7 +358,12 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         }
         await tx
             .update(itemProcessing)
-            .set({ profileId, profileRevisionId, updatedAt: new Date() })
+            .set({
+                profileId,
+                profileRevisionId,
+                manualOnly,
+                updatedAt: new Date(),
+            })
             .where(
                 and(
                     eq(itemProcessing.itemId, itemId),

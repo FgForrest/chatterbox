@@ -54,6 +54,7 @@ export interface SummaryData {
     keyPoints: string[] | null;
     actionItems: string[] | null;
     source: SummarySource;
+    itemProfileId?: string | null;
     transcriptionId?: string | null;
     availableSources?: SummarySource[];
     provider?: string;
@@ -179,12 +180,25 @@ export function useTranscriptionSummary({
     const [summaryProfileOptions, setSummaryProfileOptions] = useState<
         SettingsProfileSummary[]
     >([]);
+    const [itemProfileId, setItemProfileId] = useState<string | null>(null);
     const [summaryProfilesLoading, setSummaryProfilesLoading] = useState(true);
     const userSelectedProfileRef = useRef(false);
-    const setSummaryProfileId = useCallback((profileId: string) => {
-        userSelectedProfileRef.current = true;
-        setSummaryProfileIdState(profileId);
-    }, []);
+    const setSummaryProfileId = useCallback(
+        (profileId: string) => {
+            userSelectedProfileRef.current = true;
+            setSummaryProfileIdState(profileId);
+            if (!itemProfileId) return;
+            const key = `summary-profile:${profileChannel}:${itemProfileId}`;
+            try {
+                if (profileId === itemProfileId) {
+                    localStorage.removeItem(key);
+                } else {
+                    localStorage.setItem(key, profileId);
+                }
+            } catch {}
+        },
+        [itemProfileId, profileChannel],
+    );
 
     // Re-fetch trigger separate from the URL/id key so callers can
     // bump it imperatively (e.g. right after a re-transcribe finishes,
@@ -204,19 +218,6 @@ export function useTranscriptionSummary({
             .then((data: SettingsProfilesPage | null) => {
                 if (!data) return;
                 setSummaryProfileOptions(data.profiles);
-                if (!userSelectedProfileRef.current) {
-                    const resolvedScope =
-                        view === "org" ? "organization" : "personal";
-                    const resolved =
-                        data.profiles.find(
-                            (profile) =>
-                                profile.scope === resolvedScope &&
-                                profile.isDefault,
-                        ) ??
-                        data.profiles.find((profile) => profile.isDefault) ??
-                        data.profiles[0];
-                    setSummaryProfileIdState(resolved?.id ?? "");
-                }
             })
             .catch(() => {})
             .finally(() => {
@@ -225,7 +226,39 @@ export function useTranscriptionSummary({
                 }
             });
         return () => controller.abort();
-    }, [profileChannel, view]);
+    }, [profileChannel]);
+
+    useEffect(() => {
+        if (
+            userSelectedProfileRef.current ||
+            summaryProfileOptions.length === 0
+        ) {
+            return;
+        }
+        let remembered: string | null = null;
+        if (itemProfileId) {
+            try {
+                remembered = localStorage.getItem(
+                    `summary-profile:${profileChannel}:${itemProfileId}`,
+                );
+            } catch {}
+        }
+        const resolvedScope = view === "org" ? "organization" : "personal";
+        const selected =
+            summaryProfileOptions.find(
+                (profile) => profile.id === remembered,
+            ) ??
+            summaryProfileOptions.find(
+                (profile) => profile.id === itemProfileId,
+            ) ??
+            summaryProfileOptions.find(
+                (profile) =>
+                    profile.scope === resolvedScope && profile.isDefault,
+            ) ??
+            summaryProfileOptions.find((profile) => profile.isDefault) ??
+            summaryProfileOptions[0];
+        setSummaryProfileIdState(selected?.id ?? "");
+    }, [itemProfileId, profileChannel, summaryProfileOptions, view]);
 
     const recordingIdRef = useRef(recordingId);
     const summarySourceRef = useRef(summarySource);
@@ -259,6 +292,8 @@ export function useTranscriptionSummary({
 
     useEffect(() => {
         setAvailableSummarySources([]);
+        setItemProfileId(null);
+        userSelectedProfileRef.current = false;
         setSummaryDataByKey((current) => {
             if (!recordingId) return {};
             const prefix = `${recordingId}:`;
@@ -441,6 +476,7 @@ export function useTranscriptionSummary({
                     return;
                 }
                 const availableSources = data.availableSources ?? [];
+                setItemProfileId(data.itemProfileId ?? null);
                 setAvailableSummarySources(availableSources);
                 setSummaryFor(
                     requestedId,

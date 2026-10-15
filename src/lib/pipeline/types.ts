@@ -54,11 +54,9 @@ export type PipelinePhases = Partial<Record<PhaseName, PhaseRecord>>;
 export interface PipelineProfileFacts {
     revisionId: string;
     learn?: {
-        enabled: boolean;
         automatic: boolean;
     };
     transcribe?: {
-        enabled: boolean;
         automatic: boolean;
         plaudTranscript: "use" | "also_transcribe";
     };
@@ -84,6 +82,7 @@ export interface PipelineFacts {
     };
     view: PipelineView;
     generation: number;
+    manualOnly?: boolean;
     content: (ContentRevisionInput & { timed: boolean }) | null;
     transcription?: {
         riffado: (ContentRevisionInput & { timed: boolean }) | null;

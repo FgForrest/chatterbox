@@ -104,7 +104,17 @@ describe("profile editor Czech labels", () => {
         expect(
             document.getElementById(descriptionId ?? "")?.textContent,
         ).toContain("AI");
+        expect(
+            screen.getAllByRole("switch", {
+                name: "Spouštět automaticky",
+            }),
+        ).toHaveLength(5);
         fireEvent.click(screen.getByRole("tab", { name: "Pokročilé" }));
+        expect(
+            screen.getAllByRole("switch", {
+                name: "Spouštět automaticky",
+            }),
+        ).toHaveLength(5);
 
         for (const label of [
             "Přepis",

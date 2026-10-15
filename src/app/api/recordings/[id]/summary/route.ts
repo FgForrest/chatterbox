@@ -2,7 +2,12 @@ import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { getActiveJob } from "@/db/queries/async-jobs";
-import { aiEnhancements, chatterItems, recordings } from "@/db/schema";
+import {
+    aiEnhancements,
+    chatterItems,
+    itemProcessing,
+    recordings,
+} from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
@@ -373,6 +378,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                 summary: null,
                 source,
                 availableSources: [],
+                itemProfileId: null,
             });
         }
         return NextResponse.json({
@@ -384,6 +390,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             source: "riffado",
             transcriptionId: null,
             availableSources: ["riffado"],
+            itemProfileId: null,
         });
     }
 
@@ -391,6 +398,18 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, view, {
         kinds: ALL_ITEM_KINDS,
     });
+    const [processing] = await db
+        .select({ profileId: itemProcessing.profileId })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, id),
+                eq(itemProcessing.userId, access.ownerUserId),
+                eq(itemProcessing.view, view),
+            ),
+        )
+        .limit(1);
+    const itemProfileId = processing?.profileId ?? null;
 
     // Reported alongside the summary so a page opened while a summary is
     // being generated -- in another tab, by an automatic run, or by a worker
@@ -434,6 +453,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             source,
             availableSources,
             activeJob: source === "riffado" ? activeJob : undefined,
+            itemProfileId,
         });
     }
 
@@ -452,6 +472,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         stale: await summaryIsStale(stored),
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
+        itemProfileId,
     });
 });
 

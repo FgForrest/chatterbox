@@ -45,6 +45,7 @@ function audioFacts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
         },
         view: "private",
         generation: 4,
+        manualOnly: false,
         content: {
             contentId: "transcription-1",
             contentSourceId: "riffado",
@@ -224,6 +225,60 @@ describe("planAdvance audio", () => {
             record: phase("done", "categorized"),
         });
         expect(actionTypes(result.actions)).toContain("queueSummary");
+    });
+
+    it("skips every profile phase for a manual-only item without blocking review", () => {
+        const result = planAdvance(
+            audioFacts({
+                manualOnly: true,
+                content: null,
+                taskReview: { proposals: 1, followUps: 0 },
+                phases: {
+                    categorize: phase("done", "categorized"),
+                    transcribe: phase("pending", "queued"),
+                    learn: undefined,
+                    summary: undefined,
+                    taskReview: undefined,
+                },
+            }),
+        );
+
+        expect(result.actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "transcribe",
+                record: expect.objectContaining({
+                    state: "skipped",
+                    reason: "manual_only",
+                }),
+            }),
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "learn",
+                record: expect.objectContaining({
+                    state: "skipped",
+                    reason: "manual_only",
+                }),
+            }),
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "summary",
+                record: expect.objectContaining({
+                    state: "skipped",
+                    reason: "manual_only",
+                }),
+            }),
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "waiting",
+                    reason: "needs_review",
+                }),
+            }),
+        ]);
+        expect(actionTypes(result.actions)).not.toContain("queueTranscription");
+        expect(actionTypes(result.actions)).not.toContain("queueSummary");
     });
 
     it("does not start a later phase until Categorize is done", () => {

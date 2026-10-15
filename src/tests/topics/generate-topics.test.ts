@@ -30,7 +30,11 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
 }));
 vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+    resolveItemProfile: vi.fn(async () => {
+        const profile = resolvedAudioProfile();
+        profile.settings.steps.topics.automatic = false;
+        return profile;
+    }),
 }));
 vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
@@ -208,7 +212,7 @@ describe("generateTopicsForTranscript", () => {
         createMock.mockReset();
     });
 
-    it("shows the model timed lines and stores its topics snapped to them", async () => {
+    it("runs manual topics when automatic topics are off", async () => {
         stage();
         reply(
             JSON.stringify({

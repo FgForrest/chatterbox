@@ -86,7 +86,7 @@ export async function saveUploadedAudio(
         input.folderId,
         input.deferredFolderFallback,
     );
-    const profile = folder
+    const profileResolution = folder
         ? await resolveArrivalProfile({
               ownerUserId: input.userId,
               itemId: recordingId,
@@ -143,7 +143,12 @@ export async function saveUploadedAudio(
             {
                 pipeline: "arrival",
                 initializeInTx: (tx, arrival) =>
-                    requestArrivalInTx(tx, { ...arrival, folder, profile }),
+                    requestArrivalInTx(tx, {
+                        ...arrival,
+                        folder,
+                        profile: profileResolution?.profile ?? null,
+                        manualOnly: profileResolution?.manualOnly ?? false,
+                    }),
             },
         );
     } catch (dbError) {

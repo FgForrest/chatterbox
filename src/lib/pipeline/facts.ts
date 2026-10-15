@@ -162,6 +162,7 @@ export async function gatherFacts(
             },
             view,
             generation: processing?.requestedGeneration ?? 0,
+            manualOnly: processing?.manualOnly ?? false,
             content: null,
             transcription: undefined,
             summaryDueAt: null,
@@ -475,10 +476,8 @@ export async function gatherFacts(
               transcribe:
                   "transcribe" in resolvedProfile.settings.steps
                       ? {
-                            enabled:
-                                resolvedProfile.settings.steps.transcribe
-                                    .enabled,
                             automatic:
+                                !processing?.manualOnly &&
                                 resolvedProfile.settings.steps.transcribe
                                     .automatic,
                             plaudTranscript:
@@ -488,22 +487,23 @@ export async function gatherFacts(
                       : undefined,
               automatic: {
                   learn:
-                      resolvedProfile.settings.steps.learn.enabled &&
+                      !processing?.manualOnly &&
                       resolvedProfile.settings.steps.learn.automatic,
                   summary:
-                      resolvedProfile.settings.steps.summary.enabled &&
+                      !processing?.manualOnly &&
                       resolvedProfile.settings.steps.summary.automatic,
                   title:
-                      resolvedProfile.settings.steps.title.enabled &&
+                      !processing?.manualOnly &&
                       resolvedProfile.settings.steps.title.automatic,
                   topics:
                       "topics" in resolvedProfile.settings.steps &&
-                      resolvedProfile.settings.steps.topics.enabled &&
+                      !processing?.manualOnly &&
                       resolvedProfile.settings.steps.topics.automatic,
               },
               learn: {
-                  enabled: resolvedProfile.settings.steps.learn.enabled,
-                  automatic: resolvedProfile.settings.steps.learn.automatic,
+                  automatic:
+                      !processing?.manualOnly &&
+                      resolvedProfile.settings.steps.learn.automatic,
               },
           }
         : null;
@@ -511,7 +511,8 @@ export async function gatherFacts(
     if (!isLearnDeploymentAvailable()) {
         learnAvailability = "hosted";
     } else if (
-        resolvedProfile?.settings.steps.learn.enabled &&
+        !processing?.manualOnly &&
+        resolvedProfile &&
         resolvedProfile.settings.steps.learn.automatic
     ) {
         try {
@@ -554,6 +555,7 @@ export async function gatherFacts(
         },
         view,
         generation: processing?.requestedGeneration ?? 0,
+        manualOnly: processing?.manualOnly ?? false,
         content: content
             ? {
                   contentId: content.id,

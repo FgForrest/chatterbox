@@ -46,7 +46,7 @@ describe("title after summary", () => {
         mocks.titleStillGenerated.mockResolvedValue(true);
         mocks.applyGeneratedTitle.mockResolvedValue(true);
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: { steps: { title: { enabled: true, automatic: true } } },
+            settings: { steps: { title: { automatic: true } } },
         });
     });
 
@@ -77,12 +77,9 @@ describe("title after summary", () => {
         expect(mocks.emitEvent).not.toHaveBeenCalled();
     });
 
-    it.each([
-        { enabled: true, automatic: false },
-        { enabled: false, automatic: true },
-    ])("does not retitle when profile title automation is $enabled/$automatic", async (title) => {
+    it("does not retitle when profile title automation is off", async () => {
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: { steps: { title } },
+            settings: { steps: { title: { automatic: false } } },
         });
 
         await updateTitleAfterSummary(input);

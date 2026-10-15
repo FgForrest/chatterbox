@@ -25,21 +25,44 @@ describe("folder default profile picker", () => {
                         return Response.json({ ok: true });
                     }
                     return Response.json({
+                        scope: "personal",
                         canEdit: true,
                         defaults: {
                             audio: {
                                 own: null,
+                                ownManualOnly: false,
                                 effective: {
                                     id: "inherited-audio",
                                     name: "Team recordings",
                                     scope: "organization",
                                 },
+                                effectiveManualOnly: false,
                                 inheritedFromFolderId: "parent",
+                                inherited: {
+                                    id: "inherited-audio",
+                                    name: "Team recordings",
+                                    scope: "organization",
+                                },
+                                inheritedManualOnly: false,
+                                accountDefault: {
+                                    id: "personal-audio",
+                                    name: "My recordings",
+                                    scope: "personal",
+                                },
                             },
                             mail: {
                                 own: null,
+                                ownManualOnly: false,
                                 effective: null,
+                                effectiveManualOnly: false,
                                 inheritedFromFolderId: null,
+                                inherited: null,
+                                inheritedManualOnly: false,
+                                accountDefault: {
+                                    id: "personal-mail",
+                                    name: "My mail",
+                                    scope: "personal",
+                                },
                             },
                         },
                     });
@@ -93,6 +116,16 @@ describe("folder default profile picker", () => {
         expect(screen.getByText("Default profile for mail")).toBeTruthy();
 
         fireEvent.click(screen.getByText("Default profile for recordings"));
+        expect(
+            await screen.findByRole("menuitemradio", {
+                name: "Inherit (Team recordings)",
+            }),
+        ).toBeTruthy();
+        expect(
+            screen.getByRole("menuitemradio", {
+                name: "Nothing automatic",
+            }),
+        ).toBeTruthy();
         fireEvent.click(await screen.findByText("My recordings"));
 
         await waitFor(() => {
@@ -107,5 +140,90 @@ describe("folder default profile picker", () => {
                 }),
             );
         });
+
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "Default profiles" }),
+            { button: 0, ctrlKey: false },
+        );
+        fireEvent.click(screen.getByText("Default profile for mail"));
+        expect(
+            await screen.findByRole("menuitemradio", {
+                name: "Inherit (your default: My mail)",
+            }),
+        ).toBeTruthy();
+        fireEvent.click(
+            screen.getByRole("menuitemradio", {
+                name: "Nothing automatic",
+            }),
+        );
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/folders/folder/default-profiles",
+                expect.objectContaining({
+                    method: "PUT",
+                    body: JSON.stringify({
+                        channel: "mail",
+                        profileId: null,
+                        manualOnly: true,
+                    }),
+                }),
+            );
+        });
+    });
+
+    it("shows each member's default for an Organization folder without a folder default", async () => {
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            const url = String(input);
+            if (url.endsWith("/api/folders/org-folder/default-profiles")) {
+                return Response.json({
+                    scope: "org",
+                    canEdit: true,
+                    defaults: {
+                        audio: {
+                            own: null,
+                            ownManualOnly: false,
+                            effective: null,
+                            effectiveManualOnly: false,
+                            inheritedFromFolderId: null,
+                            inherited: null,
+                            inheritedManualOnly: false,
+                            accountDefault: null,
+                        },
+                        mail: {
+                            own: null,
+                            ownManualOnly: false,
+                            effective: null,
+                            effectiveManualOnly: false,
+                            inheritedFromFolderId: null,
+                            inherited: null,
+                            inheritedManualOnly: false,
+                            accountDefault: null,
+                        },
+                    },
+                });
+            }
+            if (url.includes("/api/settings/profiles?channel=")) {
+                return Response.json({ profiles: [] });
+            }
+            throw new Error(`Unexpected request: ${url}`);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+
+        render(<FolderDefaultProfiles folderId="org-folder" />);
+
+        fireEvent.pointerDown(
+            await screen.findByRole("button", { name: "Default profiles" }),
+            { button: 0, ctrlKey: false },
+        );
+        expect(
+            await screen.findAllByText("Each person's default"),
+        ).toHaveLength(2);
+
+        fireEvent.click(screen.getByText("Default profile for recordings"));
+        expect(
+            await screen.findByRole("menuitemradio", {
+                name: "Inherit (each person's default)",
+            }),
+        ).toBeTruthy();
     });
 });

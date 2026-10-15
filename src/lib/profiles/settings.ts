@@ -35,7 +35,6 @@ const providerPinSchema = z
 export type ProviderPin = z.infer<typeof providerPinSchema>;
 
 const commonStepSchema = {
-    enabled: z.boolean(),
     automatic: z.boolean(),
     provider: providerPinSchema.nullable(),
 };
@@ -71,10 +70,6 @@ const titleStepSchema = z
         fullPrompt: z.string().nullable().optional().default(null),
     })
     .strict();
-
-const mailTitleStepSchema = titleStepSchema.extend({
-    enabled: z.boolean().default(false),
-});
 
 const topicsStepSchema = z
     .object({
@@ -130,9 +125,27 @@ const sharedSteps = {
     tasks: tasksStepSchema,
 };
 
-export const audioProfileSettingsSchema = z
+const audioProfileSettingsV1Schema = z
     .object({
         schemaVersion: z.literal(1),
+        steps: z
+            .object({
+                transcribe: transcribeStepSchema.extend({
+                    enabled: z.boolean(),
+                }),
+                learn: learnStepSchema.extend({ enabled: z.boolean() }),
+                title: titleStepSchema.extend({ enabled: z.boolean() }),
+                tasks: tasksStepSchema,
+                summary: summaryStepSchema.extend({ enabled: z.boolean() }),
+                topics: topicsStepSchema.extend({ enabled: z.boolean() }),
+            })
+            .strict(),
+    })
+    .strict();
+
+export const audioProfileSettingsSchema = z
+    .object({
+        schemaVersion: z.literal(2),
         steps: z
             .object({
                 transcribe: transcribeStepSchema,
@@ -144,13 +157,30 @@ export const audioProfileSettingsSchema = z
     })
     .strict();
 
-export const mailProfileSettingsSchema = z
+const mailProfileSettingsV1Schema = z
     .object({
         schemaVersion: z.literal(1),
         steps: z
             .object({
+                learn: learnStepSchema.extend({ enabled: z.boolean() }),
+                title: titleStepSchema.extend({
+                    enabled: z.boolean().default(false),
+                }),
+                tasks: tasksStepSchema,
+                summary: mailSummaryStepSchema.extend({
+                    enabled: z.boolean(),
+                }),
+            })
+            .strict(),
+    })
+    .strict();
+
+export const mailProfileSettingsSchema = z
+    .object({
+        schemaVersion: z.literal(2),
+        steps: z
+            .object({
                 ...sharedSteps,
-                title: mailTitleStepSchema,
                 summary: mailSummaryStepSchema,
             })
             .strict(),
@@ -169,13 +199,11 @@ export type ProfileSettings = z.infer<typeof profileSettingsSchema>;
 function sharedDefaults() {
     return {
         learn: {
-            enabled: true,
             automatic: false,
             provider: null,
             correctAfterLearn: true,
         },
         title: {
-            enabled: true,
             automatic: true,
             provider: null,
             preset: "default" as PromptPreset,
@@ -183,7 +211,6 @@ function sharedDefaults() {
             fullPrompt: null,
         },
         summary: {
-            enabled: true,
             automatic: false,
             provider: null,
             preset: "general" as SummaryPreset,
@@ -214,7 +241,7 @@ export function defaultProfileSettings(
     const shared = sharedDefaults();
     if (channel === "mail") {
         return {
-            schemaVersion: 1,
+            schemaVersion: 2,
             steps: {
                 ...shared,
                 summary: {
@@ -222,15 +249,14 @@ export function defaultProfileSettings(
                     preset: MAIL_SUMMARY_PROMPT_ID,
                     fullPrompt: null,
                 },
-                title: { ...shared.title, enabled: false, automatic: false },
+                title: { ...shared.title, automatic: false },
             },
         };
     }
     return {
-        schemaVersion: 1,
+        schemaVersion: 2,
         steps: {
             transcribe: {
-                enabled: true,
                 automatic: false,
                 provider: null,
                 language: null,
@@ -239,7 +265,6 @@ export function defaultProfileSettings(
             },
             ...shared,
             topics: {
-                enabled: true,
                 automatic: false,
                 provider: null,
                 preset: "default" as TopicPreset,
@@ -268,6 +293,37 @@ export function parseProfileSettings(
     value: unknown,
 ): ProfileSettings {
     const parsedChannel = profileChannelSchema.parse(channel);
+    const version =
+        typeof value === "object" && value !== null && "schemaVersion" in value
+            ? value.schemaVersion
+            : undefined;
+    if (version === 1) {
+        const v1 =
+            parsedChannel === "audio"
+                ? audioProfileSettingsV1Schema.parse(value)
+                : mailProfileSettingsV1Schema.parse(value);
+        const upgradedSteps = Object.fromEntries(
+            Object.entries(v1.steps).map(([name, step]) => {
+                if (name === "tasks") return [name, step];
+                const record = step as Record<string, unknown>;
+                const { enabled, ...settings } = record;
+                return [
+                    name,
+                    {
+                        ...settings,
+                        automatic:
+                            enabled === true
+                                ? settings.automatic === true
+                                : false,
+                    },
+                ];
+            }),
+        );
+        const upgraded = { schemaVersion: 2, steps: upgradedSteps };
+        return parsedChannel === "audio"
+            ? audioProfileSettingsSchema.parse(upgraded)
+            : mailProfileSettingsSchema.parse(upgraded);
+    }
     return parsedChannel === "audio"
         ? audioProfileSettingsSchema.parse(value)
         : mailProfileSettingsSchema.parse(value);

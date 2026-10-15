@@ -20,7 +20,13 @@ function sameInput(
 
 function markPhase(
     facts: PipelineFacts,
-    phase: "categorize" | "transcribe" | "learn" | "taskReview" | "share",
+    phase:
+        | "categorize"
+        | "transcribe"
+        | "learn"
+        | "summary"
+        | "taskReview"
+        | "share",
     state: PhaseRecord["state"],
     reason: string,
     input?: ContentRevisionInput,
@@ -173,11 +179,11 @@ function learnSkipReason(
     content: NonNullable<PipelineFacts["content"]>,
 ): "profile_off" | "hosted" | "no_provider" | "no_timings" | null {
     if (facts.item.kind === "audio" && !content.timed) return "no_timings";
-    const configured = facts.profile?.learn ?? {
-        enabled: facts.profile?.automatic.learn ?? false,
-        automatic: facts.profile?.automatic.learn ?? false,
-    };
-    if (!configured.enabled || !configured.automatic) return "profile_off";
+    const automatic =
+        facts.profile?.learn?.automatic ??
+        facts.profile?.automatic.learn ??
+        false;
+    if (!automatic) return "profile_off";
     const availability =
         facts.learnAvailability ??
         (facts.hasEnhancementCredential ? "available" : "no_provider");
@@ -505,6 +511,23 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             ? facts.generation
             : (facts.phases.categorize?.generation ?? facts.generation);
 
+    if (facts.manualOnly) {
+        for (const phase of ["transcribe", "learn", "summary"] as const) {
+            const current = facts.phases[phase];
+            if (
+                current?.state === "skipped" &&
+                current.reason === "manual_only" &&
+                current.generation >= minimumGeneration
+            ) {
+                continue;
+            }
+            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
+        }
+        actions.push(...taskReviewActions(facts));
+        planShare(facts, actions);
+        return { actions };
+    }
+
     const profileTranscription = facts.profile?.transcribe;
     const riffadoTranscript = facts.transcription?.riffado ?? facts.content;
     const plaudTranscript = facts.transcription?.plaud ?? null;
@@ -541,10 +564,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     if (!content) {
         if (facts.item.kind === "audio") {
             if (transcribeSkipReason) return { actions };
-            if (
-                profileTranscription?.enabled &&
-                profileTranscription.automatic
-            ) {
+            if (profileTranscription?.automatic) {
                 const transcribe = facts.phases.transcribe;
                 const failed = facts.transcription?.failed;
                 const completedAfterRun =

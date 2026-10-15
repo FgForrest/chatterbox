@@ -368,6 +368,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
                 defaultModel: "gpt-4o-mini",
                 isDefaultEnhancement: true,
             });
+        await setAutomaticLearn(false);
         knowledgeStore().invalidateAll();
         await seedCoreVocabulary();
         acmeId = (
@@ -384,7 +385,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
         rmSync(storageDir, { recursive: true, force: true });
     }, 30_000);
 
-    it("reads a mail in parts and stores review items at their place in its text", async () => {
+    it("runs manual Learn when automatic Learn is off", async () => {
         const itemId = await deliver("Pilot", BODY);
         createCompletion.mockReset();
         createCompletion

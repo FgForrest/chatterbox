@@ -9,7 +9,7 @@ export async function autoTranscribeNewRecording(
     const profile = await resolveItemProfile(recordingId, "private", userId);
     if (!("transcribe" in profile.settings.steps)) return false;
     const transcribe = profile.settings.steps.transcribe;
-    if (!transcribe.enabled || !transcribe.automatic) return false;
+    if (!transcribe.automatic) return false;
     await enqueueTranscriptionJob({
         userId,
         recordingId,

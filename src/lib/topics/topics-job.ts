@@ -170,7 +170,6 @@ export async function queueAutoTopics(
         );
         if (
             !("topics" in profile.settings.steps) ||
-            !profile.settings.steps.topics.enabled ||
             !profile.settings.steps.topics.automatic
         ) {
             return;

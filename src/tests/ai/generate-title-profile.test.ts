@@ -39,8 +39,10 @@ function selectRows(rows: unknown[]) {
 describe("profile-backed title generation", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        const settings = defaultProfileSettings("audio");
+        settings.steps.title.automatic = false;
         mocks.resolveItemProfile.mockResolvedValue({
-            settings: defaultProfileSettings("audio"),
+            settings,
         });
         mocks.resolveStepProvider.mockResolvedValue({
             kind: "credential",
@@ -60,7 +62,7 @@ describe("profile-backed title generation", () => {
         });
     });
 
-    it("keeps the auto-language directive while localizing the prompt for the owner", async () => {
+    it("generates a manual title when automatic titles are off", async () => {
         selectRows([{ detectedLanguage: "cs" }]);
         selectRows([{ uiLocale: "cs-CZ" }]);
 

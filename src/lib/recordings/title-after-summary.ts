@@ -28,7 +28,6 @@ export async function updateTitleAfterSummary(input: {
     );
     const title = profile.settings.steps.title;
     if (
-        !title.enabled ||
         !title.automatic ||
         !(await titleStillGenerated(input.userId, input.recordingId))
     ) {

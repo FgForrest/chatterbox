@@ -35,7 +35,13 @@ import {
     or,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { asyncJobs, chatterItems, learnRuns, mailMessages } from "@/db/schema";
+import {
+    asyncJobs,
+    chatterItems,
+    itemProcessing,
+    learnRuns,
+    mailMessages,
+} from "@/db/schema";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
@@ -92,7 +98,18 @@ export async function startAutomaticLearn(input: {
         }
         const profile = await resolveItemProfile(itemId, "private", userId);
         const learn = profile.settings.steps.learn;
-        if (!learn.enabled || !learn.automatic) {
+        const [processing] = await db
+            .select({ manualOnly: itemProcessing.manualOnly })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, userId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        if (processing?.manualOnly || !learn.automatic) {
             return { status: "skipped", reason: "profile_off" };
         }
         try {

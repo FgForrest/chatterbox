@@ -83,7 +83,7 @@ describe("automatic upload transcription", () => {
         });
         mocks.resolveItemProfile.mockResolvedValue({
             settings: {
-                steps: { transcribe: { enabled: true, automatic: true } },
+                steps: { transcribe: { automatic: true } },
             },
         });
     });
@@ -91,20 +91,7 @@ describe("automatic upload transcription", () => {
     it("does not queue when the recording profile's automatic transcription is disabled", async () => {
         mocks.resolveItemProfile.mockResolvedValue({
             settings: {
-                steps: { transcribe: { enabled: true, automatic: false } },
-            },
-        });
-
-        await expect(
-            autoTranscribeNewRecording("user-1", "recording-1"),
-        ).resolves.toBe(false);
-        expect(mocks.enqueueJob).not.toHaveBeenCalled();
-    });
-
-    it("does not queue when the recording profile's transcription step is disabled", async () => {
-        mocks.resolveItemProfile.mockResolvedValue({
-            settings: {
-                steps: { transcribe: { enabled: false, automatic: true } },
+                steps: { transcribe: { automatic: false } },
             },
         });
 

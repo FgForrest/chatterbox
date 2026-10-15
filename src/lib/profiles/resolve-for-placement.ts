@@ -9,6 +9,7 @@ import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import type { ProfileChannel } from "@/lib/profiles/settings";
 import {
+    getDefaultProfile,
     getProfile,
     listProfiles,
     type ProfileRecord,
@@ -17,14 +18,24 @@ import type { RecordingView } from "@/lib/sharing/view";
 
 export interface FolderDefaultProfileDetails {
     own: ProfileRecord | null;
+    ownManualOnly: boolean;
     effective: ProfileRecord | null;
+    effectiveManualOnly: boolean;
     inheritedFromFolderId: string | null;
 }
 
+export type PlacementProfileCandidate =
+    | { kind: "profile"; profile: ProfileRecord }
+    | { kind: "manual_only" };
+
 export type PlacementProfileResolution =
-    | { status: "resolved"; profile: ProfileRecord }
-    | { status: "choose"; candidates: ProfileRecord[] }
+    | { status: "resolved"; profile: ProfileRecord; manualOnly: boolean }
+    | { status: "choose"; candidates: PlacementProfileCandidate[] }
     | { status: "waiting_for_curator" };
+
+type FolderDefaultOutcome =
+    | { kind: "profile"; profile: ProfileRecord }
+    | { kind: "manual_only" };
 
 interface FolderContext {
     id: string;
@@ -61,9 +72,12 @@ async function usableDefaultAtFolder(input: {
     channel: ProfileChannel;
     organizationUserId: string | null;
     organizationOnly: boolean;
-}): Promise<ProfileRecord | null> {
+}): Promise<FolderDefaultOutcome | null> {
     const [row] = await db
-        .select({ profileId: folderDefaultProfiles.profileId })
+        .select({
+            profileId: folderDefaultProfiles.profileId,
+            manualOnly: folderDefaultProfiles.manualOnly,
+        })
         .from(folderDefaultProfiles)
         .innerJoin(
             recordingFolders,
@@ -77,7 +91,9 @@ async function usableDefaultAtFolder(input: {
             ),
         )
         .limit(1);
-    if (!row?.profileId) return null;
+    if (!row) return null;
+    if (row.manualOnly) return { kind: "manual_only" };
+    if (!row.profileId) return null;
 
     const owners = input.organizationOnly
         ? input.organizationUserId
@@ -100,7 +116,7 @@ async function usableDefaultAtFolder(input: {
             profile?.channel === input.channel &&
             (!input.organizationOnly || profile.scope === "organization")
         ) {
-            return profile;
+            return { kind: "profile", profile };
         }
     }
     return null;
@@ -122,7 +138,9 @@ export async function folderDefaultProfileDetails(input: {
     if (folder.parentId === null) {
         return {
             own: null,
+            ownManualOnly: false,
             effective: null,
+            effectiveManualOnly: false,
             inheritedFromFolderId: null,
         };
     }
@@ -136,7 +154,13 @@ export async function folderDefaultProfileDetails(input: {
         organizationOnly: input.organizationOnly ?? false,
     });
     if (own) {
-        return { own, effective: own, inheritedFromFolderId: null };
+        return {
+            own: own.kind === "profile" ? own.profile : null,
+            ownManualOnly: own.kind === "manual_only",
+            effective: own.kind === "profile" ? own.profile : null,
+            effectiveManualOnly: own.kind === "manual_only",
+            inheritedFromFolderId: null,
+        };
     }
 
     let parentId = folder.parentId;
@@ -154,13 +178,22 @@ export async function folderDefaultProfileDetails(input: {
         if (inherited) {
             return {
                 own: null,
-                effective: inherited,
+                ownManualOnly: false,
+                effective:
+                    inherited.kind === "profile" ? inherited.profile : null,
+                effectiveManualOnly: inherited.kind === "manual_only",
                 inheritedFromFolderId: parent.id,
             };
         }
         parentId = parent.parentId;
     }
-    return { own: null, effective: null, inheritedFromFolderId: null };
+    return {
+        own: null,
+        ownManualOnly: false,
+        effective: null,
+        effectiveManualOnly: false,
+        inheritedFromFolderId: null,
+    };
 }
 
 /** Resolve one folder's usable default, inheriting to but never from its root. */
@@ -258,7 +291,7 @@ async function defaultsForPlacements(input: {
     channel: ProfileChannel;
     folderIds: readonly string[];
     view: RecordingView;
-}): Promise<ProfileRecord[]> {
+}): Promise<FolderDefaultOutcome[]> {
     const organizationUserId = await getOrgUserId();
     const allowedOwners =
         input.view === "org"
@@ -283,12 +316,58 @@ async function defaultsForPlacements(input: {
                 channel: input.channel,
                 organizationOnly: input.view === "org",
             });
-            return details?.effective ?? null;
+            if (details?.effectiveManualOnly) {
+                return { kind: "manual_only" } as const;
+            }
+            return details?.effective
+                ? ({ kind: "profile", profile: details.effective } as const)
+                : null;
         }),
     );
     return profiles.filter(
-        (profile): profile is ProfileRecord => profile !== null,
+        (outcome): outcome is FolderDefaultOutcome => outcome !== null,
     );
+}
+
+async function accountDefaultProfile(input: {
+    ownerUserId: string;
+    actorUserId: string;
+    channel: ProfileChannel;
+}): Promise<ProfileRecord | null> {
+    await ensureProfiles(input.ownerUserId);
+    return getDefaultProfile(
+        input.ownerUserId,
+        input.channel,
+        input.actorUserId,
+    );
+}
+
+/**
+ * Resolve the view's channel default: the owner's on the private view, the
+ * Organization account's on the Organization view.
+ */
+export async function resolveChannelDefaultProfile(input: {
+    ownerUserId: string;
+    channel: ProfileChannel;
+    view: RecordingView;
+}): Promise<ProfileRecord | null> {
+    const profileOwnerUserId =
+        input.view === "org" ? await getOrgUserId() : input.ownerUserId;
+    if (!profileOwnerUserId) return null;
+    return accountDefaultProfile({
+        ownerUserId: profileOwnerUserId,
+        actorUserId: input.ownerUserId,
+        channel: input.channel,
+    });
+}
+
+function profileCandidates(
+    profiles: ProfileRecord[],
+): PlacementProfileCandidate[] {
+    return [
+        ...profiles.map((profile) => ({ kind: "profile" as const, profile })),
+        { kind: "manual_only" },
+    ];
 }
 
 /** Resolve a categorization profile without throwing for human-choice outcomes. */
@@ -301,28 +380,71 @@ export async function resolveProfileForPlacements(input: {
 }): Promise<PlacementProfileResolution> {
     if (input.view === "org") {
         const itemProfile = await organizationItemProfile(input);
-        if (itemProfile) return { status: "resolved", profile: itemProfile };
+        if (itemProfile) {
+            return {
+                status: "resolved",
+                profile: itemProfile,
+                manualOnly: false,
+            };
+        }
     }
 
     const defaults = await defaultsForPlacements(input);
     const distinctDefaults = new Map(
-        defaults.map((profile) => [profile.id, profile]),
+        defaults.map((outcome) => [
+            outcome.kind === "manual_only"
+                ? "manual_only"
+                : `profile:${outcome.profile.id}`,
+            outcome,
+        ]),
     );
     if (distinctDefaults.size === 1) {
-        const [profile] = distinctDefaults.values();
-        if (profile) return { status: "resolved", profile };
+        const [outcome] = distinctDefaults.values();
+        if (outcome?.kind === "profile") {
+            return {
+                status: "resolved",
+                profile: outcome.profile,
+                manualOnly: false,
+            };
+        }
+        if (outcome?.kind === "manual_only") {
+            const profile = await resolveChannelDefaultProfile(input);
+            if (profile)
+                return { status: "resolved", profile, manualOnly: true };
+        }
     }
     if (input.view === "org") {
+        if (distinctDefaults.size === 0) {
+            const organizationDefault =
+                await resolveChannelDefaultProfile(input);
+            if (organizationDefault) {
+                return {
+                    status: "resolved",
+                    profile: organizationDefault,
+                    manualOnly: false,
+                };
+            }
+        }
         return { status: "waiting_for_curator" };
     }
 
     const candidates = await usableProfiles(input.ownerUserId, input.channel);
     if (distinctDefaults.size > 1) {
-        return { status: "choose", candidates };
+        return { status: "choose", candidates: profileCandidates(candidates) };
+    }
+    const ownerDefault = await resolveChannelDefaultProfile(input);
+    if (ownerDefault) {
+        return {
+            status: "resolved",
+            profile: ownerDefault,
+            manualOnly: false,
+        };
     }
     if (candidates.length === 1) {
         const [profile] = candidates;
-        if (profile) return { status: "resolved", profile };
+        if (profile) {
+            return { status: "resolved", profile, manualOnly: false };
+        }
     }
-    return { status: "choose", candidates };
+    return { status: "choose", candidates: profileCandidates(candidates) };
 }
