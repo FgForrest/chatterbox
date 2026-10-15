@@ -106,6 +106,7 @@ export interface RunSummaryInput {
     /** Multi-pass settings, or null for one pass. */
     multiPass: { rounds: number | null; mergePrompt: string | null } | null;
     onProgress?: (progress: MultiPassProgress) => void;
+    tasksEnabled?: boolean;
 }
 
 /**
@@ -219,7 +220,9 @@ export async function runSummary(input: RunSummaryInput): Promise<{
         };
 
         const raw = await complete(label, messages, maxTokens);
-        const firstParse = parseSummaryPayloadResult(raw);
+        const firstParse = parseSummaryPayloadResult(raw, {
+            tasksEnabled: input.tasksEnabled,
+        });
         if (!firstParse.failure) return raw;
 
         if (preReservedMultiPass) return raw;
@@ -228,9 +231,13 @@ export async function runSummary(input: RunSummaryInput): Promise<{
             `[summary] ${label} returned invalid structured output (${firstParse.failure}); requesting repair`,
         );
 
+        const shape =
+            input.tasksEnabled === false
+                ? '{"summary": string, "keyPoints": string[]}'
+                : '{"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}';
         const repairPrompt = `Your previous response was rejected by the application's JSON parser: ${firstParse.failure}
 
-Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: {"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}, keeping each action item and task update object as it was. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
+Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: ${shape}. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
 
         try {
             const repaired = await complete(
@@ -246,7 +253,9 @@ Correct the serialization without dropping or inventing information. Return exac
                 ],
                 Math.min(Math.ceil(maxTokens * 1.5), 4000),
             );
-            const repairedParse = parseSummaryPayloadResult(repaired);
+            const repairedParse = parseSummaryPayloadResult(repaired, {
+                tasksEnabled: input.tasksEnabled,
+            });
             if (!repairedParse.failure) return repaired;
             console.warn(
                 `[summary] ${label} repair still returned invalid structured output (${repairedParse.failure})`,
@@ -286,7 +295,11 @@ Correct the serialization without dropping or inventing information. Return exac
         );
 
     if (!input.multiPass) {
-        return { payload: parseSummaryPayload(await runPass()) };
+        return {
+            payload: parseSummaryPayload(await runPass(), {
+                tasksEnabled: input.tasksEnabled,
+            }),
+        };
     }
 
     if (preReservedMultiPass) {
@@ -303,6 +316,7 @@ Correct the serialization without dropping or inventing information. Return exac
             runMerge,
             mergePrompt: input.multiPass.mergePrompt,
             onProgress: input.onProgress,
+            tasksEnabled: input.tasksEnabled,
         });
     } catch (error) {
         if (reservationError) throw reservationError;

@@ -59,6 +59,19 @@ export const DEFAULT_MERGE_PROMPT = `You are given several independent JSON extr
 
 Return only the merged JSON object, with no code fences around it. Markdown inside the JSON string values is expected.`;
 
+/** Merge directive used when the active profile has task extraction disabled. */
+export const DEFAULT_MERGE_PROMPT_WITHOUT_TASKS = `You are given several independent JSON extractions produced from the SAME content, each shaped {"summary": string, "keyPoints": string[]}. Merge them into a single extraction. This is a UNION-and-DEDUP task, NOT a re-summarization.
+
+- Preserve EVERY distinct key point that appears in ANY version. Never drop one for being minor, or for appearing in only one version.
+- Collapse entries expressing the same idea into one, keeping the clearest and most complete phrasing. Merge only true duplicates. When in doubt, keep both.
+- Never invent a point or detail that is not present in at least one input.
+- When versions conflict on a detail, prefer the reading that is more specific and appears in more than one version. If they cannot be reconciled, keep both readings rather than silently choosing.
+- Write one coherent Markdown summary covering what the versions agree on. Preserve the structure the inputs used.
+- Keep each entry in the language it was written in.
+- If no version had key points, return that list empty.
+
+Return only the merged JSON object, with no code fences around it. Markdown inside the JSON string values is expected.`;
+
 /** Multi-pass provenance as it is stored and returned to the client. */
 export interface MultiPassProvenance {
     roundsRequested: number;
@@ -140,6 +153,7 @@ export interface RunMultiPassOptions {
     /** Defaults to `DEFAULT_MERGE_PROMPT` when blank. */
     mergePrompt?: string | null;
     onProgress?: (progress: MultiPassProgress) => void;
+    tasksEnabled?: boolean;
 }
 
 /**
@@ -230,16 +244,24 @@ function richest(payloads: SummaryPayload[]): SummaryPayload {
 }
 
 /** Format the surviving passes as the merge step's user message. */
-export function buildMergeInput(payloads: SummaryPayload[]): string {
+export function buildMergeInput(
+    payloads: SummaryPayload[],
+    tasksEnabled = true,
+): string {
     return payloads
         .map((payload, index) => {
             const version = JSON.stringify(
-                {
-                    summary: payload.summary,
-                    keyPoints: payload.keyPoints,
-                    actionItems: payload.taskItems,
-                    taskUpdates: payload.taskUpdates,
-                },
+                tasksEnabled
+                    ? {
+                          summary: payload.summary,
+                          keyPoints: payload.keyPoints,
+                          actionItems: payload.taskItems,
+                          taskUpdates: payload.taskUpdates,
+                      }
+                    : {
+                          summary: payload.summary,
+                          keyPoints: payload.keyPoints,
+                      },
                 null,
                 2,
             );
@@ -271,7 +293,12 @@ export async function runMultiPassSummary(
     options: RunMultiPassOptions,
 ): Promise<MultiPassResult> {
     const { rounds, runPass, runMerge, onProgress } = options;
-    const mergePrompt = options.mergePrompt?.trim() || DEFAULT_MERGE_PROMPT;
+    const tasksEnabled = options.tasksEnabled !== false;
+    const mergePrompt =
+        options.mergePrompt?.trim() ||
+        (tasksEnabled
+            ? DEFAULT_MERGE_PROMPT
+            : DEFAULT_MERGE_PROMPT_WITHOUT_TASKS);
 
     let completed = 0;
     onProgress?.({ phase: "passes", completed: 0, total: rounds });
@@ -308,7 +335,7 @@ export async function runMultiPassSummary(
     // pass still occupies its slot, instead of going missing from the list.
     const parsedByIndex = settled.map((outcome) =>
         outcome.status === "fulfilled"
-            ? parseSummaryPayload(outcome.value)
+            ? parseSummaryPayload(outcome.value, { tasksEnabled })
             : null,
     );
     const parsed = parsedByIndex.filter(
@@ -357,8 +384,11 @@ export async function runMultiPassSummary(
     });
 
     try {
-        const mergedRaw = await runMerge(buildMergeInput(usable), mergePrompt);
-        const mergedPayload = parseSummaryPayload(mergedRaw);
+        const mergedRaw = await runMerge(
+            buildMergeInput(usable, tasksEnabled),
+            mergePrompt,
+        );
+        const mergedPayload = parseSummaryPayload(mergedRaw, { tasksEnabled });
         if (!mergedPayload.structured) {
             return {
                 payload: richest(usable),

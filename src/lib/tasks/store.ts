@@ -82,6 +82,7 @@ export interface ProposedTaskMatch {
 
 /** What one summary proposes, ready to store. */
 export interface TaskProposals {
+    /** Plaud proposals show in review as "not matched against earlier tasks". */
     source: "riffado" | "plaud";
     tasks: ProposedTask[];
     matches?: ProposedTaskMatch[];
@@ -151,16 +152,18 @@ export async function writeTaskProposalsInTx(
         )
         .limit(1);
     if (!item) return;
-    await tx
-        .delete(taskMentions)
-        .where(
-            and(
-                eq(taskMentions.itemId, recordingId),
-                eq(taskMentions.userId, ownerUserId),
-                eq(taskMentions.view, view),
-                eq(taskMentions.matchDecision, "suggested"),
-            ),
-        );
+    if (proposals.source === "riffado") {
+        await tx
+            .delete(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, recordingId),
+                    eq(taskMentions.userId, ownerUserId),
+                    eq(taskMentions.view, view),
+                    eq(taskMentions.matchDecision, "suggested"),
+                ),
+            );
+    }
     await tx
         .delete(recordingTasks)
         .where(
@@ -168,22 +171,26 @@ export async function writeTaskProposalsInTx(
                 eq(recordingTasks.itemId, recordingId),
                 eq(recordingTasks.userId, ownerUserId),
                 eq(recordingTasks.status, "proposed"),
-                eq(recordingTasks.source, proposals.source),
+                proposals.source === "riffado"
+                    ? inArray(recordingTasks.source, ["riffado", "plaud"])
+                    : eq(recordingTasks.source, "plaud"),
                 eq(recordingTasks.version, 0),
             ),
         );
     // Untouched source-review follow-ups are heard again. Decisions already
     // routed or made are durable history.
-    await tx
-        .delete(taskUpdateProposals)
-        .where(
-            and(
-                eq(taskUpdateProposals.itemId, recordingId),
-                eq(taskUpdateProposals.userId, ownerUserId),
-                eq(taskUpdateProposals.state, "awaiting_source_review"),
-                sql`${taskUpdateProposals.updatedAt} = ${taskUpdateProposals.createdAt}`,
-            ),
-        );
+    if (proposals.source === "riffado") {
+        await tx
+            .delete(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, recordingId),
+                    eq(taskUpdateProposals.userId, ownerUserId),
+                    eq(taskUpdateProposals.state, "awaiting_source_review"),
+                    sql`${taskUpdateProposals.updatedAt} = ${taskUpdateProposals.createdAt}`,
+                ),
+            );
+    }
 
     const rejected = new Set(
         (

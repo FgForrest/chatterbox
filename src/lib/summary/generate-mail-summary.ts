@@ -132,35 +132,6 @@ export async function generateMailSummary(
     const subject = (await secretAddressMasker([title]))(title);
     const mailText = renderMailForModel(content, { subject, sentAt });
 
-    const tasksContext = await loadTasksPromptContext({
-        recording: {
-            id: mail.id,
-            userId: mail.userId,
-            occurredAt: sentAt,
-            timezone: null,
-            zonemins: null,
-        },
-        transcriptionId: null,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-        noun: "mail",
-        participants: content.participants,
-        itemText: mailText,
-    }).catch(async (error: unknown) => {
-        console.error("[summary] task context unavailable:", error);
-        return {
-            text: "",
-            refs: new Map<string, string>(),
-            scopeFingerprint: await itemScopeFingerprint(
-                itemId,
-                ctx.view,
-                ctx.ownerUserId,
-            ),
-        };
-    });
-
     const profile = opts.presetId
         ? null
         : opts.profileRevisionId
@@ -181,6 +152,7 @@ export async function generateMailSummary(
     const profileSettings = profile?.settings as
         | MailProfileSettings
         | undefined;
+    const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
     const itemProfileRevisionId =
         opts.profileRevisionId ??
         (profile?.assigned ? profile.revisionId : null);
@@ -190,6 +162,40 @@ export async function generateMailSummary(
         contentRevision: stored.revision,
         profileRevisionId: itemProfileRevisionId,
     };
+    const tasksContext = tasksEnabled
+        ? await loadTasksPromptContext({
+              recording: {
+                  id: mail.id,
+                  userId: mail.userId,
+                  occurredAt: sentAt,
+                  timezone: null,
+                  zonemins: null,
+              },
+              transcriptionId: null,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              noun: "mail",
+              participants: content.participants,
+              itemText: mailText,
+          }).catch(async (error: unknown) => {
+              console.error("[summary] task context unavailable:", error);
+              return {
+                  text: "",
+                  refs: new Map<string, string>(),
+                  scopeFingerprint: await itemScopeFingerprint(
+                      itemId,
+                      ctx.view,
+                      ctx.ownerUserId,
+                  ),
+              };
+          })
+        : {
+              text: "",
+              refs: new Map<string, string>(),
+              scopeFingerprint: null,
+          };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -288,7 +294,7 @@ export async function generateMailSummary(
         CONTENT_IS_DATA_DIRECTIVE,
         SUMMARY_MARKDOWN_DIRECTIVE,
         MAIL_PARTICIPANT_DIRECTIVE,
-        MAIL_TASKS_DIRECTIVE,
+        tasksEnabled ? MAIL_TASKS_DIRECTIVE : "",
         languageDirective,
     ]
         .filter(Boolean)
@@ -318,7 +324,7 @@ export async function generateMailSummary(
                 CONTENT_IS_DATA_DIRECTIVE,
                 SUMMARY_MARKDOWN_DIRECTIVE,
                 MAIL_PARTICIPANT_DIRECTIVE,
-                SUMMARY_TASKS_MERGE_DIRECTIVE,
+                tasksEnabled ? SUMMARY_TASKS_MERGE_DIRECTIVE : "",
                 mergeLanguageDirective,
             ]
                 .filter(Boolean)
@@ -341,28 +347,31 @@ export async function generateMailSummary(
               }
             : null,
         onProgress: opts.onProgress,
+        tasksEnabled,
     });
 
     const { summary, keyPoints, actionItems } = payload;
-    const tasks = await resolveTaskProposals({
-        source: "riffado",
-        items: payload.taskItems,
-        updates: payload.taskUpdates,
-        refs: tasksContext.refs,
-        ownerUserId: ctx.ownerUserId,
-        transcriptionId: null,
-        turns: null,
-        language: content.language,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-        summaryText: summary,
-        mail: content,
-    }).catch((error: unknown) => {
-        console.error("[summary] task proposals unavailable:", error);
-        return undefined;
-    });
+    const tasks = tasksEnabled
+        ? await resolveTaskProposals({
+              source: "riffado",
+              items: payload.taskItems,
+              updates: payload.taskUpdates,
+              refs: tasksContext.refs,
+              ownerUserId: ctx.ownerUserId,
+              transcriptionId: null,
+              turns: null,
+              language: content.language,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              summaryText: summary,
+              mail: content,
+          }).catch((error: unknown) => {
+              console.error("[summary] task proposals unavailable:", error);
+              return undefined;
+          })
+        : undefined;
 
     const { committed, reason } = await upsertEnhancement({
         userId: ctx.contentUserId,

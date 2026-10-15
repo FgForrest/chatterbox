@@ -21,6 +21,10 @@ import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { loadSelectedProfileRevision } from "@/lib/profiles/resolve";
 import type { LegacyProfileSettings } from "@/lib/profiles/seed";
 import { DEFAULT_MERGE_PROMPT } from "@/lib/summary/multi-pass";
+import {
+    loadTasksPromptContext,
+    resolveTaskProposals,
+} from "@/lib/tasks/proposals";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
@@ -69,23 +73,33 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock, profileLegacy } = vi.hoisted(() => ({
-    createMock: vi.fn(),
-    profileLegacy: {
-        current: {} as Partial<LegacyProfileSettings>,
-    },
+const { createMock, plaudActionItems, profileLegacy, tasksEnabled } =
+    vi.hoisted(() => ({
+        createMock: vi.fn(),
+        plaudActionItems: { current: [] as string[] },
+        profileLegacy: {
+            current: {} as Partial<LegacyProfileSettings>,
+        },
+        tasksEnabled: { current: true },
+    }));
+
+vi.mock("@/lib/summary/read-summary", () => ({
+    readPlaudActionItems: vi.fn(async () => plaudActionItems.current),
 }));
 
 vi.mock("@/lib/profiles/resolve", () => ({
     loadSelectedProfileRevision: vi.fn(
-        async ({ revisionId }: { revisionId: string }) => ({
-            ...resolvedAudioProfile(profileLegacy.current),
-            revisionId,
-        }),
+        async ({ revisionId }: { revisionId: string }) => {
+            const profile = resolvedAudioProfile(profileLegacy.current);
+            profile.settings.steps.tasks.enabled = tasksEnabled.current;
+            return { ...profile, revisionId };
+        },
     ),
-    resolveItemProfile: vi.fn(async () =>
-        resolvedAudioProfile(profileLegacy.current),
-    ),
+    resolveItemProfile: vi.fn(async () => {
+        const profile = resolvedAudioProfile(profileLegacy.current);
+        profile.settings.steps.tasks.enabled = tasksEnabled.current;
+        return profile;
+    }),
 }));
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvanceInTx: vi.fn().mockResolvedValue(null),
@@ -239,6 +253,10 @@ describe("multi-pass gating", () => {
     beforeEach(() => {
         createMock.mockReset();
         vi.mocked(loadSelectedProfileRevision).mockClear();
+        vi.mocked(loadTasksPromptContext).mockClear();
+        vi.mocked(resolveTaskProposals).mockClear();
+        plaudActionItems.current = [];
+        tasksEnabled.current = true;
         selectResults.clear();
         written.length = 0;
     });
@@ -387,5 +405,116 @@ describe("multi-pass gating", () => {
         const mergeSystem = systemPrompts().at(-1) ?? "";
         expect(mergeSystem).toContain("Merge them my way.");
         expect(mergeSystem).not.toContain(DEFAULT_MERGE_PROMPT);
+    });
+
+    it("passes Plaud action items after the transcript as suggestions", async () => {
+        stage({ summaryMultiPass: false });
+        plaudActionItems.current = ["Call Alice", "Send the report"];
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: [],
+                            actionItems: [{ text: "Send the report" }],
+                            taskUpdates: [],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        await generate("manual");
+
+        const userPrompt = (
+            createMock.mock.calls[0]?.[0] as {
+                messages: { role: string; content: string }[];
+            }
+        ).messages.find((message) => message.role === "user")?.content;
+        expect(userPrompt).toContain("Plaud's action-item suggestions");
+        expect(userPrompt).toContain("- Call Alice");
+        expect(userPrompt).toContain("- Send the report");
+        expect(userPrompt?.indexOf("a transcript")).toBeLessThan(
+            userPrompt?.indexOf("Plaud's action-item suggestions") ?? -1,
+        );
+        expect(resolveTaskProposals).toHaveBeenCalledWith(
+            expect.objectContaining({
+                source: "riffado",
+                items: [expect.objectContaining({ text: "Send the report" })],
+            }),
+        );
+    });
+
+    it("drops task output and task prompt context when Tasks are off", async () => {
+        stage({ summaryMultiPass: false });
+        tasksEnabled.current = false;
+        plaudActionItems.current = ["Do not pass this hint"];
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: ["k"],
+                            actionItems: [{ text: "Ignored task" }],
+                            taskUpdates: [
+                                { ref: "T1", kind: "done", quote: "done" },
+                            ],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        const result = await generate("manual");
+
+        expect(result.actionItems).toEqual([]);
+        expect(loadTasksPromptContext).not.toHaveBeenCalled();
+        expect(resolveTaskProposals).not.toHaveBeenCalled();
+        expect(systemPrompts()[0]).not.toContain("ACTION ITEMS:");
+        const userPrompt = (
+            createMock.mock.calls[0]?.[0] as {
+                messages: { role: string; content: string }[];
+            }
+        ).messages.find((message) => message.role === "user")?.content;
+        expect(userPrompt).not.toContain("Plaud's action-item suggestions");
+    });
+
+    it("removes task data and directives from a Tasks-off multi-pass merge", async () => {
+        stage({ summaryMultiPass: true, summaryMultiPassRounds: 2 });
+        tasksEnabled.current = false;
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: ["k"],
+                            actionItems: [{ text: "Ignored task" }],
+                            taskUpdates: [{ ref: "T1", kind: "match" }],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        const result = await generate("manual");
+
+        const mergeCall = createMock.mock.calls.at(-1)?.[0] as {
+            messages: { role: string; content: string }[];
+        };
+        const mergeSystem = mergeCall.messages.find(
+            (message) => message.role === "system",
+        )?.content;
+        const mergeInput = mergeCall.messages.find(
+            (message) => message.role === "user",
+        )?.content;
+        expect(result.actionItems).toEqual([]);
+        expect(mergeSystem).not.toContain("ACTION ITEMS:");
+        expect(mergeSystem).not.toContain("taskUpdates");
+        expect(mergeInput).not.toContain("actionItems");
+        expect(mergeInput).not.toContain("taskUpdates");
+        expect(resolveTaskProposals).not.toHaveBeenCalled();
     });
 });

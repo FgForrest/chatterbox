@@ -24,6 +24,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
+    recordingTaskRejections,
     transcriptions,
     transcriptSpeakers,
     userSettings,
@@ -44,6 +45,7 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
+import { taskFingerprint } from "@/lib/tasks/proposals";
 import { insertRecordings } from "@/tests/integration/items";
 import {
     createMigratedTestDatabase,
@@ -86,6 +88,8 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
             ORG_ACCOUNT_PASSWORD: "organization-password",
             DATABASE_URL: "postgres://unused",
             AUTO_SUMMARY_RATE_LIMIT_PER_HOUR: 20,
+            API_TOKEN_HASH_SECRET: "pipeline-advance-test-secret",
+            BETTER_AUTH_SECRET: "pipeline-advance-test-secret",
         },
     };
 });
@@ -226,6 +230,72 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             )
             .limit(1);
         return row;
+    }
+
+    async function seedPlaudTaskPipeline(
+        actionItems: unknown[],
+        itemId = ITEM_ID,
+    ): Promise<void> {
+        await seedAudio(itemId);
+        const current = await processing(itemId);
+        if (!current?.profileRevisionId) {
+            throw new Error("expected a frozen profile revision");
+        }
+        const settings = defaultProfileSettings("audio");
+        settings.steps.title = { ...settings.steps.title, automatic: false };
+        settings.steps.topics = {
+            ...settings.steps.topics,
+            automatic: false,
+        };
+        settings.steps.summary = {
+            ...settings.steps.summary,
+            automatic: true,
+        };
+        await db()
+            .update(processingProfileRevisions)
+            .set({ settings: JSON.stringify(settings) })
+            .where(
+                eq(processingProfileRevisions.id, current.profileRevisionId),
+            );
+        await db()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, USER_ID));
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId,
+                userId: USER_ID,
+                transcriptionId: `transcription-${itemId}`,
+                summary: "Plaud summary",
+                actionItems,
+                keyPoints: [],
+                provider: "plaud",
+                model: "plaud-native",
+                source: "plaud",
+            });
+        await db()
+            .insert(transcriptSpeakers)
+            .values({
+                userId: USER_ID,
+                transcriptionId: `transcription-${itemId}`,
+                label: "speaker_0",
+                personId: null,
+                source: "user",
+                status: "confirmed",
+                markedUnknown: true,
+                confirmedByUserId: USER_ID,
+            });
+        await db().insert(mailPendingShares).values({
+            userId: USER_ID,
+            itemId,
+            folderId: "pipeline-folder",
+        });
+        await requestAdvance({
+            itemId,
+            userId: USER_ID,
+            view: "private",
+            reason: "summary",
+        });
     }
 
     beforeAll(async () => {
@@ -549,6 +619,46 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                 .from(mailPendingShares)
                 .where(eq(mailPendingShares.itemId, ITEM_ID)),
         ).toHaveLength(1);
+    });
+
+    it("settles Task review and reaches the share gate when Plaud proposals are filtered out", async () => {
+        const actionItem = "Already rejected by the task validator";
+        await seedPlaudTaskPipeline([actionItem]);
+        await db()
+            .insert(recordingTaskRejections)
+            .values({
+                userId: USER_ID,
+                itemId: ITEM_ID,
+                fingerprintHmac: taskFingerprint(actionItem),
+            });
+
+        await expect(
+            pipelineAdvanceJobHandler.run(jobContext()),
+        ).resolves.toMatchObject({ processedGeneration: 2 });
+
+        expect((await processing())?.phases).toMatchObject({
+            taskReview: { state: "done", reason: "reviewed" },
+            share: { state: "waiting", reason: "org_unavailable" },
+        });
+    });
+
+    it("waits for Task review and blocks sharing when Plaud proposals are valid", async () => {
+        await seedPlaudTaskPipeline(["Draft the final report"]);
+
+        await expect(
+            pipelineAdvanceJobHandler.run(jobContext()),
+        ).resolves.toMatchObject({ processedGeneration: 2 });
+
+        expect((await processing())?.phases).toMatchObject({
+            taskReview: { state: "waiting", reason: "needs_review" },
+            share: {
+                state: "waiting",
+                reason: "gate_blocked",
+                problems: [
+                    expect.objectContaining({ kind: "tasks_unreviewed" }),
+                ],
+            },
+        });
     });
 
     it("runs the synchronously released Learn path exactly once", async () => {

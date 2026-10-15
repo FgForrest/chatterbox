@@ -10,6 +10,7 @@ import type {
 const AT = "2026-10-14T12:00:00.000Z";
 const DEFAULT_PROFILE: PipelineProfileFacts = {
     revisionId: "profile-revision-1",
+    tasksEnabled: true,
     automatic: {
         learn: false,
         summary: true,
@@ -136,6 +137,7 @@ function applyMarks(facts: PipelineFacts, actions: PipelineAction[]) {
     const phases = { ...facts.phases };
     for (const action of actions) {
         if (action.type === "markPhase") phases[action.phase] = action.record;
+        if (action.type === "applyPlaudTasks") phases.summary = action.record;
     }
     return { ...facts, phases };
 }
@@ -1056,6 +1058,111 @@ describe("planAdvance audio", () => {
                 }),
             }),
         );
+    });
+
+    it("uses Plaud action items when automatic Summary has no provider", () => {
+        const facts = audioFacts({
+            profile: {
+                ...profileAutomatic({ title: false, topics: false }),
+                tasksEnabled: true,
+            },
+            stepAvailability: { summary: "no_provider" },
+            plaudTasks: { fingerprint: "plaud-v1" },
+        });
+
+        const actions = planAdvance(facts).actions;
+        expect(actions[0]).toEqual({
+            type: "applyPlaudTasks",
+            sourceFingerprint: "plaud-v1",
+            content: {
+                contentId: "transcription-1",
+                contentSourceId: "riffado",
+                contentRevision: 7,
+            },
+            record: expect.objectContaining({
+                state: "done",
+                reason: "completed",
+                steps: {
+                    summary: expect.objectContaining({
+                        state: "done",
+                        reason: "plaud_tasks",
+                        sourceFingerprint: "plaud-v1",
+                    }),
+                },
+            }),
+        });
+        expect(
+            actions.some(
+                (action) =>
+                    action.type === "markPhase" &&
+                    action.phase === "taskReview",
+            ),
+        ).toBe(false);
+
+        const applied = applyMarks(facts, actions);
+        expect(
+            planAdvance(applied).actions.some(
+                (action) => action.type === "applyPlaudTasks",
+            ),
+        ).toBe(false);
+        applied.plaudTasks = { fingerprint: "plaud-v2" };
+        expect(
+            planAdvance(applied).actions.some(
+                (action) => action.type === "applyPlaudTasks",
+            ),
+        ).toBe(true);
+    });
+
+    it("writes no Plaud tasks when Tasks are off", () => {
+        const actions = planAdvance(
+            audioFacts({
+                profile: {
+                    ...profileAutomatic({ title: false, topics: false }),
+                    tasksEnabled: false,
+                },
+                stepAvailability: { summary: "no_provider" },
+                plaudTasks: { fingerprint: "plaud-v1" },
+            }),
+        ).actions;
+
+        expect(
+            actions.some((action) => action.type === "applyPlaudTasks"),
+        ).toBe(false);
+        expect(actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "summary",
+                record: expect.objectContaining({
+                    steps: {
+                        summary: expect.objectContaining({
+                            state: "skipped",
+                            reason: "no_provider",
+                        }),
+                    },
+                }),
+            }),
+        );
+    });
+
+    it("writes no Plaud tasks when Summary is manual", () => {
+        const actions = planAdvance(
+            audioFacts({
+                profile: {
+                    ...profileAutomatic({
+                        title: false,
+                        topics: false,
+                        summary: false,
+                    }),
+                    tasksEnabled: true,
+                },
+                stepAvailability: { summary: "no_provider" },
+                plaudTasks: { fingerprint: "plaud-v1" },
+            }),
+        ).actions;
+
+        expect(
+            actions.some((action) => action.type === "applyPlaudTasks"),
+        ).toBe(false);
     });
 
     it("emits every queue action immediately before its durable mark", () => {

@@ -14,6 +14,7 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
+import { applyPlaudActionItemProposals } from "@/lib/tasks/plaud-proposals";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
 import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
 
@@ -148,6 +149,15 @@ export async function executePipelineAction(
             );
             return;
         }
+        case "applyPlaudTasks":
+            await applyPlaudActionItemProposals({
+                itemId,
+                userId,
+                view,
+                expectedFingerprint: action.sourceFingerprint,
+                record: action.record,
+            });
+            return;
         case "completeCategorization": {
             const requested = await db.transaction(async (tx) => {
                 const [current] = await tx

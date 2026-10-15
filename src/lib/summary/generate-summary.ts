@@ -45,6 +45,7 @@ import {
 } from "@/lib/sharing/writer";
 import { taskViewerById } from "@/lib/tasks/access";
 import {
+    buildPlaudActionItemHints,
     SUMMARY_TASKS_DIRECTIVE,
     SUMMARY_TASKS_MERGE_DIRECTIVE,
 } from "@/lib/tasks/directive";
@@ -55,6 +56,7 @@ import {
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
+import { readPlaudActionItems } from "./read-summary";
 import { runSummary, summaryModelFor } from "./summary-model";
 
 export interface GenerateSummaryOptions {
@@ -265,30 +267,6 @@ export async function generateSummaryForRecording(
     const input = await modelInput(transcription);
     const transcriptText = input.text;
 
-    // What the summary is told about tasks: the recording's date, the tasks
-    // already decided on it, and open tasks its reviewer may close. Tasks
-    // never cost the summary: without them it is made as before.
-    const tasksContext = await loadTasksPromptContext({
-        recording,
-        transcriptionId: transcription.id,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-        itemText: transcriptText,
-    }).catch(async (error: unknown) => {
-        console.error("[summary] task context unavailable:", error);
-        return {
-            text: "",
-            refs: new Map<string, string>(),
-            scopeFingerprint: await itemScopeFingerprint(
-                recordingId,
-                ctx.view,
-                ctx.ownerUserId,
-            ),
-        };
-    });
-
     const profile = opts.presetId
         ? null
         : opts.profileRevisionId
@@ -309,6 +287,7 @@ export async function generateSummaryForRecording(
     const profileSettings = profile?.settings as
         | AudioProfileSettings
         | undefined;
+    const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
     const itemProfileRevisionId =
         opts.profileRevisionId ??
         (profile?.assigned ? profile.revisionId : null);
@@ -318,6 +297,36 @@ export async function generateSummaryForRecording(
         contentRevision: transcription.revision,
         profileRevisionId: itemProfileRevisionId,
     };
+
+    // What the summary is told about tasks: the recording's date, the tasks
+    // already decided on it, and open tasks its reviewer may close. Tasks
+    // never cost the summary: without them it is made as before.
+    const tasksContext = tasksEnabled
+        ? await loadTasksPromptContext({
+              recording,
+              transcriptionId: transcription.id,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              itemText: transcriptText,
+          }).catch(async (error: unknown) => {
+              console.error("[summary] task context unavailable:", error);
+              return {
+                  text: "",
+                  refs: new Map<string, string>(),
+                  scopeFingerprint: await itemScopeFingerprint(
+                      recordingId,
+                      ctx.view,
+                      ctx.ownerUserId,
+                  ),
+              };
+          })
+        : {
+              text: "",
+              refs: new Map<string, string>(),
+              scopeFingerprint: null,
+          };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -423,9 +432,22 @@ export async function generateSummaryForRecording(
               outputLanguage,
               selectedTemplate?.prompt === null,
           );
+    const plaudActionItems = tasksEnabled
+        ? await readPlaudActionItems(ctx.ownerUserId, recordingId).catch(
+              (error: unknown) => {
+                  console.error(
+                      "[summary] Plaud task hints unavailable:",
+                      error,
+                  );
+                  return [];
+              },
+          )
+        : [];
+    const plaudHints = buildPlaudActionItemHints(plaudActionItems);
     const prompt = [
         localizedTemplate.replaceAll("{transcription}", () => transcriptText),
         tasksContext.text,
+        plaudHints,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -437,7 +459,7 @@ export async function generateSummaryForRecording(
         CONTENT_IS_DATA_DIRECTIVE,
         SUMMARY_MARKDOWN_DIRECTIVE,
         SUMMARY_SPEAKER_DIRECTIVE,
-        SUMMARY_TASKS_DIRECTIVE,
+        tasksEnabled ? SUMMARY_TASKS_DIRECTIVE : "",
         languageDirective,
     ]
         .filter(Boolean)
@@ -471,7 +493,7 @@ export async function generateSummaryForRecording(
                 CONTENT_IS_DATA_DIRECTIVE,
                 SUMMARY_MARKDOWN_DIRECTIVE,
                 SUMMARY_SPEAKER_DIRECTIVE,
-                SUMMARY_TASKS_MERGE_DIRECTIVE,
+                tasksEnabled ? SUMMARY_TASKS_MERGE_DIRECTIVE : "",
                 mergeLanguageDirective,
             ]
                 .filter(Boolean)
@@ -494,27 +516,30 @@ export async function generateSummaryForRecording(
               }
             : null,
         onProgress: opts.onProgress,
+        tasksEnabled,
     });
 
     const { summary, keyPoints, actionItems } = payload;
-    const tasks = await resolveTaskProposals({
-        source: "riffado",
-        items: payload.taskItems,
-        updates: payload.taskUpdates,
-        refs: tasksContext.refs,
-        ownerUserId: ctx.ownerUserId,
-        transcriptionId: transcription.id,
-        turns: input.turns,
-        language: transcription.detectedLanguage,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-        summaryText: summary,
-    }).catch((error: unknown) => {
-        console.error("[summary] task proposals unavailable:", error);
-        return undefined;
-    });
+    const tasks = tasksEnabled
+        ? await resolveTaskProposals({
+              source: "riffado",
+              items: payload.taskItems,
+              updates: payload.taskUpdates,
+              refs: tasksContext.refs,
+              ownerUserId: ctx.ownerUserId,
+              transcriptionId: transcription.id,
+              turns: input.turns,
+              language: transcription.detectedLanguage,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              summaryText: summary,
+          }).catch((error: unknown) => {
+              console.error("[summary] task proposals unavailable:", error);
+              return undefined;
+          })
+        : undefined;
 
     const { committed, reason } = await upsertEnhancement({
         userId,

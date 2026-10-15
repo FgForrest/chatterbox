@@ -36,7 +36,9 @@ import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placemen
 import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import { readPlaudTaskSource } from "@/lib/summary/read-summary";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
+import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
@@ -290,6 +292,10 @@ export async function gatherFacts(
                           : null,
                   )
             : Promise.resolve(null);
+    const plaudTaskSourcePromise =
+        item.kind === "audio"
+            ? readPlaudTaskSource(userId, itemId)
+            : Promise.resolve(null);
     const [
         content,
         [mail],
@@ -307,6 +313,7 @@ export async function gatherFacts(
         [openLearnRun],
         recentLearnRuns,
         [completedTranscriptionJob],
+        plaudTaskSource,
     ] = await Promise.all([
         contentPromise,
         mailPromise,
@@ -485,6 +492,7 @@ export async function gatherFacts(
                   .orderBy(desc(asyncJobs.createdAt))
                   .limit(1)
             : Promise.resolve([]),
+        plaudTaskSourcePromise,
     ]);
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
@@ -561,6 +569,7 @@ export async function gatherFacts(
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
+              tasksEnabled: resolvedProfile.settings.steps.tasks.enabled,
               transcribe:
                   "transcribe" in resolvedProfile.settings.steps
                       ? {
@@ -735,6 +744,14 @@ export async function gatherFacts(
         stepAvailability,
         learnAvailability,
         learnRunOpen: openLearnRun !== undefined,
+        plaudTasks:
+            plaudTaskSource && plaudTaskSource.actionItems.length > 0
+                ? {
+                      fingerprint: plaudActionItemsFingerprint(
+                          plaudTaskSource.actionItems,
+                      ),
+                  }
+                : undefined,
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,

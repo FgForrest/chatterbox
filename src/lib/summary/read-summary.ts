@@ -38,6 +38,52 @@ export interface StoredSummary {
     createdAt: Date;
 }
 
+/** Plaud-owned summary data that can seed task hints or unmatched proposals. */
+export interface PlaudTaskSource {
+    summary: string;
+    actionItems: string[];
+    transcriptionId: string | null;
+}
+
+/** Read the Plaud summary fields used by Summary-step task processing. */
+export async function readPlaudTaskSource(
+    userId: string,
+    recordingId: string,
+): Promise<PlaudTaskSource | null> {
+    const [row] = await db
+        .select({
+            summary: aiEnhancements.summary,
+            actionItems: aiEnhancements.actionItems,
+            transcriptionId: aiEnhancements.transcriptionId,
+        })
+        .from(aiEnhancements)
+        .where(
+            and(
+                eq(aiEnhancements.itemId, recordingId),
+                eq(aiEnhancements.userId, userId),
+                eq(aiEnhancements.source, "plaud"),
+            ),
+        )
+        .limit(1);
+    if (!row) return null;
+    const actionItems = decryptJsonField<unknown[]>(row.actionItems) ?? [];
+    return {
+        summary: decryptText(row.summary) ?? "",
+        actionItems: actionItems.flatMap((item) =>
+            typeof item === "string" && item.trim() ? [item.trim()] : [],
+        ),
+        transcriptionId: row.transcriptionId,
+    };
+}
+
+/** Read only Plaud's action-item suggestions for an AI summary prompt. */
+export async function readPlaudActionItems(
+    userId: string,
+    recordingId: string,
+): Promise<string[]> {
+    return (await readPlaudTaskSource(userId, recordingId))?.actionItems ?? [];
+}
+
 export async function readStoredSummary(
     userId: string,
     recordingId: string,

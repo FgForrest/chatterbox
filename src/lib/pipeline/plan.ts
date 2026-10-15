@@ -168,6 +168,82 @@ function skippedSummaryStepMarker(
     };
 }
 
+function plaudTasksPending(
+    facts: PipelineFacts,
+    input: ContentRevisionInput,
+    minimumGeneration?: number,
+): boolean {
+    const source = facts.plaudTasks;
+    if (
+        facts.item.kind !== "audio" ||
+        !source ||
+        facts.profile?.tasksEnabled === false ||
+        !facts.profile?.automatic.summary ||
+        stepProviderAvailable(facts, "summary")
+    ) {
+        return false;
+    }
+    const step = facts.phases.summary?.steps?.summary;
+    return (
+        !stepRequested(
+            facts.phases.summary,
+            "summary",
+            input,
+            minimumGeneration,
+        ) ||
+        step?.reason !== "plaud_tasks" ||
+        step.sourceFingerprint !== source.fingerprint
+    );
+}
+
+function plaudTasksAction(
+    facts: PipelineFacts,
+    input: ContentRevisionInput,
+    steps: NonNullable<PhaseRecord["steps"]>,
+): PipelineAction {
+    const sourceFingerprint = facts.plaudTasks?.fingerprint;
+    if (!sourceFingerprint) throw new Error("Plaud task source is missing");
+    const content = {
+        contentId: input.contentId,
+        contentSourceId: input.contentSourceId,
+        contentRevision: input.contentRevision,
+    };
+    steps.summary = {
+        ...content,
+        generation: facts.generation,
+        profileRevisionId: facts.profile?.revisionId,
+        state: "done",
+        reason: "plaud_tasks",
+        sourceFingerprint,
+    };
+    const currentSteps = Object.values(steps).filter(
+        (candidate) =>
+            candidate.contentId === input.contentId &&
+            (candidate.contentSourceId ??
+                facts.phases.summary?.inputs?.contentSourceId) ===
+                input.contentSourceId &&
+            candidate.contentRevision === input.contentRevision,
+    );
+    const done = currentSteps.every(
+        (candidate) =>
+            candidate.state === "done" || candidate.state === "skipped",
+    );
+    return {
+        type: "applyPlaudTasks",
+        sourceFingerprint,
+        content,
+        record: {
+            state: done ? "done" : "pending",
+            reason: done ? "completed" : "plaud_tasks",
+            generation: facts.generation,
+            inputs: content,
+            at: facts.at,
+            steps: { ...steps },
+            profileRevisionId: facts.profile?.revisionId,
+        },
+    };
+}
+
 function summaryFailureRecord(facts: PipelineFacts): PhaseRecord | null {
     const summary = facts.phases.summary;
     if (!summary?.steps || !facts.summary.failed) return null;
@@ -359,6 +435,12 @@ function planReleasedAudio(
             !stepProviderAvailable(facts, step) &&
             notRequested(step)
         ) {
+            if (
+                step === "summary" &&
+                plaudTasksPending(facts, input, minimumGeneration)
+            ) {
+                continue;
+            }
             actions.push(
                 skippedSummaryStepMarker(
                     facts,
@@ -399,7 +481,9 @@ function planReleasedAudio(
         );
     }
 
-    if (
+    if (plaudTasksPending(facts, input, minimumGeneration)) {
+        actions.push(plaudTasksAction(facts, input, steps));
+    } else if (
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !facts.summary.jobActive &&
@@ -434,6 +518,12 @@ function planTranscriptAudio(
             !stepProviderAvailable(facts, step) &&
             !stepRequested(facts.phases.summary, step, input, minimumGeneration)
         ) {
+            if (
+                step === "summary" &&
+                plaudTasksPending(facts, input, minimumGeneration)
+            ) {
+                continue;
+            }
             actions.push(
                 skippedSummaryStepMarker(
                     facts,
@@ -493,7 +583,9 @@ function planTranscriptAudio(
         );
     }
 
-    if (
+    if (plaudTasksPending(facts, input, minimumGeneration)) {
+        actions.push(plaudTasksAction(facts, input, steps));
+    } else if (
         facts.profile?.automatic.summary &&
         stepProviderAvailable(facts, "summary") &&
         !stepRequested(
@@ -975,6 +1067,12 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                     (action.record.state === "done" ||
                         action.record.state === "skipped"),
             );
+        const plaudTasksApplied = actions.some(
+            (action) => action.type === "applyPlaudTasks",
+        );
+        if (plaudTasksApplied) {
+            return;
+        }
         actions.push(...taskReviewActions(facts, summarySettled));
         planShare(facts, actions);
     };
