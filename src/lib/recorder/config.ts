@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { DEFAULT_RECORDER_EXTENSION_ID } from "@/lib/recorder-extension/extension-id";
 import {
     isRecorderPlatformId,
     RECORDER_PLATFORM_IDS,
@@ -6,8 +7,7 @@ import {
     type RecorderPlatformId,
 } from "./platforms";
 
-/** Extension id of the published Meeting Recorder build (pinned manifest key). */
-export const DEFAULT_RECORDER_EXTENSION_ID = "hiipabbdnlhdkgldhkdndmohejoaecnh";
+export { DEFAULT_RECORDER_EXTENSION_ID };
 
 export const DEFAULT_RECORDER_NOTICE_TEXT =
     "Meetings I record with Chatterbox are transcribed and summarized. I will inform the other participants before recording.";
