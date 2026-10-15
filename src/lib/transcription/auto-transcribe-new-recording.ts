@@ -1,20 +1,15 @@
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { userSettings } from "@/db/schema";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
 
-/** Queue transcription when the recording owner's setting is enabled. */
+/** Queue transcription when the recording's profile enables automation. */
 export async function autoTranscribeNewRecording(
     userId: string,
     recordingId: string,
 ): Promise<boolean> {
-    const [settings] = await db
-        .select({ autoTranscribe: userSettings.autoTranscribe })
-        .from(userSettings)
-        .where(eq(userSettings.userId, userId))
-        .limit(1);
-
-    if (!settings?.autoTranscribe) return false;
+    const profile = await resolveItemProfile(recordingId, "private", userId);
+    if (!("transcribe" in profile.settings.steps)) return false;
+    const transcribe = profile.settings.steps.transcribe;
+    if (!transcribe.enabled || !transcribe.automatic) return false;
     await enqueueTranscriptionJob({
         userId,
         recordingId,

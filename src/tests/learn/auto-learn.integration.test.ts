@@ -105,6 +105,8 @@ import { recordingFollowUps } from "@/lib/learn/follow-ups";
 import * as learnJob from "@/lib/learn/learn-job";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import * as titleQueue from "@/lib/recordings/title-job";
 import { titleJobHandler } from "@/lib/recordings/title-job-handler";
@@ -288,6 +290,39 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             .set({ summaryDueAt: new Date(Date.now() + AUTO_LEARN_HOLD_MS) })
             .where(eq(chatterItems.id, REC));
 
+    async function setLearnAutomation(input: {
+        automatic: boolean;
+        enabled: boolean;
+    }): Promise<void> {
+        const resolved = await resolveDefaultProfile(OWNER, "audio");
+        const settings = resolved.settings;
+        if (!("transcribe" in settings.steps)) {
+            throw new Error("audio profile");
+        }
+        await updateProfile({
+            ownerUserId: OWNER,
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: OWNER,
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    learn: { ...settings.steps.learn, ...input },
+                },
+            },
+        });
+    }
+
     it("holds the title, summary and topics and starts Learn, queuing nothing else", async () => {
         const before = Date.now();
 
@@ -316,10 +351,9 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             holdForAutoLearn({ userId: OWNER, recordingId: REC, timed });
 
         expect(await tryHold(false)).toBe(false);
-        await db()
-            .update(userSettings)
-            .set({ autoLearn: false })
-            .where(eq(userSettings.userId, OWNER));
+        await setLearnAutomation({ enabled: true, automatic: false });
+        expect(await tryHold()).toBe(false);
+        await setLearnAutomation({ enabled: false, automatic: true });
         expect(await tryHold()).toBe(false);
 
         expect(await dueAt()).toBeNull();

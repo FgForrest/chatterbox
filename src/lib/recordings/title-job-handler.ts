@@ -4,6 +4,7 @@ import { recordingItemJoin } from "@/db/items";
 import { chatterItems, recordings, userSettings } from "@/db/schema";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import { readTitleInput } from "@/lib/recordings/title-input";
 import {
@@ -49,14 +50,18 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
         if (recording.titleEditedAt) return { retitled: false };
         const [settings] = await db
             .select({
-                autoGenerateTitle: userSettings.autoGenerateTitle,
                 syncTitleToPlaud: userSettings.syncTitleToPlaud,
             })
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
-        // Turned off while it waited.
-        if (settings && !settings.autoGenerateTitle) {
+        const profile = await resolveItemProfile(
+            payload.recordingId,
+            "private",
+            userId,
+        );
+        const title = profile.settings.steps.title;
+        if (!title.enabled || !title.automatic) {
             return { skipped: "off" };
         }
         const input = await readTitleInput(userId, payload.recordingId);

@@ -26,7 +26,6 @@ import {
     people,
     personEmails,
     recordingFolders,
-    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -130,6 +129,8 @@ import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { deleteMail } from "@/lib/mail/manage";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { requireRecordingView } from "@/lib/sharing/access";
 import {
     rawMessage,
@@ -247,6 +248,34 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: () => undefined,
         });
+
+    async function setAutomaticLearn(automatic: boolean): Promise<void> {
+        const resolved = await resolveDefaultProfile("u-jan", "mail");
+        const settings = resolved.settings;
+        if ("transcribe" in settings.steps) throw new Error("mail profile");
+        await updateProfile({
+            ownerUserId: "u-jan",
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: "u-jan",
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    learn: { ...settings.steps.learn, automatic },
+                },
+            },
+        });
+    }
 
     beforeAll(async () => {
         storageDir = mkdtempSync(join(tmpdir(), "riffado-mail-learn-"));
@@ -674,13 +703,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
     });
 
     it("starts Learn by itself on a new mail when automatic Learn is on", async () => {
-        await db()
-            .insert(userSettings)
-            .values({ userId: "u-jan", autoLearn: true })
-            .onConflictDoUpdate({
-                target: userSettings.userId,
-                set: { autoLearn: true },
-            });
+        await setAutomaticLearn(true);
         try {
             const itemId = await deliver("Automatic", "Please call Petra.");
             await runAdvance(itemId);
@@ -693,10 +716,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
                 .where(eq(learnRuns.itemId, itemId));
             expect(run).toMatchObject({ trigger: "auto", status: "queued" });
         } finally {
-            await db()
-                .update(userSettings)
-                .set({ autoLearn: false })
-                .where(eq(userSettings.userId, "u-jan"));
+            await setAutomaticLearn(false);
         }
     });
 

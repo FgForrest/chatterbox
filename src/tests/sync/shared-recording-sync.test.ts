@@ -7,6 +7,7 @@
  * #274 regression test.)
  */
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 const { sharing } = vi.hoisted(() => ({ sharing: { shared: true } }));
 
@@ -29,6 +30,11 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveDefaultProfile: vi.fn(async () => resolvedAudioProfile()),
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
 }));
 
 vi.mock("@/lib/storage/factory", () => ({

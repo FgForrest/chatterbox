@@ -63,6 +63,9 @@ vi.mock("@/lib/demo/fixtures", () => ({
     DEMO_SUMMARIES: new Map(),
     isDemoRecordingId: () => false,
 }));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(),
+}));
 
 vi.mock("@/lib/summary/summary-job", async (importOriginal) => {
     const actual =

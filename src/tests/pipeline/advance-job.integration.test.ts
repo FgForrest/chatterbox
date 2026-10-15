@@ -74,6 +74,12 @@ const { dbProxy, dbRef, mockEnv } = vi.hoisted(() => {
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/encryption/fields", () => ({
+    decryptJsonField: vi.fn((value: unknown) => value),
+    decryptText: vi.fn((value: string | null) => value),
+    encryptJsonField: vi.fn((value: unknown) => value),
+    encryptText: vi.fn((value: string | null) => value),
+}));
 vi.mock("@/lib/mail/auto-process", () => ({
     autoLearnMail: mocks.autoLearnMail,
 }));
@@ -319,7 +325,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         expect(mocks.queueAutoSummary).toHaveBeenCalledWith(
             USER_ID,
             ITEM_ID,
-            "meeting-notes",
+            null,
             { strict: true },
         );
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
@@ -435,7 +441,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         expect(mocks.queueAutoSummary).toHaveBeenLastCalledWith(
             USER_ID,
             ITEM_ID,
-            "meeting-notes",
+            null,
         );
     });
 

@@ -35,7 +35,7 @@ import {
     or,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { asyncJobs, chatterItems, learnRuns, userSettings } from "@/db/schema";
+import { asyncJobs, chatterItems, learnRuns } from "@/db/schema";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
 import {
@@ -49,6 +49,7 @@ import { settleDeadLearnRuns, startLearnRun } from "@/lib/learn/learn-job";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import { markLearnReleasedInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { resolveRecordingAccess } from "@/lib/sharing/access";
 
@@ -71,12 +72,13 @@ export async function holdForAutoLearn(input: {
     const { userId, recordingId, timed } = input;
     try {
         if (!timed) return false;
-        const [settings] = await db
-            .select({ autoLearn: userSettings.autoLearn })
-            .from(userSettings)
-            .where(eq(userSettings.userId, userId))
-            .limit(1);
-        if (!settings?.autoLearn) return false;
+        const profile = await resolveItemProfile(
+            recordingId,
+            "private",
+            userId,
+        );
+        const learn = profile.settings.steps.learn;
+        if (!learn.enabled || !learn.automatic) return false;
         if (!(await isLearnAvailableFor(userId))) return false;
         const access = await resolveRecordingAccess(userId, recordingId);
         // Shared: the Organization's to change; its curator runs Learn.

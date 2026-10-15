@@ -37,6 +37,8 @@ import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import {
@@ -853,6 +855,27 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
+        let autoTranscribe = false;
+        let transcriptMode = "plaud_only";
+        try {
+            const profile = await resolveDefaultProfile(userId, "audio");
+            const profileSettings = profile.settings as AudioProfileSettings;
+            const transcribe = profileSettings.steps.transcribe;
+            autoTranscribe = transcribe.enabled && transcribe.automatic;
+            transcriptMode =
+                transcribe.plaudTranscript === "also_transcribe"
+                    ? "keep_both"
+                    : "plaud_only";
+        } catch (error) {
+            console.error(
+                `[sync] Failed to resolve default audio profile for user ${userId}`,
+            );
+            captureServerException(error, {
+                source: "sync",
+                distinctId: userId,
+                reason: "profile_resolution",
+            });
+        }
 
         const [user] = await db
             .select({
@@ -883,9 +906,9 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
 
         const context: SyncContext = {
             userId,
-            autoTranscribe: settings?.autoTranscribe ?? false,
+            autoTranscribe,
             importPlaudContent: settings?.importPlaudContent ?? false,
-            transcriptMode: settings?.transcriptMode ?? "plaud_only",
+            transcriptMode,
             emailNotifications: settings?.emailNotifications ?? false,
             barkNotifications: settings?.barkNotifications ?? false,
             notificationEmail:

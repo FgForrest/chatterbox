@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
+const profileMocks = vi.hoisted(() => ({ resolveItemProfile: vi.fn() }));
 vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+    resolveItemProfile: profileMocks.resolveItemProfile,
 }));
 
 vi.mock("@/db", () => ({
@@ -139,6 +140,9 @@ describe("Transcription", () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        profileMocks.resolveItemProfile.mockResolvedValue(
+            resolvedAudioProfile(),
+        );
         (db.delete as Mock).mockReturnValue({
             where: vi.fn().mockResolvedValue(undefined),
         });
@@ -445,10 +449,17 @@ describe("Transcription", () => {
         function stubTitledRun({
             syncTitleToPlaud,
             retitled,
+            title = { enabled: true, automatic: true },
         }: {
             syncTitleToPlaud: boolean;
             retitled: boolean;
+            title?: { enabled: boolean; automatic: boolean };
         }) {
+            const profile = resolvedAudioProfile({
+                autoGenerateTitle: title.automatic,
+            });
+            profile.settings.steps.title.enabled = title.enabled;
+            profileMocks.resolveItemProfile.mockResolvedValue(profile);
             const mockCreate = vi.fn().mockResolvedValue({
                 text: "Fresh transcript",
                 language: "en",
@@ -677,6 +688,24 @@ describe("Transcription", () => {
             expect(refreshExistingRecordingSidecars).not.toHaveBeenCalled();
             expect(createPlaudClient).not.toHaveBeenCalled();
         });
+
+        it.each([
+            { enabled: true, automatic: false },
+            { enabled: false, automatic: true },
+        ])("does not generate a title when profile automation is $enabled/$automatic", async (title) => {
+            stubTitledRun({
+                syncTitleToPlaud: false,
+                retitled: true,
+                title,
+            });
+
+            await expect(
+                transcribeRecording(mockUserId, mockRecordingId),
+            ).resolves.toMatchObject({ success: true });
+
+            expect(generateTitleFromTranscription).not.toHaveBeenCalled();
+        });
+
         describe("pushing the generated title to Plaud", () => {
             function stubPlaud() {
                 (db.select as Mock).mockReturnValueOnce({

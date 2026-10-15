@@ -10,9 +10,10 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { aiEnhancements, userSettings } from "@/db/schema";
+import { aiEnhancements } from "@/db/schema";
 import { env } from "@/lib/env";
 import { llmRendering } from "@/lib/learn/llm-input";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import type { RecordingView } from "@/lib/sharing/view";
 import { enqueueSummaryJob } from "@/lib/summary/summary-job";
@@ -84,7 +85,7 @@ async function refresh(input: {
 /**
  * Whether the summary is to be made again now: on the private view, stale,
  * with auto-summarize on and within the hourly cap (spent when it is).
- * Null when not; otherwise the preset the automatic summary uses.
+ * Null when not; otherwise the summary job resolves the item's profile.
  */
 export async function summaryRefreshDue(input: {
     ownerUserId: string;
@@ -95,15 +96,13 @@ export async function summaryRefreshDue(input: {
     if (!(await isSummaryStale(input.ownerUserId, input.recordingId))) {
         return null;
     }
-    const [settings] = await db
-        .select({
-            autoSummarize: userSettings.autoSummarize,
-            preset: userSettings.autoSummarizePreset,
-        })
-        .from(userSettings)
-        .where(eq(userSettings.userId, input.ownerUserId))
-        .limit(1);
-    if (!settings?.autoSummarize) return null;
+    const profile = await resolveItemProfile(
+        input.recordingId,
+        "private",
+        input.ownerUserId,
+    );
+    const summary = profile.settings.steps.summary;
+    if (!summary.enabled || !summary.automatic) return null;
     const allowed = await consumeRateLimitBucket(
         `auto-summary:user:${input.ownerUserId}`,
         {
@@ -113,5 +112,5 @@ export async function summaryRefreshDue(input: {
     );
     // Over the cap: the summary says it may be stale instead.
     if (!allowed.allowed) return null;
-    return settings.preset ? { presetId: settings.preset } : {};
+    return {};
 }

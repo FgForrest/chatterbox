@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     titleStillGenerated: vi.fn(),
     applyGeneratedTitle: vi.fn(),
     emitEvent: vi.fn(),
+    resolveItemProfile: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -21,6 +22,9 @@ vi.mock("@/lib/recordings/apply-generated-title", () => ({
     applyGeneratedTitle: mocks.applyGeneratedTitle,
 }));
 vi.mock("@/lib/webhooks/emit", () => ({ emitEvent: mocks.emitEvent }));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: mocks.resolveItemProfile,
+}));
 
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 
@@ -41,6 +45,9 @@ describe("title after summary", () => {
             .mockResolvedValueOnce([{ plaudFileId: "plaud-1" }]);
         mocks.titleStillGenerated.mockResolvedValue(true);
         mocks.applyGeneratedTitle.mockResolvedValue(true);
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: { steps: { title: { enabled: true, automatic: true } } },
+        });
     });
 
     it("retitles from the completed summary and announces the change", async () => {
@@ -63,6 +70,20 @@ describe("title after summary", () => {
 
     it("preserves a title a person edited", async () => {
         mocks.titleStillGenerated.mockResolvedValue(false);
+
+        await updateTitleAfterSummary(input);
+
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.emitEvent).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        { enabled: true, automatic: false },
+        { enabled: false, automatic: true },
+    ])("does not retitle when profile title automation is $enabled/$automatic", async (title) => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: { steps: { title } },
+        });
 
         await updateTitleAfterSummary(input);
 

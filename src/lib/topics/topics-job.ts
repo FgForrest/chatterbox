@@ -4,8 +4,6 @@
  * only the worker registration imports the handler and its provider client.
  */
 
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
 import {
     type AsyncJobRow,
     countRateLimitedJobs,
@@ -14,11 +12,11 @@ import {
     enqueueJob,
     getActiveJob,
 } from "@/db/queries/async-jobs";
-import { userSettings } from "@/db/schema";
 import { env } from "@/lib/env";
 import { nudge } from "@/lib/jobs/nudge";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import type { TopicSource } from "./generate-topics";
@@ -165,12 +163,18 @@ export async function queueAutoTopics(
     { strict = false }: { strict?: boolean } = {},
 ): Promise<void> {
     try {
-        const [settings] = await db
-            .select({ autoDetectTopics: userSettings.autoDetectTopics })
-            .from(userSettings)
-            .where(eq(userSettings.userId, userId))
-            .limit(1);
-        if (!settings?.autoDetectTopics) return;
+        const profile = await resolveItemProfile(
+            recordingId,
+            "private",
+            userId,
+        );
+        if (
+            !("topics" in profile.settings.steps) ||
+            !profile.settings.steps.topics.enabled ||
+            !profile.settings.steps.topics.automatic
+        ) {
+            return;
+        }
 
         // The job is per recording: one queued for this transcript is this
         // one; one for the other transcript leaves no room for it until it

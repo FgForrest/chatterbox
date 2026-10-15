@@ -592,7 +592,9 @@ async function transcribeRecordingInner(
         // Title, Plaud and automation side effects act on the owner's
         // recording; a run on the Organization view never triggers them.
         const autoGenerateTitle =
-            !orgView && (settings?.autoGenerateTitle ?? true);
+            !orgView &&
+            profileSettings.steps.title.enabled &&
+            profileSettings.steps.title.automatic;
         const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
         void quality;
 

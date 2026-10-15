@@ -4,17 +4,28 @@ import type {
     PhaseRecord,
     PipelineAction,
     PipelineFacts,
-    PipelineSettingsFacts,
+    PipelineProfileFacts,
 } from "@/lib/pipeline/types";
 
 const AT = "2026-10-14T12:00:00.000Z";
-const DEFAULT_SETTINGS: PipelineSettingsFacts = {
-    autoGenerateTitle: true,
-    autoLearn: false,
-    autoSummarize: true,
-    autoSummarizePreset: "meeting-notes",
-    mailAutoProcess: true,
+const DEFAULT_PROFILE: PipelineProfileFacts = {
+    revisionId: "profile-revision-1",
+    automatic: {
+        learn: false,
+        summary: true,
+        title: true,
+        topics: true,
+    },
 };
+
+function profileAutomatic(
+    overrides: Partial<PipelineProfileFacts["automatic"]>,
+): PipelineProfileFacts {
+    return {
+        ...DEFAULT_PROFILE,
+        automatic: { ...DEFAULT_PROFILE.automatic, ...overrides },
+    };
+}
 
 function audioFacts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
     return {
@@ -33,7 +44,7 @@ function audioFacts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
             timed: true,
         },
         summaryDueAt: null,
-        settings: { ...DEFAULT_SETTINGS },
+        profile: { ...DEFAULT_PROFILE },
         hasEnhancementCredential: true,
         mail: null,
         summary: { exists: false, stale: false, jobActive: false },
@@ -103,7 +114,7 @@ describe("planAdvance audio", () => {
         {
             name: "automatic titles off (the inline title remains at the trigger)",
             facts: audioFacts({
-                settings: { ...DEFAULT_SETTINGS, autoGenerateTitle: false },
+                profile: profileAutomatic({ title: false }),
             }),
             expected: ["queueTopics", "markPhase", "queueSummary", "markPhase"],
         },
@@ -127,10 +138,7 @@ describe("planAdvance audio", () => {
         {
             name: "automatic summaries off",
             facts: audioFacts({
-                settings: {
-                    ...DEFAULT_SETTINGS,
-                    autoSummarize: false,
-                },
+                profile: profileAutomatic({ summary: false }),
             }),
             expected: ["queueTopics", "markPhase"],
         },
@@ -186,7 +194,7 @@ describe("planAdvance audio", () => {
     it("queues strict topics even when release-time auto-summary is off", () => {
         const facts = audioFacts({
             phases: { learn: releasedLearn() },
-            settings: { ...DEFAULT_SETTINGS, autoSummarize: false },
+            profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
             "queueTopics",
@@ -199,7 +207,7 @@ describe("planAdvance audio", () => {
     it("does not queue a release-time title when automatic titles are off", () => {
         const facts = audioFacts({
             phases: { learn: releasedLearn() },
-            settings: { ...DEFAULT_SETTINGS, autoGenerateTitle: false },
+            profile: profileAutomatic({ title: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
             "queueSummary",
@@ -209,10 +217,10 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("defaults release-time title generation on without a settings row", () => {
+    it("uses the seeded profile's release-time title automation", () => {
         const facts = audioFacts({
             phases: { learn: releasedLearn() },
-            settings: null,
+            profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
             "queueTopics",
@@ -333,18 +341,20 @@ describe("planAdvance audio", () => {
                 phase: "summary",
                 record: expect.objectContaining({
                     generation: 4,
+                    profileRevisionId: "profile-revision-1",
                     steps: {
                         topics: {
                             contentId: "transcription-1",
                             contentRevision: 7,
                             generation: 4,
+                            profileRevisionId: "profile-revision-1",
                         },
                     },
                 }),
             },
             {
                 type: "queueSummary",
-                presetId: "meeting-notes",
+                presetId: null,
                 strict: false,
             },
             {
@@ -352,16 +362,19 @@ describe("planAdvance audio", () => {
                 phase: "summary",
                 record: expect.objectContaining({
                     generation: 4,
+                    profileRevisionId: "profile-revision-1",
                     steps: {
                         topics: {
                             contentId: "transcription-1",
                             contentRevision: 7,
                             generation: 4,
+                            profileRevisionId: "profile-revision-1",
                         },
                         summary: {
                             contentId: "transcription-1",
                             contentRevision: 7,
                             generation: 4,
+                            profileRevisionId: "profile-revision-1",
                         },
                     },
                 }),
@@ -415,7 +428,7 @@ describe("planAdvance mail", () => {
         {
             name: "mail auto-processing off",
             facts: mailFacts({
-                settings: { ...DEFAULT_SETTINGS, mailAutoProcess: false },
+                profile: profileAutomatic({ summary: false, learn: false }),
             }),
             expected: [],
         },
@@ -446,7 +459,7 @@ describe("planAdvance mail", () => {
         {
             name: "normal mail with Learn",
             facts: mailFacts({
-                settings: { ...DEFAULT_SETTINGS, autoLearn: true },
+                profile: profileAutomatic({ learn: true }),
             }),
             expected: [
                 "queueSummary",
@@ -456,14 +469,14 @@ describe("planAdvance mail", () => {
             ],
         },
         {
-            name: "no settings row",
-            facts: mailFacts({ settings: null }),
+            name: "the seeded mail profile",
+            facts: mailFacts(),
             expected: ["queueSummary", "markPhase"],
         },
         {
             name: "already shared mail",
             facts: mailFacts({
-                settings: { ...DEFAULT_SETTINGS, autoLearn: true },
+                profile: profileAutomatic({ learn: true }),
                 mail: { autoGenerated: false, unreadable: false, shared: true },
             }),
             expected: [
@@ -479,7 +492,7 @@ describe("planAdvance mail", () => {
 
     it("does not repeat mail actions after their marks are applied", () => {
         const facts = mailFacts({
-            settings: { ...DEFAULT_SETTINGS, autoLearn: true },
+            profile: profileAutomatic({ learn: true }),
         });
         const first = planAdvance(facts);
         expect(planAdvance(applyMarks(facts, first.actions)).actions).toEqual(

@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, userSettings } from "@/db/schema";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import { titleStillGenerated } from "@/lib/recordings/generated-title";
 import { emitEvent } from "@/lib/webhooks/emit";
@@ -15,14 +16,20 @@ export async function updateTitleAfterSummary(input: {
     if (!input.summary.trim()) return;
     const [settings] = await db
         .select({
-            autoGenerateTitle: userSettings.autoGenerateTitle,
             syncTitleToPlaud: userSettings.syncTitleToPlaud,
         })
         .from(userSettings)
         .where(eq(userSettings.userId, input.userId))
         .limit(1);
+    const profile = await resolveItemProfile(
+        input.recordingId,
+        "private",
+        input.userId,
+    );
+    const title = profile.settings.steps.title;
     if (
-        !(settings?.autoGenerateTitle ?? true) ||
+        !title.enabled ||
+        !title.automatic ||
         !(await titleStillGenerated(input.userId, input.recordingId))
     ) {
         return;

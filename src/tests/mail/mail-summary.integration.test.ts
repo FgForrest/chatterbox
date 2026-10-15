@@ -118,6 +118,8 @@ import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { parseSummaryJobPayload } from "@/lib/summary/summary-job";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
@@ -203,6 +205,34 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             signal: new AbortController().signal,
             reportProgress: () => undefined,
         });
+
+    async function setAutomaticSummary(automatic: boolean): Promise<void> {
+        const resolved = await resolveDefaultProfile("u-jan", "mail");
+        const settings = resolved.settings;
+        if ("transcribe" in settings.steps) throw new Error("mail profile");
+        await updateProfile({
+            ownerUserId: "u-jan",
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: "u-jan",
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    summary: { ...settings.steps.summary, automatic },
+                },
+            },
+        });
+    }
 
     function headers(subject: string, extra: string[] = []) {
         return [
@@ -696,13 +726,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         );
         await runAdvance(machine);
         expect(await queued(machine)).toHaveLength(0);
-        await db()
-            .insert(userSettings)
-            .values({ userId: "u-jan", mailAutoProcess: false })
-            .onConflictDoUpdate({
-                target: userSettings.userId,
-                set: { mailAutoProcess: false },
-            });
+        await setAutomaticSummary(false);
         const off = await deliver(
             await signMessage(
                 rawMessage(headers("Later"), "Not now."),
@@ -715,10 +739,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
     });
 
     it("runs a queued mail summary on the worker's path", async () => {
-        await db()
-            .update(userSettings)
-            .set({ mailAutoProcess: true })
-            .where(eq(userSettings.userId, "u-jan"));
+        await setAutomaticSummary(true);
         const itemId = await deliver(
             await signMessage(
                 rawMessage(headers("Worker"), "Please confirm the date."),

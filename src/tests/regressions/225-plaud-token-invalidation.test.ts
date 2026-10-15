@@ -28,6 +28,20 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveDefaultProfile: vi.fn().mockResolvedValue({
+        settings: {
+            steps: {
+                transcribe: {
+                    enabled: true,
+                    automatic: false,
+                    plaudTranscript: "use",
+                },
+            },
+        },
+    }),
+}));
+
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         uploadFile: vi.fn().mockResolvedValue(undefined),

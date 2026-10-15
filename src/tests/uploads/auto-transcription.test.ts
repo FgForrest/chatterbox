@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     select: vi.fn(),
     transcribeRecording: vi.fn(),
     allowManualArtifactGeneration: vi.fn(),
+    resolveItemProfile: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -27,6 +28,9 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
 }));
 vi.mock("@/lib/recordings/erase", () => ({
     allowManualArtifactGeneration: mocks.allowManualArtifactGeneration,
+}));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: mocks.resolveItemProfile,
 }));
 
 import { ErrorCode } from "@/lib/errors";
@@ -69,10 +73,19 @@ describe("automatic upload transcription", () => {
             created: true,
         });
         mocks.allowManualArtifactGeneration.mockResolvedValue(true);
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: {
+                steps: { transcribe: { enabled: true, automatic: true } },
+            },
+        });
     });
 
-    it("does not queue when the recording owner's setting is disabled", async () => {
-        mocks.limit.mockResolvedValue([{ autoTranscribe: false }]);
+    it("does not queue when the recording profile's automatic transcription is disabled", async () => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: {
+                steps: { transcribe: { enabled: true, automatic: false } },
+            },
+        });
 
         await expect(
             autoTranscribeNewRecording("user-1", "recording-1"),
@@ -80,9 +93,20 @@ describe("automatic upload transcription", () => {
         expect(mocks.enqueueJob).not.toHaveBeenCalled();
     });
 
-    it("queues when the recording owner's setting is enabled", async () => {
-        mocks.limit.mockResolvedValue([{ autoTranscribe: true }]);
+    it("does not queue when the recording profile's transcription step is disabled", async () => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: {
+                steps: { transcribe: { enabled: false, automatic: true } },
+            },
+        });
 
+        await expect(
+            autoTranscribeNewRecording("user-1", "recording-1"),
+        ).resolves.toBe(false);
+        expect(mocks.enqueueJob).not.toHaveBeenCalled();
+    });
+
+    it("queues when the recording profile's transcription automation is enabled", async () => {
         await expect(
             autoTranscribeNewRecording("user-1", "recording-1"),
         ).resolves.toBe(true);
@@ -98,6 +122,11 @@ describe("automatic upload transcription", () => {
                     force: false,
                 },
             }),
+        );
+        expect(mocks.resolveItemProfile).toHaveBeenCalledWith(
+            "recording-1",
+            "private",
+            "user-1",
         );
     });
 

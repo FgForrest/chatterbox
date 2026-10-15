@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
+const profileMocks = vi.hoisted(() => ({
+    resolveItemProfile: vi.fn(),
+}));
+
 vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+    resolveItemProfile: profileMocks.resolveItemProfile,
 }));
 
 const pipelineMocks = vi.hoisted(() => ({
@@ -160,6 +164,13 @@ function mountSelectChain(
     settings: UserSettingsRow,
     existingText: string | null = null,
 ) {
+    profileMocks.resolveItemProfile.mockResolvedValue(
+        resolvedAudioProfile({
+            autoGenerateTitle: settings.autoGenerateTitle,
+            autoSummarize: settings.autoSummarize,
+            autoSummarizePreset: settings.autoSummarizePreset,
+        }),
+    );
     (db.select as Mock)
         .mockReturnValueOnce({
             from: vi.fn().mockReturnValue({
@@ -230,10 +241,14 @@ function mountSelectChain(
             timed: false,
         },
         summaryDueAt: null,
-        settings: {
-            ...settings,
-            autoLearn: false,
-            mailAutoProcess: true,
+        profile: {
+            revisionId: "seeded-profile-revision",
+            automatic: {
+                learn: false,
+                summary: settings.autoSummarize,
+                title: settings.autoGenerateTitle,
+                topics: false,
+            },
         },
         hasEnhancementCredential: true,
         mail: null,
@@ -400,7 +415,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         expect(summaryEvents).toHaveLength(0);
     });
 
-    it("passes autoSummarizePreset into the queued job when set", async () => {
+    it("uses the automatic profile prompt instead of passing the legacy preset", async () => {
         mountSelectChain({
             autoGenerateTitle: false,
             syncTitleToPlaud: false,
@@ -419,7 +434,7 @@ describe("Auto-summarize integration with transcribeRecording", () => {
         expect(enqueueSummaryJob).toHaveBeenCalledWith({
             userId: mockUserId,
             recordingId: mockRecordingId,
-            presetId: "meeting-notes",
+            presetId: undefined,
             trigger: "auto",
         });
     });

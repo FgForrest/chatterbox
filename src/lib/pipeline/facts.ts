@@ -10,13 +10,13 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     transcriptions,
-    userSettings,
     users,
 } from "@/db/schema";
 import { pickEnhancementCredential } from "@/lib/ai/enhancement-provider";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
 import { readProcessing } from "@/lib/pipeline/state";
 import type { PipelineFacts, PipelineView } from "@/lib/pipeline/types";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 
@@ -56,7 +56,7 @@ export async function gatherFacts(
     view: PipelineView,
     userId: string,
 ): Promise<PipelineFacts> {
-    const [processing, [item], [settings], credentials] = await Promise.all([
+    const [processing, [item], credentials] = await Promise.all([
         readProcessing(itemId, view, userId),
         db
             .select({
@@ -71,17 +71,6 @@ export async function gatherFacts(
                     eq(chatterItems.userId, userId),
                 ),
             )
-            .limit(1),
-        db
-            .select({
-                autoGenerateTitle: userSettings.autoGenerateTitle,
-                autoLearn: userSettings.autoLearn,
-                autoSummarize: userSettings.autoSummarize,
-                autoSummarizePreset: userSettings.autoSummarizePreset,
-                mailAutoProcess: userSettings.mailAutoProcess,
-            })
-            .from(userSettings)
-            .where(eq(userSettings.userId, userId))
             .limit(1),
         db
             .select({
@@ -106,7 +95,7 @@ export async function gatherFacts(
             generation: processing?.requestedGeneration ?? 0,
             content: null,
             summaryDueAt: null,
-            settings: settings ?? null,
+            profile: null,
             hasEnhancementCredential: Boolean(
                 pickEnhancementCredential(credentials),
             ),
@@ -116,6 +105,31 @@ export async function gatherFacts(
             at: new Date().toISOString(),
         };
     }
+
+    const resolvedProfile =
+        view === "private"
+            ? await resolveItemProfile(itemId, "private", userId)
+            : null;
+    const profile = resolvedProfile
+        ? {
+              revisionId: resolvedProfile.revisionId,
+              automatic: {
+                  learn:
+                      resolvedProfile.settings.steps.learn.enabled &&
+                      resolvedProfile.settings.steps.learn.automatic,
+                  summary:
+                      resolvedProfile.settings.steps.summary.enabled &&
+                      resolvedProfile.settings.steps.summary.automatic,
+                  title:
+                      resolvedProfile.settings.steps.title.enabled &&
+                      resolvedProfile.settings.steps.title.automatic,
+                  topics:
+                      "topics" in resolvedProfile.settings.steps &&
+                      resolvedProfile.settings.steps.topics.enabled &&
+                      resolvedProfile.settings.steps.topics.automatic,
+              },
+          }
+        : null;
 
     const contentPromise: Promise<{
         id: string;
@@ -249,7 +263,7 @@ export async function gatherFacts(
               }
             : null,
         summaryDueAt: item.summaryDueAt?.toISOString() ?? null,
-        settings: settings ?? null,
+        profile,
         hasEnhancementCredential: Boolean(
             pickEnhancementCredential(credentials),
         ),

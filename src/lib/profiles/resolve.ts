@@ -132,6 +132,26 @@ async function defaultProfile(input: {
         : null;
 }
 
+/** Resolve the owner's current default profile when no item exists yet. */
+export async function resolveDefaultProfile(
+    ownerUserId: string,
+    channel: ProfileChannel,
+    actorUserId = ownerUserId,
+): Promise<ResolvedItemProfile> {
+    const resolved = await defaultProfile({
+        ownerUserId,
+        actorUserId,
+        channel,
+        scope: "personal",
+    });
+    if (resolved) return resolved;
+    throw new AppError(
+        ErrorCode.CONFLICT,
+        "Choose a default processing profile before running this step",
+        409,
+    );
+}
+
 /**
  * Resolve the immutable profile revision used by one item run.
  *
