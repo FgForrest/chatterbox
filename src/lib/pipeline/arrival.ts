@@ -1,6 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { db } from "@/db";
-import { itemProcessing, processingProfiles } from "@/db/schema";
+import {
+    itemProcessing,
+    processingProfiles,
+    recordingFolderAssignments,
+} from "@/db/schema";
+import type { assertCategorizableFolder } from "@/lib/folders/folders";
+import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
@@ -8,6 +14,9 @@ import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placemen
 import type { ProfileRecord } from "@/lib/profiles/store";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type ArrivalFolder = Awaited<
+    ReturnType<typeof assertCategorizableFolder>
+>;
 
 /** Resolve an unambiguous arrival placement to the profile frozen on the item. */
 export async function resolveArrivalProfile(input: {
@@ -32,9 +41,29 @@ export async function requestArrivalInTx(
         userId: string;
         view?: PipelineView;
         profile?: ProfileRecord | null;
+        folder?: ArrivalFolder | null;
     },
 ) {
     const view = input.view ?? "private";
+    if (input.folder && view === "private") {
+        if (input.folder.scope === "org") {
+            await recordIntendedPlacementInTx(tx, {
+                ownerUserId: input.userId,
+                itemId: input.itemId,
+                folderId: input.folder.folderId,
+                requestPipeline: false,
+            });
+        } else {
+            await tx
+                .insert(recordingFolderAssignments)
+                .values({
+                    itemId: input.itemId,
+                    userId: input.userId,
+                    folderId: input.folder.folderId,
+                })
+                .onConflictDoNothing();
+        }
+    }
     const advance = await requestAdvanceInTx(tx, {
         itemId: input.itemId,
         userId: input.userId,

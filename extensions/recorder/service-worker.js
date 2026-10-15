@@ -16,6 +16,7 @@ import {
     completeSession,
     createSession,
     getSession,
+    getRecorderFolders,
     recoverSession,
     sha256Hex,
     uploadChunk,
@@ -49,6 +50,7 @@ import {
     effectiveQuietSeconds,
     getSettings,
     isPaired,
+    saveSettings,
 } from "./lib/settings.js";
 
 const STATE_KEY = "recordingState";
@@ -376,18 +378,35 @@ async function startCapturedRecording({
             ? CHANNEL_LAYOUT_SPLIT
             : CHANNEL_LAYOUT_MIXED;
 
+    const sessionBody = {
+        clientRecordingId,
+        mimeType: SESSION_MIME_TYPE,
+        channelLayout,
+        startedAt,
+        platformHint: platformHint ?? undefined,
+        clientVersion: chrome.runtime.getManifest().version,
+        timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
+        noticeAcknowledgedAt: noticeAcknowledgedAt ?? startedAt,
+        folderId: settings.folderId ?? undefined,
+    };
     let session;
     try {
-        session = await createSession(auth, {
-            clientRecordingId,
-            mimeType: SESSION_MIME_TYPE,
-            channelLayout,
-            startedAt,
-            platformHint: platformHint ?? undefined,
-            clientVersion: chrome.runtime.getManifest().version,
-            timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
-            noticeAcknowledgedAt: noticeAcknowledgedAt ?? startedAt,
-        });
+        try {
+            session = await createSession(auth, sessionBody);
+        } catch (error) {
+            if (
+                settings.folderId &&
+                error?.status === 400 &&
+                error?.field === "folderId"
+            ) {
+                await saveSettings({ folderId: null, folderLabel: null });
+                const fallbackBody = { ...sessionBody };
+                delete fallbackBody.folderId;
+                session = await createSession(auth, fallbackBody);
+            } else {
+                throw error;
+            }
+        }
     } catch (error) {
         const current = await getState();
         if (
@@ -1251,6 +1270,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             reconcileDesktopWindow()
                 .then(getState)
                 .then((state) => sendResponse({ state }));
+            return true;
+
+        case "get-folders":
+            getSettings()
+                .then(async (settings) =>
+                    getRecorderFolders({
+                        serverUrl: settings.serverUrl,
+                        apiKey: await readToken(),
+                    }),
+                )
+                .then((folders) => sendResponse({ ok: true, folders }))
+                .catch((error) =>
+                    sendResponse({
+                        ok: false,
+                        error: error?.message ?? String(error),
+                    }),
+                );
             return true;
 
         case "get-armed":

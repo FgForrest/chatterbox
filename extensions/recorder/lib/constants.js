@@ -52,6 +52,10 @@ export const STORAGE_KEYS = {
     autoModeAcknowledgedAt: "autoModeAcknowledgedAt",
     /** ISO timestamp of explicit extension data-use consent. */
     dataUseAcknowledgedAt: "dataUseAcknowledgedAt",
+    /** Folder selected in the popup, or null to file later. */
+    folderId: "folderId",
+    /** Display label for the selected folder, or null to file later. */
+    folderLabel: "folderLabel",
 };
 
 /** Per-platform recording modes. */

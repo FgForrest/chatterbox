@@ -820,6 +820,20 @@
       "when": 1792031441122,
       "tag": "0116_mark_legacy_items",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1792044124581,
+      "tag": "0117_groovy_gladiator",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792045072021,
+      "tag": "0118_famous_spirit",
+      "breakpoints": true
     }
   ]
 }

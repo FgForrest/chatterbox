@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { apiHandler } from "@/lib/errors";
+import { assertCategorizableFolderInput } from "@/lib/folders/folders";
+import { readPrivateProcessingForItems } from "@/lib/pipeline/state";
 import {
     MAX_CHUNK_BYTES,
     MAX_SESSION_BYTES,
@@ -26,6 +28,9 @@ export const POST = apiHandler(async (request: Request) => {
 
     const body = await request.json().catch(() => null);
     const input = parseCreateRecordingSessionBody(body);
+    if (input.folderId) {
+        await assertCategorizableFolderInput(authn.user.id, input.folderId);
+    }
 
     const created = await createRecordingSession({
         userId: authn.user.id,
@@ -35,6 +40,7 @@ export const POST = apiHandler(async (request: Request) => {
         metadata: input.metadata,
         startedAt: input.startedAt,
         noticeAcknowledgedAt: input.noticeAcknowledgedAt,
+        folderId: input.folderId,
     });
 
     return NextResponse.json(
@@ -73,8 +79,22 @@ export const GET = apiHandler(async (request: Request) => {
             limit,
         },
     );
+    const processing = await readPrivateProcessingForItems(
+        sessions.flatMap((session) =>
+            session.recordingId ? [session.recordingId] : [],
+        ),
+        authn.user.id,
+    );
 
     return NextResponse.json({
-        data: sessions.map((session) => serializeRecordingSession(session, [])),
+        data: sessions.map((session) =>
+            serializeRecordingSession(
+                session,
+                [],
+                session.recordingId
+                    ? processing.get(session.recordingId)
+                    : undefined,
+            ),
+        ),
     });
 });

@@ -1,5 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import type { db } from "@/db";
+import { and, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
 import {
     readProcessingRow,
     updateProcessingPhaseInTx,
@@ -13,6 +13,7 @@ import {
 import type {
     PhaseName,
     PhaseRecord,
+    PipelinePhases,
     PipelineView,
 } from "@/lib/pipeline/types";
 
@@ -25,6 +26,28 @@ export function readProcessing(
     userId: string,
 ) {
     return readProcessingRow(itemId, view, userId);
+}
+
+/** Read private-view phase maps for an owner's item ids in one query. */
+export async function readPrivateProcessingForItems(
+    itemIds: readonly string[],
+    userId: string,
+): Promise<Map<string, PipelinePhases>> {
+    if (itemIds.length === 0) return new Map();
+    const rows = await db
+        .select({
+            itemId: itemProcessing.itemId,
+            phases: itemProcessing.phases,
+        })
+        .from(itemProcessing)
+        .where(
+            and(
+                inArray(itemProcessing.itemId, [...new Set(itemIds)]),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, "private"),
+            ),
+        );
+    return new Map(rows.map((row) => [row.itemId, row.phases]));
 }
 
 /** Write one phase without replacing a record from a higher generation. */

@@ -231,6 +231,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
 
         async run({
             payload,
+            jobId,
             userId,
             attempt,
             maxAttempts,
@@ -317,6 +318,11 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
                     storage,
                     sourceExtension,
                     convertedFromVideo: true,
+                    folderId: payload.folderId,
+                    deferredFolderFallback: {
+                        kind: "video extraction job",
+                        id: jobId,
+                    },
                 });
 
                 await deleteSource(storage, payload.sourceStorageKey);

@@ -282,6 +282,11 @@ export const recordingSessionFinalizeJobHandler: JobHandler<RecordingSessionFina
                         storage,
                         recordedAt: session.startedAt,
                         signal,
+                        folderId: session.folderId,
+                        deferredFolderFallback: {
+                            kind: "recording session",
+                            id: session.id,
+                        },
                     });
                 } catch (error) {
                     const alreadySaved = await getRecordingForCapture(

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { readProcessing } from "@/lib/pipeline/state";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
 import { serializeRecordingSession } from "@/lib/recording-sessions/serialize";
 import {
@@ -37,8 +38,13 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         throw new AppError(ErrorCode.FORBIDDEN, "Recorder key mismatch", 403);
     }
     const chunks = await listRecordingSessionChunks(session.id);
+    const processing = session.recordingId
+        ? await readProcessing(session.recordingId, "private", authn.user.id)
+        : null;
 
-    return NextResponse.json(serializeRecordingSession(session, chunks));
+    return NextResponse.json(
+        serializeRecordingSession(session, chunks, processing?.phases),
+    );
 });
 
 /**

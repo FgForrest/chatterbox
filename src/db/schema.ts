@@ -3892,6 +3892,9 @@ export const recordingSessions = pgTable(
             .references(() => apiKeys.id, { onDelete: "cascade" }),
         status: recordingSessionStatusEnum("status").notNull().default("open"),
         mimeType: varchar("mime_type", { length: 100 }).notNull(),
+        folderId: text("folder_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
         metadata: jsonb("metadata")
             .$type<Record<string, unknown>>()
             .notNull()
@@ -3926,6 +3929,9 @@ export const recordingSessions = pgTable(
             table.status,
             table.updatedAt,
         ),
+        folderIdIdx: index("recording_sessions_folder_id_idx")
+            .on(table.folderId)
+            .where(sql`${table.folderId} is not null`),
     }),
 );
 

@@ -8,6 +8,7 @@ import {
 import {
     aiEnhancements,
     chatterItems,
+    itemProcessing,
     plaudDevices,
     recordings,
     transcriptions,
@@ -15,7 +16,14 @@ import {
 } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import type { OverlayCorrection } from "@/lib/learn/render";
+import {
+    type PublicProcessing,
+    serializeProcessing,
+} from "@/lib/pipeline/serialize";
+import type { PipelinePhases } from "@/lib/pipeline/types";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
+
+export { serializeProcessing } from "@/lib/pipeline/serialize";
 
 type RecordingRow = AudioItemRow;
 type DeviceRow = typeof plaudDevices.$inferSelect;
@@ -103,12 +111,15 @@ export type V1Recording = {
      * deletion from a broken instance until it tries the download.
      */
     audio_reaped: boolean;
+    processing: V1Processing;
     links: {
         self: string;
         transcript: string;
         audio: string;
     };
 };
+
+export type V1Processing = PublicProcessing;
 
 export type V1RecordingDetail = V1Recording & {
     /** The primary transcript (per the user's preferred source). Kept singular
@@ -240,6 +251,7 @@ export function serializeRecording(
     recording: RecordingRow,
     device: DeviceRow | null,
     flags: { hasTranscription: boolean; hasSummary: boolean },
+    phases?: PipelinePhases | null,
 ): V1Recording {
     const self = `/api/v1/recordings/${recording.id}`;
 
@@ -261,6 +273,7 @@ export function serializeRecording(
         has_transcription: flags.hasTranscription,
         has_summary: flags.hasSummary,
         audio_reaped: recording.audioReapedAt !== null,
+        processing: serializeProcessing(phases),
         links: {
             self,
             transcript: `${self}/transcript`,
@@ -292,6 +305,7 @@ export function serializeRecordingDetail(
     transcripts: TranscriptionRow[],
     enhancements: AiEnhancementRow[],
     preferredSource = "plaud",
+    phases?: PipelinePhases | null,
 ): V1RecordingDetail {
     const primary = resolvePrimaryTranscript(transcripts, preferredSource);
     const primaryEnhancement =
@@ -300,10 +314,15 @@ export function serializeRecordingDetail(
         enhancements[0] ??
         null;
     return {
-        ...serializeRecording(recording, device, {
-            hasTranscription: transcripts.length > 0,
-            hasSummary: enhancements.length > 0,
-        }),
+        ...serializeRecording(
+            recording,
+            device,
+            {
+                hasTranscription: transcripts.length > 0,
+                hasSummary: enhancements.length > 0,
+            },
+            phases,
+        ),
         transcript: serializeTranscript(primary),
         transcripts: transcripts
             .map((transcript) => serializeTranscript(transcript))
@@ -332,6 +351,7 @@ export async function getV1RecordingDetailForUser(
         .select({
             recording: audioItemColumns,
             device: plaudDevices,
+            processingPhases: itemProcessing.phases,
         })
         .from(recordings)
         .innerJoin(chatterItems, recordingItemJoin)
@@ -340,6 +360,14 @@ export async function getV1RecordingDetailForUser(
             and(
                 eq(plaudDevices.userId, userId),
                 eq(plaudDevices.serialNumber, recordings.deviceSn),
+            ),
+        )
+        .leftJoin(
+            itemProcessing,
+            and(
+                eq(itemProcessing.itemId, recordings.id),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, "private"),
             ),
         )
         .where(
@@ -380,5 +408,6 @@ export async function getV1RecordingDetailForUser(
         transcriptRows,
         enhancementRows,
         await getPreferredTranscriptSource(userId),
+        row.processingPhases,
     );
 }

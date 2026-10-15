@@ -100,7 +100,15 @@ export interface NewAudioItem extends NewRecording {
 export async function insertAudioItem(
     executor: Executor,
     values: NewAudioItem,
-    options: { pipeline: "arrival" | "legacy" },
+    options:
+        | {
+              pipeline: "arrival";
+              initializeInTx?: (
+                  tx: Tx,
+                  input: { itemId: string; userId: string },
+              ) => ReturnType<typeof requestAdvanceInTx>;
+          }
+        | { pipeline: "legacy" },
 ): Promise<{ id: string }> {
     const { title, occurredAt, titleEditedAt, ...recording } = values;
     const id = recording.id ?? nanoid();
@@ -121,15 +129,20 @@ export async function insertAudioItem(
         await tx
             .insert(recordings)
             .values({ ...recording, id, createdAt, updatedAt });
-        const advance =
-            options.pipeline === "arrival"
-                ? await requestAdvanceInTx(tx, {
+        let advance = null;
+        if (options.pipeline === "arrival") {
+            advance = options.initializeInTx
+                ? await options.initializeInTx(tx, {
+                      itemId: id,
+                      userId: recording.userId,
+                  })
+                : await requestAdvanceInTx(tx, {
                       itemId: id,
                       userId: recording.userId,
                       view: "private",
                       reason: "arrival",
-                  })
-                : null;
+                  });
+        }
         return { id, advance };
     };
     const result = await (executor as typeof db).transaction(insert);

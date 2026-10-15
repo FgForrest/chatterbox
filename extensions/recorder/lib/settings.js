@@ -35,6 +35,8 @@ import { t } from "./i18n.js";
  * @property {number|null} autoStopQuietSeconds
  * @property {string|null} autoModeAcknowledgedAt
  * @property {string|null} dataUseAcknowledgedAt
+ * @property {string|null} folderId
+ * @property {string|null} folderLabel
  */
 
 /** @returns {Promise<RecorderSettings>} */
@@ -52,6 +54,8 @@ export async function getSettings() {
         autoStopQuietSeconds: raw[STORAGE_KEYS.autoStopQuietSeconds] ?? null,
         autoModeAcknowledgedAt: raw[STORAGE_KEYS.autoModeAcknowledgedAt] ?? null,
         dataUseAcknowledgedAt: raw[STORAGE_KEYS.dataUseAcknowledgedAt] ?? null,
+        folderId: raw[STORAGE_KEYS.folderId] ?? null,
+        folderLabel: raw[STORAGE_KEYS.folderLabel] ?? null,
     };
 }
 

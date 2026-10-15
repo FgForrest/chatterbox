@@ -6,6 +6,11 @@ import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { assertCategorizableFolder } from "@/lib/folders/folders";
+import {
+    requestArrivalInTx,
+    resolveArrivalProfile,
+} from "@/lib/pipeline/arrival";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
@@ -22,12 +27,19 @@ export interface SaveUploadedAudioInput {
     storage: StorageProvider;
     sourceExtension: string;
     convertedFromVideo: boolean;
+    folderId?: string | null;
     /**
      * When the audio was actually captured. Defaults to now, which is right
      * for a file picked from disk but wrong for a meeting recording that
      * started an hour ago and is only being assembled now.
      */
     recordedAt?: Date;
+    deferredFolderFallback?: DeferredFolderFallback;
+}
+
+export interface DeferredFolderFallback {
+    kind: "recording session" | "video extraction job";
+    id: string;
 }
 
 export interface SavedUploadedAudio {
@@ -38,10 +50,50 @@ export interface SavedUploadedAudio {
     filesize: number;
 }
 
+function isUnavailableFolderError(error: unknown): boolean {
+    return (
+        error instanceof AppError &&
+        (error.statusCode === 400 ||
+            error.statusCode === 403 ||
+            error.statusCode === 404)
+    );
+}
+
+/** Resolve an upload folder, optionally degrading deferred captures to filing later. */
+export async function resolveUploadedAudioFolder(
+    userId: string,
+    folderId: string | null | undefined,
+    fallback?: DeferredFolderFallback,
+) {
+    if (!folderId) return null;
+    try {
+        return await assertCategorizableFolder(userId, folderId);
+    } catch (error) {
+        if (!fallback || !isUnavailableFolderError(error)) throw error;
+        console.warn(
+            `[${fallback.kind} ${fallback.id}] selected folder is unavailable; saved without placement`,
+        );
+        return null;
+    }
+}
+
 export async function saveUploadedAudio(
     input: SaveUploadedAudioInput,
 ): Promise<SavedUploadedAudio> {
     const recordingId = nanoid();
+    const folder = await resolveUploadedAudioFolder(
+        input.userId,
+        input.folderId,
+        input.deferredFolderFallback,
+    );
+    const profile = folder
+        ? await resolveArrivalProfile({
+              ownerUserId: input.userId,
+              itemId: recordingId,
+              channel: "audio",
+              folderIds: [folder.folderId],
+          })
+        : null;
     const storageKey = buildRecordingStagingPath(
         input.userId,
         recordingId,
@@ -88,7 +140,11 @@ export async function saveUploadedAudio(
                 plaudVersion: "1",
                 isTrash: false,
             },
-            { pipeline: "arrival" },
+            {
+                pipeline: "arrival",
+                initializeInTx: (tx, arrival) =>
+                    requestArrivalInTx(tx, { ...arrival, folder, profile }),
+            },
         );
     } catch (dbError) {
         try {

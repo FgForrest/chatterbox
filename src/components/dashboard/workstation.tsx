@@ -16,6 +16,10 @@ import {
 import { ShortcutsDialog } from "@/components/dashboard/shortcuts-dialog";
 import type { TranscriptOption } from "@/components/dashboard/transcription-panel";
 import { TrialBanner } from "@/components/dashboard/trial-banner";
+import {
+    UploadDialog,
+    uploadFolderOptions,
+} from "@/components/dashboard/upload-dialog";
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { WorkstationHeader } from "@/components/dashboard/workstation-header";
@@ -420,8 +424,19 @@ export function Workstation({
         pendingUploads,
         uploadInputRef,
         handleUpload,
+        selectedFile,
+        confirmUpload,
+        cancelUpload,
         triggerUpload,
     } = useUploadQueue({ onUploadComplete: refresh });
+    const uploadFolders = useMemo(
+        () =>
+            uploadFolderOptions(
+                folderOrganization.folders,
+                organizationLibrary !== null,
+            ),
+        [folderOrganization.folders, organizationLibrary],
+    );
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
@@ -1251,6 +1266,17 @@ export function Workstation({
             <ShortcutsDialog
                 open={shortcutsOpen}
                 onOpenChange={setShortcutsOpen}
+            />
+
+            <UploadDialog
+                file={selectedFile}
+                folders={uploadFolders}
+                open={selectedFile !== null}
+                onOpenChange={(open) => {
+                    if (!open) cancelUpload();
+                }}
+                onUpload={(folderId) => void confirmUpload(folderId)}
+                selectedFolderId={selectedFolderId}
             />
 
             <SettingsDialog

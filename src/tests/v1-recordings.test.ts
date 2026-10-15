@@ -16,6 +16,7 @@ vi.mock("@/lib/encryption/fields", () => ({
 import {
     decodeRecordingCursor,
     encodeRecordingCursor,
+    serializeProcessing,
     serializeRecording,
     serializeRecordingDetail,
     serializeTranscript,
@@ -157,10 +158,22 @@ describe("v1 recordings", () => {
 
     it("serializes stable list payloads", () => {
         expect(
-            serializeRecording(recording, device, {
-                hasTranscription: true,
-                hasSummary: true,
-            }),
+            serializeRecording(
+                recording,
+                device,
+                {
+                    hasTranscription: true,
+                    hasSummary: true,
+                },
+                {
+                    categorize: {
+                        state: "waiting",
+                        reason: "needs_folder",
+                        generation: 1,
+                        at: now.toISOString(),
+                    },
+                },
+            ),
         ).toEqual({
             id: "rec-1",
             title: "Planning Call",
@@ -179,11 +192,79 @@ describe("v1 recordings", () => {
             // Tells a client the audio link will answer 410 before it
             // spends a request finding out.
             audio_reaped: false,
+            processing: { phase: "categorize", state: "waiting" },
             links: {
                 self: "/api/v1/recordings/rec-1",
                 transcript: "/api/v1/recordings/rec-1/transcript",
                 audio: "/api/v1/recordings/rec-1/audio",
             },
+        });
+    });
+
+    it.each([
+        [
+            "waiting",
+            {
+                categorize: {
+                    state: "waiting" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+            },
+            { phase: "categorize", state: "waiting" },
+        ],
+        [
+            "running",
+            {
+                categorize: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+                transcribe: {
+                    state: "running" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+            },
+            { phase: "transcribe", state: "running" },
+        ],
+        [
+            "done",
+            {
+                categorize: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+                transcribe: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+            },
+            { phase: "transcribe", state: "done" },
+        ],
+        [
+            "legacy",
+            {
+                categorize: {
+                    state: "skipped" as const,
+                    reason: "legacy",
+                    generation: 0,
+                    at: now.toISOString(),
+                },
+            },
+            { phase: "categorize", state: "skipped" },
+        ],
+    ])("serializes %s processing", (_label, phases, expected) => {
+        expect(serializeProcessing(phases)).toEqual(expected);
+    });
+
+    it("serializes an item without a processing row as legacy skipped", () => {
+        expect(serializeProcessing(undefined)).toEqual({
+            phase: "categorize",
+            state: "skipped",
         });
     });
 

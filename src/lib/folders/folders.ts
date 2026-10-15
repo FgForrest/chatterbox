@@ -308,6 +308,29 @@ export async function assertCategorizableFolder(
     return { folderId: folder.id, ownerId: folder.userId, scope };
 }
 
+/** Validate a folder supplied at an external entry path, with a useful 400. */
+export async function assertCategorizableFolderInput(
+    ownerUserId: string,
+    folderId: string,
+) {
+    try {
+        return await assertCategorizableFolder(ownerUserId, folderId);
+    } catch (error) {
+        if (
+            error instanceof AppError &&
+            (error.statusCode === 403 || error.statusCode === 404)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "This folder does not exist or you cannot file recordings into it",
+                400,
+                { field: "folderId" },
+            );
+        }
+        throw error;
+    }
+}
+
 /** Changes to the Organization tree need the scope to be writable. */
 function assertWritable(target: AccessibleFolder): void {
     if (target.scope === "org") assertOrgScopeWritable();

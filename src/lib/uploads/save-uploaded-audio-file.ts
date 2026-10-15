@@ -9,12 +9,20 @@ import { DEFAULT_BUCKETS } from "@/lib/audio/waveform";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import {
+    requestArrivalInTx,
+    resolveArrivalProfile,
+} from "@/lib/pipeline/arrival";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import type { StorageProvider } from "@/lib/storage/types";
 import { readAudioFileDurationMs } from "@/lib/uploads/audio-duration";
-import type { SavedUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
+import {
+    type DeferredFolderFallback,
+    resolveUploadedAudioFolder,
+    type SavedUploadedAudio,
+} from "@/lib/uploads/save-uploaded-audio";
 import { getAudioMimeType } from "@/lib/utils";
 
 /** Save a recorder file using bounded streams for metadata and storage. */
@@ -27,6 +35,8 @@ export async function saveUploadedAudioFile(input: {
     storage: StorageProvider;
     recordedAt: Date;
     signal?: AbortSignal;
+    folderId?: string | null;
+    deferredFolderFallback?: DeferredFolderFallback;
 }): Promise<SavedUploadedAudio> {
     const info = await stat(input.filePath);
     const durationMs = await readAudioFileDurationMs(input.filePath);
@@ -55,6 +65,19 @@ export async function saveUploadedAudioFile(input: {
     }
     input.signal?.throwIfAborted();
     const recordingId = nanoid();
+    const folder = await resolveUploadedAudioFolder(
+        input.userId,
+        input.folderId,
+        input.deferredFolderFallback,
+    );
+    const profile = folder
+        ? await resolveArrivalProfile({
+              ownerUserId: input.userId,
+              itemId: recordingId,
+              channel: "audio",
+              folderIds: [folder.folderId],
+          })
+        : null;
     const storageKey = buildRecordingStagingPath(
         input.userId,
         recordingId,
@@ -86,7 +109,11 @@ export async function saveUploadedAudioFile(input: {
                 plaudVersion: "1",
                 isTrash: false,
             },
-            { pipeline: "arrival" },
+            {
+                pipeline: "arrival",
+                initializeInTx: (tx, arrival) =>
+                    requestArrivalInTx(tx, { ...arrival, folder, profile }),
+            },
         );
     } catch (error) {
         await input.storage

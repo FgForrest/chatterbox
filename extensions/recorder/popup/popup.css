@@ -93,9 +93,26 @@ button:hover:not(:disabled) {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 2px;
+}
+
+.field {
+    display: grid;
+    gap: 5px;
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+
+.field select {
+    width: 100%;
+    padding: 7px 8px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface);
+    color: inherit;
 }
 
 button:disabled {
