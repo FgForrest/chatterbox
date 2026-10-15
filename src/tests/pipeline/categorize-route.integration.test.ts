@@ -87,6 +87,7 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
 }));
 
+import { POST as PREVIEW } from "@/app/api/recordings/[id]/categorize/preview/route";
 import { POST } from "@/app/api/recordings/[id]/categorize/route";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -107,6 +108,17 @@ function request(folderIds: string[], profileId?: string, manualOnly = false) {
                 ...(profileId ? { profileId } : {}),
                 ...(manualOnly ? { manualOnly: true } : {}),
             }),
+        },
+    );
+}
+
+function previewRequest(folderIds: string[]) {
+    return new Request(
+        `https://app.example.test/api/recordings/${ITEM}/categorize/preview`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folderIds }),
         },
     );
 }
@@ -296,6 +308,17 @@ describeWithDatabase("categorize route", () => {
         });
         await addFolder({ id: "org-a", userId: ORG, parentId: "org-root" });
         await addFolder({ id: "org-b", userId: ORG, parentId: "org-root" });
+        await addFolder({
+            id: "other-root",
+            userId: OTHER,
+            parentId: null,
+            kind: "private",
+        });
+        await addFolder({
+            id: "other-a",
+            userId: OTHER,
+            parentId: "other-root",
+        });
         await addProfile({
             id: "audio-a",
             ownerUserId: OWNER,
@@ -364,6 +387,73 @@ describeWithDatabase("categorize route", () => {
         });
         expect(enqueueExportPlansForUser).toHaveBeenCalledWith(OWNER);
         expect(nudge).toHaveBeenCalledOnce();
+    });
+
+    it("previews folder, Nothing automatic and conflicting resolutions without a write", async () => {
+        await addItem();
+
+        const folderResponse = await PREVIEW(
+            previewRequest(["personal-a"]),
+            context(),
+        );
+        expect(folderResponse.status).toBe(200);
+        await expect(folderResponse.json()).resolves.toMatchObject({
+            resolution: {
+                status: "resolved",
+                profile: { id: "audio-a" },
+                manualOnly: false,
+                source: "folder",
+            },
+        });
+
+        await db()
+            .update(folderDefaultProfiles)
+            .set({ profileId: null, manualOnly: true })
+            .where(eq(folderDefaultProfiles.folderId, "personal-a"));
+        const manualResponse = await PREVIEW(
+            previewRequest(["personal-a"]),
+            context(),
+        );
+        await expect(manualResponse.json()).resolves.toMatchObject({
+            resolution: {
+                status: "resolved",
+                profile: { id: "audio-a" },
+                manualOnly: true,
+                source: "folder",
+            },
+        });
+
+        const chooseResponse = await PREVIEW(
+            previewRequest(["personal-a", "personal-b"]),
+            context(),
+        );
+        await expect(chooseResponse.json()).resolves.toMatchObject({
+            resolution: { status: "choose" },
+        });
+        expect(await placementIds()).toEqual([]);
+        expect(await intentIds()).toEqual([]);
+        expect(await processing()).toBeUndefined();
+        expect(enqueueExportPlansForUser).not.toHaveBeenCalled();
+        expect(nudge).not.toHaveBeenCalled();
+    });
+
+    it("keeps previews owner-only and refuses roots and foreign folders", async () => {
+        await addItem();
+
+        expect(
+            (await PREVIEW(previewRequest(["personal-root"]), context()))
+                .status,
+        ).toBe(400);
+        expect(
+            (await PREVIEW(previewRequest(["other-a"]), context())).status,
+        ).toBe(404);
+
+        authState.userId = OTHER;
+        expect(
+            (await PREVIEW(previewRequest(["personal-a"]), context())).status,
+        ).toBe(404);
+        expect(await placementIds()).toEqual([]);
+        expect(await processing()).toBeUndefined();
     });
 
     it("keeps using the revision frozen at categorization after the profile changes", async () => {
@@ -485,7 +575,7 @@ describeWithDatabase("categorize route", () => {
         });
     });
 
-    it("replaces placements and intents while keeping the assigned profile", async () => {
+    it("replaces placements and intents and resolves the new folder profile", async () => {
         await addItem();
         expect(
             (await POST(request(["personal-a", "org-a"], "audio-a"), context()))
@@ -501,8 +591,8 @@ describeWithDatabase("categorize route", () => {
         expect(await placementIds()).toEqual(["personal-b"]);
         expect(await intentIds()).toEqual(["org-b"]);
         expect(await processing()).toMatchObject({
-            profileId: "audio-a",
-            profileRevisionId: "audio-a-revision",
+            profileId: "audio-b",
+            profileRevisionId: "audio-b-revision",
             requestedGeneration: 2,
             phases: {
                 categorize: expect.objectContaining({ generation: 2 }),

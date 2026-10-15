@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
+import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -58,6 +60,10 @@ interface Props {
     /** The viewer changes the Organization's content (a curator). */
     canCurate?: boolean;
 }
+
+type MailDetailResponse = MailDetail & {
+    processing: ItemProcessingPresentation | null;
+};
 
 function person(participant: MailParticipantView): string {
     if (participant.name && participant.address) {
@@ -100,7 +106,7 @@ export function MailDetailPane({
     const i18n = useExtracted();
     const locale = useLocale();
     const confirm = useConfirm();
-    const [detail, setDetail] = useState<MailDetail | null>(null);
+    const [detail, setDetail] = useState<MailDetailResponse | null>(null);
     const [failed, setFailed] = useState(false);
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
@@ -117,7 +123,7 @@ export function MailDetailPane({
         })
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
-                setDetail((await response.json()) as MailDetail);
+                setDetail((await response.json()) as MailDetailResponse);
             })
             .catch((error: unknown) => {
                 if (!controller.signal.aborted) {
@@ -312,6 +318,32 @@ export function MailDetailPane({
                         organizationOnly={mail.view === "org"}
                         onMove={onMoveBetweenFolders}
                     />
+                    {isOwn && mail.view !== "org" && detail?.processing && (
+                        <WorkflowIndicator
+                            initialData={detail.processing}
+                            onLearn={() =>
+                                document
+                                    .getElementById(`mail-learn-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onSummary={() =>
+                                document
+                                    .getElementById(`mail-summary-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onReviewLearn={() =>
+                                document
+                                    .getElementById(`mail-learn-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onReviewTasks={() =>
+                                document
+                                    .getElementById(`mail-summary-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onChanged={onChanged}
+                        />
+                    )}
                     {failed && (
                         <p className="text-sm text-destructive">
                             {i18n("The mail could not be loaded.")}
@@ -477,21 +509,29 @@ export function MailDetailPane({
             </Card>
 
             {detail && !detail.unreadable && (
-                <MailSummaryCard
-                    mail={mail}
-                    canChange={
-                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
-                    }
-                />
+                <div id={`mail-summary-${mail.id}`}>
+                    <MailSummaryCard
+                        mail={mail}
+                        canChange={
+                            mail.view === "org"
+                                ? isOrgAccount || canCurate
+                                : isOwn
+                        }
+                    />
+                </div>
             )}
             {detail && (
-                <MailLearnCard
-                    mail={mail}
-                    detail={detail}
-                    canChange={
-                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
-                    }
-                />
+                <div id={`mail-learn-${mail.id}`}>
+                    <MailLearnCard
+                        mail={mail}
+                        detail={detail}
+                        canChange={
+                            mail.view === "org"
+                                ? isOrgAccount || canCurate
+                                : isOwn
+                        }
+                    />
+                </div>
             )}
 
             {detail && detail.segments.length > 0 && (

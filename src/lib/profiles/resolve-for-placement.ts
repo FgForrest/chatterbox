@@ -29,7 +29,12 @@ export type PlacementProfileCandidate =
     | { kind: "manual_only" };
 
 export type PlacementProfileResolution =
-    | { status: "resolved"; profile: ProfileRecord; manualOnly: boolean }
+    | {
+          status: "resolved";
+          profile: ProfileRecord;
+          manualOnly: boolean;
+          source: "folder" | "default";
+      }
     | { status: "choose"; candidates: PlacementProfileCandidate[] }
     | { status: "waiting_for_curator" };
 
@@ -220,15 +225,16 @@ export async function folderDefaultProfile(
 async function usableProfiles(
     ownerUserId: string,
     channel: ProfileChannel,
+    seedProfiles: boolean,
 ): Promise<ProfileRecord[]> {
-    await ensureProfiles(ownerUserId);
+    if (seedProfiles) await ensureProfiles(ownerUserId);
     const organizationUserId = await getOrgUserId();
     if (
         organizationUserId &&
         organizationUserId !== ownerUserId &&
         isOrgScopeEnabled()
     ) {
-        await ensureProfiles(organizationUserId);
+        if (seedProfiles) await ensureProfiles(organizationUserId);
     }
     const owners = [
         ownerUserId,
@@ -333,8 +339,9 @@ async function accountDefaultProfile(input: {
     ownerUserId: string;
     actorUserId: string;
     channel: ProfileChannel;
+    seedProfiles: boolean;
 }): Promise<ProfileRecord | null> {
-    await ensureProfiles(input.ownerUserId);
+    if (input.seedProfiles) await ensureProfiles(input.ownerUserId);
     return getDefaultProfile(
         input.ownerUserId,
         input.channel,
@@ -350,6 +357,7 @@ export async function resolveChannelDefaultProfile(input: {
     ownerUserId: string;
     channel: ProfileChannel;
     view: RecordingView;
+    seedProfiles?: boolean;
 }): Promise<ProfileRecord | null> {
     const profileOwnerUserId =
         input.view === "org" ? await getOrgUserId() : input.ownerUserId;
@@ -358,6 +366,7 @@ export async function resolveChannelDefaultProfile(input: {
         ownerUserId: profileOwnerUserId,
         actorUserId: input.ownerUserId,
         channel: input.channel,
+        seedProfiles: input.seedProfiles ?? true,
     });
 }
 
@@ -377,7 +386,9 @@ export async function resolveProfileForPlacements(input: {
     channel: ProfileChannel;
     folderIds: readonly string[];
     view: RecordingView;
+    seedProfiles?: boolean;
 }): Promise<PlacementProfileResolution> {
+    const seedProfiles = input.seedProfiles ?? true;
     if (input.view === "org") {
         const itemProfile = await organizationItemProfile(input);
         if (itemProfile) {
@@ -385,6 +396,7 @@ export async function resolveProfileForPlacements(input: {
                 status: "resolved",
                 profile: itemProfile,
                 manualOnly: false,
+                source: "default",
             };
         }
     }
@@ -405,45 +417,70 @@ export async function resolveProfileForPlacements(input: {
                 status: "resolved",
                 profile: outcome.profile,
                 manualOnly: false,
+                source: "folder",
             };
         }
         if (outcome?.kind === "manual_only") {
-            const profile = await resolveChannelDefaultProfile(input);
+            const profile = await resolveChannelDefaultProfile({
+                ...input,
+                seedProfiles,
+            });
             if (profile)
-                return { status: "resolved", profile, manualOnly: true };
+                return {
+                    status: "resolved",
+                    profile,
+                    manualOnly: true,
+                    source: "folder",
+                };
         }
     }
     if (input.view === "org") {
         if (distinctDefaults.size === 0) {
-            const organizationDefault =
-                await resolveChannelDefaultProfile(input);
+            const organizationDefault = await resolveChannelDefaultProfile({
+                ...input,
+                seedProfiles,
+            });
             if (organizationDefault) {
                 return {
                     status: "resolved",
                     profile: organizationDefault,
                     manualOnly: false,
+                    source: "default",
                 };
             }
         }
         return { status: "waiting_for_curator" };
     }
 
-    const candidates = await usableProfiles(input.ownerUserId, input.channel);
+    const candidates = await usableProfiles(
+        input.ownerUserId,
+        input.channel,
+        seedProfiles,
+    );
     if (distinctDefaults.size > 1) {
         return { status: "choose", candidates: profileCandidates(candidates) };
     }
-    const ownerDefault = await resolveChannelDefaultProfile(input);
+    const ownerDefault = await resolveChannelDefaultProfile({
+        ...input,
+        seedProfiles,
+    });
     if (ownerDefault) {
         return {
             status: "resolved",
             profile: ownerDefault,
             manualOnly: false,
+            source: "default",
         };
     }
     if (candidates.length === 1) {
         const [profile] = candidates;
         if (profile) {
-            return { status: "resolved", profile, manualOnly: false };
+            return {
+                status: "resolved",
+                profile,
+                manualOnly: false,
+                source: "default",
+            };
         }
     }
     return { status: "choose", candidates: profileCandidates(candidates) };

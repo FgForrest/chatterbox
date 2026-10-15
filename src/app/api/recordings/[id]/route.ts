@@ -32,6 +32,7 @@ import {
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { getOrgUserId } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
+import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import { deleteRecordingStorageArtifacts } from "@/lib/recordings/erase";
 import {
     MAX_RECORDING_TITLE_LENGTH,
@@ -83,6 +84,12 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             "Recording not found",
             404,
         );
+    }
+
+    if (new URL(request.url).searchParams.get("processing") === "1") {
+        return NextResponse.json({
+            processing: await loadPrivateItemProcessing(session.user.id, id),
+        });
     }
 
     // Get transcription if exists. Defense-in-depth: scope by userId

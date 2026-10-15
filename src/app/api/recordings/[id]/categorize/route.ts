@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import {
-    chatterItems,
     itemProcessing,
     mailPendingShares,
     processingProfiles,
@@ -13,20 +12,18 @@ import {
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
-    assertCategorizableFolder,
     pruneRedundantAssignmentsInTx,
     scheduleFolderExportProjection,
 } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
+import { resolveCategorizationSelection } from "@/lib/pipeline/categorization";
+import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { resolveSelectedProfile } from "@/lib/profiles/resolve";
-import {
-    resolveChannelDefaultProfile,
-    resolveProfileForPlacements,
-} from "@/lib/profiles/resolve-for-placement";
+import { resolveChannelDefaultProfile } from "@/lib/profiles/resolve-for-placement";
 import type { ProfileRecord } from "@/lib/profiles/store";
 
 type IdContext = { params: Promise<{ id: string }> };
@@ -71,6 +68,16 @@ async function usableExplicitProfile(input: {
     return resolved.profile;
 }
 
+export const GET = apiHandler<IdContext>(async (request, context) => {
+    const session = await requireApiSession(request);
+    const { id: itemId } = await (context as IdContext).params;
+    const panel = await loadPrivateCategorizationPanel(session.user.id, itemId);
+    if (!panel) throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
+    return NextResponse.json(panel, {
+        headers: { "Cache-Control": "private, no-store" },
+    });
+});
+
 export const POST = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const ownerUserId = session.user.id;
@@ -87,25 +94,15 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
-    const [item] = await db
-        .select({ id: chatterItems.id, kind: chatterItems.kind })
-        .from(chatterItems)
-        .where(
-            and(
-                eq(chatterItems.id, itemId),
-                eq(chatterItems.userId, ownerUserId),
-                isNull(chatterItems.deletedAt),
-            ),
-        )
-        .limit(1);
-    if (!item) throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
-
-    const folderIds = [...new Set(parsed.data.folderIds)];
-    const folders = await Promise.all(
-        folderIds.map((folderId) =>
-            assertCategorizableFolder(ownerUserId, folderId),
-        ),
-    );
+    const {
+        item,
+        folders,
+        resolution: placementResolution,
+    } = await resolveCategorizationSelection({
+        ownerUserId,
+        itemId,
+        folderIds: parsed.data.folderIds,
+    });
     const personalFolderIds = folders
         .filter(({ scope }) => scope === "personal")
         .map(({ folderId }) => folderId);
@@ -128,14 +125,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             ),
         )
         .limit(1);
-    const placementResolution = await resolveProfileForPlacements({
-        ownerUserId,
-        itemId,
-        channel: item.kind,
-        folderIds,
-        view: "private",
-    });
-
     let selectedProfile: ProfileRecord | null = null;
     let selectedManualOnly: boolean | null = null;
     if (parsed.data.profileId) {
@@ -159,7 +148,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
         }
         selectedManualOnly = true;
-    } else if (!current?.profileId || !current.profileRevisionId) {
+    } else {
         if (placementResolution.status === "choose") {
             throw new AppError(
                 ErrorCode.CONFLICT,

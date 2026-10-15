@@ -28,6 +28,7 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
+import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -712,6 +713,29 @@ export function TranscriptionPanel({
 
     return (
         <div className="space-y-4">
+            {!orgView && (
+                <WorkflowIndicator
+                    itemId={recording.id}
+                    onTranscribe={() => onTranscribe()}
+                    onLearn={() =>
+                        transcriptSectionRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                        })
+                    }
+                    onSummary={handleSummarize}
+                    onReviewLearn={() =>
+                        transcriptSectionRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                        })
+                    }
+                    onReviewTasks={() =>
+                        document
+                            .getElementById(`recording-summary-${recording.id}`)
+                            ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    onChanged={onTranscriptStale}
+                />
+            )}
             {correcting && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
@@ -1201,6 +1225,7 @@ export function TranscriptionPanel({
 
                                 {summaryExpanded && (
                                     <section
+                                        id={`recording-summary-${recording.id}`}
                                         aria-label={i18n("Summary content")}
                                         className="max-h-96 space-y-4 overflow-y-auto pr-2"
                                     >
