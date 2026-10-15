@@ -23,6 +23,39 @@ ohlásí stav healthy pomocí `/api/health`. Neexistuje žádný samostatný „
 kontejner“ — pokud migrace selže, selže i start kontejneru, což je
 žádané chování.
 
+<span id="processing-pipeline-release" />
+
+## Vydání se zpracovatelským postupem
+
+Není nutná žádná změna konfigurace. Stáhněte nový image a restartujte jej podle
+postupu výše. Při startu kontejner použije migrace `0112` až `0124`. Všechny
+jsou aditivní. Migrace `0116` označí existující položky jako **Zpracováno před
+zavedením profilů**, takže aktualizace nespustí placené zpracování starých
+nahrávek ani pošty. Migrace `0122` vytvoří pro každý existující úkol domovskou
+zmínku a zaznamená okamžik platnosti jeho současných polí.
+
+Po aktualizaci čekají nové nahrávky a pošta poslaná do hlavní schránky na
+zařazení vlastníkem do složky, než se spustí placený krok. Pošta poslaná na
+adresu složky, nahrání přes přehled se zvolenou složkou a relace Meeting
+Recorderu se složkou toto čekání přeskočí.
+
+Rozšíření Meeting Recorder potřebuje odpovídající vydání v obchodě kvůli novému
+výběru složky. Staré rozšíření zůstává kompatibilní s novým serverem, ale jeho
+nahrávky přijdou bez `folderId` a čekají na zařazení. Proti staršímu serveru
+nabízí nové rozšíření pouze **Zařadit později**; pokud server vybranou složku
+odmítne, rozšíření volbu složky zahodí a pokračuje v nahrávání.
+
+Proměnná `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` je volitelná a má výchozí
+hodnotu 60. Chcete-li ji změnit, upravte předání prostředí do služby aplikace v
+Compose podle [Proměnných prostředí](./environment-variables#optional-knobs).
+
+{/* TODO rollback verified */}
+Tyto migrace pouze přidávají data a struktury, takže předchozí image by se měl
+spustit nad migrovanou databází. Stále je nutné ověřit starý image na migrované
+kopii, včetně chování starého kódu u položek čekajících na zařazení a nastavení
+změněných po aktualizaci prostřednictvím profilů. Než na tento postup vrácení
+spolehnete, zálohujte databázi a zvuk.
+
 <span id="picking-a-tag" />
 
 ## Výběr tagu

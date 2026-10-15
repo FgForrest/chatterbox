@@ -25,7 +25,7 @@ Seznam vlevo v části **Nahrávky** zobrazuje Vaše nejnovější nahrávky jak
 Nahrávky přibývají dvěma způsoby:
 
 - **Z Vašeho záznamníku.** Chatterbox stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
-- **Nahráním souboru.** Klikněte na **Nahrát** a vyberte zvukový nebo video soubor. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou. Nahrané nahrávky jsou automaticky přepsány, pokud je zapnutá funkce **Automaticky přepsat nové nahrávky** (Nastavení → Přepisování).
+- **Nahráním souboru.** Klikněte na **Nahrát** a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky čeká, až ji zařadíte. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
 
 Pořizujete záznam schůzky v prohlížeči na Linuxu? Váš administrátor Vám může poskytnout **meetrec**, malý program z příkazového řádku, který zaznamená Vás i ostatní účastníky do jednoho souboru vhodného pro nahrání. Viz [Pro administrátory](administrators.md#meeting-recorder-meetrec).
 
@@ -42,7 +42,7 @@ Nahoře naleznete:
 - **Název.** Kliknutím na tužku vedle názvu jej můžete přejmenovat. Vlastnoručně zadaný název nebude nikdy přepsán automaticky generovaným.
 - **Kdy, jak dlouhá, jak velká.**
 - **Odhadovaná spotřeba AI** (viz níže).
-- **Štítky složek** s přiřazenými složkami a možnost **Přidat do složky**.
+- [Ukazatel pracovního postupu](processing-and-profiles.md#the-workflow-indicator), včetně akcí **Zařadit** nebo **Změnit složky**, profilu a zamýšleného umístění v Organizaci.
 - **Vymazat** vpravo (viz níže).
 
 Pod tím jsou přehrávač, [přepis](transcripts.md) a [souhrn](summaries-and-tasks.md).
@@ -88,9 +88,9 @@ Klikněte na **Organizovat** nad seznamem pro zobrazení svých složek.
 - **Soukromé** obsahují Vaše vlastní složky. Každá nahrávka je vždy ve složce Soukromé, bez ohledu na to, kde jinde se nachází.
 - **Organizace** obsahuje složky sdílené s kolegy. Zobrazí se pouze, když má Vaše instance nastavenou Organizaci. Viz [Organizace](organization.md).
 
-Nahrávku zařadíte do složky tak, že ji přetáhnete na příslušnou složku, nebo přímo v detailu nahrávky použijete **Přidat do složky**:
+Nahrávku zařadíte do složky tak, že ji přetáhnete na příslušnou složku, nebo přímo v detailu nahrávky použijete **Zařadit** či **Změnit složky**:
 
-![Přidat do složky](images/add-to-folder.png)
+![Panel zařazení](images/add-to-folder.png)
 
 Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky.
 
@@ -100,6 +100,6 @@ Kliknutím na složku zobrazíte její nahrávky v tabulce, kterou lze řadit po
 
 ![Složka](images/folder-pane.png)
 
-**Nastavení** u složky umožní export složky na disk nebo na Google Drive. Viz [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
+**Nastavení** u složky určuje **Výchozí profily** pro nahrávky a poštu nebo nastavuje export na disk či Google Drive. Viz [Zpracování a profily](processing-and-profiles.md#folder-default-profiles) a [Exporty, zálohy a uchovávání](exports-backups-retention.md#folder-exports).
 
 Další: [Přepisy](transcripts.md)

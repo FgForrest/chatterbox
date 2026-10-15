@@ -21,6 +21,37 @@ healthy via `/api/health` once ready. There is no separate "migration
 container" — failure to migrate is failure to start, which is the
 behaviour you want.
 
+## Processing pipeline release
+
+No configuration change is required. Pull the new image and restart it as
+above. At startup, the container applies migrations `0112` through `0124`. They
+are additive. Migration `0116` marks existing items as **Processed before
+profiles**, so an upgrade does not start paid processing on old recordings or
+mail. Migration `0122` creates a home mention for each existing task and records
+the effective time of its current fields.
+
+After the upgrade, new recordings and mail sent to the main mailbox wait for
+their owner to file them into a folder before any paid step runs. Mail sent to a
+folder address, dashboard uploads with a folder, and Meeting Recorder sessions
+with a folder skip that wait.
+
+The Meeting Recorder extension needs its matching store release for the new
+folder picker. The old extension remains compatible with the new server, but
+its recordings arrive without `folderId` and wait for filing. Against an older
+server, the new extension offers only **File later**; if that server rejects a
+selected folder, the extension drops the folder choice and continues recording.
+
+`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` is optional and defaults to 60. To
+change it, update the app service's Compose environment pass-through as
+described under [Environment variables](./environment-variables#optional-knobs).
+
+{/* TODO rollback verified */}
+These migrations only add data and structures, so the previous image should
+start against the migrated database. This still needs verification with an old
+image on a migrated copy, including how old code handles items waiting for
+filing and settings changed through profiles after the upgrade. Take a database
+and audio backup before relying on this rollback path.
+
 ## Picking a tag
 
 `RIFFADO_VERSION` in your `.env` controls which image tag Compose

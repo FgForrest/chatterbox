@@ -29,7 +29,7 @@ Klikněte na **Učit se** nad přepisem. Tlačítko ukazuje průběh:
 | **Chyba učení**            | Něco se nepovedlo; klikněte pro důvod a opakování.|
 
 
-Při zapnutí **Učit se automaticky** (Nastavení → Učení) se Učení spustí u každého nového přepisu. Název, souhrn a témata pak čekají, až návrhy zkontrolujete, aby mohly vzniknout z upraveného přepisu. Čekají maximálně 72 hodin.
+Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
 
 <span id="reviewing" />
 
@@ -58,7 +58,7 @@ Klikněte na **Zkontrolováno** a zobrazte výsledek každého návrhu: použit,
 
 Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, takže je lze vždy vrátit zpět. Viz [Opravená slova](transcripts.md#corrected-words).
 
-Při zapnutí **Opravit přepis po Učení** (Nastavení → Učení, ve výchozím stavu zapnuto) pak Učení ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
+Pokud má profil zpracování zapnuté **Opravit přepis po Učení**, Učení potom ještě jednou přečte celý přepis s údaji z Almanachu a opraví další nesprávně rozpoznaná slova. Každá oprava je podtržena jantarovou barvou a můžete ji vrátit zpět.
 
 <span id="where-reviews-wait" />
 
@@ -75,6 +75,6 @@ Při zapnutí **Opravit přepis po Učení** (Nastavení → Učení, ve výchoz
 - Jména jsou rozpoznávána v jejich ohýbaných tvarech v jazyce přepisu, s diakritikou i bez: „Šimákem“ najde Šimáka.
 - Mluvčí označený pouze křestním jménem je podle toho označen. Křestní jméno, které sdílí dvě osoby v Almanachu, nepřiřadí žádné z nich.
 - Zařazení nového záznamu jako toho, který už máte, naučí Chatterbox nerozpoznané jméno jako přezdívku, takže příští běh jej rozpozná správně.
-- Učení může používat vlastního poskytovatele a model, například výkonnější než ten pro souhrny: Nastavení → Učení → **Poskytovatel učení**.
+- Profil zpracování může Učení přiřadit vlastního poskytovatele a model, například výkonnější než pro shrnutí. Viz [Zpracování a profily](processing-and-profiles.md).
 
 Pokračujte zde: [Organizace](organization.md)

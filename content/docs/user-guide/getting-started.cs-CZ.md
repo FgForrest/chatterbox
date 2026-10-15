@@ -36,7 +36,7 @@ Horní lišta obsahuje tři sekce:
 
 - **Nahrávky**: vaše knihovna. Vlevo je seznam nahrávek, vpravo detail vybrané nahrávky.
 - **Almanach**: osoby a objekty, o kterých Chatterbox ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
-- **Úkoly**: akční položky nalezené ve vašich nahrávkách. Odznak ukazuje nové úkoly přiřazené vám. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
+- **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
 
@@ -91,4 +91,4 @@ Paleta během psaní vyhledává v názvech i přepisech. Stiskněte `Enter` pro
 
 Chatterbox komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Chatterbox zasílá, se také posílají ve stejném jazyce.
 
-Pokračujte: [Nahrávky](recordings.md)
+Pokračujte: [Zpracování a profily](processing-and-profiles.md)

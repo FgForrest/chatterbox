@@ -4,10 +4,11 @@ description: Sdílejte nahrávky se všemi na své instanci prostřednictvím je
 ---
 
 Vlastní hosting Chatterbox může svým uživatelům poskytnout sdílenou **Organizaci** vedle
-jejich soukromé knihovny. Vlastníci sdílí nahrávku tím, že ji zařadí do stromu
-Organizace; každý v instanci ji pak může otevřít, přehrát a generovat k ní přepisy
-a shrnutí. Nic se nekopíruje: nahrávka, její zvuk a soukromý přepis a shrnutí
-vlastníka zůstávají přesně tam, kde byly.
+jejich soukromé knihovny. Vlastníci při zařazení nahrávky nebo pošty zvolí
+složku Organizace. Položka zůstane soukromá, dokud neprojde zpracováním
+a kontrolami, a potom se nasdílí automaticky. Každý v instanci může sdílenou
+položku otevřít; její sdílený obsah spravují kurátoři. Nic se nekopíruje:
+položka a její zdrojová data zůstávají u vlastníka.
 
 <span id="turning-it-on" />
 
@@ -42,18 +43,20 @@ samostatnou kryptografickou doménou.
 
 ## Co lidé mohou dělat
 
-| Akce                                                     | Vlastník | Ostatní uživatelé | Účet organizace |
-| -------------------------------------------------------- | :------: | :---------------: | :-------------: |
-| Sdílet nahrávku (zařadit ji do stromu Organizace)        |   ano    |         -         |        -        |
-| Stáhnout nahrávku z Organizace                          |   ano    |         -         |        -        |
-| Vytvářet, přejmenovat, přesouvat, mazat složky Organizace|   ano    |       ano         |      ano        |
-| Přesunout sdílenou nahrávku mezi složkami Organizace     |   ano    |       ano         |      ano        |
-| Otevřít, přehrát, stáhnout sdílenou nahrávku             |   ano    |       ano         |      ano        |
-| Přepisovat / sumarizovat zobrazení Organizace            |   ano    |       ano         |      ano        |
-| Pojmenovat mluvčí ve zobrazení Organizace                |   ano    |       ano         |      ano        |
-| Změnit, sloučit nebo vymazat lidi a věci Organizace      |    -     |         -         |      ano        |
-| Nastavit exporty souborového systému pro složky Organizace|    -     |         -         |      ano        |
-| Přejmenovat, smazat, vymazat samotnou nahrávku           |   ano    |         -         |        -        |
+| Akce                                                       | Vlastník položky | Člen | Kurátor / účet organizace |
+| ---------------------------------------------------------- | :--------------: | :--: | :-----------------------: |
+| Zvolit nebo zrušit zamýšlené umístění v Organizaci         |       ano        |  -   |             -             |
+| Odebrat sdílenou položku z Organizace                      |       ano        |  -   |             -             |
+| Otevřít sdílený obsah; přehrát nebo stáhnout sdílený zvuk  |       ano        | ano  |            ano            |
+| Zařadit sdílenou položku do složek Organizace              |       ano        | ano  |            ano            |
+| Upravit sdílený obsah a dokončit jeho kontroly              |        -         |  -   |            ano            |
+| Spravovat složky, profily, osoby a věci Organizace          |        -         |  -   |            ano            |
+| Nastavit exporty a zálohovat Organizaci                     |        -         |  -   |            ano            |
+| Přejmenovat, smazat nebo vymazat zdrojovou položku          |       ano        |  -   |             -             |
+
+Úkoly jsou výjimkou z pravidla pro sdílený obsah. Vlastník domovské položky
+a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit; jeho řešitel
+jej může také uzavřít nebo znovu otevřít.
 
 Smazání složky Organizace nikdy nezpůsobí ztrátu sdílených nahrávek: ty se přesunou
 do kořene Organizace.
@@ -69,31 +72,51 @@ svým vlastním jménem: ve zobrazení Organizace sdílené nahrávky ji
 přejmenují, přepíšou, shrnou, rozpoznají její témata, pojmenují mluvčí,
 spustí Learn a dokončí její kontrolu a vracejí opravy. Co vytvoří, se
 dostane do Almanachu Organizace a jsou u toho zaznamenáni jako autoři;
-účet organizace zůstává vlastníkem dat, ne jejich autorem.
+účet organizace zůstává vlastníkem dat, ne jejich autorem. Kurátoři také
+spravují složky a profily, osoby a věci, navržené vztahy, exporty a zálohy
+Organizace.
 
 Server o tom rozhoduje podle ověřeného přístupu kurátora, ne podle
 obrazovky. Práce zahájená před odebráním `org.curate` (shrnutí, přepis,
 běh Learn) se při zápisu znovu ověří a po ztrátě oprávnění nic nezapíše.
 
-Mazání a slučování lidí a věcí Organizace, sdílení a stahování nahrávek
-a nastavení exportů zatím ke správě Organizace nepatří: zůstávají účtu
-organizace a vlastníkovi nahrávky, jak je popsáno výše.
+Sdílení a odebrání zůstává vlastníkovi položky. Správa poskytovatelů AI
+Organizace vyžaduje oprávnění `access.manage`, nikoli `org.curate`.
 
 <span id="two-views-of-one-recording" />
 
 ## Dva pohledy na jednu nahrávku
 
-- **Soukromé zobrazení** (otevřené přes *Soukromé*): vlastní přepis a shrnutí
-  vlastníka, vytvořené podle jeho šablon. Měnit je může pouze vlastník.
-- **Zobrazení Organizace** (otevřené přes *Organizace*): vlastní přepis a shrnutí
-  Organizace. Dokud je někdo nevytvoří, zobrazují se vlastníkovy verze pouze pro
-  čtení. Spuštění v tomto zobrazení využívá poskytovatele AI, model a klíče podle
-  uživatele, který akci spouští — kdo klikne, ten platí — a šablony, prompty a
-  výchozí jazyk účtu organizace. Generování názvu, synchronizace názvu s Plaud,
-  webhooky a automatizace vlastníka se odtud nikdy nespouští.
+- **Soukromé zobrazení** (otevřené přes *Soukromé*): výsledek zpracování
+  vlastníka před sdílením a znovu po odebrání. Profil se vyřeší při zařazení
+  položky.
+- **Zobrazení Organizace** (otevřené přes *Organizace*): sdílený výsledek,
+  který spravují kurátoři. Profil Organizace zůstane připojený, pokud byl použit
+  před sdílením; jinak se použije výchozí profil složky Organizace. Pokud profil
+  neurčí ani jeden, zobrazení čeká, až jej zvolí kurátor.
 
-Stažení nebo smazání nahrávky odstraní její organizované zobrazení
-okamžitě pro všechny.
+Profil Organizace může připnout poskytovatele Organizace. Jinak ruční spuštění
+použije výchozího poskytovatele kurátora. Chybějící nebo zakázaný připnutý
+poskytovatel krok zastaví; Chatterbox nikdy tiše nepřejde na klíč jiné osoby.
+
+Odebrání nebo smazání položky ji okamžitě odstraní ze zobrazení Organizace
+všem. Odebrání domovské položky úkolu přesune domov na nejnovější zbývající
+sdílenou zmínku; pokud žádná nezůstane, úkol se stane soukromým spolu
+s odebranou položkou.
+
+## Poskytovatelé Organizace
+
+Poskytovatelé Organizace jsou přihlašovací údaje AI vlastněné účtem
+organizace. Členové je mohou používat prostřednictvím profilů, aniž by viděli
+jejich klíče. Přidávat, měnit, zakazovat nebo odebírat je mohou pouze osoby
+s oprávněním `access.manage`, případně účet organizace v místním režimu
+autorizace. Každá správcovská změna se zapisuje do auditního protokolu
+administrátora.
+
+Ve výchozím nastavení může každý člen provést 60 volání za hodinu u každého
+poskytovatele Organizace. Limit změníte pomocí
+`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`; produkční soubor Compose musí tuto
+proměnnou předat do kontejneru aplikace.
 
 <span id="people-and-things" />
 
@@ -106,11 +129,11 @@ Návrhy a soukromé poznámky se nikdy nesdílí — poznámky jsou viditelné p
 kdo je napsal.
 
 Každý má ve svém [Almanachu](../guides/almanac) své vlastní osoby a věci
-i osoby a věci Organizace. Pouze účet organizace může osoby a věci Organizace změnit,
-sloučit nebo vymazat a jeho úpravy platí pro každou nahrávku, kde se vyskytují, včetně
-soukromých. Kdokoli může sloučit soukromý duplikát s organizačním záznamem, vést si k němu
-soukromé poznámky nebo mu přidělit vlastní přezdívky. Věci a fakta přidané účtem organizace
-jsou vlastnictvím Organizace.
+i osoby a věci Organizace. Kurátoři mohou osoby a věci Organizace měnit,
+slučovat nebo mazat a změny platí všude, kde se sdílený záznam používá.
+Kdokoli může sloučit soukromý duplikát se záznamem Organizace, vést si k němu
+soukromé poznámky nebo mu přidělit vlastní přezdívky. Věci a fakta přidané
+kurátory patří Organizaci.
 
 <span id="retention" />
 
@@ -127,6 +150,8 @@ jsou vlastnictvím Organizace.
 
 ## Exporty
 
-Přihlaste se jako účet organizace, otevřete složku Organizace a přidejte export
+Jako kurátor nebo účet organizace otevřete složku Organizace a přidejte export
 souborového systému obvyklým způsobem. Zapíše zobrazení Organizace u každé
 sdílené nahrávky v této větvi včetně zvuku načteného ze skladu daného vlastníka.
+Kurátoři mohou také vytvořit zálohu Organizace; archiv zaznamená vlastníka
+každé položky.

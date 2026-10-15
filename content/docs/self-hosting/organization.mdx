@@ -4,11 +4,11 @@ description: Share recordings with everyone on your instance through one Organiz
 ---
 
 A self-hosted Chatterbox can give its users a shared **Organization** next to
-their private library. Owners share a recording by filing it into the
-Organization tree; everyone on the instance can then open it, play it,
-and generate transcripts and summaries for it. Nothing is copied: the
-recording, its audio and the owner's private transcript and summary stay
-exactly where they were.
+their private library. Owners choose an Organization folder while filing a
+recording or mail. The item stays private while its processing and review gates
+run, then is shared automatically. Everyone on the instance can open the
+shared item; curators maintain its shared content. Nothing is copied: the item
+and its source data stay with their owner.
 
 ## Turning it on
 
@@ -40,18 +40,20 @@ cryptographic domain.
 
 ## What people can do
 
-| Action                                                  | Owner | Other users | Organization account |
-| ------------------------------------------------------- | :---: | :---------: | :------------------: |
-| Share a recording (file it in the Organization tree)    |  yes  |      -      |          -           |
-| Withdraw a recording from the Organization              |  yes  |      -      |          -           |
-| Create, rename, move, delete Organization folders       |  yes  |     yes     |         yes          |
-| Move a shared recording between Organization folders    |  yes  |     yes     |         yes          |
-| Open, play, download a shared recording                 |  yes  |     yes     |         yes          |
-| Transcribe / summarize the Organization view            |  yes  |     yes     |         yes          |
-| Name speakers in the Organization view                  |  yes  |     yes     |         yes          |
-| Change, merge or erase Organization people and things   |   -   |      -      |         yes          |
-| Configure filesystem exports of Organization folders    |   -   |      -      |         yes          |
-| Rename, delete, erase the recording itself              |  yes  |      -      |          -           |
+| Action                                                    | Item owner | Member | Curator / organization account |
+| --------------------------------------------------------- | :--------: | :----: | :----------------------------: |
+| Choose or cancel an intended Organization placement       |    yes     |   -    |               -                |
+| Withdraw a shared item                                    |    yes     |   -    |               -                |
+| Open shared content; play or download shared audio        |    yes     |  yes   |              yes               |
+| File a shared item in Organization folders                |    yes     |  yes   |              yes               |
+| Edit shared content and complete its reviews              |     -      |   -    |              yes               |
+| Manage Organization folders, profiles, people and things  |     -      |   -    |              yes               |
+| Configure exports and back up the Organization            |     -      |   -    |              yes               |
+| Rename, delete or erase the source item                    |    yes     |   -    |               -                |
+
+Tasks are an exception to the shared-content rule. The home item's owner and
+curators may edit, drop, close and merge a shared task; its assignee may also
+close or reopen it.
 
 Deleting an Organization folder never unshares anything: its recordings move
 to the Organization root.
@@ -71,26 +73,42 @@ the author.
 The server decides this from the curator's verified access, not from
 the screen. Work started before their `org.curate` was taken away (a
 summary, a transcription, a Learn run) checks again when it writes and
-writes nothing once the right is gone.
+writes nothing once the right is gone. Curators also manage Organization
+folders and profiles, people and things, suggested relations, exports and
+backups.
 
-Deleting or merging Organization people and things, sharing and
-withdrawing recordings and configuring exports are not part of curation
-yet: they stay with the organization account and the recording's owner
-as described above.
+Sharing and withdrawing remain with the item's owner. Managing Organization
+AI providers requires `access.manage`, not `org.curate`.
 
 ## Two views of one recording
 
-- **Private view** (opened from *Private*): the owner's own transcript and
-  summary, made with the owner's templates. Only the owner changes them.
-- **Organization view** (opened from *Organization*): the organization's own
-  transcript and summary. Until someone creates them it shows the owner's,
-  read-only. Runs in this view use the clicker's AI provider, model and
-  keys -- whoever clicks pays -- and the organization account's templates,
-  prompts and output language. Title generation, Plaud title sync, webhooks
-  and the owner's automations never fire from it.
+- **Private view** (opened from *Private*): the owner's processing result before
+  sharing and again after withdrawal. The profile is resolved when the item is
+  filed.
+- **Organization view** (opened from *Organization*): the shared result that
+  curators maintain. An Organization profile remains attached when one was
+  used before sharing; otherwise the Organization folder default applies. If
+  neither supplies one, the view waits for a curator to choose a profile.
 
-Withdrawing or deleting a recording deletes its Organization view for
-everyone at once.
+An Organization profile may pin an Organization provider. Otherwise a manual
+run uses the curator's default provider. A missing or disabled pinned provider
+stops the step; Chatterbox never silently switches to another person's key.
+
+Withdrawing or deleting an item removes it from Organization views for everyone
+at once. Withdrawing a task's home item moves the home to the newest remaining
+shared mention; without one, the task becomes private with the withdrawn item.
+
+## Organization providers
+
+Organization providers are AI credentials owned by the organization account.
+Members can use them through profiles without seeing their keys. Only holders
+of `access.manage`, or the organization account in local authorization mode,
+may add, change, disable or remove them. Every management change is written to
+the administrator audit log.
+
+Each member may make 60 calls per hour to each Organization provider by
+default. Set `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` to change that limit; the
+production Compose file must pass the variable into the application container.
 
 ## People and things
 
@@ -101,12 +119,11 @@ person from the start. Suggestions and private notes are never shared --
 notes stay visible only to whoever wrote them.
 
 Everyone's [Almanac](../guides/almanac) shows their own people and things and
-the Organization's. Only the organization account changes, merges or erases
-Organization people and things, and its changes apply to every recording that
-names them, private ones included. Anyone can fold a private duplicate into an
-Organization record, keep private notes on one, and give it nicknames of their
-own. The things and facts the organization account adds are the
-Organization's.
+the Organization's. Curators change, merge or erase Organization people and
+things, and those changes apply wherever the shared record is used. Anyone can
+fold a private duplicate into an Organization record, keep private notes on
+one, and give it nicknames of their own. The things and facts curators add are
+the Organization's.
 
 ## Retention
 
@@ -121,6 +138,7 @@ Organization's.
 
 ## Exports
 
-Sign in as the organization account, open an Organization folder and add a
-filesystem export as usual. It writes the Organization view of every shared
-recording in that subtree, with audio read from each owner's storage.
+As a curator or the organization account, open an Organization folder and add
+a filesystem export as usual. It writes the Organization view of every shared
+recording in that subtree, with audio read from each owner's storage. Curators
+can also create an Organization backup; the archive records each item's owner.

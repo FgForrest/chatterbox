@@ -20,7 +20,7 @@ The list on the left of **Recordings** shows your newest recordings first, group
 Recordings arrive in two ways:
 
 - **From your recorder.** Chatterbox fetches new recordings from your recorder's cloud on a schedule, when you open the app, and when you click **Sync device**. Settings → Sync controls how often.
-- **By upload.** Click **Upload** and pick an audio or a video file. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time. Uploaded recordings are transcribed automatically when **Auto-transcribe new recordings** is on (Settings → Transcription).
+- **By upload.** Click **Upload** and pick an audio or a video file. You can choose a folder before the upload; that recording skips the filing wait and uses the folder's default profile. Without a folder it waits for you to file it. For a video, Chatterbox keeps only the sound: the file is uploaded, the audio is extracted in the background, and a message tells you when it is ready. One video is converted at a time.
 
 Recording a meeting held in the browser on Linux? Your administrator can give you **meetrec**, a small command-line recorder that captures both your microphone and the other participants into one file, ready to upload. See [For administrators](administrators.md#meeting-recorder-meetrec).
 
@@ -35,7 +35,7 @@ At the top:
 - **The title.** Click the pencil next to it to rename the recording. A title you set yourself is never replaced by a generated one.
 - **When, how long, how large.**
 - **Estimated AI spend** (see below).
-- **Folder chips** with the folders it is filed in, and **Add to folder**.
+- The [workflow indicator](processing-and-profiles.md#the-workflow-indicator), including **File it** or **Change folders**, its profile, and any intended Organization placement.
 - **Erase** on the right (see below).
 
 Below that are the player, the [transcript](transcripts.md) and the [summary](summaries-and-tasks.md).
@@ -73,9 +73,9 @@ Click **Organize** above the list to see your folders.
 - **Private** holds your own folders. Every recording is in Private, whatever else it is filed in.
 - **Organization** holds the folders you share with colleagues. It appears only when your instance has an Organization. See [The Organization](organization.md).
 
-To file a recording, drag its row onto a folder, or open the recording and use **Add to folder**:
+To file a recording, drag its row onto a folder, or open the recording and click **File it** or **Change folders**:
 
-![Add to folder](images/add-to-folder.png)
+![The filing panel](images/add-to-folder.png)
 
 A recording can sit in several folders at once. Click the **×** on a folder chip to take it out of that folder.
 
@@ -85,6 +85,6 @@ Click a folder to see its recordings in a table you can sort by title, date, len
 
 ![A folder](images/folder-pane.png)
 
-**Settings** on a folder sets up an export of the folder to disk or to Google Drive. See [Exports, backups and retention](exports-backups-retention.md#folder-exports).
+**Settings** on a folder sets its **Default profiles** for recordings and mail, or sets up an export to disk or Google Drive. See [Processing and profiles](processing-and-profiles.md#folder-default-profiles) and [Exports, backups and retention](exports-backups-retention.md#folder-exports).
 
 Next: [Transcripts](transcripts.md)

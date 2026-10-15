@@ -165,6 +165,10 @@ nebo `{ "phase": "categorize", "state": "skipped" }`, pokud nemají řádek
 zpracování. Do čekajícího stavu přejdou až tehdy, když po zavedení postupu
 dorazí nový obsah.
 
+`phase` má jednu z hodnot `categorize`, `transcribe`, `learn`, `summary`,
+`taskReview` nebo `share`. `state` má jednu z hodnot `pending`, `waiting`,
+`running`, `done`, `skipped`, `failed`, `outdated` nebo `not_processed`.
+
 Stránkování je **kurzorové, sestupně dle `updated_at`**. Když
 `has_more` je `true`, předejte `next_cursor` v dalším dotazu.
 Pokud je `false`, jste na konci seznamu.
@@ -294,8 +298,11 @@ které odesílá zvuk po částech už během nahrávání:
    (`audio/webm` nebo `audio/ogg`), `channelLayout`, `startedAt` a nepovinná pole
    `platformHint`, `clientVersion`, `timezoneOffsetMinutes`,
    `noticeAcknowledgedAt` a `folderId`. Složka musí být osobní složka mimo
-   kořen nebo zapisovatelná složka Organizace. Neznámá, kořenová nebo
-   nepřístupná složka vrátí `400 INVALID_INPUT`. Odpověď obsahuje `id` relace.
+   kořen nebo zapisovatelná složka Organizace. Kořenová složka vrátí
+   `400 INVALID_INPUT`; neznámá nebo nepřístupná složka vrátí stejný kód s
+   hodnotou `folderId` v `details.field`. Odpověď `201` je úplná reprezentace relace včetně
+   `folder_id`, `processing`, jednorázového klíče `encryption` a limitů nahrávání
+   v `limits`.
 2. `PUT /api/v1/recording-sessions/{id}/chunks/{index}` odešle jednu část jako
    nezpracované tělo požadavku s hlavičkou `X-Chunk-SHA256`. Indexy začínají od
    nuly a musí být souvislé.
@@ -303,8 +310,10 @@ které odesílá zvuk po částech už během nahrávání:
    pomocí `chunkCount`, `endedAt` a `stopReason`. Server ověří části, sestaví je
    a vytvoří nahrávku. Odpověď obsahuje `job_id`.
 4. `GET /api/v1/recording-sessions/{id}` vrací stav a přijaté indexy částí pro
-   obnovení po přerušení. Odpovědi relace obsahují také
-   `processing: { phase, state }`; po dokončení odpovídá stavu nahrávky.
+   obnovení po přerušení. Odpovědi relace obsahují také `folder_id` a
+   `processing: { phase, state }`. Před vznikem nahrávky je zpracování
+   `{ "phase": "categorize", "state": "pending" }`; po dokončení odpovídá
+   stavu nahrávky.
 5. `DELETE /api/v1/recording-sessions/{id}` relaci zruší a smaže uložené části.
 
 Spárované rozšíření načítá výchozí nastavení serveru z
@@ -321,10 +330,15 @@ kořen a zapisovatelné složky Organizace:
 }
 ```
 
+Složky jsou seřazené nejprve osobní a potom podle `path`. Endpoint používá
+rate-limit klíče rekordéru: chybějící nebo neplatný klíč vrátí `401`, klíč bez
+oprávnění `recordings:write` vrátí `403` a vyčerpaný limit vrátí `429`.
+
 Je-li uvedeno `folderId`, dokončení nahrávku zařadí před pokračováním ve
 zpracování. Složka Organizace nejprve vytvoří záměr sdílení; zpracování
-automaticky pokračuje, jakmile se vyhodnotí profil, jinak čeká ve stavu
-`needs_profile`. Bez `folderId` nahrávka čeká v aplikaci, až ji vlastník zařadí.
+automaticky pokračuje, jakmile se vyhodnotí použitelný profil složky, jinak v
+aplikaci čeká na volbu profilu nebo zásah kurátora. Bez `folderId` nahrávka čeká
+v aplikaci, až ji vlastník zařadí.
 Webhooky `transcription.completed` a `summary.completed` se proto u takové
 nahrávky odešlou až poté, co ji vlastník zařadí a zpracování dosáhne příslušné
 fáze.
