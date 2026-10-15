@@ -28,7 +28,11 @@ import {
     sharingOrgUserId,
     type WriterRefusal,
 } from "@/lib/sharing/writer";
-import { type TaskProposals, writeTaskProposalsInTx } from "@/lib/tasks/store";
+import {
+    dropTasksWithoutSummaryInTx,
+    type TaskProposals,
+    writeTaskProposalsInTx,
+} from "@/lib/tasks/store";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /**
@@ -453,6 +457,10 @@ export async function upsertTranscription(
                                 ),
                             ),
                         );
+                    await dropTasksWithoutSummaryInTx(tx, {
+                        recordingId,
+                        ownerUserId: userId,
+                    });
                 }
             } else {
                 await tx.insert(transcriptions).values({
@@ -709,6 +717,15 @@ export async function upsertEnhancement(
                     recordingId,
                     ownerUserId: userId,
                     actorUserId,
+                    view: args.view ?? "private",
+                    contentSourceId:
+                        typeof args.inputs?.contentSourceId === "string"
+                            ? args.inputs.contentSourceId
+                            : null,
+                    contentRevision:
+                        typeof args.inputs?.contentRevision === "number"
+                            ? args.inputs.contentRevision
+                            : null,
                     proposals: args.tasks,
                 });
             }

@@ -396,6 +396,7 @@ export async function generateMailSummary(
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
+        view: ctx.view,
         tasks,
     });
     if (!committed) {

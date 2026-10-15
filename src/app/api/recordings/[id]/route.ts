@@ -53,7 +53,10 @@ import {
     writerRefusalError,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { deleteRecordingTasksInTx } from "@/lib/tasks/store";
+import {
+    deleteItemTaskDataInTx,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { createRedactedWebhookPayload } from "@/lib/webhooks/payload";
 
@@ -382,6 +385,10 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         // recording's, as every change to the tree does, so no folder move
         // can file the recording again beside this delete.
         if (orgUserId) await lockOrgTree(tx);
+        await lockItemTaskGraphInTx(tx, {
+            itemId: id,
+            ownerUserId: userId,
+        });
 
         // Lock the parent recording row up front. Without this, a
         // concurrent transcribe/summary writer (which also re-checks
@@ -445,7 +452,13 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
 
         await tx.delete(aiEnhancements).where(eq(aiEnhancements.itemId, id));
-        await deleteRecordingTasksInTx(tx, id);
+        await deleteItemTaskDataInTx(tx, {
+            itemId: id,
+            ownerUserId: userId,
+            actorUserId: userId,
+            orgUserId,
+            reason: "deleted",
+        });
         // Learn runs and their items went with the transcripts; what was
         // dismissed has nothing left to answer for.
         await tx.delete(learnDismissals).where(eq(learnDismissals.itemId, id));

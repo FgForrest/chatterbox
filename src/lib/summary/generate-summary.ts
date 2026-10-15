@@ -551,6 +551,7 @@ export async function generateSummaryForRecording(
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
+        view: ctx.view,
         tasks,
     });
 

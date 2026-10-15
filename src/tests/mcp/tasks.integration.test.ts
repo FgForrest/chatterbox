@@ -23,7 +23,7 @@ import {
     vi,
 } from "vitest";
 import { z } from "zod";
-import { recordingTasks, users } from "@/db/schema";
+import { recordingTasks, taskMentions, users } from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -485,6 +485,59 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
             });
         });
 
+        it("links a task to the item that carries its visible evidence", async () => {
+            const taskId = id("aliceSharedBob");
+            await db()
+                .insert(taskMentions)
+                .values([
+                    {
+                        taskId,
+                        itemId: "a-shared",
+                        userId: ALICE,
+                        view: "private",
+                        quote: encryptText("hidden home evidence"),
+                        statementAt: new Date("2026-09-06T10:00:00Z"),
+                        matchDecision: "home",
+                    },
+                    {
+                        taskId,
+                        itemId: "b-shared",
+                        userId: BOB,
+                        view: "org",
+                        quote: encryptText("visible evidence elsewhere"),
+                        evidenceStartMs: 9_000,
+                        statementAt: new Date("2026-09-07T10:00:00Z"),
+                        matchDecision: "accepted",
+                    },
+                ]);
+            try {
+                const listed = await call<ListOut>("list_tasks", service(), {
+                    status: "all",
+                });
+                expect(
+                    listed.tasks.find((row) => row.id === taskId),
+                ).toMatchObject({
+                    quote: "visible evidence elsewhere",
+                    start_ms: 9_000,
+                    recording: { id: "a-shared" },
+                    url: "https://riffado.example.test/dashboard?recording=b-shared&view=org",
+                });
+                const searched = await call<SearchOut>(
+                    "search_tasks",
+                    service(),
+                    { query: "visible evidence elsewhere" },
+                );
+                expect(searched.tasks[0]).toMatchObject({
+                    id: taskId,
+                    url: "https://riffado.example.test/dashboard?recording=b-shared&view=org",
+                });
+            } finally {
+                await db()
+                    .delete(taskMentions)
+                    .where(eq(taskMentions.taskId, taskId));
+            }
+        });
+
         it("filters by assignee name, due day and recording title", async () => {
             const byAssignee = await call<ListOut>("list_tasks", alice(), {
                 assignee: "bob bauer",
@@ -589,6 +642,74 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
                     })
                 ).tasks,
             ).toEqual([]);
+        });
+
+        it("never lists or searches a private or withdrawn mention for another member", async () => {
+            const taskId = id("aliceSharedBob");
+            await db()
+                .insert(taskMentions)
+                .values([
+                    {
+                        taskId,
+                        itemId: "a-shared",
+                        userId: ALICE,
+                        view: "org",
+                        quote: encryptText("shared launch evidence"),
+                        statementAt: new Date("2026-09-06T10:00:00Z"),
+                        matchDecision: "home",
+                    },
+                    {
+                        taskId,
+                        itemId: "a-private",
+                        userId: ALICE,
+                        view: "private",
+                        quote: encryptText("private roadmap evidence"),
+                        statementAt: new Date("2026-09-07T10:00:00Z"),
+                        matchDecision: "accepted",
+                    },
+                    {
+                        taskId,
+                        itemId: "a-private",
+                        userId: ALICE,
+                        view: "org",
+                        quote: encryptText("withdrawn organization evidence"),
+                        statementAt: new Date("2026-09-08T10:00:00Z"),
+                        matchDecision: "accepted",
+                    },
+                ]);
+            try {
+                const listed = await call<ListOut>("list_tasks", bob(), {
+                    status: "all",
+                });
+                expect(
+                    listed.tasks.find((row) => row.id === taskId)?.quote,
+                ).toBe("shared launch evidence");
+                expect(
+                    (
+                        await call<SearchOut>("search_tasks", service(), {
+                            query: "private roadmap",
+                        })
+                    ).tasks,
+                ).toEqual([]);
+                expect(
+                    (
+                        await call<SearchOut>("search_tasks", service(), {
+                            query: "withdrawn organization",
+                        })
+                    ).tasks,
+                ).toEqual([]);
+                expect(
+                    (
+                        await call<SearchOut>("search_tasks", service(), {
+                            query: "shared launch",
+                        })
+                    ).tasks.map((row) => row.id),
+                ).toContain(taskId);
+            } finally {
+                await db()
+                    .delete(taskMentions)
+                    .where(eq(taskMentions.taskId, taskId));
+            }
         });
 
         it("narrows by the recording filters and the task filters", async () => {

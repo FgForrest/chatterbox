@@ -7,7 +7,7 @@
  * create scratch databases on.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -25,6 +25,8 @@ import {
     recordingFolders,
     recordingTaskRejections,
     recordingTasks,
+    taskHomeMoves,
+    taskMentions,
     taskUpdateProposals,
     transcriptions,
     transcriptSpeakers,
@@ -90,16 +92,23 @@ vi.mock("@/lib/export/document-sidecars", () => ({
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/storage/factory", () => ({
+    createUserStorageProvider: vi.fn().mockResolvedValue({
+        deleteFile: vi.fn().mockResolvedValue(undefined),
+    }),
+}));
 
 import { markRecordingDeleted } from "@/db/items";
 import { deleteSummaryForRecording } from "@/db/queries/retention";
-import { encryptText } from "@/lib/encryption/fields";
-import { addRecordingToFolder } from "@/lib/folders/folders";
+import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { addRecordingToFolder, unshareRecording } from "@/lib/folders/folders";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { eraseLocalArtifact } from "@/lib/recordings/erase";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
+import { deleteItemTaskDataInTx } from "@/lib/tasks/mentions";
 import { loadTasksPromptContext, taskFingerprint } from "@/lib/tasks/proposals";
 import type { ProposedTask, TaskProposals } from "@/lib/tasks/store";
 import {
@@ -114,7 +123,10 @@ import {
     tickUpdateProposal,
     updateTask,
 } from "@/lib/tasks/tasks";
-import { upsertEnhancement } from "@/lib/transcription/persist";
+import {
+    type UpsertEnhancementArgs,
+    upsertEnhancement,
+} from "@/lib/transcription/persist";
 import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -272,6 +284,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         recordingId: string,
         tasks: ProposedTask[],
         extra: Partial<TaskProposals> = {},
+        inputs?: UpsertEnhancementArgs["inputs"],
     ) {
         const result = await upsertEnhancement({
             userId: ALICE,
@@ -284,6 +297,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             provider: "openai",
             model: "gpt",
             allowReaped: true,
+            inputs,
             tasks: {
                 source: "riffado",
                 tasks,
@@ -341,6 +355,142 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             duePhrase: "by next Friday",
         });
         expect(proposals[2]?.assigneeHint).toBe("Dana");
+    });
+
+    it("stores a mention for every proposed task and follow-up", async () => {
+        const target = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        const [manualMention] = await db()
+            .select({
+                quote: taskMentions.quote,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(eq(taskMentions.taskId, target.id));
+        expect(manualMention).toEqual({ quote: null, decision: "home" });
+        await summarize(
+            REC,
+            [
+                proposal("Draft the pricing page", {
+                    quote: "draft the pricing page",
+                    evidenceText: {
+                        segmentIndex: 2,
+                        charStart: 4,
+                        charEnd: 26,
+                    },
+                    evidenceProvenance: "quoted",
+                }),
+            ],
+            {
+                updates: [
+                    {
+                        taskId: target.id,
+                        kind: "done",
+                        dueDate: null,
+                        duePhrase: null,
+                        quote: "the partner email is sent",
+                        evidenceStartMs: 8_000,
+                        evidenceProvenance: "unverified",
+                    },
+                ],
+            },
+            {
+                contentId: transcriptId,
+                contentSourceId: "riffado",
+                contentRevision: 0,
+            },
+        );
+
+        const rows = await db()
+            .select({
+                taskId: taskMentions.taskId,
+                itemId: taskMentions.itemId,
+                view: taskMentions.view,
+                quote: taskMentions.quote,
+                start: taskMentions.evidenceStartMs,
+                segment: taskMentions.evidenceSegmentIndex,
+                charStart: taskMentions.evidenceCharStart,
+                charEnd: taskMentions.evidenceCharEnd,
+                provenance: taskMentions.provenance,
+                contentSourceId: taskMentions.contentSourceId,
+                contentRevision: taskMentions.contentRevision,
+                decision: taskMentions.matchDecision,
+                statementAt: taskMentions.statementAt,
+            })
+            .from(taskMentions)
+            .where(eq(taskMentions.itemId, REC));
+        expect(rows).toHaveLength(2);
+        expect(
+            rows.map((row) => ({
+                ...row,
+                quote: row.quote ? decryptText(row.quote) : null,
+            })),
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    itemId: REC,
+                    view: "private",
+                    quote: "draft the pricing page",
+                    start: null,
+                    segment: 2,
+                    charStart: 4,
+                    charEnd: 26,
+                    provenance: "quoted",
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                    decision: "home",
+                    statementAt: new Date("2026-10-06T10:00:00Z"),
+                }),
+                expect.objectContaining({
+                    taskId: target.id,
+                    itemId: REC,
+                    view: "private",
+                    quote: "the partner email is sent",
+                    start: 8_000,
+                    provenance: "unverified",
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                    decision: "suggested",
+                    statementAt: new Date("2026-10-06T10:00:00Z"),
+                }),
+            ]),
+        );
+    });
+
+    it("replaces the same view's proposed and follow-up mentions on re-summary", async () => {
+        const target = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(REC, [proposal("Draft the pricing page")], {
+            updates: [
+                {
+                    taskId: target.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "the partner email is sent",
+                    evidenceStartMs: 8_000,
+                },
+            ],
+        });
+        await summarize(REC, [proposal("Book the venue")]);
+
+        const mentions = await db()
+            .select({
+                quote: taskMentions.quote,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(eq(taskMentions.itemId, REC));
+        expect(
+            mentions.map((mention) => ({
+                ...mention,
+                quote: mention.quote ? decryptText(mention.quote) : null,
+            })),
+        ).toEqual([{ quote: null, decision: "home" }]);
     });
 
     it("accepts the ticked, rejects the rest for good, and keeps tasks over a re-summarize", async () => {
@@ -731,6 +881,100 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([]);
     });
 
+    it("decides follow-up mentions and keeps only accepted evidence", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "dismissed follow-up evidence",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
+
+        await acceptReview(alice, LATER);
+
+        const [mention] = await db()
+            .select({
+                decision: taskMentions.matchDecision,
+                decidedBy: taskMentions.decidedByUserId,
+                decidedAt: taskMentions.decidedAt,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.taskId, task.id),
+                    eq(taskMentions.itemId, LATER),
+                ),
+            );
+        expect(mention).toMatchObject({
+            decision: "rejected",
+            decidedBy: ALICE,
+        });
+        expect(mention?.decidedAt).toBeInstanceOf(Date);
+        const [listed] = await listTasks(alice, query("tracked"));
+        expect(listed?.visibleMentionQuotes).not.toContainEqual({
+            text: "dismissed follow-up evidence",
+            kind: "audio",
+        });
+    });
+
+    it("keeps an applied follow-up mention through a re-summary", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "accepted follow-up evidence",
+                    evidenceStartMs: 2_000,
+                },
+            ],
+        });
+        const [update] = (await review(alice, LATER)).updates;
+        if (!update) throw new Error("missing follow-up");
+        await tickUpdateProposal(alice, LATER, update.id, true, update.version);
+        await acceptReview(alice, LATER);
+
+        await summarize(LATER, []);
+
+        const mentions = await db()
+            .select({
+                decision: taskMentions.matchDecision,
+                quote: taskMentions.quote,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.taskId, task.id),
+                    eq(taskMentions.itemId, LATER),
+                ),
+            );
+        expect(
+            mentions.map((mention) => ({
+                decision: mention.decision,
+                quote: mention.quote ? decryptText(mention.quote) : null,
+            })),
+        ).toEqual([
+            {
+                decision: "accepted",
+                quote: "accepted follow-up evidence",
+            },
+        ]);
+    });
+
     it("applies a ticked follow-up to a task on a mail", async () => {
         const mailId = "mail-follow-up-target";
         await addMail(mailId);
@@ -878,8 +1122,32 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
     it("archives a shared recording's tasks for the Organization, and for the owner only theirs", async () => {
         await summarize(REC, [proposal("Draft the pricing page")]);
         await acceptReview(alice, REC);
+        const [draft] = (await review(alice)).tasks;
+        if (!draft) throw new Error("missing accepted task");
         await addTask(alice, LATER, { text: "Call Dana", status: "open" });
         await share();
+        await db()
+            .insert(taskMentions)
+            .values([
+                {
+                    taskId: draft.id,
+                    itemId: REC,
+                    userId: ALICE,
+                    view: "org",
+                    quote: encryptText("organization evidence"),
+                    statementAt: new Date("2026-10-07T10:00:00Z"),
+                    matchDecision: "accepted",
+                },
+                {
+                    taskId: draft.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    view: "org",
+                    quote: encryptText("withdrawn evidence"),
+                    statementAt: new Date("2026-10-08T10:00:00Z"),
+                    matchDecision: "accepted",
+                },
+            ]);
         await addTask(org, REC, { text: "Book the venue", status: "open" });
 
         const archived = async (scope: TaskArchiveScope) =>
@@ -900,6 +1168,14 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             [LATER]: ["Call Dana"],
         });
         expect(await archived({ kind: "personal", userId: BOB })).toEqual({});
+        const organizationTasks = await tasksForArchive(
+            { kind: "organization", orgUserId },
+            [REC, LATER],
+        );
+        expect(
+            organizationTasks.get(REC)?.find((task) => task.id === draft.id)
+                ?.quote,
+        ).toBe("organization evidence");
     });
 
     it("moves tasks to the survivor of a person merge", async () => {
@@ -928,6 +1204,508 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             new Date(),
         );
         expect((await review(alice)).tasks).toEqual([]);
+    });
+
+    it("removes the home mention with its last summary without moving the home", async () => {
+        await summarize(REC, [proposal("Send the partner email")]);
+        await acceptReview(alice, REC);
+        const [task] = (await review(alice)).tasks;
+        if (!task) throw new Error("missing accepted task");
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "the partner email was sent",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
+        const [update] = (await review(alice, LATER)).updates;
+        if (!update) throw new Error("missing follow-up");
+        await tickUpdateProposal(alice, LATER, update.id, true, update.version);
+        await acceptReview(alice, LATER);
+
+        await deleteSummaryForRecording(
+            REC,
+            ALICE,
+            { isOrg: false, orgUserId },
+            new Date(),
+        );
+
+        const [stored] = await db()
+            .select({ itemId: recordingTasks.itemId })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored?.itemId).toBe(REC);
+        expect(
+            await db()
+                .select()
+                .from(taskMentions)
+                .where(eq(taskMentions.taskId, task.id)),
+        ).toHaveLength(1);
+        expect(
+            await db()
+                .select()
+                .from(taskHomeMoves)
+                .where(eq(taskHomeMoves.taskId, task.id)),
+        ).toEqual([]);
+    });
+
+    it.each([
+        "deleted",
+        "erased",
+    ] as const)("moves a %s home to its newest remaining mention and records the move", async (reason) => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "private",
+                quote: encryptText("the newer mention"),
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        await db().transaction(async (tx) => {
+            await tx
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
+                .where(eq(chatterItems.id, REC))
+                .for("update");
+            await deleteItemTaskDataInTx(tx, {
+                itemId: REC,
+                ownerUserId: ALICE,
+                actorUserId: ALICE,
+                orgUserId,
+                reason,
+            });
+            await tx
+                .update(chatterItems)
+                .set({ deletedAt: new Date() })
+                .where(eq(chatterItems.id, REC));
+        });
+
+        const [stored] = await db()
+            .select({ itemId: recordingTasks.itemId })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored?.itemId).toBe(LATER);
+        const [move] = await db()
+            .select()
+            .from(taskHomeMoves)
+            .where(eq(taskHomeMoves.taskId, task.id));
+        expect(move).toMatchObject({
+            fromItemId: REC,
+            toItemId: LATER,
+            fromUserId: ALICE,
+            toUserId: ALICE,
+            reason,
+            actorUserId: ALICE,
+        });
+    });
+
+    it("moves the home when the last remaining artifact is erased", async () => {
+        await summarize(REC, []);
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "private",
+                quote: encryptText("the newer mention"),
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        await eraseLocalArtifact(ALICE, REC, "summary");
+        expect(
+            (
+                await db()
+                    .select({ itemId: recordingTasks.itemId })
+                    .from(recordingTasks)
+                    .where(eq(recordingTasks.id, task.id))
+            )[0]?.itemId,
+        ).toBe(REC);
+        await eraseLocalArtifact(ALICE, REC, "transcript");
+        expect(
+            (
+                await db()
+                    .select({ itemId: recordingTasks.itemId })
+                    .from(recordingTasks)
+                    .where(eq(recordingTasks.id, task.id))
+            )[0]?.itemId,
+        ).toBe(REC);
+
+        await eraseLocalArtifact(ALICE, REC, "audio");
+
+        expect(
+            (
+                await db()
+                    .select({ itemId: recordingTasks.itemId })
+                    .from(recordingTasks)
+                    .where(eq(recordingTasks.id, task.id))
+            )[0]?.itemId,
+        ).toBe(LATER);
+        expect(
+            await db()
+                .select({ reason: taskHomeMoves.reason })
+                .from(taskHomeMoves)
+                .where(eq(taskHomeMoves.taskId, task.id)),
+        ).toEqual([{ reason: "erased" }]);
+    });
+
+    it("deletes a task when only a suggested mention remains", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    quote: "not decided yet",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
+
+        await db().transaction(async (tx) => {
+            await deleteItemTaskDataInTx(tx, {
+                itemId: REC,
+                ownerUserId: ALICE,
+                actorUserId: ALICE,
+                orgUserId,
+                reason: "deleted",
+            });
+        });
+
+        expect(
+            await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, task.id)),
+        ).toEqual([]);
+    });
+
+    it("does not move an Organization task to another member's private item", async () => {
+        await share(REC);
+        const task = await addTask(org, REC, {
+            text: "Keep this in the Organization",
+            status: "open",
+        });
+        const bobMail = "mail-bob-private-home-candidate";
+        await addMail(bobMail, BOB);
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: bobMail,
+                userId: BOB,
+                view: "private",
+                quote: encryptText("Bob's private evidence"),
+                statementAt: new Date("2026-10-09T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        await db().transaction(async (tx) => {
+            await deleteItemTaskDataInTx(tx, {
+                itemId: REC,
+                ownerUserId: ALICE,
+                actorUserId: ALICE,
+                orgUserId,
+                reason: "deleted",
+            });
+        });
+
+        expect(
+            await db()
+                .select()
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, task.id)),
+        ).toEqual([]);
+    });
+
+    it("withdraws a home to another shared mention, or leaves it private", async () => {
+        await share(REC);
+        await share(LATER);
+        const moved = await addTask(org, REC, {
+            text: "Move this task",
+            status: "open",
+        });
+        const privateAfter = await addTask(org, REC, {
+            text: "Keep this task private",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: moved.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "org",
+                quote: encryptText("visible shared evidence"),
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        await unshareRecording(ALICE, REC, { withdraw: true });
+
+        const stored = await db()
+            .select({ id: recordingTasks.id, itemId: recordingTasks.itemId })
+            .from(recordingTasks)
+            .where(inArray(recordingTasks.id, [moved.id, privateAfter.id]));
+        expect(stored).toEqual(
+            expect.arrayContaining([
+                { id: moved.id, itemId: LATER },
+                { id: privateAfter.id, itemId: REC },
+            ]),
+        );
+        expect((await review(org, LATER)).tasks.map((row) => row.id)).toContain(
+            moved.id,
+        );
+        const organizationTasks = await listTasks(org, query("tracked"));
+        expect(organizationTasks.map((row) => row.id)).not.toContain(
+            privateAfter.id,
+        );
+        expect(
+            organizationTasks.find((row) => row.id === moved.id)?.quote,
+        ).toBe("visible shared evidence");
+        const archived = await tasksForArchive(
+            { kind: "organization", orgUserId },
+            [REC, LATER],
+        );
+        expect(archived.get(REC) ?? []).toEqual([]);
+        expect(archived.get(LATER)).toEqual([
+            expect.objectContaining({
+                id: moved.id,
+                quote: "visible shared evidence",
+            }),
+        ]);
+        expect((await review(alice, REC)).tasks.map((row) => row.id)).toContain(
+            privateAfter.id,
+        );
+    });
+
+    it("identifies another visible item as the evidence target", async () => {
+        await share(REC);
+        await share(LATER);
+        const task = await addTask(org, REC, {
+            text: "Publish the launch note",
+            status: "open",
+        });
+        await db()
+            .update(taskMentions)
+            .set({ view: "private" })
+            .where(eq(taskMentions.taskId, task.id));
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "org",
+                quote: encryptText("publish it after the follow-up"),
+                evidenceStartMs: 4_000,
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        const listed = (await listTasks(org, query("tracked"))).find(
+            (row) => row.id === task.id,
+        );
+        expect(listed).toMatchObject({
+            recordingId: REC,
+            evidenceItemId: LATER,
+            evidenceItemKind: "audio",
+            quote: "publish it after the follow-up",
+            evidenceStartMs: 4_000,
+        });
+    });
+
+    it("keeps visible home evidence ahead of a newer linked mention", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Publish the launch note",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "private",
+                quote: encryptText("newer evidence elsewhere"),
+                evidenceStartMs: 4_000,
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        const listed = (await listTasks(alice, query("tracked"))).find(
+            (row) => row.id === task.id,
+        );
+        expect(listed).toMatchObject({
+            evidenceItemId: REC,
+            evidenceItemKind: "audio",
+            quote: null,
+            evidenceStartMs: null,
+        });
+    });
+
+    it("serializes retention, task review, and withdrawal without losing the surviving home", async () => {
+        await summarize(REC, []);
+        await share(REC);
+        await share(LATER);
+        const task = await addTask(org, REC, {
+            text: "Publish the launch note",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                view: "org",
+                quote: encryptText("publish it after the follow-up"),
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+        await followUp(task.id, REC);
+
+        const results = await Promise.allSettled([
+            deleteSummaryForRecording(
+                REC,
+                ALICE,
+                { isOrg: true, orgUserId },
+                new Date(),
+            ),
+            acceptReview(org, REC),
+            unshareRecording(ALICE, REC, { withdraw: true }),
+        ]);
+
+        for (const result of results) {
+            if (result.status === "rejected") {
+                const error = result.reason as {
+                    code?: string;
+                    cause?: { code?: string };
+                };
+                expect(error.code).not.toBe("40P01");
+                expect(error.cause?.code).not.toBe("40P01");
+            }
+        }
+        const [stored] = await db()
+            .select({ itemId: recordingTasks.itemId })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored?.itemId).toBe(LATER);
+        expect(
+            (await listTasks(org, query("tracked"))).map((row) => row.id),
+        ).toContain(task.id);
+        expect(
+            await db()
+                .select()
+                .from(taskHomeMoves)
+                .where(eq(taskHomeMoves.taskId, task.id)),
+        ).toEqual([
+            expect.objectContaining({
+                fromItemId: REC,
+                toItemId: LATER,
+                reason: "withdrawn",
+            }),
+        ]);
+    });
+
+    it("serializes deleting a home with mail and audio follow-up reviews", async () => {
+        const mailId = "mail-concurrent-follow-up";
+        const audioId = "rec-concurrent-follow-up";
+        await addMail(mailId);
+        await addRecording(audioId, "2026-10-09T10:00:00Z");
+        const task = await addTask(alice, REC, {
+            text: "Publish the launch note",
+            status: "open",
+        });
+        for (const [itemId, statementAt] of [
+            [mailId, new Date("2026-10-08T10:00:00Z")],
+            [audioId, new Date("2026-10-09T10:00:00Z")],
+        ] as const) {
+            const [update] = await db()
+                .insert(taskUpdateProposals)
+                .values({
+                    taskId: task.id,
+                    itemId,
+                    userId: ALICE,
+                    kind: "done",
+                    ticked: true,
+                })
+                .returning({ id: taskUpdateProposals.id });
+            await db()
+                .insert(taskMentions)
+                .values({
+                    id: update?.id ?? "",
+                    taskId: task.id,
+                    itemId,
+                    userId: ALICE,
+                    view: "private",
+                    quote: encryptText(`evidence on ${itemId}`),
+                    statementAt,
+                    matchDecision: "suggested",
+                });
+        }
+
+        const results = await Promise.allSettled([
+            db().transaction(async (tx) => {
+                await deleteItemTaskDataInTx(tx, {
+                    itemId: REC,
+                    ownerUserId: ALICE,
+                    actorUserId: ALICE,
+                    orgUserId,
+                    reason: "deleted",
+                });
+            }),
+            acceptReview(alice, mailId),
+            acceptReview(alice, audioId),
+        ]);
+
+        for (const result of results) {
+            if (result.status === "rejected") {
+                const error = result.reason as {
+                    code?: string;
+                    cause?: { code?: string };
+                };
+                expect(error.code).not.toBe("40P01");
+                expect(error.cause?.code).not.toBe("40P01");
+            }
+        }
+        const [stored] = await db()
+            .select({ itemId: recordingTasks.itemId })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        if (stored) {
+            expect([mailId, audioId]).toContain(stored.itemId);
+            const linked = await db()
+                .select({ decision: taskMentions.matchDecision })
+                .from(taskMentions)
+                .where(eq(taskMentions.taskId, task.id));
+            expect(linked.some((row) => row.decision === "accepted")).toBe(
+                true,
+            );
+        }
     });
 
     async function propose(recordingId: string, text: string) {

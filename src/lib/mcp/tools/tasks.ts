@@ -117,21 +117,32 @@ function sourceReadable(caller: McpCaller, task: TaskListItem): boolean {
     return task.recording.kind !== "mail" || mayReadMail(caller);
 }
 
+function evidenceReadable(caller: McpCaller, task: TaskListItem): boolean {
+    return task.evidenceItemKind !== "mail" || mayReadMail(caller);
+}
+
 /**
  * Hides the token of every secret address the mail tasks among `tasks`
  * mention, for every caller: an MCP client is no person reading their own.
  */
 async function mailMasker(tasks: readonly TaskListItem[]): Promise<Mask> {
-    const texts = tasks
-        .filter((task) => task.recording.kind === "mail")
-        .flatMap((task) => [
-            task.text,
-            task.quote ?? "",
-            task.duePhrase ?? "",
-            task.assigneeHint ?? "",
-            task.assignee?.name ?? "",
-            task.recording.title,
-        ]);
+    const texts = [
+        ...tasks
+            .filter((task) => task.recording.kind === "mail")
+            .flatMap((task) => [
+                task.text,
+                task.quote ?? "",
+                task.duePhrase ?? "",
+                task.assigneeHint ?? "",
+                task.assignee?.name ?? "",
+                task.recording.title,
+            ]),
+        ...tasks.flatMap((task) =>
+            task.visibleMentionQuotes
+                .filter((mention) => mention.kind === "mail")
+                .map((mention) => mention.text),
+        ),
+    ];
     return texts.length > 0
         ? secretAddressMasker(texts)
         : (text: string) => text;
@@ -139,13 +150,28 @@ async function mailMasker(tasks: readonly TaskListItem[]): Promise<Mask> {
 
 /** The tasks, those of mail with their secret addresses masked. */
 async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
-    if (!tasks.some((task) => task.recording.kind === "mail")) return tasks;
+    if (
+        !tasks.some(
+            (task) =>
+                task.recording.kind === "mail" ||
+                task.visibleMentionQuotes.some(
+                    (mention) => mention.kind === "mail",
+                ),
+        )
+    ) {
+        return tasks;
+    }
     const mask = await mailMasker(tasks);
     const optional = (text: string | null) => (text ? mask(text) : text);
-    return tasks.map((task) =>
-        task.recording.kind === "mail"
+    return tasks.map((task) => {
+        const mentions = task.visibleMentionQuotes.map((mention) => ({
+            ...mention,
+            text: mention.kind === "mail" ? mask(mention.text) : mention.text,
+        }));
+        return task.recording.kind === "mail"
             ? {
                   ...task,
+                  visibleMentionQuotes: mentions,
                   text: mask(task.text),
                   quote: optional(task.quote),
                   duePhrase: optional(task.duePhrase),
@@ -155,8 +181,8 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
                       title: mask(task.recording.title),
                   },
               }
-            : task,
-    );
+            : { ...task, visibleMentionQuotes: mentions };
+    });
 }
 
 function toItem(
@@ -166,9 +192,17 @@ function toItem(
 ): TaskItem {
     const writes = caller.roles.has("tasks:write");
     const mail = task.recording.kind === "mail";
+    const evidenceMail = task.evidenceItemKind === "mail";
     const mask: Mask = mail ? maskMail : (text) => text;
+    const quoteMask: Mask =
+        task.evidenceItemKind === "mail" ? maskMail : (text) => text;
     const source = sourceReadable(caller, task);
-    const url = source
+    const quoteReadable =
+        task.evidenceItemKind !== "mail" || mayReadMail(caller);
+    const url = evidenceReadable(caller, task)
+        ? recordingUrl(task.evidenceItemId, task.recording.view)
+        : null;
+    const homeUrl = source
         ? recordingUrl(task.recording.id, task.recording.view)
         : null;
     return {
@@ -181,13 +215,13 @@ function toItem(
         assignee_hint: task.assigneeHint ? mask(task.assigneeHint) : null,
         due_date: task.dueDate,
         due_phrase: source && task.duePhrase ? mask(task.duePhrase) : null,
-        quote: source && task.quote ? mask(task.quote) : null,
+        quote: quoteReadable && task.quote ? quoteMask(task.quote) : null,
         start_ms: task.evidenceStartMs,
-        kind: task.recording.kind,
-        ...(mail
+        kind: task.evidenceItemKind,
+        ...(evidenceMail
             ? {
                   untrusted: true as const,
-                  ...(source
+                  ...(quoteReadable
                       ? { evidence_provenance: task.evidenceProvenance }
                       : {}),
               }
@@ -196,12 +230,12 @@ function toItem(
         can_edit: writes && task.canEdit,
         can_close: writes && task.canClose,
         recording:
-            source && url
+            source && homeUrl
                 ? {
                       id: task.recording.id,
                       title: mask(task.recording.title),
                       recorded_at: task.recording.startTime,
-                      url,
+                      url: homeUrl,
                   }
                 : null,
         url,
@@ -395,7 +429,11 @@ const searchTasks = defineTool({
                 // A quote of a mail the caller may not read finds nothing.
                 const text = [
                     task.text,
-                    sourceReadable(caller, task) ? task.quote : null,
+                    ...task.visibleMentionQuotes.flatMap((mention) =>
+                        mention.kind === "mail" && !mayReadMail(caller)
+                            ? []
+                            : [mention.text],
+                    ),
                     task.assigneeHint,
                 ]
                     .filter((part): part is string => Boolean(part))
@@ -515,7 +553,11 @@ const updateTaskTool = defineTool({
             throw await taskFailure(error, caller, viewer, before.id);
         }
         const [task] = await toItems(caller, [
-            { ...updated, recording: before.recording },
+            {
+                ...updated,
+                recording: before.recording,
+                visibleMentionQuotes: before.visibleMentionQuotes,
+            },
         ]);
         return {
             task: task as TaskItem,

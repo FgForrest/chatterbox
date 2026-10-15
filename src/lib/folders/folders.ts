@@ -43,6 +43,10 @@ import {
     publishTaskAssigneesInTx,
 } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import {
+    lockItemTaskGraphInTx,
+    withdrawItemTaskHomesInTx,
+} from "@/lib/tasks/mentions";
 import type {
     FolderKind,
     FolderOrganization,
@@ -395,6 +399,23 @@ export async function lockItemForFolderMutation(
             ),
         )
         .for("update");
+}
+
+async function lockItemTaskGraphForFolderMutation(
+    tx: Tx,
+    itemId: string,
+): Promise<void> {
+    const [item] = await tx
+        .select({ ownerUserId: chatterItems.userId })
+        .from(chatterItems)
+        .where(eq(chatterItems.id, itemId))
+        .limit(1);
+    if (item) {
+        await lockItemTaskGraphInTx(tx, {
+            itemId,
+            ownerUserId: item.ownerUserId,
+        });
+    }
 }
 
 async function listTreeFolders(
@@ -1281,6 +1302,7 @@ export async function removeRecordingFromFolder(input: {
     await requireMayWithdraw(input.userId, input.recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
+        await lockItemTaskGraphForFolderMutation(tx, input.recordingId);
         await lockItemForFolderMutation(tx, input.recordingId);
         // Not shared (any more): nothing to take out, and nothing withdrawn.
         // To the organization account it is then a recording it cannot see.
@@ -1312,7 +1334,12 @@ export async function removeRecordingFromFolder(input: {
         }
         await bumpScopeInTx(
             tx,
-            await endSharingIfUnfiled(tx, target.ownerId, input.recordingId),
+            await endSharingIfUnfiled(
+                tx,
+                target.ownerId,
+                input.recordingId,
+                input.userId,
+            ),
         );
         const [owner] = await tx
             .select({ userId: chatterItems.userId })
@@ -1349,6 +1376,7 @@ export async function unshareRecording(
     await requireMayWithdraw(userId, recordingId, orgUserId);
     const withdrew = await db.transaction(async (tx) => {
         await lockOrgTree(tx);
+        await lockItemTaskGraphForFolderMutation(tx, recordingId);
         await lockItemForFolderMutation(tx, recordingId);
         // Not shared (any more): nothing to withdraw.
         if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
@@ -1364,7 +1392,7 @@ export async function unshareRecording(
         }
         await bumpScopeInTx(
             tx,
-            await withdrawRecordingInTx(tx, orgUserId, recordingId),
+            await withdrawRecordingInTx(tx, orgUserId, recordingId, userId),
         );
         const [owner] = await tx
             .select({ userId: chatterItems.userId })
@@ -1397,6 +1425,7 @@ export async function withdrawRecordingInTx(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
+    actorUserId: string,
 ): Promise<Set<string>> {
     const orgFolderIds = (
         await tx
@@ -1414,7 +1443,7 @@ export async function withdrawRecordingInTx(
                 ),
             );
     }
-    return endSharingIfUnfiled(tx, orgUserId, recordingId);
+    return endSharingIfUnfiled(tx, orgUserId, recordingId, actorUserId);
 }
 
 /**
@@ -1503,6 +1532,7 @@ async function endSharingIfUnfiled(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
+    actorUserId: string,
 ): Promise<Set<string>> {
     const remaining = await tx
         .select({ folderId: recordingFolderAssignments.folderId })
@@ -1548,6 +1578,12 @@ async function endSharingIfUnfiled(
         .where(eq(chatterItems.id, recordingId))
         .limit(1);
     if (!owner) return new Set();
+    await withdrawItemTaskHomesInTx(tx, {
+        itemId: recordingId,
+        ownerUserId: owner.userId,
+        actorUserId,
+        orgUserId,
+    });
     return withdrawKnowledgeInTx(tx, {
         recordingId,
         ownerUserId: owner.userId,

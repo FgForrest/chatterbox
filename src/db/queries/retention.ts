@@ -17,7 +17,7 @@ import {
     recordingFolderAssignments,
     recordingFolders,
     recordings,
-    recordingTasks,
+    taskMentions,
     transcriptions,
     userSettings,
     users,
@@ -407,13 +407,13 @@ function reapCandidateWhere(
                                 ),
                             ),
                     ),
-                    // Tasks left by a summary a re-run replaced and nothing
-                    // made again: they age with the summaries.
+                    // Mentions left by a summary a re-run replaced and
+                    // nothing made again age with the summaries.
                     exists(
                         db
-                            .select({ id: recordingTasks.id })
-                            .from(recordingTasks)
-                            .where(eq(recordingTasks.itemId, recordings.id)),
+                            .select({ id: taskMentions.id })
+                            .from(taskMentions)
+                            .where(eq(taskMentions.itemId, recordings.id)),
                     ),
                 ),
             ),

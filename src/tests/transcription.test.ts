@@ -816,6 +816,23 @@ describe("Transcription", () => {
                                     ),
                             }),
                         }),
+                    })
+                    .mockReturnValueOnce({
+                        from: vi.fn().mockReturnValue({
+                            where: vi.fn().mockReturnValue({
+                                limit: vi.fn().mockResolvedValue([]),
+                            }),
+                        }),
+                    })
+                    .mockReturnValueOnce({
+                        from: vi.fn().mockReturnValue({
+                            where: vi.fn().mockResolvedValue([]),
+                        }),
+                    })
+                    .mockReturnValueOnce({
+                        from: vi.fn().mockReturnValue({
+                            where: vi.fn().mockResolvedValue([]),
+                        }),
                     }),
                 insert: txInsert,
                 update: txUpdate,

@@ -327,6 +327,7 @@ import {
     recordings as recordingsTable,
     recordingTaskRejections,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
     transcriptions as transcriptionsTable,
     webhookDeliveries,
@@ -348,11 +349,13 @@ describe("DELETE /api/recordings/[id]", () => {
 
     let txCalls: Array<{ table: string; op: "delete" | "update" }>;
     let txSets: Array<{ table: string; values: Record<string, unknown> }>;
+    let lockedDeletedAt: Date | null;
 
     beforeEach(() => {
         vi.clearAllMocks();
         txCalls = [];
         txSets = [];
+        lockedDeletedAt = null;
 
         (auth.api.getSession as unknown as Mock).mockResolvedValue({
             user: { id: userId },
@@ -376,13 +379,15 @@ describe("DELETE /api/recordings/[id]", () => {
                           ? "learn_dismissals"
                           : t === recordingTasks
                             ? "recording_tasks"
-                            : t === recordingTaskRejections
-                              ? "recording_task_rejections"
-                              : t === taskUpdateProposals
-                                ? "task_update_proposals"
-                                : t === chatterItems
-                                  ? "chatter_items"
-                                  : "unknown";
+                            : t === taskMentions
+                              ? "task_mentions"
+                              : t === recordingTaskRejections
+                                ? "recording_task_rejections"
+                                : t === taskUpdateProposals
+                                  ? "task_update_proposals"
+                                  : t === chatterItems
+                                    ? "chatter_items"
+                                    : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -391,19 +396,92 @@ describe("DELETE /api/recordings/[id]", () => {
                     // of the tombstone transaction. The default stub
                     // returns a non-tombstoned row so the handler
                     // proceeds; individual tests can override.
-                    select: vi.fn().mockReturnValue({
-                        from: vi.fn().mockReturnValue({
-                            where: vi.fn().mockReturnValue({
-                                for: vi.fn().mockReturnValue({
-                                    limit: vi
-                                        .fn()
-                                        .mockResolvedValue([
-                                            { deletedAt: null },
+                    select: vi.fn().mockImplementation((selection) => ({
+                        from: vi.fn().mockImplementation((table: unknown) => {
+                            if (table === recordingsTable) {
+                                const keys = Object.keys(
+                                    selection as Record<string, unknown>,
+                                );
+                                if (!keys.includes("deletedAt")) {
+                                    return {
+                                        where: vi.fn().mockReturnValue({
+                                            for: vi
+                                                .fn()
+                                                .mockResolvedValue([
+                                                    { id: recordingId },
+                                                ]),
+                                        }),
+                                    };
+                                }
+                                return {
+                                    where: vi.fn().mockReturnValue({
+                                        for: vi.fn().mockReturnValue({
+                                            limit: vi.fn().mockResolvedValue([
+                                                {
+                                                    deletedAt: lockedDeletedAt,
+                                                },
+                                            ]),
+                                        }),
+                                    }),
+                                };
+                            }
+                            if (table === recordingTasks) {
+                                const rows = [
+                                    {
+                                        id: "task-1",
+                                        itemId: recordingId,
+                                        userId,
+                                    },
+                                ];
+                                const direct = Object.assign(
+                                    Promise.resolve(rows),
+                                    {
+                                        orderBy: vi.fn().mockReturnValue({
+                                            for: vi
+                                                .fn()
+                                                .mockResolvedValue(rows),
+                                        }),
+                                    },
+                                );
+                                return {
+                                    where: vi.fn().mockReturnValue(direct),
+                                };
+                            }
+                            if (table === taskMentions) {
+                                const remaining = {
+                                    innerJoin: vi.fn(),
+                                    where: vi.fn(),
+                                };
+                                remaining.innerJoin.mockReturnValue(remaining);
+                                const direct = Object.assign(
+                                    Promise.resolve([]),
+                                    {
+                                        orderBy: vi.fn().mockResolvedValue([]),
+                                    },
+                                );
+                                remaining.where.mockReturnValue(direct);
+                                return remaining;
+                            }
+                            if (table === taskUpdateProposals) {
+                                return {
+                                    where: vi.fn().mockResolvedValue([]),
+                                };
+                            }
+                            if (table === chatterItems) {
+                                return {
+                                    where: vi.fn().mockReturnValue({
+                                        orderBy: vi.fn().mockResolvedValue([
+                                            {
+                                                id: recordingId,
+                                                kind: "audio",
+                                            },
                                         ]),
-                                }),
-                            }),
+                                    }),
+                                };
+                            }
+                            throw new Error("Unexpected transaction select");
                         }),
-                    }),
+                    })),
                     delete: vi.fn((table: unknown) => ({
                         where: vi.fn().mockImplementation(() => {
                             txCalls.push({
@@ -555,15 +633,16 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(10);
+        expect(txCalls).toHaveLength(11);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
         // Learn dismissals → webhook redaction → recording → its item.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
-            "delete:task_update_proposals",
+            "delete:task_mentions",
             "delete:recording_tasks",
+            "delete:task_update_proposals",
             "delete:recording_task_rejections",
             "delete:learn_dismissals",
             "update:webhook_deliveries",
@@ -637,8 +716,9 @@ describe("DELETE /api/recordings/[id]", () => {
             "update:async_jobs",
             "delete:transcriptions",
             "delete:ai_enhancements",
-            "delete:task_update_proposals",
+            "delete:task_mentions",
             "delete:recording_tasks",
+            "delete:task_update_proposals",
             "delete:recording_task_rejections",
             "delete:learn_dismissals",
             "update:webhook_deliveries",
@@ -669,32 +749,7 @@ describe("DELETE /api/recordings/[id]", () => {
             { id: recordingId, userId, storagePath, deletedAt: null },
         ]);
 
-        // Override the default tx.select stub so the FOR UPDATE re-check
-        // returns an already-tombstoned row.
-        (db.transaction as Mock).mockImplementationOnce(
-            async (cb: (tx: unknown) => Promise<unknown>) => {
-                const tx = {
-                    select: vi.fn().mockReturnValue({
-                        from: vi.fn().mockReturnValue({
-                            where: vi.fn().mockReturnValue({
-                                for: vi.fn().mockReturnValue({
-                                    limit: vi.fn().mockResolvedValue([
-                                        {
-                                            deletedAt: new Date(
-                                                "2024-02-01T00:00:00Z",
-                                            ),
-                                        },
-                                    ]),
-                                }),
-                            }),
-                        }),
-                    }),
-                    delete: vi.fn(),
-                    update: vi.fn(),
-                };
-                return cb(tx);
-            },
-        );
+        lockedDeletedAt = new Date("2024-02-01T00:00:00Z");
 
         const res = await deleteRecording(makeRequest(), { params });
         expect(res.status).toBe(200);

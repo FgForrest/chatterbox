@@ -23,6 +23,10 @@ import { shareMailInTx } from "@/lib/mail/share-gate";
 import { getOrgUserId } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    deleteItemTaskDataInTx,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -100,6 +104,10 @@ export async function deleteMail(
     const orgUserId = await getOrgUserId();
     await db.transaction(async (tx) => {
         if (orgUserId) await lockOrgTree(tx);
+        await lockItemTaskGraphInTx(tx, {
+            itemId,
+            ownerUserId,
+        });
         await lockMailInTx(tx, ownerUserId, itemId);
         if (orgUserId) {
             const [shared] = await tx
@@ -143,6 +151,13 @@ export async function deleteMail(
                 ),
             );
         const knowledge = await knowledgeOnRecordingInTx(tx, itemId);
+        await deleteItemTaskDataInTx(tx, {
+            itemId,
+            ownerUserId,
+            actorUserId: ownerUserId,
+            orgUserId,
+            reason: "deleted",
+        });
         await tx
             .delete(chatterItems)
             .where(

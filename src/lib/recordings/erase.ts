@@ -34,6 +34,10 @@ import {
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
+import {
+    deleteItemTaskDataInTx,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 export type LocalEraseScope = "audio" | "transcript" | "summary";
@@ -166,9 +170,19 @@ export async function eraseLocalArtifact(
         const scopes = new Set<string>();
         // Before the recording lock, as withdrawing takes them.
         if (orgUserId && options.withdraw) await lockOrgTree(tx);
+        await lockItemTaskGraphInTx(tx, {
+            itemId: recordingId,
+            ownerUserId: userId,
+        });
         const [locked] = await tx
-            .select({ deletedAt: recordings.deletedAt })
+            .select({
+                deletedAt: recordings.deletedAt,
+                audioReapedAt: recordings.audioReapedAt,
+                contentReapedAt: chatterItems.contentReapedAt,
+                summaryReapedAt: chatterItems.summaryReapedAt,
+            })
             .from(recordings)
+            .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
             .where(
                 and(
                     eq(recordings.id, recordingId),
@@ -193,10 +207,25 @@ export async function eraseLocalArtifact(
                 tx,
                 orgUserId,
                 recordingId,
+                userId,
             )) {
                 scopes.add(scope);
             }
             withdrew = true;
+        }
+
+        const erasedAsWhole =
+            (scope === "audio" || locked.audioReapedAt !== null) &&
+            (scope === "transcript" || locked.contentReapedAt !== null) &&
+            (scope === "summary" || locked.summaryReapedAt !== null);
+        if (erasedAsWhole) {
+            await deleteItemTaskDataInTx(tx, {
+                itemId: recordingId,
+                ownerUserId: userId,
+                actorUserId: userId,
+                orgUserId,
+                reason: "erased",
+            });
         }
 
         if (scope === "audio") {

@@ -13,6 +13,7 @@ import {
     type ArchiveScope,
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
+import { loadArchivedTaskMentions } from "@/lib/tasks/mentions";
 
 /** One task as a backup archive carries it. */
 export interface ArchivedTask {
@@ -142,7 +143,23 @@ export async function tasksForArchive(
             ),
         )
         .orderBy(recordingTasks.position, recordingTasks.createdAt);
+    const mentions = await loadArchivedTaskMentions(
+        scope,
+        rows.map((row) => row.id),
+    );
     for (const row of rows) {
+        const mention = mentions.latest.get(row.id);
+        const legacy = !mentions.taskIdsWithMentions.has(row.id);
+        const segmentIndex =
+            mention?.evidenceSegmentIndex ??
+            (legacy ? row.evidenceSegmentIndex : null);
+        const charStart =
+            mention?.evidenceCharStart ??
+            (legacy ? row.evidenceCharStart : null);
+        const charEnd =
+            mention?.evidenceCharEnd ?? (legacy ? row.evidenceCharEnd : null);
+        const provenance =
+            mention?.provenance ?? (legacy ? row.evidenceProvenance : null);
         const list = byRecording.get(row.recordingId) ?? [];
         const status = row.status as ArchivedTask["status"];
         list.push({
@@ -159,22 +176,20 @@ export async function tasksForArchive(
             assigneeHint: optional(row.assigneeHint),
             dueDate: row.dueDate,
             duePhrase: optional(row.duePhrase),
-            quote: optional(row.quote),
-            evidenceStartMs: row.evidenceStartMs,
-            ...(row.evidenceSegmentIndex !== null &&
-            row.evidenceCharStart !== null &&
-            row.evidenceCharEnd !== null
+            quote: mention?.quote ?? (legacy ? optional(row.quote) : null),
+            evidenceStartMs:
+                mention?.evidenceStartMs ??
+                (legacy ? row.evidenceStartMs : null),
+            ...(segmentIndex !== null && charStart !== null && charEnd !== null
                 ? {
                       evidenceText: {
-                          segmentIndex: row.evidenceSegmentIndex,
-                          charStart: row.evidenceCharStart,
-                          charEnd: row.evidenceCharEnd,
+                          segmentIndex,
+                          charStart,
+                          charEnd,
                       },
                   }
                 : {}),
-            ...(row.evidenceProvenance
-                ? { evidenceProvenance: row.evidenceProvenance }
-                : {}),
+            ...(provenance ? { evidenceProvenance: provenance } : {}),
             source: row.source,
             createdAt: row.createdAt.toISOString(),
             acceptedAt: row.acceptedAt?.toISOString() ?? null,

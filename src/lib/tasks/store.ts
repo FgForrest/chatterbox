@@ -1,15 +1,18 @@
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import type { db } from "@/db";
 import { liveFollowUpCondition } from "@/db/queries/tasks";
 import {
     aiEnhancements,
+    chatterItems,
     type EvidenceProvenance,
     people,
     recordingTaskRejections,
     recordingTasks,
+    taskMentions,
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { linkedTaskMentionCondition } from "@/lib/tasks/mentions";
 
 export { liveFollowUpCondition } from "@/db/queries/tasks";
 
@@ -80,14 +83,41 @@ export async function writeTaskProposalsInTx(
         recordingId,
         ownerUserId,
         actorUserId,
+        view = "private",
+        contentSourceId = null,
+        contentRevision = null,
         proposals,
     }: {
         recordingId: string;
         ownerUserId: string;
         actorUserId: string;
+        view?: "private" | "org";
+        contentSourceId?: string | null;
+        contentRevision?: number | null;
         proposals: TaskProposals;
     },
 ): Promise<void> {
+    const [item] = await tx
+        .select({ occurredAt: chatterItems.occurredAt })
+        .from(chatterItems)
+        .where(
+            and(
+                eq(chatterItems.id, recordingId),
+                eq(chatterItems.userId, ownerUserId),
+            ),
+        )
+        .limit(1);
+    if (!item) return;
+    await tx
+        .delete(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.itemId, recordingId),
+                eq(taskMentions.userId, ownerUserId),
+                eq(taskMentions.view, view),
+                eq(taskMentions.matchDecision, "suggested"),
+            ),
+        );
     await tx
         .delete(recordingTasks)
         .where(
@@ -184,7 +214,7 @@ export async function writeTaskProposalsInTx(
             : [],
     );
 
-    const rows = [];
+    const rows: (typeof recordingTasks.$inferInsert)[] = [];
     for (const task of proposals.tasks) {
         const { fingerprint } = task;
         if (rejected.has(fingerprint) || known.has(fingerprint)) continue;
@@ -213,15 +243,45 @@ export async function writeTaskProposalsInTx(
             ticked: !task.assigneeCheck && !task.evidenceProvenance,
             position,
             createdByUserId: actorUserId,
+            originItemId: recordingId,
         });
     }
-    if (rows.length > 0) await tx.insert(recordingTasks).values(rows);
+    const insertedTasks =
+        rows.length > 0
+            ? await tx
+                  .insert(recordingTasks)
+                  .values(rows)
+                  .returning({ id: recordingTasks.id })
+            : [];
+    if (insertedTasks.length > 0) {
+        await tx.insert(taskMentions).values(
+            insertedTasks.map((row, index) => {
+                const stored = rows[index];
+                return {
+                    taskId: row.id,
+                    itemId: recordingId,
+                    userId: ownerUserId,
+                    view,
+                    evidenceStartMs: stored?.evidenceStartMs ?? null,
+                    evidenceSegmentIndex: stored?.evidenceSegmentIndex ?? null,
+                    evidenceCharStart: stored?.evidenceCharStart ?? null,
+                    evidenceCharEnd: stored?.evidenceCharEnd ?? null,
+                    quote: stored?.quote ?? null,
+                    provenance: stored?.evidenceProvenance ?? null,
+                    contentSourceId,
+                    contentRevision,
+                    statementAt: item.occurredAt,
+                    matchDecision: "home" as const,
+                };
+            }),
+        );
+    }
 
     const updates = proposals.updates.filter((update) =>
         openTasks.has(update.taskId),
     );
     if (updates.length > 0) {
-        await tx
+        const insertedUpdates = await tx
             .insert(taskUpdateProposals)
             .values(
                 updates.map((update) => ({
@@ -240,7 +300,44 @@ export async function writeTaskProposalsInTx(
                     evidenceProvenance: update.evidenceProvenance ?? null,
                 })),
             )
-            .onConflictDoNothing();
+            .onConflictDoNothing()
+            .returning({
+                id: taskUpdateProposals.id,
+                taskId: taskUpdateProposals.taskId,
+                kind: taskUpdateProposals.kind,
+            });
+        if (insertedUpdates.length > 0) {
+            await tx.insert(taskMentions).values(
+                insertedUpdates.map((row) => {
+                    const update = updates.find(
+                        (candidate) =>
+                            candidate.taskId === row.taskId &&
+                            candidate.kind === row.kind,
+                    );
+                    if (!update)
+                        throw new Error("inserted follow-up was not found");
+                    return {
+                        id: row.id,
+                        taskId: row.taskId,
+                        itemId: recordingId,
+                        userId: ownerUserId,
+                        view,
+                        evidenceStartMs: update.evidenceStartMs,
+                        evidenceSegmentIndex:
+                            update.evidenceText?.segmentIndex ?? null,
+                        evidenceCharStart:
+                            update.evidenceText?.charStart ?? null,
+                        evidenceCharEnd: update.evidenceText?.charEnd ?? null,
+                        quote: encryptText(update.quote),
+                        provenance: update.evidenceProvenance ?? null,
+                        contentSourceId,
+                        contentRevision,
+                        statementAt: item.occurredAt,
+                        matchDecision: "suggested" as const,
+                    };
+                }),
+            );
+        }
     }
 }
 
@@ -282,5 +379,82 @@ export async function dropTasksWithoutSummaryInTx(
             ),
         )
         .limit(1);
-    if (!left) await deleteRecordingTasksInTx(tx, recordingId);
+    if (!left) {
+        const affected = new Set(
+            (
+                await tx
+                    .select({ id: taskMentions.taskId })
+                    .from(taskMentions)
+                    .where(
+                        and(
+                            eq(taskMentions.itemId, recordingId),
+                            eq(taskMentions.userId, ownerUserId),
+                        ),
+                    )
+            ).map((row) => row.id),
+        );
+        const homeTasks = await tx
+            .select({ id: recordingTasks.id, userId: recordingTasks.userId })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.itemId, recordingId),
+                    eq(recordingTasks.userId, ownerUserId),
+                ),
+            );
+        for (const row of homeTasks) affected.add(row.id);
+        const affectedTasks =
+            affected.size > 0
+                ? await tx
+                      .select({
+                          id: recordingTasks.id,
+                          userId: recordingTasks.userId,
+                      })
+                      .from(recordingTasks)
+                      .where(inArray(recordingTasks.id, [...affected]))
+                : [];
+        await tx
+            .delete(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, recordingId),
+                    eq(taskUpdateProposals.userId, ownerUserId),
+                ),
+            );
+        await tx
+            .delete(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, recordingId),
+                    eq(taskMentions.userId, ownerUserId),
+                ),
+            );
+        for (const task of affectedTasks) {
+            await tx.delete(recordingTasks).where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    eq(recordingTasks.userId, task.userId),
+                    notExists(
+                        tx
+                            .select({ id: taskMentions.id })
+                            .from(taskMentions)
+                            .where(
+                                and(
+                                    eq(taskMentions.taskId, recordingTasks.id),
+                                    linkedTaskMentionCondition(),
+                                ),
+                            ),
+                    ),
+                ),
+            );
+        }
+        await tx
+            .delete(recordingTaskRejections)
+            .where(
+                and(
+                    eq(recordingTaskRejections.itemId, recordingId),
+                    eq(recordingTaskRejections.userId, ownerUserId),
+                ),
+            );
+    }
 }

@@ -23,6 +23,7 @@ import {
     recordingTaskRejections,
     recordingTasks,
     type TaskUpdateProposalKind,
+    taskMentions,
     taskUpdateProposals,
     userSettings,
 } from "@/db/schema";
@@ -48,6 +49,11 @@ import {
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
+import {
+    type LoadedTaskMentions,
+    loadVisibleTaskMentions,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import { liveFollowUpCondition } from "@/lib/tasks/store";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
@@ -63,6 +69,8 @@ const LIST_LIMIT = 200;
 export interface TaskView {
     id: string;
     recordingId: string;
+    evidenceItemId: string;
+    evidenceItemKind: "audio" | "mail";
     status: TaskStatus;
     text: string;
     assignee: { personId: string; name: string } | null;
@@ -189,6 +197,7 @@ const taskColumns = {
     evidenceCharStart: recordingTasks.evidenceCharStart,
     evidenceCharEnd: recordingTasks.evidenceCharEnd,
     evidenceProvenance: recordingTasks.evidenceProvenance,
+    homeItemKind: chatterItems.kind,
     source: recordingTasks.source,
     ticked: recordingTasks.ticked,
     version: recordingTasks.version,
@@ -205,10 +214,17 @@ type TaskSelect = {
 
 function toView(
     row: TaskSelect & { canEdit: boolean; canClose: boolean },
+    mentions?: LoadedTaskMentions,
 ): TaskView {
+    const taskId = row.id as string;
+    const mention = mentions?.latest.get(taskId);
+    const legacy = !mentions?.taskIdsWithMentions.has(taskId);
     return {
-        id: row.id as string,
+        id: taskId,
         recordingId: row.recordingId as string,
+        evidenceItemId: mention?.itemId ?? (row.recordingId as string),
+        evidenceItemKind:
+            mention?.kind ?? (row.homeItemKind as "audio" | "mail"),
         status: row.status as TaskStatus,
         text: decryptText(row.text as string),
         assignee:
@@ -222,19 +238,28 @@ function toView(
         assigneeCheck: row.assigneeCheck === true,
         dueDate: row.dueDate,
         duePhrase: decryptOptional(row.duePhrase),
-        quote: decryptOptional(row.quote),
-        evidenceStartMs: row.evidenceStartMs,
+        quote: mention?.quote ?? (legacy ? decryptOptional(row.quote) : null),
+        evidenceStartMs:
+            mention?.evidenceStartMs ?? (legacy ? row.evidenceStartMs : null),
         evidenceText:
-            row.evidenceSegmentIndex !== null &&
-            row.evidenceCharStart !== null &&
-            row.evidenceCharEnd !== null
+            (mention?.evidenceSegmentIndex ??
+                (legacy ? row.evidenceSegmentIndex : null)) !== null &&
+            (mention?.evidenceCharStart ??
+                (legacy ? row.evidenceCharStart : null)) !== null &&
+            (mention?.evidenceCharEnd ??
+                (legacy ? row.evidenceCharEnd : null)) !== null
                 ? {
-                      segmentIndex: row.evidenceSegmentIndex,
-                      charStart: row.evidenceCharStart,
-                      charEnd: row.evidenceCharEnd,
+                      segmentIndex: (mention?.evidenceSegmentIndex ??
+                          row.evidenceSegmentIndex) as number,
+                      charStart: (mention?.evidenceCharStart ??
+                          row.evidenceCharStart) as number,
+                      charEnd: (mention?.evidenceCharEnd ??
+                          row.evidenceCharEnd) as number,
                   }
                 : null,
-        evidenceProvenance: row.evidenceProvenance ?? null,
+        evidenceProvenance:
+            mention?.provenance ??
+            (legacy ? (row.evidenceProvenance ?? null) : null),
         source: row.source as TaskView["source"],
         ticked: row.ticked === true,
         version: row.version ?? 0,
@@ -296,7 +321,11 @@ export async function listRecordingTasks(
             ),
         )
         .orderBy(asc(recordingTasks.position), asc(recordingTasks.createdAt));
-    const views = rows.map(toView);
+    const mentions = await loadVisibleTaskMentions(
+        viewer,
+        rows.map((row) => row.id),
+    );
+    const views = rows.map((row) => toView(row, mentions));
     const [rejection] = await db
         .select({ id: recordingTaskRejections.id })
         .from(recordingTaskRejections)
@@ -484,20 +513,22 @@ async function lockRecordingForEdit(
     tx: Tx,
     viewer: TaskViewer,
     recordingId: string,
-): Promise<{ ownerUserId: string; shared: boolean }> {
+): Promise<{ ownerUserId: string; shared: boolean; occurredAt: Date }> {
     if (viewer.isOrg) assertOrgScopeWritable();
     const [recordingRow] = await tx
         .select({
             ownerUserId: recordings.userId,
+            occurredAt: chatterItems.occurredAt,
             visible: sql<boolean>`${taskVisible(viewer)}`,
             canEdit: sql<boolean>`${taskEditable(viewer)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer)}`,
         })
         .from(recordings)
+        .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
         .where(
             and(eq(recordings.id, recordingId), isNull(recordings.deletedAt)),
         )
-        .for("update")
+        .for("update", { of: recordings })
         .limit(1);
     // A mail has no recording row: its item row is locked instead.
     const [row] = recordingRow
@@ -505,6 +536,7 @@ async function lockRecordingForEdit(
         : await tx
               .select({
                   ownerUserId: chatterItems.userId,
+                  occurredAt: chatterItems.occurredAt,
                   visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
                   canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
                   shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
@@ -651,8 +683,19 @@ export async function addTask(
                 assignedAt: open && assigneePersonId ? now : null,
                 acceptedByUserId: open ? viewer.userId : null,
                 updatedByUserId: viewer.userId,
+                originItemId: recordingId,
             })
             .returning({ id: recordingTasks.id });
+        if (row) {
+            await tx.insert(taskMentions).values({
+                taskId: row.id,
+                itemId: recordingId,
+                userId: recording.ownerUserId,
+                view: recording.shared ? "org" : "private",
+                statementAt: recording.occurredAt,
+                matchDecision: "home",
+            });
+        }
         return { id: row?.id ?? "", ownerUserId: recording.ownerUserId };
     });
     await tasksChanged(id.ownerUserId, recordingId);
@@ -846,6 +889,24 @@ export async function mergeProposals(
                 updatedByUserId: viewer.userId,
             })
             .where(eq(recordingTasks.id, first.id));
+        await tx
+            .update(taskMentions)
+            .set({
+                quote: evidence.quote,
+                evidenceStartMs: evidence.evidenceStartMs,
+                evidenceSegmentIndex: evidence.evidenceSegmentIndex,
+                evidenceCharStart: evidence.evidenceCharStart,
+                evidenceCharEnd: evidence.evidenceCharEnd,
+                provenance: evidence.evidenceProvenance,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(taskMentions.taskId, first.id),
+                    eq(taskMentions.itemId, recordingId),
+                    eq(taskMentions.matchDecision, "home"),
+                ),
+            );
         await rejectInTx(
             tx,
             { recordingId, ownerUserId: recording.ownerUserId },
@@ -907,6 +968,15 @@ export async function acceptReview(
     shown?: { proposals: readonly string[]; updates: readonly string[] },
 ): Promise<AcceptResult> {
     const result = await db.transaction(async (tx) => {
+        const [source] = await tx
+            .select({ ownerUserId: chatterItems.userId })
+            .from(chatterItems)
+            .where(eq(chatterItems.id, recordingId))
+            .limit(1);
+        await lockItemTaskGraphInTx(tx, {
+            itemId: recordingId,
+            ownerUserId: source?.ownerUserId ?? viewer.userId,
+        });
         const recording = await lockRecordingForEdit(tx, viewer, recordingId);
         const proposals = await tx
             .select({
@@ -1004,29 +1074,7 @@ export async function acceptReview(
         let updatesSkipped = 0;
         const touched = new Map<string, string>();
         const ticked = updates.filter((row) => row.ticked);
-        // The tasks' items, locked in one order as every task write locks
-        // them, so who may change them holds while they change.
-        if (ticked.length > 0) {
-            await tx
-                .select({ id: chatterItems.id })
-                .from(chatterItems)
-                .where(
-                    inArray(
-                        chatterItems.id,
-                        tx
-                            .select({ id: recordingTasks.itemId })
-                            .from(recordingTasks)
-                            .where(
-                                inArray(
-                                    recordingTasks.id,
-                                    ticked.map((row) => row.taskId),
-                                ),
-                            ),
-                    ),
-                )
-                .orderBy(asc(chatterItems.id))
-                .for("update");
-        }
+        const appliedMentionIds: string[] = [];
         for (const update of ticked) {
             const [target] = await tx
                 .select({
@@ -1078,6 +1126,46 @@ export async function acceptReview(
                 .where(eq(recordingTasks.id, update.taskId));
             touched.set(target.recordingId, target.ownerUserId);
             updatesApplied += 1;
+            appliedMentionIds.push(update.id);
+        }
+        if (appliedMentionIds.length > 0) {
+            await tx
+                .update(taskMentions)
+                .set({
+                    matchDecision: "accepted",
+                    decidedByUserId: viewer.userId,
+                    decidedAt: now,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        inArray(taskMentions.id, appliedMentionIds),
+                        eq(taskMentions.itemId, recordingId),
+                        eq(taskMentions.userId, recording.ownerUserId),
+                        eq(taskMentions.matchDecision, "suggested"),
+                    ),
+                );
+        }
+        const rejectedMentionIds = updates
+            .filter((update) => !appliedMentionIds.includes(update.id))
+            .map((update) => update.id);
+        if (rejectedMentionIds.length > 0) {
+            await tx
+                .update(taskMentions)
+                .set({
+                    matchDecision: "rejected",
+                    decidedByUserId: viewer.userId,
+                    decidedAt: now,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        inArray(taskMentions.id, rejectedMentionIds),
+                        eq(taskMentions.itemId, recordingId),
+                        eq(taskMentions.userId, recording.ownerUserId),
+                        eq(taskMentions.matchDecision, "suggested"),
+                    ),
+                );
         }
         await tx
             .delete(taskUpdateProposals)
@@ -1136,7 +1224,8 @@ async function requireTaskView(
         )
         .limit(1);
     if (!row) throw notFound();
-    return toView(row);
+    const mentions = await loadVisibleTaskMentions(viewer, [taskId]);
+    return toView(row, mentions);
 }
 
 /**
@@ -1223,6 +1312,8 @@ export interface TaskListQuery {
 }
 
 export interface TaskListItem extends TaskView {
+    /** Visible mention quotes used by MCP's encrypted-text scan. */
+    visibleMentionQuotes: { text: string; kind: "audio" | "mail" }[];
     recording: {
         id: string;
         title: string;
@@ -1413,8 +1504,19 @@ async function loadTaskListItems(
         .orderBy(...order)
         .limit(limit);
 
+    const mentions = await loadVisibleTaskMentions(
+        viewer,
+        rows.map((row) => row.id),
+    );
     return rows.map((row) => ({
-        ...toView(row),
+        ...toView(row, mentions),
+        visibleMentionQuotes:
+            mentions.quotes.get(row.id) ??
+            (mentions.taskIdsWithMentions.has(row.id)
+                ? []
+                : [decryptOptional(row.quote)]
+                      .filter((quote): quote is string => quote !== null)
+                      .map((text) => ({ text, kind: row.recordingKind }))),
         recording: {
             id: row.recordingId as string,
             title: decryptText(row.recordingTitle),

@@ -24,7 +24,7 @@ import {
     mailContents,
     mailLearnedParts,
     mailMessages,
-    recordingTasks,
+    taskMentions,
     userSettings,
     users,
 } from "@/db/schema";
@@ -177,9 +177,9 @@ function mailReapWhere(
                     ),
                     exists(
                         db
-                            .select({ id: recordingTasks.id })
-                            .from(recordingTasks)
-                            .where(eq(recordingTasks.itemId, chatterItems.id)),
+                            .select({ id: taskMentions.id })
+                            .from(taskMentions)
+                            .where(eq(taskMentions.itemId, chatterItems.id)),
                     ),
                 ),
             ) as SQL,
