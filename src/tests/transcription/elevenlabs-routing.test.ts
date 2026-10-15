@@ -78,6 +78,10 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/folders/item-scope", () => ({
+    itemScopeFolderIds: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/lib/transcription/almanac-terms", () => ({
     almanacTermsFor: vi.fn().mockResolvedValue([]),
 }));
@@ -337,6 +341,8 @@ describe("ElevenLabs credentials route to Scribe, not the OpenAI SDK", () => {
             ownerUserId: "user-el",
             shared: false,
             language: "cs",
+            itemId: "rec-el",
+            scopeFolderIds: [],
         });
         const [, init] = vi.mocked(globalThis.fetch).mock.calls[0] as [
             string,

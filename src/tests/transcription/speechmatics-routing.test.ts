@@ -78,6 +78,10 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/folders/item-scope", () => ({
+    itemScopeFolderIds: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/lib/transcription/almanac-terms", () => ({
     almanacTermsFor: vi.fn().mockResolvedValue([]),
 }));

@@ -13,10 +13,15 @@
  */
 
 import { z } from "zod";
+import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
 import {
     type AnchorPosition,
     anchorsOverlap,
 } from "@/lib/knowledge/correction-anchors";
+import {
+    almanacUsageById,
+    compareScopeUsage,
+} from "@/lib/knowledge/scope-ranking";
 import { LearnOutputUnusable } from "@/lib/learn/errors";
 import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import { parseJsonAnswer, strictJsonSchema } from "@/lib/learn/output";
@@ -77,6 +82,57 @@ export interface AlmanacRecord {
     aliases: string[];
     /** How transcription misheard it before. */
     heardAs: string[];
+}
+
+/** Maximum number of Almanac records included in a correction pass. */
+export const MAX_ALMANAC_RECORDS = 500;
+
+/** Almanac records for a correction pass, in prompt order and capped. */
+export function almanacRecordsFor(
+    items: readonly {
+        id: string;
+        kind: "person" | "entity";
+        typeKey: string;
+        name: string;
+        names: readonly { kind: string; text: string }[];
+    }[],
+    named: ReadonlySet<string>,
+    options: {
+        scopeUsage?: readonly AlmanacUsageRow[];
+        limit?: number;
+    } = {},
+): AlmanacRecord[] {
+    const scopeUsage = almanacUsageById(options.scopeUsage ?? []);
+    const records = items.map((item) => ({
+        id: item.id,
+        kind: item.kind,
+        typeKey: item.typeKey,
+        name: item.name,
+        aliases: [
+            ...new Set(
+                item.names
+                    .filter((name) => name.kind === "alias")
+                    .map((name) => name.text),
+            ),
+        ],
+        heardAs: [
+            ...new Set(
+                item.names
+                    .filter((name) => name.kind === "heard_as")
+                    .map((name) => name.text),
+            ),
+        ],
+    }));
+    return records
+        .sort(
+            (a, b) =>
+                Number(named.has(b.id)) - Number(named.has(a.id)) ||
+                compareScopeUsage(a.id, b.id, scopeUsage) ||
+                Number(b.heardAs.length > 0) - Number(a.heardAs.length > 0) ||
+                a.name.localeCompare(b.name) ||
+                a.id.localeCompare(b.id),
+        )
+        .slice(0, options.limit ?? MAX_ALMANAC_RECORDS);
 }
 
 /** A correction already on the transcript, as the pass is told of it. */

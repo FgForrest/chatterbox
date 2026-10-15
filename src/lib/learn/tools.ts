@@ -15,6 +15,7 @@
  * embedding service answers.
  */
 
+import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
 import type { KnowledgeTarget } from "@/lib/knowledge/aliases";
 import {
     type FoundEntity,
@@ -36,6 +37,8 @@ export interface LearnToolContext {
     budget: { remaining: number };
     /** The transcript's language: names are matched in their word forms. */
     language?: string | null;
+    /** Usage in this item's folder scope, for tie-breaking searches. */
+    scopeUsage?: readonly AlmanacUsageRow[];
 }
 
 async function viewFor(context: LearnToolContext): Promise<KnowledgeView> {
@@ -66,6 +69,7 @@ export async function findEntities(
         type,
         byName,
         language: context.language ?? null,
+        scopeUsage: context.scopeUsage,
     });
 }
 

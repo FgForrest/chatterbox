@@ -1,12 +1,21 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { type AlmanacUsageRow, almanacUsage } from "@/db/queries/almanac-usage";
+import {
+    type AlmanacUsageRow,
+    almanacScopeUsage,
+    almanacUsage,
+} from "@/db/queries/almanac-usage";
 import { users } from "@/db/schema";
 import {
     type KnowledgeView,
     knowledgeView,
 } from "@/lib/knowledge/knowledge-loader";
 import { findPersonByEmail } from "@/lib/knowledge/people";
+import {
+    almanacUsageById,
+    compareScopeUsage,
+} from "@/lib/knowledge/scope-ranking";
+import { getOrgUserId } from "@/lib/org/config";
 
 /** A name the transcription provider should expect to hear. */
 export interface AlmanacTerm {
@@ -49,8 +58,9 @@ function baseLanguage(language: string | null | undefined): string | null {
 
 /**
  * The names a recording's transcription should expect, best first, at
- * most `limit`: the recorder, then the people and things the owner's
- * transcripts named lately, then those named at all, then the ones
+ * most `limit`: the recorder, then names used in the item's folder scope,
+ * then the people and things the owner's transcripts named lately, then
+ * those named at all, then the ones
  * transcription misheard before, then the rest. Each record gives its
  * name, with the forms it was misheard as in `language` (any language when
  * unknown), and its nicknames.
@@ -58,16 +68,14 @@ function baseLanguage(language: string | null | undefined): string | null {
 export function rankAlmanacTerms(input: {
     items: readonly ViewItem[];
     usage: readonly AlmanacUsageRow[];
+    scopeUsage?: readonly AlmanacUsageRow[];
     recorderId: string | null;
     language: string | null;
     limit?: number;
 }): AlmanacTerm[] {
     const limit = input.limit ?? MAX_ALMANAC_TERMS;
-    const usage = new Map<string, AlmanacUsageRow>();
-    for (const row of input.usage) {
-        const id = row.personId ?? row.entityId;
-        if (id) usage.set(id, row);
-    }
+    const usage = almanacUsageById(input.usage);
+    const scopeUsage = almanacUsageById(input.scopeUsage ?? []);
     const language = baseLanguage(input.language);
     const misheard = (item: ViewItem) =>
         item.names.filter(
@@ -80,6 +88,8 @@ export function rankAlmanacTerms(input: {
             Number(b.id === input.recorderId) -
             Number(a.id === input.recorderId);
         if (recorder) return recorder;
+        const scoped = compareScopeUsage(a.id, b.id, scopeUsage);
+        if (scoped) return scoped;
         const ua = usage.get(a.id);
         const ub = usage.get(b.id);
         return (
@@ -146,6 +156,8 @@ export async function almanacTermsFor(input: {
     ownerUserId: string;
     shared: boolean;
     language: string | null;
+    itemId?: string;
+    scopeFolderIds?: readonly string[];
     limit?: number;
 }): Promise<AlmanacTerm[]> {
     const view = await knowledgeView({
@@ -154,16 +166,27 @@ export async function almanacTermsFor(input: {
         shared: input.shared,
     });
     if (view.items.length === 0) return [];
-    const [usage, recorderId] = await Promise.all([
+    const [usage, scopeUsage, recorderId] = await Promise.all([
         almanacUsage(
             input.ownerUserId,
             new Date(Date.now() - RECENT_DAYS * DAY_MS),
         ),
+        input.itemId && input.scopeFolderIds?.length
+            ? almanacScopeUsage({
+                  ownerUserId: input.ownerUserId,
+                  orgUserId: await getOrgUserId(),
+                  itemId: input.itemId,
+                  view: input.shared ? "org" : "private",
+                  scopeFolderIds: input.scopeFolderIds,
+                  recentSince: new Date(Date.now() - RECENT_DAYS * DAY_MS),
+              })
+            : [],
         input.shared ? null : recorderIdOf(input.ownerUserId),
     ]);
     return rankAlmanacTerms({
         items: view.items,
         usage,
+        scopeUsage,
         recorderId,
         language: input.language,
         limit: input.limit,

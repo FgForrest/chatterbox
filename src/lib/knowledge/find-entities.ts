@@ -1,8 +1,13 @@
+import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
 import {
     findByName,
     type KnowledgeView,
     searchByMeaning,
 } from "@/lib/knowledge/knowledge-loader";
+import {
+    almanacUsageById,
+    compareScopeUsage,
+} from "@/lib/knowledge/scope-ranking";
 
 /** A person or entity a text may name, with why. */
 export interface FoundEntity {
@@ -29,6 +34,8 @@ export interface FindEntitiesQuery {
     byName?: boolean;
     /** The language the text was said in: inflected forms meet too. */
     language?: string | null;
+    /** Folder usage breaks ties between equally strong text matches. */
+    scopeUsage?: readonly AlmanacUsageRow[];
 }
 
 const MAX_FOUND = 10;
@@ -41,7 +48,13 @@ const MAX_FOUND = 10;
  */
 export async function findEntitiesInView(
     view: KnowledgeView,
-    { text, type, byName = false, language = null }: FindEntitiesQuery,
+    {
+        text,
+        type,
+        byName = false,
+        language = null,
+        scopeUsage = [],
+    }: FindEntitiesQuery,
 ): Promise<{ byMeaning: boolean; entities: FoundEntity[] }> {
     const items = new Map(view.items.map((item) => [item.id, item]));
     const found = new Map<string, FoundEntity>();
@@ -77,8 +90,20 @@ export async function findEntitiesInView(
     }
     return {
         byMeaning: meaning.available,
-        entities: [...found.values()]
-            .sort((a, b) => b.score - a.score)
-            .slice(0, MAX_FOUND),
+        entities: rankFoundEntities([...found.values()], scopeUsage).slice(
+            0,
+            MAX_FOUND,
+        ),
     };
+}
+
+/** Text matches best first; folder use only breaks equal match scores. */
+export function rankFoundEntities(
+    candidates: readonly FoundEntity[],
+    scopeUsage: readonly AlmanacUsageRow[] = [],
+): FoundEntity[] {
+    const usage = almanacUsageById(scopeUsage);
+    return [...candidates].sort(
+        (a, b) => b.score - a.score || compareScopeUsage(a.id, b.id, usage),
+    );
 }

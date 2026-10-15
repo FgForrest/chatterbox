@@ -37,6 +37,7 @@ import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
 import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
 import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
 import { nudge } from "@/lib/jobs/nudge";
@@ -757,6 +758,13 @@ async function runLearnJob({
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
+        if (path === "fallback") {
+            tools.scopeUsage = await itemScopeAlmanacUsage(
+                run.itemId,
+                run.view,
+                run.userId,
+            );
+        }
         const unnamedLabels = labels.filter(
             (label) => !frameBefore.answeredLabels.has(label),
         );
@@ -1175,6 +1183,11 @@ async function runMailLearnJob(
             read: { kind: "recording", ownerUserId: run.userId, shared },
             budget: { remaining: TOOL_BUDGET },
             language: content.language,
+            scopeUsage: await itemScopeAlmanacUsage(
+                run.itemId,
+                run.view,
+                run.userId,
+            ),
         };
         const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
             sharedOnly: shared,

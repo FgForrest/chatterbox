@@ -22,6 +22,7 @@ import {
     exportRecordingSidecarsIfEnabled,
     removeRecordingSidecar,
 } from "@/lib/export/document-sidecars";
+import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import {
     isMynahConfigured,
     transcribeViaMynah,
@@ -644,6 +645,12 @@ async function transcribeRecordingInner(
                     ownerUserId: ctx.ownerUserId,
                     shared: orgView,
                     language: defaultLanguage ?? null,
+                    itemId: recordingId,
+                    scopeFolderIds: await itemScopeFolderIds(
+                        recordingId,
+                        ctx.view,
+                        ctx.ownerUserId,
+                    ),
                 });
             } catch (error) {
                 console.error(

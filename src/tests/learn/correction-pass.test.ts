@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+    almanacRecordsFor,
     type ProposedFix,
     planFixes,
     runCorrectionPass,
@@ -309,6 +310,90 @@ describe("runCorrectionPass", () => {
         expect(result.fixes.every((f) => f.turn === 2)).toBe(true);
         const last = complete.mock.calls.at(-1)?.[0]?.[1]?.content ?? "";
         expect(last).toContain('"reads":"Orion"');
+    });
+});
+
+describe("correction pass Almanac ranking", () => {
+    const item = (id: string, name: string, heardAs = false) => ({
+        id,
+        kind: "entity" as const,
+        typeKey: "project",
+        name,
+        description: null,
+        scope: "personal" as const,
+        notes: null,
+        names: heardAs
+            ? [
+                  {
+                      target: { entityId: id },
+                      kind: "heard_as" as const,
+                      text: `${name}-heard`,
+                      language: null,
+                      provider: null,
+                  },
+              ]
+            : [],
+    });
+
+    it("puts named records first, then scoped records, and keeps the same capped candidate set", () => {
+        const items = [
+            item("named", "Atlas"),
+            item("scope", "Borealis"),
+            item("heard", "Orion", true),
+        ];
+        const withoutScope = almanacRecordsFor(items, new Set(["named"]));
+        const withScope = almanacRecordsFor(items, new Set(["named"]), {
+            scopeUsage: [
+                {
+                    personId: null,
+                    entityId: "scope",
+                    recent: 1,
+                    total: 1,
+                    lastAt: new Date("2026-10-01T00:00:00Z"),
+                },
+            ],
+        });
+
+        expect(withScope.map((record) => record.id)).toEqual([
+            "named",
+            "scope",
+            "heard",
+        ]);
+        expect(withScope.map((record) => record.id).sort()).toEqual(
+            withoutScope.map((record) => record.id).sort(),
+        );
+        expect(
+            almanacRecordsFor(items, new Set(["named"]), {
+                scopeUsage: [
+                    {
+                        personId: null,
+                        entityId: "scope",
+                        recent: 1,
+                        total: 1,
+                        lastAt: new Date("2026-10-01T00:00:00Z"),
+                    },
+                ],
+                limit: 2,
+            }).map((record) => record.id),
+        ).toEqual(["named", "scope"]);
+    });
+
+    it("keeps a named record before folder-used records it does not name", () => {
+        const items = [item("named", "Atlas"), item("scope", "Borealis")];
+
+        expect(
+            almanacRecordsFor(items, new Set(["named"]), {
+                scopeUsage: [
+                    {
+                        personId: null,
+                        entityId: "scope",
+                        recent: 1,
+                        total: 1,
+                        lastAt: new Date("2026-10-01T00:00:00Z"),
+                    },
+                ],
+            }).map((record) => record.id),
+        ).toEqual(["named", "scope"]);
     });
 });
 

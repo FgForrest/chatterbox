@@ -11,6 +11,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { learnRuns, transcriptCorrectionPasses } from "@/db/schema";
+import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
 import { readBoundedJson } from "@/lib/http/bounded-json";
 import { LEARN_MCP_TOOLS } from "@/lib/learn/mcp-tools";
 import {
@@ -32,6 +33,7 @@ export interface McpRun {
     /** A Learn run's, or a correction pass's: where its lookups count. */
     kind?: "learn" | "correction";
     userId: string;
+    itemId: string;
     view: "private" | "org";
     /** Its transcript's language, which names are matched in. */
     language?: string | null;
@@ -206,6 +208,14 @@ export async function handleLearnMcp(
                 },
                 budget: { remaining: 1 },
                 language: run.language ?? null,
+                scopeUsage:
+                    name === "find_entities"
+                        ? await itemScopeAlmanacUsage(
+                              run.itemId,
+                              run.view,
+                              run.userId,
+                          )
+                        : undefined,
             };
             if (name === "find_entities") {
                 return answer(

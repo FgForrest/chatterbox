@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/db", () => ({ db: {} }));
 vi.mock("@/lib/knowledge/knowledge-loader", () => ({ knowledgeView: vi.fn() }));
 vi.mock("@/lib/knowledge/people", () => ({ findPersonByEmail: vi.fn() }));
+vi.mock("@/lib/org/config", () => ({ getOrgUserId: vi.fn() }));
 
 import type { AlmanacUsageRow } from "@/db/queries/almanac-usage";
 import type { KnowledgeView } from "@/lib/knowledge/knowledge-loader";
@@ -95,6 +96,59 @@ describe("rankAlmanacTerms", () => {
             "Zefira",
             "Atlas",
         ]);
+    });
+
+    it("puts scope use after the recorder without changing the terms", () => {
+        const items = [
+            item("account", "Atlas"),
+            item("scope-old", "Borealis"),
+            item("scope-recent", "Orion"),
+            item("me", "Jan Novák", [], "person"),
+        ];
+        const usage = [used("account", 9, 12)];
+        const withoutScope = rankAlmanacTerms({
+            items,
+            usage,
+            recorderId: "me",
+            language: "cs",
+        });
+        const withScope = rankAlmanacTerms({
+            items,
+            usage,
+            scopeUsage: [
+                used("scope-old", 0, 8, "2026-01-01T00:00:00Z"),
+                used("scope-recent", 2, 2, "2026-10-01T00:00:00Z"),
+            ],
+            recorderId: "me",
+            language: "cs",
+        });
+
+        expect(withScope.map((term) => term.text)).toEqual([
+            "Jan Novák",
+            "Orion",
+            "Borealis",
+            "Atlas",
+        ]);
+        expect(withScope.map((term) => term.text).sort()).toEqual(
+            withoutScope.map((term) => term.text).sort(),
+        );
+    });
+
+    it("applies the cap after scope ranking", () => {
+        const terms = rankAlmanacTerms({
+            items: [
+                item("account", "Atlas"),
+                item("scope", "Borealis"),
+                item("quiet", "Orion"),
+            ],
+            usage: [used("account", 5, 5)],
+            scopeUsage: [used("scope", 1, 1)],
+            recorderId: null,
+            language: null,
+            limit: 2,
+        });
+
+        expect(terms.map((term) => term.text)).toEqual(["Borealis", "Atlas"]);
     });
 
     it("gives misheard forms in the recording's language, and nicknames as terms", () => {

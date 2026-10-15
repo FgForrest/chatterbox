@@ -47,6 +47,7 @@ async function runOf(token: string): Promise<McpRun | null> {
         const [run] = await db
             .select({
                 id: learnRuns.id,
+                itemId: learnRuns.itemId,
                 userId: learnRuns.userId,
                 view: learnRuns.view,
                 language: transcriptions.detectedLanguage,
@@ -68,6 +69,7 @@ async function runOf(token: string): Promise<McpRun | null> {
     const [pass] = await db
         .select({
             id: passes.id,
+            itemId: passes.recordingId,
             userId: passes.userId,
             view: passes.view,
             language: transcriptions.detectedLanguage,
