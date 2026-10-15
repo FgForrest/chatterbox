@@ -30,7 +30,10 @@ import type {
     PipelineView,
 } from "@/lib/pipeline/types";
 import { resolveStepProvider } from "@/lib/profiles/providers";
-import { resolveItemProfile } from "@/lib/profiles/resolve";
+import {
+    AssignedProfileUnavailableError,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -96,6 +99,7 @@ function legacyPhases(input: {
     for (const step of stepNames) {
         summarySteps[step] = {
             contentId: contentInput.contentId,
+            contentSourceId: contentInput.contentSourceId,
             contentRevision: contentInput.contentRevision,
             generation: 0,
         };
@@ -123,6 +127,7 @@ export async function gatherFacts(
     itemId: string,
     view: PipelineView,
     userId: string,
+    options: { legacyIfEmpty?: boolean } = {},
 ): Promise<PipelineFacts> {
     const [processing, [item], credentials] = await Promise.all([
         readProcessing(itemId, view, userId),
@@ -299,6 +304,8 @@ export async function gatherFacts(
         [failedTranscriptionJob],
         [recording],
         [openLearnRun],
+        recentLearnRuns,
+        [completedTranscriptionJob],
     ] = await Promise.all([
         contentPromise,
         mailPromise,
@@ -435,25 +442,80 @@ export async function gatherFacts(
                 ),
             )
             .limit(1),
+        db
+            .select({
+                transcriptionId: learnRuns.transcriptionId,
+                transcriptRevision: learnRuns.transcriptRevision,
+                createdAt: learnRuns.createdAt,
+            })
+            .from(learnRuns)
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, userId),
+                    eq(learnRuns.view, "private"),
+                ),
+            )
+            .orderBy(desc(learnRuns.createdAt)),
+        item.kind === "audio"
+            ? db
+                  .select({ createdAt: asyncJobs.createdAt })
+                  .from(asyncJobs)
+                  .where(
+                      and(
+                          eq(asyncJobs.userId, userId),
+                          eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                          eq(
+                              asyncJobs.subjectId,
+                              recordingJobSubject(itemId, view),
+                          ),
+                          eq(asyncJobs.status, "completed"),
+                      ),
+                  )
+                  .orderBy(desc(asyncJobs.createdAt))
+                  .limit(1)
+            : Promise.resolve([]),
     ]);
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
-    const phases =
-        processing?.phases ??
-        legacyPhases({
-            kind: item.kind,
-            hasPlacement:
-                placementFolderIds.length > 0 || intendedFolderIds.length > 0,
-            content: content
-                ? { id: content.id, revision: content.revision }
-                : null,
-        });
+    const storedPhases = processing?.phases ?? {};
+    const legacyFallback =
+        options.legacyIfEmpty !== false &&
+        Object.keys(storedPhases).length === 0;
+    const phases = legacyFallback
+        ? legacyPhases({
+              kind: item.kind,
+              hasPlacement:
+                  placementFolderIds.length > 0 || intendedFolderIds.length > 0,
+              content: content
+                  ? { id: content.id, revision: content.revision }
+                  : null,
+          })
+        : storedPhases;
     const categorizedAsLegacy =
         phases.categorize?.state === "done" &&
         phases.categorize.reason === "legacy";
     const profileAssigned = Boolean(
         processing?.profileId && processing.profileRevisionId,
     );
+    const legacyCutoverAt =
+        phases.categorize?.reason === "legacy"
+            ? Date.parse(phases.categorize.at)
+            : Number.NaN;
+    const matchingPreCutoverLearn = recentLearnRuns.some(
+        (run) =>
+            run.createdAt.getTime() < legacyCutoverAt &&
+            run.transcriptRevision === content?.revision &&
+            (item.kind === "mail" || run.transcriptionId === content?.id),
+    );
+    const legacyContinuation =
+        Number.isFinite(legacyCutoverAt) &&
+        Boolean(content) &&
+        (matchingPreCutoverLearn ||
+            (item.kind === "audio" &&
+                completedTranscriptionJob !== undefined &&
+                completedTranscriptionJob.createdAt.getTime() <
+                    legacyCutoverAt));
     const folderIds = [...placementFolderIds, ...intendedFolderIds];
     const resolution =
         view === "private" && folderIds.length > 0 && !profileAssigned
@@ -465,11 +527,27 @@ export async function gatherFacts(
                   view,
               })
             : null;
-    const resolvedProfile =
+    let profileUnavailable = false;
+    let resolvedProfile = null;
+    if (
         view === "private" &&
-        (profileAssigned || categorizedAsLegacy || processing?.profileId)
-            ? await resolveItemProfile(itemId, "private", userId)
-            : null;
+        (profileAssigned ||
+            categorizedAsLegacy ||
+            legacyContinuation ||
+            processing?.profileId)
+    ) {
+        try {
+            resolvedProfile = await resolveItemProfile(
+                itemId,
+                "private",
+                userId,
+            );
+        } catch (error) {
+            if (!(error instanceof AssignedProfileUnavailableError))
+                throw error;
+            profileUnavailable = true;
+        }
+    }
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
@@ -545,6 +623,9 @@ export async function gatherFacts(
         view,
         generation: processing?.requestedGeneration ?? 0,
         manualOnly: processing?.manualOnly ?? false,
+        legacyFallback,
+        legacyContinuation,
+        profileUnavailable,
         content: content
             ? {
                   contentId: content.id,
@@ -596,6 +677,17 @@ export async function gatherFacts(
             intendedFolderIds,
             profileAssigned,
             resolution: resolution?.status ?? null,
+            ...(resolution?.status === "resolved" &&
+            resolution.profile.currentRevisionId
+                ? {
+                      resolvedProfile: {
+                          profileId: resolution.profile.id,
+                          profileRevisionId:
+                              resolution.profile.currentRevisionId,
+                          manualOnly: resolution.manualOnly,
+                      },
+                  }
+                : {}),
         },
         hasEnhancementCredential: Boolean(
             pickEnhancementCredential(credentials),

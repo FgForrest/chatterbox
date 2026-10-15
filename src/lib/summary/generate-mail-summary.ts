@@ -33,6 +33,7 @@ import {
     loadSelectedProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import {
     MAIL_SUMMARY_PROMPT_ID,
     type MailProfileSettings,
@@ -164,7 +165,9 @@ export async function generateMailSummary(
                 channel: "mail",
                 view: ctx.view,
             })
-          : await resolveItemProfile(
+          : await ((opts.trigger ?? "manual") === "manual"
+                ? resolveManualItemProfile
+                : resolveItemProfile)(
                 itemId,
                 ctx.view,
                 ctx.ownerUserId,

@@ -28,6 +28,7 @@ import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
@@ -126,7 +127,9 @@ export async function startLearnRun(input: {
         );
     }
     const view: RecordingView = access.view;
-    const profile = await resolveItemProfile(
+    const profile = await (trigger === "manual"
+        ? resolveManualItemProfile
+        : resolveItemProfile)(
         access.recordingId,
         view,
         access.ownerUserId,

@@ -33,6 +33,7 @@ import {
     loadSelectedProfileRevision,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/access";
@@ -293,7 +294,9 @@ export async function generateSummaryForRecording(
                 channel: "audio",
                 view: ctx.view,
             })
-          : await resolveItemProfile(
+          : await ((opts.trigger ?? "manual") === "manual"
+                ? resolveManualItemProfile
+                : resolveItemProfile)(
                 recordingId,
                 ctx.view,
                 ctx.ownerUserId,

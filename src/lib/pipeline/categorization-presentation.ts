@@ -1,6 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, mailPendingShares } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    mailPendingShares,
+    processingProfiles,
+} from "@/db/schema";
+import { decryptText } from "@/lib/encryption/fields";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
@@ -18,7 +24,7 @@ export type ProcessingResolution =
           status: "resolved";
           profile: ProcessingProfileSummary;
           manualOnly: boolean;
-          source: "folder" | "default";
+          source: "folder" | "default" | "current";
       }
     | {
           status: "choose";
@@ -43,6 +49,8 @@ export interface CategorizationPanelPresentation {
     selectedFolderIds: string[];
     profiles: ProcessingProfileSummary[];
     resolution: ProcessingResolution;
+    currentProfile: ProcessingProfileSummary | null;
+    currentManualOnly: boolean;
 }
 
 function profileSummary(profile: ProfileRecord): ProcessingProfileSummary {
@@ -96,8 +104,25 @@ export async function loadPrivateCategorizationPanel(
     itemId: string,
 ): Promise<CategorizationPanelPresentation | null> {
     const [item] = await db
-        .select({ kind: chatterItems.kind })
+        .select({
+            kind: chatterItems.kind,
+            currentProfileId: itemProcessing.profileId,
+            currentProfileName: processingProfiles.name,
+            currentManualOnly: itemProcessing.manualOnly,
+        })
         .from(chatterItems)
+        .leftJoin(
+            itemProcessing,
+            and(
+                eq(itemProcessing.itemId, chatterItems.id),
+                eq(itemProcessing.userId, ownerUserId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
+        .leftJoin(
+            processingProfiles,
+            eq(processingProfiles.id, itemProcessing.profileId),
+        )
         .where(
             and(
                 eq(chatterItems.id, itemId),
@@ -166,14 +191,30 @@ export async function loadPrivateCategorizationPanel(
             .map((assignment) => assignment.folderId),
         ...intents.map((intent) => intent.folderId),
     ].filter((folderId) => selectableFolderIds.has(folderId));
-    const resolution = await resolveProfileForPlacements({
-        ownerUserId,
-        itemId,
-        channel: item.kind,
-        folderIds: selectedFolderIds,
-        view: "private",
-        seedProfiles: false,
-    });
+    const currentProfile =
+        item.currentProfileId && item.currentProfileName
+            ? {
+                  id: item.currentProfileId,
+                  name: decryptText(item.currentProfileName),
+              }
+            : null;
+    const resolution: ProcessingResolution = currentProfile
+        ? {
+              status: "resolved",
+              profile: currentProfile,
+              manualOnly: item.currentManualOnly ?? false,
+              source: "current",
+          }
+        : serializeProcessingResolution(
+              await resolveProfileForPlacements({
+                  ownerUserId,
+                  itemId,
+                  channel: item.kind,
+                  folderIds: selectedFolderIds,
+                  view: "private",
+                  seedProfiles: false,
+              }),
+          );
 
     return {
         itemId,
@@ -182,6 +223,8 @@ export async function loadPrivateCategorizationPanel(
         profiles: profilePages.flatMap((page) =>
             page.items.map(profileSummary),
         ),
-        resolution: serializeProcessingResolution(resolution),
+        resolution,
+        currentProfile,
+        currentManualOnly: item.currentManualOnly ?? false,
     };
 }

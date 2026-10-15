@@ -49,6 +49,13 @@ function resolutionChoice(resolution: ProcessingResolution): string {
     return resolution.manualOnly ? MANUAL_ONLY : resolution.profile.id;
 }
 
+function initialProfileChoice(data: CategorizePanelData): string {
+    if (data.currentProfile) {
+        return data.currentManualOnly ? MANUAL_ONLY : data.currentProfile.id;
+    }
+    return resolutionChoice(data.resolution);
+}
+
 function sameFolderSelection(left: string[], right: string[]): boolean {
     if (left.length !== right.length) return false;
     const rightIds = new Set(right);
@@ -68,7 +75,7 @@ export function CategorizePanel({
         data.resolution,
     );
     const [profileChoice, setProfileChoice] = useState(
-        resolutionChoice(data.resolution),
+        initialProfileChoice(data),
     );
     const [previewing, setPreviewing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -78,11 +85,17 @@ export function CategorizePanel({
         if (!open) return;
         setFolderIds(data.selectedFolderIds);
         setPreview(data.resolution);
-        setProfileChoice(resolutionChoice(data.resolution));
+        setProfileChoice(initialProfileChoice(data));
     }, [data, open]);
 
     useEffect(() => {
         if (!open) return;
+        if (data.currentProfile) {
+            setPreview(data.resolution);
+            setProfileChoice(initialProfileChoice(data));
+            setPreviewing(false);
+            return;
+        }
         if (sameFolderSelection(folderIds, data.selectedFolderIds)) {
             setPreview(data.resolution);
             setProfileChoice(resolutionChoice(data.resolution));
@@ -135,7 +148,9 @@ export function CategorizePanel({
         };
     }, [data, folderIds, open, previewError]);
 
-    const prefilledChoice = resolutionChoice(preview);
+    const prefilledChoice = data.currentProfile
+        ? initialProfileChoice(data)
+        : resolutionChoice(preview);
     const selectedOrganization = data.folders.some(
         (folder) => folder.scope === "org" && folderIds.includes(folder.id),
     );
@@ -143,6 +158,9 @@ export function CategorizePanel({
         const byId = new Map(
             data.profiles.map((profile) => [profile.id, profile]),
         );
+        if (data.currentProfile) {
+            byId.set(data.currentProfile.id, data.currentProfile);
+        }
         if (preview.status === "choose") {
             for (const candidate of preview.candidates) {
                 if (candidate.kind === "profile") {
@@ -153,7 +171,7 @@ export function CategorizePanel({
             byId.set(preview.profile.id, preview.profile);
         }
         return [...byId.values()];
-    }, [data.profiles, preview]);
+    }, [data.currentProfile, data.profiles, preview]);
 
     const submit = async () => {
         if (folderIds.length === 0 || !profileChoice || previewing) return;
@@ -228,8 +246,10 @@ export function CategorizePanel({
                                     disabled={root}
                                     checked={folderIds.includes(folder.id)}
                                     onChange={(event) => {
-                                        setPreviewing(true);
-                                        setProfileChoice("");
+                                        if (!data.currentProfile) {
+                                            setPreviewing(true);
+                                            setProfileChoice("");
+                                        }
                                         setFolderIds((current) =>
                                             event.target.checked
                                                 ? [...current, folder.id]
@@ -273,9 +293,11 @@ export function CategorizePanel({
                     </Select>
                     {preview.status === "resolved" && (
                         <p className="text-xs text-muted-foreground">
-                            {preview.source === "folder"
-                                ? i18n("From the folder's default")
-                                : i18n("Your default")}
+                            {data.currentProfile
+                                ? i18n("Current profile")
+                                : preview.source === "folder"
+                                  ? i18n("From the folder's default")
+                                  : i18n("Your default")}
                         </p>
                     )}
                     {selectedOrganization && (

@@ -1012,18 +1012,21 @@ describe("planAdvance audio", () => {
                     steps: {
                         title: {
                             contentId: "transcription-1",
+                            contentSourceId: "riffado",
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
                         },
                         topics: {
                             contentId: "transcription-1",
+                            contentSourceId: "riffado",
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
                         },
                         summary: {
                             contentId: "transcription-1",
+                            contentSourceId: "riffado",
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",

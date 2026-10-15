@@ -27,7 +27,9 @@ async function advancePipeline(
     signal: AbortSignal,
 ): Promise<JobResult> {
     for (let iteration = 0; iteration < MAX_STABLE_CHECKS; iteration++) {
-        const facts = await gatherFacts(payload.itemId, payload.view, userId);
+        const facts = await gatherFacts(payload.itemId, payload.view, userId, {
+            legacyIfEmpty: payload.reason !== "arrival",
+        });
         const generation = facts.generation;
         const plan = planAdvance(facts);
         for (const action of plan.actions) {

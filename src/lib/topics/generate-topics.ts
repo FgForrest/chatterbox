@@ -29,6 +29,7 @@ import { captureServerEvent } from "@/lib/posthog-server";
 import { resolveTopicPrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
@@ -158,7 +159,9 @@ export async function generateTopicsForTranscript(
         );
     }
 
-    const profile = await resolveItemProfile(
+    const profile = await (opts.trigger === "manual"
+        ? resolveManualItemProfile
+        : resolveItemProfile)(
         recordingId,
         ctx.view,
         ctx.ownerUserId,

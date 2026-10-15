@@ -60,9 +60,11 @@ vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import {
+    AssignedProfileUnavailableError,
     ProfileSelectionRequiredError,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import { ensureProfiles } from "@/lib/profiles/seed";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -151,6 +153,69 @@ describeWithDatabase("item profile resolution", () => {
             );
         } finally {
             mockEnv.ORG_ACCOUNT_PASSWORD = "password";
+        }
+    });
+
+    it("reads the frozen revision after its profile is archived", async () => {
+        const assigned = await resolveItemProfile(ITEM, "private", OWNER);
+        await db().insert(itemProcessing).values({
+            itemId: ITEM,
+            userId: OWNER,
+            view: "private",
+            profileId: assigned.profile.id,
+            profileRevisionId: assigned.revisionId,
+        });
+        await db()
+            .update(processingProfiles)
+            .set({ archivedAt: new Date() })
+            .where(eq(processingProfiles.id, assigned.profile.id));
+
+        await expect(
+            resolveItemProfile(ITEM, "private", OWNER),
+        ).resolves.toMatchObject({
+            revisionId: assigned.revisionId,
+            assigned: true,
+        });
+    });
+
+    it("uses the actor's default only for a manual run when the frozen Organization profile is unavailable", async () => {
+        await ensureProfiles(OWNER);
+        await ensureProfiles(ORG);
+        const [organization] = await db()
+            .select()
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORG),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!organization?.currentRevisionId) {
+            throw new Error("organization profile was not seeded");
+        }
+        await db().insert(itemProcessing).values({
+            itemId: ITEM,
+            userId: OWNER,
+            view: "private",
+            profileId: organization.id,
+            profileRevisionId: organization.currentRevisionId,
+        });
+
+        mockEnv.SELF_HOST_MODE = "local";
+        try {
+            await expect(
+                resolveItemProfile(ITEM, "private", OWNER),
+            ).rejects.toBeInstanceOf(AssignedProfileUnavailableError);
+            await expect(
+                resolveManualItemProfile(ITEM, "private", OWNER),
+            ).resolves.toMatchObject({
+                profile: { ownerUserId: OWNER, scope: "personal" },
+                assigned: false,
+            });
+        } finally {
+            mockEnv.SELF_HOST_MODE = "shared";
         }
     });
 

@@ -1,4 +1,6 @@
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { itemProcessing } from "@/db/schema";
 import { nudge } from "@/lib/jobs/nudge";
 import {
     releaseAutoLearnHold,
@@ -137,6 +139,62 @@ export async function executePipelineAction(
                         : {}),
                 }),
             );
+            return;
+        }
+        case "completeCategorization": {
+            const requested = await db.transaction(async (tx) => {
+                const [current] = await tx
+                    .select({
+                        profileId: itemProcessing.profileId,
+                        profileRevisionId: itemProcessing.profileRevisionId,
+                        manualOnly: itemProcessing.manualOnly,
+                        requestedGeneration: itemProcessing.requestedGeneration,
+                    })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, itemId),
+                            eq(itemProcessing.userId, userId),
+                            eq(itemProcessing.view, view),
+                        ),
+                    )
+                    .limit(1)
+                    .for("update");
+                if (!current) return null;
+                if (current.requestedGeneration !== generation) return null;
+                if (!current.profileId || !current.profileRevisionId) {
+                    await tx
+                        .update(itemProcessing)
+                        .set({
+                            profileId: action.profileId,
+                            profileRevisionId: action.profileRevisionId,
+                            manualOnly: action.manualOnly,
+                            updatedAt: new Date(),
+                        })
+                        .where(
+                            and(
+                                eq(itemProcessing.itemId, itemId),
+                                eq(itemProcessing.userId, userId),
+                                eq(itemProcessing.view, view),
+                            ),
+                        );
+                }
+                const advance = await requestAdvanceInTx(tx, {
+                    itemId,
+                    userId,
+                    view,
+                    reason: "categorized",
+                });
+                if (!advance) return null;
+                await updatePhaseInTx(tx, itemId, view, userId, "categorize", {
+                    state: "done",
+                    reason: "categorized",
+                    generation: advance.requestedGeneration,
+                    at: new Date().toISOString(),
+                });
+                return advance;
+            });
+            if (requested) nudge();
             return;
         }
         case "markPhase":

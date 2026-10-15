@@ -95,6 +95,74 @@ function facts(overrides: Partial<PipelineFacts> = {}): PipelineFacts {
     };
 }
 
+function handledFacts(
+    categorize: NonNullable<PipelineFacts["phases"]["categorize"]>,
+): PipelineFacts {
+    const current = facts();
+    if (!current.profile) throw new Error("Expected profile facts");
+    return facts({
+        profile: {
+            ...current.profile,
+            automatic: {
+                learn: true,
+                summary: true,
+                title: true,
+                topics: true,
+            },
+            learn: { automatic: true },
+        },
+        phases: {
+            categorize,
+            transcribe: {
+                state: "done",
+                reason: "content-available",
+                generation: 3,
+                inputs: CURRENT_INPUT,
+                at: "2026-10-15T00:00:00.000Z",
+            },
+            learn: {
+                state: "done",
+                reason: "manual_finished",
+                generation: 3,
+                inputs: CURRENT_INPUT,
+                at: "2026-10-15T00:00:00.000Z",
+            },
+            summary: {
+                state: "done",
+                reason: "completed",
+                generation: 3,
+                inputs: CURRENT_INPUT,
+                profileRevisionId: "profile-revision-1",
+                steps: Object.fromEntries(
+                    ["title", "topics", "summary"].map((step) => [
+                        step,
+                        {
+                            contentId: CURRENT_INPUT.contentId,
+                            contentSourceId: CURRENT_INPUT.contentSourceId,
+                            contentRevision: CURRENT_INPUT.contentRevision,
+                            generation: 3,
+                            profileRevisionId: "profile-revision-1",
+                        },
+                    ]),
+                ),
+                at: "2026-10-15T00:00:00.000Z",
+            },
+        },
+    });
+}
+
+function paidActions(plan: ReturnType<typeof planAdvance>) {
+    return plan.actions.filter((action) =>
+        [
+            "queueTranscription",
+            "startAutoLearn",
+            "queueTitleJob",
+            "queueTopics",
+            "queueSummary",
+        ].includes(action.type),
+    );
+}
+
 describe("outdated pipeline results", () => {
     it("marks a summary outdated for a replacement transcript and queues its automatic rerun", () => {
         const plan = planAdvance(facts());
@@ -130,6 +198,61 @@ describe("outdated pipeline results", () => {
                 record: expect.objectContaining({ state: "outdated" }),
             }),
         );
+    });
+
+    it("does not repeat handled content when the item is categorized again", () => {
+        const plan = planAdvance(
+            handledFacts({
+                state: "done",
+                reason: "categorized",
+                generation: 8,
+                at: "2026-10-15T01:00:00.000Z",
+            }),
+        );
+
+        expect(paidActions(plan)).toEqual([]);
+    });
+
+    it("does not repeat handled content after its last placement is restored", () => {
+        const plan = planAdvance(
+            handledFacts({
+                state: "waiting",
+                reason: "needs_folder",
+                generation: 7,
+                at: "2026-10-15T00:59:00.000Z",
+            }),
+        );
+        expect(plan.actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "categorize",
+                record: expect.objectContaining({ state: "done" }),
+            }),
+        );
+        expect(paidActions(plan)).toEqual([]);
+    });
+
+    it("keeps a newly filed legacy item idle until Process again", () => {
+        const changed = markPhasesOutdatedForProfileChange(
+            handledFacts({
+                state: "done",
+                reason: "legacy",
+                generation: 0,
+                at: "2026-10-15T00:00:00.000Z",
+            }).phases,
+            8,
+            "2026-10-15T01:00:00.000Z",
+        );
+        const filed = handledFacts({
+            state: "done",
+            reason: "categorized",
+            generation: 8,
+            at: "2026-10-15T01:00:00.000Z",
+        });
+        filed.phases = { ...changed, categorize: filed.phases.categorize };
+
+        expect(processAgainPending(filed.phases)).toBe(true);
+        expect(paidActions(planAdvance(filed))).toEqual([]);
     });
 
     it("waits after re-categorization, then runs automatic steps after Process again", () => {

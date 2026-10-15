@@ -46,6 +46,7 @@ import {
     resolveStepProvider,
 } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -159,7 +160,11 @@ export async function storeBrowserTranscription(
             errorCode: "RECORDING_NOT_FOUND",
         };
     }
-    const profile = await resolveItemProfile(recordingId, "private", userId);
+    const profile = await resolveManualItemProfile(
+        recordingId,
+        "private",
+        userId,
+    );
     const runRecord = {
         profileRevisionId: profile.revisionId,
         builtinPromptsVersion: null,
@@ -538,7 +543,9 @@ async function transcribeRecordingInner(
             };
         }
 
-        const profile = await resolveItemProfile(
+        const profile = await ((opts.trigger ?? "manual") === "manual"
+            ? resolveManualItemProfile
+            : resolveItemProfile)(
             recordingId,
             ctx.view,
             ctx.ownerUserId,

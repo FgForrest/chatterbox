@@ -33,6 +33,18 @@ export class ProfileSelectionRequiredError extends AppError {
     }
 }
 
+/** The immutable profile assigned to an item can no longer be used. */
+export class AssignedProfileUnavailableError extends AppError {
+    constructor() {
+        super(
+            ErrorCode.CONFLICT,
+            "The processing profile assigned to this item is unavailable",
+            409,
+        );
+        this.name = "AssignedProfileUnavailableError";
+    }
+}
+
 /** One immutable profile revision selected for a processing run. */
 export interface ResolvedItemProfile {
     profile: ProfileRecord;
@@ -324,6 +336,7 @@ export async function resolveItemProfile(
                 ...(processing.profileRevisionId
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
+                allowArchived: true,
             });
             if (personal) return { ...personal, assigned: true };
             if (orgUserId) {
@@ -336,6 +349,7 @@ export async function resolveItemProfile(
                     ...(processing.profileRevisionId
                         ? { revisionId: processing.profileRevisionId }
                         : {}),
+                    allowArchived: true,
                 });
                 if (organization) return { ...organization, assigned: true };
             }
@@ -349,16 +363,11 @@ export async function resolveItemProfile(
                 ...(processing.profileRevisionId
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
+                allowArchived: true,
             });
             if (organization) return { ...organization, assigned: true };
         }
-        if (view === "private") {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "The processing profile revision assigned to this item is unavailable",
-                404,
-            );
-        }
+        if (view === "private") throw new AssignedProfileUnavailableError();
     }
 
     if (view === "private") {

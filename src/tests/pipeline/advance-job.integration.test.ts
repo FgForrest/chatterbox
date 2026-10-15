@@ -14,7 +14,9 @@ import {
     apiCredentials,
     asyncJobs,
     chatterItems,
+    folderDefaultProfiles,
     itemProcessing,
+    learnRuns,
     mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
@@ -24,6 +26,7 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
+import { addRecordingToFolder } from "@/lib/folders/folders";
 import { JobDeferredError } from "@/lib/jobs/retryable";
 import * as summaryRefresh from "@/lib/learn/summary-refresh";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
@@ -31,7 +34,10 @@ import {
     PIPELINE_ADVANCE_JOB_KIND,
     requestAdvance,
 } from "@/lib/pipeline/trigger";
-import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import {
+    resolveDefaultProfile,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import { insertRecordings } from "@/tests/integration/items";
 import {
     createMigratedTestDatabase,
@@ -116,13 +122,13 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const USER_ID = "pipeline-advance-user";
 const ITEM_ID = "pipeline-advance-item";
 
-function jobContext(itemId = ITEM_ID) {
+function jobContext(itemId = ITEM_ID, reason = "transcript") {
     return {
         jobId: `pipeline-job-${itemId}`,
         userId: USER_ID,
         attempt: 1,
         maxAttempts: 10,
-        payload: { itemId, view: "private" as const, reason: "transcript" },
+        payload: { itemId, view: "private" as const, reason },
         signal: new AbortController().signal,
         reportProgress: vi.fn(),
     };
@@ -322,6 +328,109 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
+    });
+
+    it("freezes the resolved profile and processes an item filed through the folder toggle", async () => {
+        await seedAudio(ITEM_ID, 1, false);
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "arrival",
+        });
+        await pipelineAdvanceJobHandler.run(jobContext(ITEM_ID, "arrival"));
+        const profile = await resolveDefaultProfile(USER_ID, "audio");
+        await db().insert(folderDefaultProfiles).values({
+            folderId: "pipeline-folder",
+            channel: "audio",
+            profileId: profile.profile.id,
+        });
+
+        await addRecordingToFolder({
+            userId: USER_ID,
+            recordingId: ITEM_ID,
+            folderId: "pipeline-folder",
+        });
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(await processing()).toMatchObject({
+            profileId: profile.profile.id,
+            profileRevisionId: profile.revisionId,
+            phases: {
+                categorize: expect.objectContaining({
+                    state: "done",
+                    reason: "categorized",
+                }),
+            },
+        });
+        expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
+    });
+
+    it("waits with needs_profile when folder defaults conflict", async () => {
+        await seedAudio(ITEM_ID, 1, false);
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "arrival",
+        });
+        await pipelineAdvanceJobHandler.run(jobContext(ITEM_ID, "arrival"));
+        const profile = await resolveDefaultProfile(USER_ID, "audio");
+        await db().insert(recordingFolders).values({
+            id: "pipeline-folder-2",
+            userId: USER_ID,
+            parentId: "pipeline-root",
+            name: "Pipeline 2",
+            nameHash: "pipeline-folder-2-hash",
+            kind: "custom",
+        });
+        await db()
+            .insert(folderDefaultProfiles)
+            .values([
+                {
+                    folderId: "pipeline-folder",
+                    channel: "audio",
+                    profileId: profile.profile.id,
+                },
+                {
+                    folderId: "pipeline-folder-2",
+                    channel: "audio",
+                    manualOnly: true,
+                },
+            ]);
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                {
+                    userId: USER_ID,
+                    itemId: ITEM_ID,
+                    folderId: "pipeline-folder",
+                },
+                {
+                    userId: USER_ID,
+                    itemId: ITEM_ID,
+                    folderId: "pipeline-folder-2",
+                },
+            ]);
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(await processing()).toMatchObject({
+            profileId: null,
+            phases: {
+                categorize: expect.objectContaining({
+                    state: "waiting",
+                    reason: "needs_profile",
+                }),
+            },
+        });
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
     it("keeps one active driver job per item and view", async () => {
@@ -774,6 +883,284 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
                     ),
                 ),
         ).toEqual([]);
+    });
+
+    it("preserves legacy state when the first trigger creates an empty processing row", async () => {
+        await seedAudio(ITEM_ID, 1, false);
+
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect((await processing())?.phases).toMatchObject({
+            categorize: { state: "skipped", reason: "legacy" },
+            learn: { state: "done", reason: "legacy" },
+            summary: { state: "done", reason: "legacy" },
+        });
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
+        expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+    });
+
+    it("finishes a Learn hold that started before the legacy cutover without filing", async () => {
+        await seedAudio(ITEM_ID, 1, false);
+        const cutover = new Date("2026-10-15T10:00:00.000Z");
+        const input = {
+            contentId: `transcription-${ITEM_ID}`,
+            contentSourceId: "riffado",
+            contentRevision: 1,
+        };
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "skipped",
+                        reason: "legacy",
+                        generation: 0,
+                        at: cutover.toISOString(),
+                    },
+                    learn: {
+                        state: "done",
+                        reason: "released",
+                        generation: 1,
+                        inputs: input,
+                        at: "2026-10-15T10:01:00.000Z",
+                    },
+                    summary: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        inputs: input,
+                        steps: {
+                            title: { ...input, generation: 0 },
+                            topics: { ...input, generation: 0 },
+                            summary: { ...input, generation: 0 },
+                        },
+                        at: cutover.toISOString(),
+                    },
+                },
+            });
+        await db()
+            .insert(learnRuns)
+            .values({
+                id: "pre-cutover-learn",
+                userId: USER_ID,
+                scopeUserId: USER_ID,
+                itemId: ITEM_ID,
+                transcriptionId: input.contentId,
+                view: "private",
+                actorUserId: USER_ID,
+                trigger: "auto",
+                transcriptRevision: 1,
+                vocabularyVersion: 0,
+                status: "finished",
+                createdAt: new Date("2026-10-15T09:59:00.000Z"),
+            });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "learn-released",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
+        expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
+        expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
+        expect((await processing())?.phases.categorize).toMatchObject({
+            state: "skipped",
+            reason: "legacy",
+        });
+    });
+
+    it("waits for filing when a Learn run started after the legacy cutover", async () => {
+        await seedAudio(ITEM_ID, 1, false);
+        const cutover = new Date("2026-10-15T10:00:00.000Z");
+        const input = {
+            contentId: `transcription-${ITEM_ID}`,
+            contentSourceId: "riffado",
+            contentRevision: 1,
+        };
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "skipped",
+                        reason: "legacy",
+                        generation: 0,
+                        at: cutover.toISOString(),
+                    },
+                    learn: {
+                        state: "done",
+                        reason: "released",
+                        generation: 1,
+                        inputs: input,
+                        at: "2026-10-15T10:02:00.000Z",
+                    },
+                },
+            });
+        await db()
+            .insert(learnRuns)
+            .values({
+                id: "post-cutover-learn",
+                userId: USER_ID,
+                scopeUserId: USER_ID,
+                itemId: ITEM_ID,
+                transcriptionId: input.contentId,
+                view: "private",
+                actorUserId: USER_ID,
+                trigger: "auto",
+                transcriptRevision: 1,
+                vocabularyVersion: 0,
+                status: "finished",
+                createdAt: new Date("2026-10-15T10:01:00.000Z"),
+            });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "learn-released",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect((await processing())?.phases.categorize).toMatchObject({
+            state: "waiting",
+            reason: "needs_folder",
+        });
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        {
+            name: "before",
+            createdAt: new Date("2026-10-15T09:59:00.000Z"),
+            processed: true,
+        },
+        {
+            name: "after",
+            createdAt: new Date("2026-10-15T10:01:00.000Z"),
+            processed: false,
+        },
+    ])("handles a transcription started $name the legacy cutover according to its start time", async ({
+        createdAt,
+        processed,
+    }) => {
+        await seedAudio(ITEM_ID, 1, false);
+        const cutover = new Date("2026-10-15T10:00:00.000Z");
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: ITEM_ID,
+                userId: USER_ID,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "skipped",
+                        reason: "legacy",
+                        generation: 0,
+                        at: cutover.toISOString(),
+                    },
+                },
+            });
+        await db()
+            .insert(asyncJobs)
+            .values({
+                id: `cutover-transcription-${processed}`,
+                userId: USER_ID,
+                kind: TRANSCRIPTION_JOB_KIND,
+                subjectId: ITEM_ID,
+                payload: {
+                    recordingId: ITEM_ID,
+                    trigger: "pipeline",
+                    force: false,
+                },
+                status: "completed",
+                createdAt,
+                completedAt: new Date("2026-10-15T10:02:00.000Z"),
+            });
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "transcript",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        if (processed) {
+            expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
+            expect((await processing())?.phases.categorize).toMatchObject({
+                state: "skipped",
+                reason: "legacy",
+            });
+        } else {
+            expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
+            expect((await processing())?.phases.categorize).toMatchObject({
+                state: "waiting",
+                reason: "needs_folder",
+            });
+        }
+    });
+
+    it("marks an unavailable frozen profile without planning paid work", async () => {
+        await db().insert(users).values({
+            id: "pipeline-org",
+            email: "org@example.test",
+            role: "org",
+        });
+        await seedAudio();
+        const organizationProfile = await resolveItemProfile(
+            ITEM_ID,
+            "org",
+            USER_ID,
+        );
+        await db()
+            .update(itemProcessing)
+            .set({
+                profileId: organizationProfile.profile.id,
+                profileRevisionId: organizationProfile.revisionId,
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM_ID),
+                    eq(itemProcessing.userId, USER_ID),
+                ),
+            );
+        mockEnv.SELF_HOST_MODE = "local";
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+
+        try {
+            await pipelineAdvanceJobHandler.run(jobContext());
+        } finally {
+            mockEnv.SELF_HOST_MODE = "shared";
+        }
+
+        expect((await processing())?.phases.categorize).toMatchObject({
+            state: "failed",
+            reason: "profile_unavailable",
+        });
+        expect(mocks.enqueueTitleJob).not.toHaveBeenCalled();
+        expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
+        expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
     it("retries an old automatic transcription failure within the daily bound", async () => {

@@ -442,6 +442,33 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             .from(recordingFolderAssignments)
             .where(eq(recordingFolderAssignments.itemId, rows[0]?.id ?? ""));
         expect(assignments).toEqual([{ folderId: weeklyFolderId }]);
+        await pipelineAdvanceJobHandler.run({
+            jobId: "mail-folder-merge",
+            userId: "u-jan",
+            payload: {
+                itemId: rows[0]?.id ?? "",
+                view: "private",
+                reason: "placement",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        const [filedProcessing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, rows[0]?.id ?? ""));
+        expect(filedProcessing).toMatchObject({
+            profileId: expect.any(String),
+            profileRevisionId: expect.any(String),
+            phases: {
+                categorize: expect.objectContaining({
+                    state: "done",
+                    reason: "categorized",
+                }),
+            },
+        });
     });
 
     it("refuses mail from someone else to a personal address, and logs it for the owner", async () => {

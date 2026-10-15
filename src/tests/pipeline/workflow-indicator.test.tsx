@@ -147,6 +147,27 @@ describe("workflow indicator", () => {
         ).toBeTruthy();
     });
 
+    it("offers profile choice when the frozen profile is unavailable", () => {
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    profile: null,
+                    phases: {
+                        categorize: {
+                            state: "failed",
+                            reason: "profile_unavailable",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                })}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: "Choose a profile" }),
+        ).toBeTruthy();
+    });
+
     it("shows manual phases as By hand and completed current outputs as done", () => {
         render(
             <WorkflowIndicator

@@ -276,10 +276,16 @@ export function WorkflowIndicator({
         }
     };
     const actionFor = (phase: DisplayPhase) => {
-        if (phase.name === "categorize" && phase.state === "waiting") {
+        if (
+            phase.name === "categorize" &&
+            (phase.state === "waiting" ||
+                (phase.state === "failed" &&
+                    phase.record?.reason === "profile_unavailable"))
+        ) {
             return {
                 label:
-                    phase.record?.reason === "needs_profile"
+                    phase.record?.reason === "needs_profile" ||
+                    phase.record?.reason === "profile_unavailable"
                         ? i18n("Choose a profile")
                         : i18n("File it"),
                 action: openPanel,

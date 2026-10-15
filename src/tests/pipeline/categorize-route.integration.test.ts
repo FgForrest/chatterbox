@@ -601,7 +601,7 @@ describeWithDatabase("categorize route", () => {
         });
     });
 
-    it("replaces placements and intents and resolves the new folder profile", async () => {
+    it("replaces managed placements but keeps the item's current profile", async () => {
         await addItem();
         expect(
             (await POST(request(["personal-a", "org-a"], "audio-a"), context()))
@@ -617,8 +617,8 @@ describeWithDatabase("categorize route", () => {
         expect(await placementIds()).toEqual(["personal-b"]);
         expect(await intentIds()).toEqual(["org-b"]);
         expect(await processing()).toMatchObject({
-            profileId: "audio-b",
-            profileRevisionId: "audio-b-revision",
+            profileId: "audio-a",
+            profileRevisionId: "audio-a-revision",
             requestedGeneration: 2,
             phases: {
                 categorize: expect.objectContaining({ generation: 2 }),
@@ -656,9 +656,9 @@ describeWithDatabase("categorize route", () => {
                 ),
             );
 
-        expect((await POST(request(["personal-b"]), context())).status).toBe(
-            200,
-        );
+        expect(
+            (await POST(request(["personal-b"], "audio-b"), context())).status,
+        ).toBe(200);
         expect((await processing())?.phases.summary).toMatchObject({
             state: "outdated",
             reason: "profile_changed",
@@ -696,7 +696,7 @@ describeWithDatabase("categorize route", () => {
                 view: "private",
                 phases: {
                     categorize: {
-                        state: "done",
+                        state: "skipped",
                         reason: "legacy",
                         generation: 0,
                         at: "2026-10-15T10:00:00.000Z",
@@ -746,6 +746,28 @@ describeWithDatabase("categorize route", () => {
 
         expect(response.status).toBe(200);
         expect(await placementIds()).toEqual(["personal-a-child"]);
+    });
+
+    it("keeps personal and Organization root placements that the panel cannot manage", async () => {
+        await addItem();
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                {
+                    userId: OWNER,
+                    itemId: ITEM,
+                    folderId: "personal-root",
+                },
+                { userId: OWNER, itemId: ITEM, folderId: "org-root" },
+            ]);
+
+        const response = await POST(request(["personal-a"]), context());
+
+        expect(response.status).toBe(200);
+        expect((await placementIds()).sort()).toEqual(
+            ["org-root", "personal-a", "personal-root"].sort(),
+        );
+        expect(await organizationPlacementIds()).toEqual(["org-root"]);
     });
 
     it("keeps an existing Organization placement when recategorizing", async () => {

@@ -30,6 +30,7 @@ export type SummaryStepName = "summary" | "topics" | "title";
 
 export interface PhaseStepRecord {
     contentId: string;
+    contentSourceId?: string;
     contentRevision: number;
     generation: number;
     profileRevisionId?: string;
@@ -84,6 +85,9 @@ export interface PipelineFacts {
     view: PipelineView;
     generation: number;
     manualOnly?: boolean;
+    legacyFallback?: boolean;
+    legacyContinuation?: boolean;
+    profileUnavailable?: boolean;
     content: (ContentRevisionInput & { timed: boolean }) | null;
     transcription?: {
         riffado: (ContentRevisionInput & { timed: boolean }) | null;
@@ -104,6 +108,11 @@ export interface PipelineFacts {
         intendedFolderIds: string[];
         profileAssigned: boolean;
         resolution: PipelineProfileResolution | null;
+        resolvedProfile?: {
+            profileId: string;
+            profileRevisionId: string;
+            manualOnly: boolean;
+        };
     };
     hasEnhancementCredential: boolean;
     learnAvailability?: "available" | "hosted" | "no_provider";
@@ -151,6 +160,12 @@ export type PipelineAction =
       }
     | { type: "releaseLearnTimeout" }
     | { type: "executeShares" }
+    | {
+          type: "completeCategorization";
+          profileId: string;
+          profileRevisionId: string;
+          manualOnly: boolean;
+      }
     | { type: "markPhase"; phase: PhaseName; record: PhaseRecord };
 
 export interface PipelinePlan {

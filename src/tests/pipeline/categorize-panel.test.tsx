@@ -57,6 +57,8 @@ const base: CategorizePanelData = {
         { id: "profile-1", name: "Meetings" },
         { id: "profile-2", name: "Sales calls" },
     ],
+    currentProfile: null,
+    currentManualOnly: false,
     resolution: {
         status: "resolved",
         profile: { id: "profile-1", name: "Meetings" },
@@ -107,6 +109,28 @@ describe("categorization panel", () => {
         fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
         expect(screen.getByText("Sales calls")).toBeTruthy();
         expect(screen.getByText("Nothing automatic")).toBeTruthy();
+    });
+
+    it("keeps the item's current profile when folders resolve differently", async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        renderPanel({
+            ...base,
+            currentProfile: { id: "profile-2", name: "Sales calls" },
+        });
+
+        expect(
+            screen.getByRole("combobox", { name: "Profile" }).textContent,
+        ).toContain("Sales calls");
+        expect(screen.getByText("Current profile")).toBeTruthy();
+
+        fireEvent.click(screen.getByLabelText("Organization › Sales"));
+        await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(
+            screen.getByRole("combobox", { name: "Profile" }).textContent,
+        ).toContain("Sales calls");
     });
 
     it.each([

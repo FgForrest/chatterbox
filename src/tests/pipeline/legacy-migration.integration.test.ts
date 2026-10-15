@@ -337,6 +337,19 @@ describeWithDatabase("legacy item processing migration", () => {
                 reason: "legacy",
             },
         });
-        expect(planAdvance(facts).actions).toEqual([]);
+        expect(planAdvance(facts).actions).toHaveLength(3);
+        expect(planAdvance(facts).actions).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    type: "markPhase",
+                    phase: "categorize",
+                }),
+                expect.objectContaining({ type: "markPhase", phase: "learn" }),
+                expect.objectContaining({
+                    type: "markPhase",
+                    phase: "summary",
+                }),
+            ]),
+        );
     });
 });

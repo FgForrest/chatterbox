@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -134,34 +134,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
         }
         selectedManualOnly = true;
-    } else {
-        if (placementResolution.status === "choose") {
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "Choose a processing profile",
-                409,
-                {
-                    candidates: placementResolution.candidates.map(
-                        (candidate) =>
-                            candidate.kind === "manual_only"
-                                ? { manualOnly: true }
-                                : {
-                                      ...profileSummary(candidate.profile),
-                                      manualOnly: false,
-                                  },
-                    ),
-                },
-            );
-        }
-        if (placementResolution.status !== "resolved") {
-            throw new AppError(
-                ErrorCode.CONFLICT,
-                "A processing profile is not available yet",
-                409,
-            );
-        }
-        selectedProfile = placementResolution.profile;
-        selectedManualOnly = placementResolution.manualOnly;
     }
 
     const orgUserId = await getOrgUserId();
@@ -186,6 +158,40 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         let profileId = current?.profileId ?? null;
         let profileRevisionId = current?.profileRevisionId ?? null;
         let manualOnly = current?.manualOnly ?? false;
+        if (
+            !selectedProfile &&
+            (!profileId || !profileRevisionId) &&
+            !parsed.data.profileId &&
+            !parsed.data.manualOnly
+        ) {
+            if (placementResolution.status === "choose") {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Choose a processing profile",
+                    409,
+                    {
+                        candidates: placementResolution.candidates.map(
+                            (candidate) =>
+                                candidate.kind === "manual_only"
+                                    ? { manualOnly: true }
+                                    : {
+                                          ...profileSummary(candidate.profile),
+                                          manualOnly: false,
+                                      },
+                        ),
+                    },
+                );
+            }
+            if (placementResolution.status !== "resolved") {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "A processing profile is not available yet",
+                    409,
+                );
+            }
+            selectedProfile = placementResolution.profile;
+            selectedManualOnly = placementResolution.manualOnly;
+        }
         if (selectedProfile) {
             const [latest] = await tx
                 .select({
@@ -227,6 +233,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 ),
             );
         const sharedFolderIds = new Set<string>();
+        const organizationRootPlacementIds: string[] = [];
         if (orgUserId) {
             const sharedPlacements = await tx
                 .select({ folderId: recordingFolderAssignments.folderId })
@@ -239,6 +246,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                             recordingFolderAssignments.folderId,
                         ),
                         eq(recordingFolders.userId, orgUserId),
+                        isNotNull(recordingFolders.parentId),
                     ),
                 )
                 .where(
@@ -250,6 +258,29 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             for (const { folderId } of sharedPlacements) {
                 sharedFolderIds.add(folderId);
             }
+            const organizationRoots = await tx
+                .select({ folderId: recordingFolderAssignments.folderId })
+                .from(recordingFolderAssignments)
+                .innerJoin(
+                    recordingFolders,
+                    and(
+                        eq(
+                            recordingFolders.id,
+                            recordingFolderAssignments.folderId,
+                        ),
+                        eq(recordingFolders.userId, orgUserId),
+                        isNull(recordingFolders.parentId),
+                    ),
+                )
+                .where(
+                    and(
+                        eq(recordingFolderAssignments.itemId, itemId),
+                        eq(recordingFolderAssignments.userId, ownerUserId),
+                    ),
+                );
+            organizationRootPlacementIds.push(
+                ...organizationRoots.map(({ folderId }) => folderId),
+            );
             if (
                 sharedPlacements.some(
                     ({ folderId }) => !intendedFolderIds.includes(folderId),
@@ -284,6 +315,27 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         recordingFolderAssignments.folderId,
                     ),
                     eq(recordingFolders.userId, ownerUserId),
+                    isNotNull(recordingFolders.parentId),
+                ),
+            )
+            .where(
+                and(
+                    eq(recordingFolderAssignments.itemId, itemId),
+                    eq(recordingFolderAssignments.userId, ownerUserId),
+                ),
+            );
+        const rootPlacements = await tx
+            .select({ folderId: recordingFolderAssignments.folderId })
+            .from(recordingFolderAssignments)
+            .innerJoin(
+                recordingFolders,
+                and(
+                    eq(
+                        recordingFolders.id,
+                        recordingFolderAssignments.folderId,
+                    ),
+                    eq(recordingFolders.userId, ownerUserId),
+                    isNull(recordingFolders.parentId),
                 ),
             )
             .where(
@@ -327,6 +379,18 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             );
         }
         await pruneRedundantAssignmentsInTx(tx, ownerUserId, itemId);
+        if (rootPlacements.length > 0) {
+            await tx
+                .insert(recordingFolderAssignments)
+                .values(
+                    rootPlacements.map(({ folderId }) => ({
+                        itemId,
+                        userId: ownerUserId,
+                        folderId,
+                    })),
+                )
+                .onConflictDoNothing();
+        }
         for (const folderId of requestedIntents) {
             await recordIntendedPlacementInTx(tx, {
                 ownerUserId,
@@ -337,6 +401,18 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         }
         if (orgUserId) {
             await pruneRedundantAssignmentsInTx(tx, orgUserId, itemId);
+            if (organizationRootPlacementIds.length > 0) {
+                await tx
+                    .insert(recordingFolderAssignments)
+                    .values(
+                        organizationRootPlacementIds.map((folderId) => ({
+                            itemId,
+                            userId: ownerUserId,
+                            folderId,
+                        })),
+                    )
+                    .onConflictDoNothing();
+            }
         }
 
         const advance = await requestAdvanceInTx(tx, {
@@ -352,8 +428,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             current !== undefined &&
             (current.profileId !== profileId ||
                 current.profileRevisionId !== profileRevisionId ||
-                current.manualOnly !== manualOnly ||
-                current.phases.categorize?.reason === "legacy");
+                current.manualOnly !== manualOnly);
         const now = new Date();
         const phases = profileChanged
             ? markPhasesOutdatedForProfileChange(
