@@ -16,7 +16,7 @@ import {
     type ProfileSettings,
     profileChannelSchema,
 } from "@/lib/profiles/settings";
-import type { ProfileRecord } from "@/lib/profiles/store";
+import { getProfile, type ProfileRecord } from "@/lib/profiles/store";
 
 export const profileScopeSchema = z.enum(["personal", "organization"]);
 
@@ -86,6 +86,30 @@ export async function editableProfile(id: string, actor: ProfileRouteActor) {
         );
     }
     return resolved;
+}
+
+/** Resolve an archived profile only when the request actor may edit it. */
+export async function editableArchivedProfile(
+    id: string,
+    actor: ProfileRouteActor,
+) {
+    const orgUserId = await getOrgUserId();
+    const ownerIds = [actor.userId, ...(orgUserId ? [orgUserId] : [])];
+    for (const ownerUserId of new Set(ownerIds)) {
+        const profile = await getProfile(ownerUserId, id, actor.userId, {
+            includeArchived: true,
+        });
+        if (!profile?.archivedAt) continue;
+        if (!(await mayEditProfile(actor.actor, profile))) {
+            throw new AppError(
+                ErrorCode.FORBIDDEN,
+                "You may use this profile but cannot edit it",
+                403,
+            );
+        }
+        return { profile };
+    }
+    throw new AppError(ErrorCode.NOT_FOUND, "Profile not found", 404);
 }
 
 export async function profileSummary(

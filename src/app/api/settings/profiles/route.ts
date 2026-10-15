@@ -24,6 +24,7 @@ const querySchema = z.object({
     channel: profileChannelSchema.optional(),
     scope: profileScopeSchema.optional(),
     q: z.string().max(200).optional(),
+    archived: z.literal("true").optional(),
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -46,19 +47,28 @@ export const GET = apiHandler(async (request: Request) => {
         channel: url.searchParams.get("channel") || undefined,
         scope: url.searchParams.get("scope") || undefined,
         q: url.searchParams.get("q") || undefined,
+        archived: url.searchParams.get("archived") || undefined,
         page: url.searchParams.get("page") || undefined,
         pageSize: url.searchParams.get("pageSize") || undefined,
     });
     if (!parsed.success) throw validationError(parsed.error);
-    const { page, pageSize, q, channel, scope } = parsed.data;
+    const { page, pageSize, q, channel, scope, archived } = parsed.data;
     const result = await listActorProfiles({
         actor: routeActor.actor,
         search: q,
         channel,
         scope,
+        archivedOnly: archived === "true",
         offset: (page - 1) * pageSize,
         limit: pageSize,
     });
+    const orgUserId = await getOrgUserId();
+    const canCreateOrganization = orgUserId
+        ? await mayEditProfile(routeActor.actor, {
+              ownerUserId: orgUserId,
+              scope: "organization",
+          })
+        : false;
     return NextResponse.json({
         profiles: await Promise.all(
             result.items.map((profile) =>
@@ -71,6 +81,7 @@ export const GET = apiHandler(async (request: Request) => {
             total: result.total,
             totalPages: Math.ceil(result.total / pageSize),
         },
+        permissions: { canCreateOrganization },
     });
 });
 

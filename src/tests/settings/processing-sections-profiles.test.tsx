@@ -14,7 +14,8 @@ import { SummarySection } from "@/components/settings-sections/summary-section";
 import { TranscriptionSection } from "@/components/settings-sections/transcription-section";
 import type { TemplateConfiguration } from "@/lib/ai/prompt-templates";
 
-const { translate } = vi.hoisted(() => ({
+const { toastSuccess, translate } = vi.hoisted(() => ({
+    toastSuccess: vi.fn(),
     translate: (text: string, values?: Record<string, unknown>) =>
         Object.entries(values ?? {}).reduce(
             (result, [key, value]) => result.replace(`{${key}}`, String(value)),
@@ -27,7 +28,7 @@ vi.mock("next-intl", () => ({
     useLocale: () => "en",
 }));
 vi.mock("sonner", () => ({
-    toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
+    toast: { error: vi.fn(), success: toastSuccess, warning: vi.fn() },
 }));
 vi.mock("@/components/settings/provider-role-select", () => ({
     ProviderRoleSelect: ({ purpose }: { purpose: string }) => (
@@ -64,6 +65,42 @@ const legacyTemplates: TemplateConfiguration = {
     ],
 };
 
+const legacyTitleTemplates: TemplateConfiguration = {
+    selectedPrompt: "default",
+    templates: [
+        {
+            id: "default",
+            name: null,
+            prompt: null,
+            createdAt: "1970-01-01T00:00:00.000Z",
+        },
+        {
+            id: "meetings",
+            name: "Edited meeting titles",
+            prompt: "Edited title prompt {transcription}",
+            createdAt: "1970-01-01T00:00:00.000Z",
+        },
+    ],
+};
+
+const legacyTopicTemplates: TemplateConfiguration = {
+    selectedPrompt: "default",
+    templates: [
+        {
+            id: "default",
+            name: null,
+            prompt: null,
+            createdAt: "1970-01-01T00:00:00.000Z",
+        },
+        {
+            id: "custom-topics",
+            name: "Short chapters",
+            prompt: "Use short chapters {transcription}",
+            createdAt: "2026-10-15T00:00:00.000Z",
+        },
+    ],
+};
+
 interface FetchCall {
     url: string;
     method: string;
@@ -77,6 +114,7 @@ describe("processing settings after profiles", () => {
     beforeEach(() => {
         calls = [];
         created = 0;
+        toastSuccess.mockClear();
         vi.stubGlobal(
             "fetch",
             vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -89,6 +127,8 @@ describe("processing settings after profiles", () => {
                 if (url === "/api/settings/user") {
                     return Response.json({
                         summaryPrompt: legacyTemplates,
+                        titleGenerationPrompt: legacyTitleTemplates,
+                        topicPrompt: legacyTopicTemplates,
                         summaryMultiPass: false,
                         summaryMultiPassRounds: 3,
                         summaryMultiPassAuto: false,
@@ -141,7 +181,7 @@ describe("processing settings after profiles", () => {
         expect(screen.queryByText("Transcription quality")).toBeNull();
         expect(screen.queryByText("When Plaud has a transcript")).toBeNull();
         expect(screen.queryByText("Auto-generate titles")).toBeNull();
-        expect(screen.queryByText("Title templates")).toBeNull();
+        expect(screen.getByText("Templates from before profiles")).toBeTruthy();
         unmount();
 
         render(
@@ -152,7 +192,7 @@ describe("processing settings after profiles", () => {
         await screen.findByText("Provider role: topics");
         expect(screen.getByText("Set in your profiles")).toBeTruthy();
         expect(screen.queryByText("Auto-detect topics")).toBeNull();
-        expect(screen.queryByText("Topic templates")).toBeNull();
+        expect(screen.getByText("Templates from before profiles")).toBeTruthy();
         cleanup();
 
         render(
@@ -233,6 +273,9 @@ describe("processing settings after profiles", () => {
             expect(screen.getByRole("dialog").textContent).toContain(
                 `copied-${created}`,
             );
+            expect(toastSuccess).toHaveBeenLastCalledWith(
+                `Profile “${name}” created`,
+            );
         }
 
         const posts = calls.filter(
@@ -265,5 +308,107 @@ describe("processing settings after profiles", () => {
             preset: "general",
             fullPrompt: "Custom prompt {transcription}",
         });
+    });
+
+    it("copies legacy title templates into the Title step", async () => {
+        render(
+            <ConfirmDialogProvider>
+                <TranscriptionSection />
+            </ConfirmDialogProvider>,
+        );
+        await screen.findByText("Edited meeting titles");
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Copy General into a profile",
+            }),
+        );
+        await waitFor(() => expect(created).toBe(1));
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Copy Edited meeting titles into a profile",
+            }),
+        );
+        await waitFor(() => expect(created).toBe(2));
+
+        const settings = calls
+            .filter(
+                (call) =>
+                    call.url === "/api/settings/profiles" &&
+                    call.method === "POST",
+            )
+            .map(
+                (call) =>
+                    call.body?.settings as {
+                        steps: {
+                            title: {
+                                preset: string;
+                                fullPrompt: string | null;
+                            };
+                        };
+                    },
+            );
+        expect(settings[0].steps.title).toMatchObject({
+            preset: "default",
+            fullPrompt: null,
+        });
+        expect(settings[1].steps.title).toMatchObject({
+            preset: "meetings",
+            fullPrompt: "Edited title prompt {transcription}",
+        });
+        expect(toastSuccess).toHaveBeenLastCalledWith(
+            "Profile “Edited meeting titles” created",
+        );
+    });
+
+    it("copies legacy topic templates into the Topics step", async () => {
+        render(
+            <ConfirmDialogProvider>
+                <TranscriptionSection mode="topics" />
+            </ConfirmDialogProvider>,
+        );
+        await screen.findByText("Short chapters");
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Copy Chapters into a profile",
+            }),
+        );
+        await waitFor(() => expect(created).toBe(1));
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Copy Short chapters into a profile",
+            }),
+        );
+        await waitFor(() => expect(created).toBe(2));
+
+        const settings = calls
+            .filter(
+                (call) =>
+                    call.url === "/api/settings/profiles" &&
+                    call.method === "POST",
+            )
+            .map(
+                (call) =>
+                    call.body?.settings as {
+                        steps: {
+                            topics: {
+                                preset: string;
+                                fullPrompt: string | null;
+                            };
+                        };
+                    },
+            );
+        expect(settings[0].steps.topics).toMatchObject({
+            preset: "default",
+            fullPrompt: null,
+        });
+        expect(settings[1].steps.topics).toMatchObject({
+            preset: "default",
+            fullPrompt: "Use short chapters {transcription}",
+        });
+        expect(toastSuccess).toHaveBeenLastCalledWith(
+            "Profile “Short chapters” created",
+        );
     });
 });

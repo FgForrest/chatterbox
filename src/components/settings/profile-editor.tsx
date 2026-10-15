@@ -28,6 +28,7 @@ import {
 import {
     defaultProfileSettings,
     type ProfileChannel,
+    type ProfileScope,
     type ProfileSettings,
     type ProviderPin,
 } from "@/lib/profiles/settings";
@@ -71,6 +72,7 @@ interface ProviderOption {
 interface ProfileEditorProps {
     profileId: string | null;
     newChannel?: ProfileChannel;
+    newScope?: ProfileScope;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onSaved: () => void;
@@ -130,62 +132,39 @@ function languageName(locale: string, code: string): string {
     return names.of(code) ?? code;
 }
 
-function stepTitle(
-    name: CommonStepName | "tasks",
-    i18n: ReturnType<typeof useExtracted>,
-): string {
-    switch (name) {
-        case "transcribe":
-            return i18n("Transcribe");
-        case "learn":
-            return i18n("Learn");
-        case "title":
-            return i18n("Title");
-        case "topics":
-            return i18n("Topics");
-        case "summary":
-            return i18n("Summary");
-        case "tasks":
-            return i18n("Tasks");
-    }
+function useStepLabels(): Record<CommonStepName | "tasks", string> {
+    const i18n = useExtracted();
+    return {
+        transcribe: i18n("Transcribe"),
+        learn: i18n("Learn"),
+        title: i18n("Title"),
+        topics: i18n("Topics"),
+        summary: i18n("Summary"),
+        tasks: i18n("Tasks"),
+    };
 }
 
-function titlePresetLabel(
-    preset: PromptPreset,
-    i18n: ReturnType<typeof useExtracted>,
-): string {
-    switch (preset) {
-        case "default":
-            return i18n("Default title");
-        case "meetings":
-            return i18n("Meetings");
-        case "lectures":
-            return i18n("Lectures");
-        case "phone-calls":
-            return i18n("Phone calls");
-        case "audio-blog":
-            return i18n("Audio blog");
-        case "idea-stormer":
-            return i18n("Idea stormer");
-    }
+function useTitlePresetLabels(): Record<PromptPreset, string> {
+    const i18n = useExtracted();
+    return {
+        default: i18n("Default title"),
+        meetings: i18n("Meetings"),
+        lectures: i18n("Lectures"),
+        "phone-calls": i18n("Phone calls"),
+        "audio-blog": i18n("Audio blog"),
+        "idea-stormer": i18n("Idea stormer"),
+    };
 }
 
-function summaryPresetLabel(
-    preset: SummaryPreset | "mail",
-    i18n: ReturnType<typeof useExtracted>,
-): string {
-    switch (preset) {
-        case "general":
-            return i18n("General summary");
-        case "meeting-notes":
-            return i18n("Meeting notes");
-        case "key-points":
-            return i18n("Key points");
-        case "action-items":
-            return i18n("Action items");
-        case "mail":
-            return i18n("Mail summary");
-    }
+function useSummaryPresetLabels(): Record<SummaryPreset | "mail", string> {
+    const i18n = useExtracted();
+    return {
+        general: i18n("General summary"),
+        "meeting-notes": i18n("Meeting notes"),
+        "key-points": i18n("Key points"),
+        "action-items": i18n("Action items"),
+        mail: i18n("Mail summary"),
+    };
 }
 
 function ProviderPinSelect({
@@ -215,31 +194,53 @@ function ProviderPinSelect({
                 ? !option.enhancementOnly
                 : !option.transcriptionOnly),
     );
+    const selectedValue = providerValue(value);
+    const unavailable =
+        value !== null &&
+        !filtered.some(
+            (option) =>
+                option.id === value.credentialId &&
+                option.scope === value.scope,
+        );
     return (
-        <select
-            id={id}
-            className="h-9 w-full rounded-md border bg-background px-3 text-sm"
-            value={mixed ? MIXED_PROVIDER_VALUE : providerValue(value)}
-            disabled={disabled}
-            onChange={(event) =>
-                onChange(parseProviderValue(event.target.value))
-            }
-        >
-            {mixed && (
-                <option value={MIXED_PROVIDER_VALUE} disabled>
-                    {i18n("Different providers per step")}
-                </option>
+        <div className="space-y-2">
+            <select
+                id={id}
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                value={mixed ? MIXED_PROVIDER_VALUE : selectedValue}
+                disabled={disabled}
+                onChange={(event) =>
+                    onChange(parseProviderValue(event.target.value))
+                }
+            >
+                {mixed && (
+                    <option value={MIXED_PROVIDER_VALUE} disabled>
+                        {i18n("Different providers per step")}
+                    </option>
+                )}
+                {unavailable && (
+                    <option value={selectedValue}>
+                        {i18n("Unavailable provider (choose another)")}
+                    </option>
+                )}
+                <option value={DEFAULT_PROVIDER_VALUE}>{defaultLabel}</option>
+                {filtered.map((option) => (
+                    <option
+                        key={`${option.scope}:${option.id}`}
+                        value={`${option.scope}:${option.id}`}
+                    >
+                        {option.label}
+                    </option>
+                ))}
+            </select>
+            {unavailable && (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {i18n(
+                        "This pinned provider is disabled or no longer exists. Choose another provider before saving.",
+                    )}
+                </p>
             )}
-            <option value={DEFAULT_PROVIDER_VALUE}>{defaultLabel}</option>
-            {filtered.map((option) => (
-                <option
-                    key={`${option.scope}:${option.id}`}
-                    value={`${option.scope}:${option.id}`}
-                >
-                    {option.label}
-                </option>
-            ))}
-        </select>
+        </div>
     );
 }
 
@@ -347,9 +348,10 @@ function CommonStepControls({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const stepLabels = useStepLabels();
     const step = getCommonStep(settings, name);
     if (!step) return null;
-    const title = stepTitle(name, i18n);
+    const title = stepLabels[name];
     return (
         <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
@@ -406,6 +408,7 @@ function CommonStepControls({
 export function ProfileEditor({
     profileId,
     newChannel,
+    newScope,
     open,
     onOpenChange,
     onSaved,
@@ -519,7 +522,7 @@ export function ProfileEditor({
                                 : i18n("New mail profile"),
                         description: null,
                         channel: newChannel,
-                        scope: "personal",
+                        scope: newScope ?? "personal",
                         isDefault: false,
                         version: 1,
                         canEdit: true,
@@ -549,7 +552,7 @@ export function ProfileEditor({
         return () => {
             active = false;
         };
-    }, [i18n, newChannel, onOpenChange, open, profileId]);
+    }, [i18n, newChannel, newScope, onOpenChange, open, profileId]);
 
     const availableProviders = useMemo(
         () =>
@@ -626,7 +629,7 @@ export function ProfileEditor({
                                   name: profile.name.trim(),
                                   description: profile.description,
                                   channel: profile.channel,
-                                  scope: "personal",
+                                  scope: profile.scope,
                                   settings: profile.settings,
                               },
                     ),
@@ -648,12 +651,25 @@ export function ProfileEditor({
                 await reloadLatest();
                 return;
             }
-            if (!response.ok) throw new Error("save");
+            if (!response.ok) {
+                const body = (await response.json().catch(() => null)) as {
+                    error?: string;
+                } | null;
+                throw new Error(
+                    response.status === 400 && body?.error
+                        ? body.error
+                        : i18n("Failed to save profile."),
+                );
+            }
             toast.success(i18n("Profile saved."));
             onSaved();
             onOpenChange(false);
-        } catch {
-            toast.error(i18n("Failed to save profile."));
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Failed to save profile."),
+            );
         } finally {
             setSaving(false);
         }
@@ -812,6 +828,7 @@ function BasicEditor({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const stepLabels = useStepLabels();
     const settings = profile.settings;
     const textSteps: CommonStepName[] = [
         "learn",
@@ -937,7 +954,9 @@ function BasicEditor({
             </div>
 
             <div className="space-y-2">
-                <h3 className="text-sm font-medium">{i18n("Automation")}</h3>
+                <h3 className="text-sm font-medium">
+                    {i18n("Runs automatically")}
+                </h3>
                 {automationSteps.map((name) => {
                     const step = getCommonStep(settings, name);
                     if (!step) return null;
@@ -947,8 +966,17 @@ function BasicEditor({
                             className="flex items-center justify-between rounded-md border px-3 py-2"
                         >
                             <Label htmlFor={`basic-${name}-automatic`}>
-                                {stepTitle(name, i18n)}
+                                {stepLabels[name]}
                             </Label>
+                            {profile.channel === "mail" &&
+                                name === "title" &&
+                                !step.enabled && (
+                                    <p className="mr-auto text-xs text-muted-foreground">
+                                        {i18n(
+                                            "Titles are off for mail; turn them on in Advanced.",
+                                        )}
+                                    </p>
+                                )}
                             <Switch
                                 id={`basic-${name}-automatic`}
                                 checked={step.automatic}
@@ -989,6 +1017,7 @@ function AdvancedEditor({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const stepLabels = useStepLabels();
     const settings = profile.settings;
     const steps: (CommonStepName | "tasks")[] = [
         ...(profile.channel === "audio" ? (["transcribe"] as const) : []),
@@ -1004,7 +1033,7 @@ function AdvancedEditor({
             {steps.map((name) => (
                 <section key={name} className="space-y-4 rounded-lg border p-4">
                     <h3 className="text-base font-semibold">
-                        {stepTitle(name, i18n)}
+                        {stepLabels[name]}
                     </h3>
                     {name === "tasks" ? (
                         <div className="flex items-center justify-between gap-3">
@@ -1118,24 +1147,64 @@ function TranscribeSettings({
     const i18n = useExtracted();
     if (!("transcribe" in settings.steps)) return null;
     const step = settings.steps.transcribe;
+    const languageOptions = [
+        { label: i18n("Auto-detect"), value: "auto" },
+        { label: i18n("English"), value: "en" },
+        { label: i18n("Spanish"), value: "es" },
+        { label: i18n("French"), value: "fr" },
+        { label: i18n("German"), value: "de" },
+        { label: i18n("Italian"), value: "it" },
+        { label: i18n("Portuguese"), value: "pt" },
+        { label: i18n("Dutch"), value: "nl" },
+        { label: i18n("Swedish"), value: "sv" },
+        { label: i18n("Danish"), value: "da" },
+        { label: i18n("Norwegian"), value: "no" },
+        { label: i18n("Finnish"), value: "fi" },
+        { label: i18n("Polish"), value: "pl" },
+        { label: i18n("Czech"), value: "cs" },
+        { label: i18n("Ukrainian"), value: "uk" },
+        { label: i18n("Russian"), value: "ru" },
+        { label: i18n("Romanian"), value: "ro" },
+        { label: i18n("Hungarian"), value: "hu" },
+        { label: i18n("Greek"), value: "el" },
+        { label: i18n("Turkish"), value: "tr" },
+        { label: i18n("Arabic"), value: "ar" },
+        { label: i18n("Hebrew"), value: "he" },
+        { label: i18n("Hindi"), value: "hi" },
+        { label: i18n("Indonesian"), value: "id" },
+        { label: i18n("Vietnamese"), value: "vi" },
+        { label: i18n("Thai"), value: "th" },
+        { label: i18n("Chinese"), value: "zh" },
+        { label: i18n("Japanese"), value: "ja" },
+        { label: i18n("Korean"), value: "ko" },
+    ];
     return (
         <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2">
                 <Label htmlFor="transcribe-language">{i18n("Language")}</Label>
-                <Input
+                <select
                     id="transcribe-language"
-                    value={step.language ?? ""}
-                    placeholder={i18n("Auto-detect")}
+                    aria-label={i18n("Language")}
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    value={step.language ?? "auto"}
                     disabled={readOnly || !step.enabled}
                     onChange={(event) =>
                         updateSettings((next) => {
                             if ("transcribe" in next.steps) {
                                 next.steps.transcribe.language =
-                                    event.target.value || null;
+                                    event.target.value === "auto"
+                                        ? null
+                                        : event.target.value;
                             }
                         })
                     }
-                />
+                >
+                    {languageOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {option.label}
+                        </option>
+                    ))}
+                </select>
             </div>
             <div className="space-y-2">
                 <Label htmlFor="transcribe-quality">{i18n("Quality")}</Label>
@@ -1196,6 +1265,7 @@ function TitleSettings({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const presetLabels = useTitlePresetLabels();
     const step = settings.steps.title;
     return (
         <div className="space-y-4">
@@ -1215,7 +1285,7 @@ function TitleSettings({
                 >
                     {TITLE_PRESETS.map((preset) => (
                         <option key={preset} value={preset}>
-                            {titlePresetLabel(preset, i18n)}
+                            {presetLabels[preset]}
                         </option>
                     ))}
                 </select>
@@ -1251,6 +1321,7 @@ function SummarySettings({
     updateSettings: (change: (next: ProfileSettings) => void) => void;
 }) {
     const i18n = useExtracted();
+    const presetLabels = useSummaryPresetLabels();
     const step = settings.steps.summary;
     const fullPromptActive = Boolean(step.fullPrompt?.trim());
     const promptParts =
@@ -1286,7 +1357,7 @@ function SummarySettings({
                 >
                     {summaryPresets.map((preset) => (
                         <option key={preset} value={preset}>
-                            {summaryPresetLabel(preset, i18n)}
+                            {presetLabels[preset]}
                         </option>
                     ))}
                 </select>

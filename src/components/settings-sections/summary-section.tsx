@@ -175,7 +175,7 @@ export function SummarySection() {
                 );
             }
             setEditingProfileId(body.profile.id);
-            toast.success(i18n("Profile created from template."));
+            toast.success(i18n("Profile “{name}” created", { name }));
         } catch (error) {
             toast.error(
                 error instanceof Error

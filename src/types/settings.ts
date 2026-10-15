@@ -46,6 +46,9 @@ export interface SettingsProfileDetail extends SettingsProfileSummary {
 
 export interface SettingsProfilesPage {
     profiles: SettingsProfileSummary[];
+    permissions: {
+        canCreateOrganization: boolean;
+    };
     pagination: {
         page: number;
         pageSize: number;

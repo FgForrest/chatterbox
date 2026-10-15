@@ -16,6 +16,7 @@ import {
 } from "@/db/schema";
 import type { ActorContext } from "@/lib/authz/model";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
+import { RIFFADO_INCLUDED_PROVIDER_ID } from "@/lib/transcription/included-provider";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -47,6 +48,7 @@ const { dbProxy, dbRef, state } = vi.hoisted(() => {
             orgEnabled: true,
             capabilities: new Set<"use" | "org.curate">(["use"]),
             usableUsers: new Set(["profile-owner", "profile-other", "curator"]),
+            mynahConfigured: false,
         },
     };
 });
@@ -90,6 +92,9 @@ vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: async (userId: string) =>
         userId === "curator" || userId === "profile-org",
 }));
+vi.mock("@/lib/hosted/transcription/mynah", () => ({
+    isMynahConfigured: () => state.mynahConfigured,
+}));
 vi.mock("@/lib/auth-server", () => ({
     requireApiSessionActor: async () => {
         const actor: ActorContext = {
@@ -121,6 +126,7 @@ vi.mock("@/lib/auth-server", () => ({
 
 import { POST as setDefaultProfile } from "@/app/api/settings/profiles/[id]/default/route";
 import { POST as duplicateProfile } from "@/app/api/settings/profiles/[id]/duplicate/route";
+import { POST as restoreProfile } from "@/app/api/settings/profiles/[id]/restore/route";
 import {
     DELETE as deleteProfile,
     GET as getProfile,
@@ -193,6 +199,7 @@ describeWithDatabase("profile settings routes", () => {
             "profile-other",
             "curator",
         ]);
+        state.mynahConfigured = false;
         await databaseClient().delete(apiCredentials);
         await databaseClient().delete(processingProfiles);
         await databaseClient().delete(userSettings);
@@ -526,6 +533,55 @@ describeWithDatabase("profile settings routes", () => {
         ).toBe(400);
     });
 
+    it("accepts a configured Mynah transcription pin and rejects it elsewhere", async () => {
+        const transcription = defaultProfileSettings("audio");
+        transcription.steps.transcribe.provider = {
+            credentialId: RIFFADO_INCLUDED_PROVIDER_ID,
+            scope: "personal",
+        };
+
+        state.mynahConfigured = true;
+        expect(
+            (
+                await create({
+                    name: "Mynah transcription",
+                    channel: "audio",
+                    scope: "personal",
+                    settings: transcription,
+                })
+            ).response.status,
+        ).toBe(201);
+
+        state.mynahConfigured = false;
+        expect(
+            (
+                await create({
+                    name: "Unavailable Mynah",
+                    channel: "audio",
+                    scope: "personal",
+                    settings: transcription,
+                })
+            ).response.status,
+        ).toBe(400);
+
+        state.mynahConfigured = true;
+        const summary = defaultProfileSettings("audio");
+        summary.steps.summary.provider = {
+            credentialId: RIFFADO_INCLUDED_PROVIDER_ID,
+            scope: "personal",
+        };
+        expect(
+            (
+                await create({
+                    name: "Mynah summary",
+                    channel: "audio",
+                    scope: "personal",
+                    settings: summary,
+                })
+            ).response.status,
+        ).toBe(400);
+    });
+
     it("duplicates to personal scope and protects the default from archive", async () => {
         const created = await create({
             name: "Source",
@@ -538,7 +594,41 @@ describeWithDatabase("profile settings routes", () => {
             context(id),
         );
         expect(duplicate.status).toBe(201);
-        expect((await duplicate.json()).profile.scope).toBe("personal");
+        const duplicated = (await duplicate.json()).profile;
+        expect(duplicated.scope).toBe("personal");
+
+        expect(
+            (
+                await deleteProfile(
+                    request("DELETE", `/${duplicated.id}`),
+                    context(duplicated.id),
+                )
+            ).status,
+        ).toBe(200);
+        const archived = await listProfiles(
+            request("GET", "?archived=true&page=1&pageSize=20"),
+        );
+        expect(
+            (await archived.json()).profiles.map(
+                (profile: { id: string }) => profile.id,
+            ),
+        ).toContain(duplicated.id);
+        expect(
+            (
+                await restoreProfile(
+                    request("POST", `/${duplicated.id}/restore`),
+                    context(duplicated.id),
+                )
+            ).status,
+        ).toBe(200);
+        const [restored] = await databaseClient()
+            .select({
+                archivedAt: processingProfiles.archivedAt,
+                isDefault: processingProfiles.isDefault,
+            })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.id, duplicated.id));
+        expect(restored).toEqual({ archivedAt: null, isDefault: false });
 
         expect(
             (

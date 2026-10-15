@@ -4,9 +4,11 @@ import { FileText, GraduationCap, ListTree } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ProfileEditor } from "@/components/settings/profile-editor";
 import { ProfilesSettingsLink } from "@/components/settings/profiles-settings-link";
 import { ProviderRoleSelect } from "@/components/settings/provider-role-select";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
+import { LegacyTemplateList } from "@/components/settings/template-list";
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -16,7 +18,25 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+    useTitlePresetCopy,
+    useTopicPresetCopy,
+} from "@/hooks/use-preset-copy";
 import { useSettings } from "@/hooks/use-settings";
+import {
+    normalizeTitlePromptConfig,
+    TITLE_TEMPLATE_KIND,
+} from "@/lib/ai/prompt-presets";
+import {
+    isPresetId,
+    type PromptTemplate,
+    templatePrompt,
+} from "@/lib/ai/prompt-templates";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import {
+    normalizeTopicPromptConfig,
+    TOPIC_TEMPLATE_KIND,
+} from "@/lib/topics/topic-presets";
 
 export function TranscriptionSection({
     mode = "transcription",
@@ -24,6 +44,8 @@ export function TranscriptionSection({
     mode?: "transcription" | "topics" | "learning";
 }) {
     const i18n = useExtracted();
+    const titlePresetCopy = useTitlePresetCopy();
+    const topicPresetCopy = useTopicPresetCopy();
     const { isLoadingSettings, isSavingSettings, setIsLoadingSettings } =
         useSettings();
     const languageOptions = useMemo(
@@ -67,6 +89,16 @@ export function TranscriptionSection({
     const [preferredTranscriptSource, setPreferredTranscriptSource] =
         useState("plaud");
     const [autoLearnOffered, setAutoLearnOffered] = useState(false);
+    const [titleTemplates, setTitleTemplates] = useState(() =>
+        normalizeTitlePromptConfig(null),
+    );
+    const [topicTemplates, setTopicTemplates] = useState(() =>
+        normalizeTopicPromptConfig(null),
+    );
+    const [copyingId, setCopyingId] = useState<string | null>(null);
+    const [editingProfileId, setEditingProfileId] = useState<string | null>(
+        null,
+    );
 
     useEffect(() => {
         const controller = new AbortController();
@@ -90,6 +122,10 @@ export function TranscriptionSection({
                         : "plaud",
                 );
                 setAutoLearnOffered(data.autoLearnOffered === true);
+                setTitleTemplates(
+                    normalizeTitlePromptConfig(data.titleGenerationPrompt),
+                );
+                setTopicTemplates(normalizeTopicPromptConfig(data.topicPrompt));
             } catch (error) {
                 if (
                     !(
@@ -123,6 +159,88 @@ export function TranscriptionSection({
             toast.error(i18n("Failed to save settings. Changes reverted."));
         }
     };
+
+    const copyIntoProfile = async (
+        template: PromptTemplate,
+        target: "title" | "topics",
+    ) => {
+        const settings = defaultProfileSettings("audio");
+        let name: string;
+        if (target === "title") {
+            const builtinId = isPresetId(TITLE_TEMPLATE_KIND, template.id)
+                ? template.id
+                : null;
+            name =
+                template.name ??
+                (builtinId ? titlePresetCopy[builtinId].name : template.id);
+            const uneditedBuiltin =
+                builtinId !== null &&
+                template.name === null &&
+                template.prompt === null;
+            settings.steps.title.preset = builtinId ?? "default";
+            settings.steps.title.fullPrompt = uneditedBuiltin
+                ? null
+                : templatePrompt(template, TITLE_TEMPLATE_KIND);
+        } else {
+            const builtinId = isPresetId(TOPIC_TEMPLATE_KIND, template.id)
+                ? template.id
+                : null;
+            name =
+                template.name ??
+                (builtinId ? topicPresetCopy[builtinId].name : template.id);
+            const uneditedBuiltin =
+                builtinId !== null &&
+                template.name === null &&
+                template.prompt === null;
+            settings.steps.topics.preset = "default";
+            settings.steps.topics.fullPrompt = uneditedBuiltin
+                ? null
+                : templatePrompt(template, TOPIC_TEMPLATE_KIND);
+        }
+        setCopyingId(template.id);
+        try {
+            const response = await fetch("/api/settings/profiles", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    name,
+                    channel: "audio",
+                    scope: "personal",
+                    settings,
+                }),
+            });
+            const body = (await response.json().catch(() => null)) as {
+                profile?: { id?: string };
+                error?: string;
+            } | null;
+            if (!response.ok || !body?.profile?.id) {
+                throw new Error(
+                    body?.error || i18n("Could not copy the template."),
+                );
+            }
+            setEditingProfileId(body.profile.id);
+            toast.success(i18n("Profile “{name}” created", { name }));
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Could not copy the template."),
+            );
+        } finally {
+            setCopyingId(null);
+        }
+    };
+
+    const profileEditor = editingProfileId ? (
+        <ProfileEditor
+            profileId={editingProfileId}
+            open
+            onOpenChange={(open) => {
+                if (!open) setEditingProfileId(null);
+            }}
+            onSaved={() => undefined}
+        />
+    ) : null;
 
     if (isLoadingSettings) {
         return (
@@ -164,6 +282,17 @@ export function TranscriptionSection({
                 />
                 <ProviderRoleSelect purpose="topics" />
                 <ProfilesSettingsLink />
+                <LegacyTemplateList
+                    kind={TOPIC_TEMPLATE_KIND}
+                    presetCopy={topicPresetCopy}
+                    config={topicTemplates}
+                    heading={i18n("Templates from before profiles")}
+                    copyingId={copyingId}
+                    onCopy={(template) =>
+                        void copyIntoProfile(template, "topics")
+                    }
+                />
+                {profileEditor}
             </div>
         );
     }
@@ -180,6 +309,14 @@ export function TranscriptionSection({
             <ProviderRoleSelect purpose="transcription" />
             <ProviderRoleSelect purpose="title" />
             <ProfilesSettingsLink />
+            <LegacyTemplateList
+                kind={TITLE_TEMPLATE_KIND}
+                presetCopy={titlePresetCopy}
+                config={titleTemplates}
+                heading={i18n("Templates from before profiles")}
+                copyingId={copyingId}
+                onCopy={(template) => void copyIntoProfile(template, "title")}
+            />
             <div className="space-y-4">
                 <div className="flex items-center justify-between gap-4">
                     <div className="space-y-0.5">
@@ -310,6 +447,7 @@ export function TranscriptionSection({
                     </p>
                 </div>
             </div>
+            {profileEditor}
         </div>
     );
 }

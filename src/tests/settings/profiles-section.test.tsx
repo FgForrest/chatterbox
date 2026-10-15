@@ -9,7 +9,10 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProfilesSection } from "@/components/settings-sections/profiles-section";
-import { defaultProfileSettings } from "@/lib/profiles/settings";
+import {
+    type AudioProfileSettings,
+    defaultProfileSettings,
+} from "@/lib/profiles/settings";
 
 const { toastError, translate } = vi.hoisted(() => ({
     toastError: vi.fn(),
@@ -62,6 +65,18 @@ const profiles = [
         updatedAt: "2026-10-15T00:00:00.000Z",
     },
     {
+        id: "unavailable-pin",
+        name: "Unavailable Pin",
+        description: null,
+        channel: "audio" as const,
+        scope: "personal" as const,
+        isDefault: false,
+        version: 1,
+        canEdit: true,
+        archivedAt: null,
+        updatedAt: "2026-10-15T00:00:00.000Z",
+    },
+    {
         id: "mail-profile",
         name: "Mail Profile",
         description: null,
@@ -74,6 +89,19 @@ const profiles = [
         updatedAt: "2026-10-15T00:00:00.000Z",
     },
 ];
+
+const archivedProfile = {
+    id: "archived-profile",
+    name: "Archived Profile",
+    description: null,
+    channel: "audio" as const,
+    scope: "personal" as const,
+    isDefault: false,
+    version: 2,
+    canEdit: true,
+    archivedAt: "2026-10-15T01:00:00.000Z",
+    updatedAt: "2026-10-15T01:00:00.000Z",
+};
 
 const builtins = {
     builtinPromptsVersion: "test",
@@ -89,13 +117,20 @@ const builtins = {
 function detail(id: string) {
     const summary = profiles.find((profile) => profile.id === id);
     if (!summary) throw new Error(`Missing fixture ${id}`);
+    const settings =
+        summary.channel === "mail"
+            ? defaultProfileSettings("mail")
+            : structuredClone(audioSettings);
+    if (id === "unavailable-pin" && "transcribe" in settings.steps) {
+        (settings as AudioProfileSettings).steps.transcribe.provider = {
+            credentialId: "deleted-provider",
+            scope: "personal",
+        };
+    }
     return {
         profile: {
             ...summary,
-            settings:
-                summary.channel === "mail"
-                    ? defaultProfileSettings("mail")
-                    : structuredClone(audioSettings),
+            settings,
         },
         ...builtins,
     };
@@ -104,10 +139,14 @@ function detail(id: string) {
 describe("Settings Profiles", () => {
     let calls: FetchCall[];
     let conflict = false;
+    let canCreateOrganization = false;
+    let badRequest = false;
 
     beforeEach(() => {
         calls = [];
         conflict = false;
+        canCreateOrganization = false;
+        badRequest = false;
         toastError.mockClear();
         vi.stubGlobal(
             "fetch",
@@ -168,6 +207,12 @@ describe("Settings Profiles", () => {
                         { status: 409 },
                     );
                 }
+                if (detailMatch && method === "PUT" && badRequest) {
+                    return Response.json(
+                        { error: "Choose another provider." },
+                        { status: 400 },
+                    );
+                }
                 if (detailMatch && method === "PUT") {
                     return Response.json({
                         profile: {
@@ -177,12 +222,16 @@ describe("Settings Profiles", () => {
                     });
                 }
                 if (url.startsWith("/api/settings/profiles?")) {
+                    const listedProfiles = url.includes("archived=true")
+                        ? [archivedProfile]
+                        : profiles;
                     return Response.json({
-                        profiles,
+                        profiles: listedProfiles,
+                        permissions: { canCreateOrganization },
                         pagination: {
                             page: 1,
                             pageSize: 10,
-                            total: profiles.length,
+                            total: listedProfiles.length,
                             totalPages: 1,
                         },
                     });
@@ -335,6 +384,137 @@ describe("Settings Profiles", () => {
         expect(screen.queryByRole("heading", { name: "Topics" })).toBeNull();
         expect(screen.getByRole("heading", { name: "Learn" })).toBeTruthy();
         expect(screen.getByRole("heading", { name: "Title" })).toBeTruthy();
+        fireEvent.click(screen.getByRole("tab", { name: "Basic" }));
+        expect(
+            screen.getByText(
+                "Titles are off for mail; turn them on in Advanced.",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("shows an unavailable provider pin and requires another choice", async () => {
+        await edit("Unavailable Pin");
+        fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
+
+        const select = screen.getByRole("combobox", {
+            name: "Transcribe provider",
+        }) as HTMLSelectElement;
+        expect(select.selectedOptions[0]?.textContent).toBe(
+            "Unavailable provider (choose another)",
+        );
+        expect(
+            screen.getByText(
+                "This pinned provider is disabled or no longer exists. Choose another provider before saving.",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("uses the transcription language select with auto-detect", async () => {
+        await edit("Default Profile");
+        fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
+
+        const language = screen.getByRole("combobox", {
+            name: "Language",
+        }) as HTMLSelectElement;
+        expect(language.options[0]?.textContent).toBe("Auto-detect");
+        fireEvent.change(language, { target: { value: "cs" } });
+        expect(language.value).toBe("cs");
+    });
+
+    it("offers Organization scope only to curators and restricts its providers", async () => {
+        await renderList();
+        expect(
+            screen.queryByRole("combobox", { name: "New profile scope" }),
+        ).toBeNull();
+        cleanup();
+
+        canCreateOrganization = true;
+        await renderList();
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "New profile scope" }),
+            { target: { value: "organization" } },
+        );
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "New profile for recordings",
+            }),
+        );
+        await screen.findByRole("dialog", {
+            name: "Edit New recordings profile",
+        });
+        fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
+        const provider = screen.getByRole("combobox", {
+            name: "Transcribe provider",
+        });
+        expect(provider.textContent).toContain("Organization · Anthropic");
+        expect(provider.textContent).not.toContain("OpenAI");
+
+        fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url === "/api/settings/profiles" &&
+                        call.method === "POST" &&
+                        (call.body as { scope?: string }).scope ===
+                            "organization",
+                ),
+            ).toBe(true),
+        );
+    });
+
+    it("confirms archive in-page and restores profiles from the archived filter", async () => {
+        await renderList();
+        fireEvent.click(
+            screen.getByRole("button", { name: "Archive Unavailable Pin" }),
+        );
+        expect(screen.getByText("Archive “Unavailable Pin”?")).toBeTruthy();
+        expect(
+            calls.some(
+                (call) =>
+                    call.url === "/api/settings/profiles/unavailable-pin" &&
+                    call.method === "DELETE",
+            ),
+        ).toBe(false);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Archive profile" }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url === "/api/settings/profiles/unavailable-pin" &&
+                        call.method === "DELETE",
+                ),
+            ).toBe(true),
+        );
+
+        fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), {
+            target: { value: "archived" },
+        });
+        await screen.findByText("Archived Profile");
+        fireEvent.click(
+            screen.getByRole("button", { name: "Restore Archived Profile" }),
+        );
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url ===
+                            "/api/settings/profiles/archived-profile/restore" &&
+                        call.method === "POST",
+                ),
+            ).toBe(true),
+        );
+    });
+
+    it("shows a 400 response message when saving fails validation", async () => {
+        badRequest = true;
+        await edit("Default Profile");
+        fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+        await waitFor(() =>
+            expect(toastError).toHaveBeenCalledWith("Choose another provider."),
+        );
     });
 
     it("reloads after a version conflict and keeps the unsaved text available", async () => {

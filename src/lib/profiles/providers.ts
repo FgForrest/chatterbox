@@ -118,6 +118,7 @@ function assertEnabled(credential: CredentialRow): void {
 
 interface SubmittedPin {
     path: string[];
+    step: string;
     pin: ProviderPin;
 }
 
@@ -127,6 +128,7 @@ function submittedPins(settings: ProfileSettings): SubmittedPin[] {
         if (!("provider" in value) || value.provider === null) continue;
         pins.push({
             path: ["settings", "steps", stepName, "provider"],
+            step: stepName,
             pin: value.provider,
         });
     }
@@ -147,7 +149,7 @@ export async function validateProfileProviderPins(input: {
     profileScope: ProfileScope;
     settings: ProfileSettings;
 }): Promise<void> {
-    for (const { path, pin } of submittedPins(input.settings)) {
+    for (const { path, pin, step } of submittedPins(input.settings)) {
         if (pin.scope === "personal") {
             if (input.profileScope !== "personal") {
                 throw invalidPin(
@@ -160,6 +162,21 @@ export async function validateProfileProviderPins(input: {
                     "A personal profile may only pin its owner's providers",
                     path,
                 );
+            }
+            if (isRiffadoIncludedProviderId(pin.credentialId)) {
+                if (step !== "transcribe") {
+                    throw invalidPin(
+                        `${RIFFADO_INCLUDED_PROVIDER_LABEL} can only be pinned for transcription`,
+                        path,
+                    );
+                }
+                if (!isMynahConfigured()) {
+                    throw invalidPin(
+                        `${RIFFADO_INCLUDED_PROVIDER_LABEL} is not available on this instance`,
+                        path,
+                    );
+                }
+                continue;
             }
             const credential = await credentialByOwner(
                 pin.credentialId,

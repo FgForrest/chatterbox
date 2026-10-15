@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { processingProfileRevisions, processingProfiles } from "@/db/schema";
@@ -178,6 +178,7 @@ export interface ListActorProfilesInput {
     scope?: ProfileScope;
     offset?: number;
     limit?: number;
+    archivedOnly?: boolean;
 }
 
 /** List the actor's personal profiles and Organization profiles they may use. */
@@ -214,7 +215,14 @@ export async function listActorProfiles(
                 eq(processingProfileRevisions.profileId, processingProfiles.id),
             ),
         )
-        .where(and(permittedOwners, isNull(processingProfiles.archivedAt)))
+        .where(
+            and(
+                permittedOwners,
+                input.archivedOnly
+                    ? isNotNull(processingProfiles.archivedAt)
+                    : isNull(processingProfiles.archivedAt),
+            ),
+        )
         .orderBy(asc(processingProfiles.createdAt), asc(processingProfiles.id));
     const search = input.search?.trim().toLocaleLowerCase();
     const permitted = await Promise.all(
@@ -518,6 +526,12 @@ export interface ArchiveProfileInput {
     actor: ActorContext;
 }
 
+export interface RestoreProfileInput {
+    ownerUserId: string;
+    profileId: string;
+    actor: ActorContext;
+}
+
 export interface SetDefaultProfileInput {
     ownerUserId: string;
     profileId: string;
@@ -627,4 +641,44 @@ export async function archiveProfile(
             .returning({ id: processingProfiles.id });
         return archived.length > 0;
     });
+}
+
+/** Restore an archived owner-scoped profile without making it the default. */
+export async function restoreProfile(
+    input: RestoreProfileInput,
+): Promise<boolean> {
+    const [current] = await db
+        .select({
+            ownerUserId: processingProfiles.ownerUserId,
+            scope: processingProfiles.scope,
+        })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.id, input.profileId),
+                isNotNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!current) return false;
+    await assertEditAccess(input.actor, current);
+    const restored = await db
+        .update(processingProfiles)
+        .set({
+            archivedAt: null,
+            isDefault: false,
+            version: sql`${processingProfiles.version} + 1`,
+            updatedBy: input.actor.actorId,
+            updatedAt: new Date(),
+        })
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, input.ownerUserId),
+                eq(processingProfiles.id, input.profileId),
+                isNotNull(processingProfiles.archivedAt),
+            ),
+        )
+        .returning({ id: processingProfiles.id });
+    return restored.length > 0;
 }

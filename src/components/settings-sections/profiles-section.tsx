@@ -9,6 +9,7 @@ import {
     Mail,
     Pencil,
     Plus,
+    RotateCcw,
     Star,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
@@ -18,7 +19,7 @@ import { ProfileEditor } from "@/components/settings/profile-editor";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ProfileChannel } from "@/lib/profiles/settings";
+import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
 import type {
     SettingsProfileSummary,
     SettingsProfilesPage,
@@ -29,6 +30,7 @@ const PAGE_SIZE = 10;
 interface EditorTarget {
     profileId: string | null;
     newChannel?: ProfileChannel;
+    newScope?: ProfileScope;
 }
 
 function errorMessage(body: unknown, fallback: string): string {
@@ -48,13 +50,17 @@ export function ProfilesSection() {
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [channel, setChannel] = useState<"all" | ProfileChannel>("all");
-    const [scope, setScope] = useState<"all" | "personal" | "organization">(
-        "all",
-    );
+    const [scope, setScope] = useState<
+        "all" | "personal" | "organization" | "archived"
+    >("all");
+    const [newProfileScope, setNewProfileScope] =
+        useState<ProfileScope>("personal");
     const [page, setPage] = useState(1);
     const [data, setData] = useState<SettingsProfilesPage | null>(null);
     const [loading, setLoading] = useState(true);
     const [editor, setEditor] = useState<EditorTarget | null>(null);
+    const [archiveTarget, setArchiveTarget] =
+        useState<SettingsProfileSummary | null>(null);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -68,7 +74,11 @@ export function ProfilesSection() {
         const params = new URLSearchParams();
         if (debouncedSearch) params.set("q", debouncedSearch);
         if (channel !== "all") params.set("channel", channel);
-        if (scope !== "all") params.set("scope", scope);
+        if (scope === "archived") {
+            params.set("archived", "true");
+        } else if (scope !== "all") {
+            params.set("scope", scope);
+        }
         params.set("page", String(page));
         params.set("pageSize", String(PAGE_SIZE));
         return params.toString();
@@ -93,7 +103,7 @@ export function ProfilesSection() {
 
     const mutate = async (
         profile: SettingsProfileSummary,
-        action: "duplicate" | "default" | "archive",
+        action: "duplicate" | "default" | "archive" | "restore",
     ) => {
         const previous = data;
         if (action === "default") {
@@ -113,7 +123,7 @@ export function ProfilesSection() {
                       }
                     : current,
             );
-        } else if (action === "archive") {
+        } else if (action === "archive" || action === "restore") {
             setData((current) =>
                 current
                     ? {
@@ -135,7 +145,9 @@ export function ProfilesSection() {
                 ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/duplicate`
                 : action === "default"
                   ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/default`
-                  : `/api/settings/profiles/${encodeURIComponent(profile.id)}`;
+                  : action === "restore"
+                    ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/restore`
+                    : `/api/settings/profiles/${encodeURIComponent(profile.id)}`;
         try {
             const response = await fetch(endpoint, {
                 method: action === "archive" ? "DELETE" : "POST",
@@ -157,8 +169,11 @@ export function ProfilesSection() {
                     ? i18n("Profile duplicated.")
                     : action === "default"
                       ? i18n("Default profile changed.")
-                      : i18n("Profile archived."),
+                      : action === "archive"
+                        ? i18n("Profile archived.")
+                        : i18n("Profile restored."),
             );
+            if (action === "archive") setArchiveTarget(null);
             await loadProfiles();
         } catch (error) {
             if (previous) setData(previous);
@@ -189,6 +204,25 @@ export function ProfilesSection() {
                 icon={FileAudio}
                 action={
                     <div className="flex flex-wrap justify-end gap-2">
+                        {data?.permissions.canCreateOrganization && (
+                            <select
+                                aria-label={i18n("New profile scope")}
+                                className="h-8 rounded-md border bg-background px-2 text-sm"
+                                value={newProfileScope}
+                                onChange={(event) =>
+                                    setNewProfileScope(
+                                        event.target.value as ProfileScope,
+                                    )
+                                }
+                            >
+                                <option value="personal">
+                                    {i18n("Personal")}
+                                </option>
+                                <option value="organization">
+                                    {i18n("Organization")}
+                                </option>
+                            </select>
+                        )}
                         <Button
                             type="button"
                             size="sm"
@@ -196,6 +230,7 @@ export function ProfilesSection() {
                                 setEditor({
                                     profileId: null,
                                     newChannel: "audio",
+                                    newScope: newProfileScope,
                                 })
                             }
                         >
@@ -210,6 +245,7 @@ export function ProfilesSection() {
                                 setEditor({
                                     profileId: null,
                                     newChannel: "mail",
+                                    newScope: newProfileScope,
                                 })
                             }
                         >
@@ -252,7 +288,8 @@ export function ProfilesSection() {
                             event.target.value as
                                 | "all"
                                 | "personal"
-                                | "organization",
+                                | "organization"
+                                | "archived",
                         );
                         setPage(1);
                     }}
@@ -260,6 +297,7 @@ export function ProfilesSection() {
                     <option value="all">{i18n("All scopes")}</option>
                     <option value="personal">{i18n("Personal")}</option>
                     <option value="organization">{i18n("Organization")}</option>
+                    <option value="archived">{i18n("Archived")}</option>
                 </select>
             </div>
 
@@ -323,103 +361,149 @@ export function ProfilesSection() {
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap items-center justify-end gap-1">
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        aria-label={
-                                            profile.canEdit
-                                                ? i18n("Edit {name}", {
-                                                      name: profile.name,
-                                                  })
-                                                : i18n("View {name}", {
-                                                      name: profile.name,
-                                                  })
-                                        }
-                                        onClick={() =>
-                                            setEditor({
-                                                profileId: profile.id,
-                                            })
-                                        }
-                                    >
-                                        <Pencil
-                                            className="mr-1 size-3.5"
-                                            aria-hidden="true"
-                                        />
-                                        {profile.canEdit
-                                            ? i18n("Edit")
-                                            : i18n("View")}
-                                    </Button>
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="ghost"
-                                        aria-label={
-                                            profile.scope === "organization"
-                                                ? i18n(
-                                                      "Duplicate to personal {name}",
-                                                      { name: profile.name },
-                                                  )
-                                                : i18n("Duplicate {name}", {
-                                                      name: profile.name,
-                                                  })
-                                        }
-                                        onClick={() =>
-                                            void mutate(profile, "duplicate")
-                                        }
-                                    >
-                                        <Copy
-                                            className="mr-1 size-3.5"
-                                            aria-hidden="true"
-                                        />
-                                        {profile.scope === "organization"
-                                            ? i18n("Duplicate to personal")
-                                            : i18n("Duplicate")}
-                                    </Button>
-                                    {profile.canEdit && !profile.isDefault && (
+                                    {profile.archivedAt ? (
+                                        profile.canEdit && (
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="ghost"
+                                                aria-label={i18n(
+                                                    "Restore {name}",
+                                                    { name: profile.name },
+                                                )}
+                                                onClick={() =>
+                                                    void mutate(
+                                                        profile,
+                                                        "restore",
+                                                    )
+                                                }
+                                            >
+                                                <RotateCcw
+                                                    className="mr-1 size-3.5"
+                                                    aria-hidden="true"
+                                                />
+                                                {i18n("Restore")}
+                                            </Button>
+                                        )
+                                    ) : (
                                         <>
                                             <Button
                                                 type="button"
                                                 size="sm"
                                                 variant="ghost"
-                                                aria-label={i18n(
-                                                    "Make {name} default",
-                                                    { name: profile.name },
-                                                )}
+                                                aria-label={
+                                                    profile.canEdit
+                                                        ? i18n("Edit {name}", {
+                                                              name: profile.name,
+                                                          })
+                                                        : i18n("View {name}", {
+                                                              name: profile.name,
+                                                          })
+                                                }
                                                 onClick={() =>
-                                                    void mutate(
-                                                        profile,
-                                                        "default",
-                                                    )
+                                                    setEditor({
+                                                        profileId: profile.id,
+                                                    })
                                                 }
                                             >
-                                                <Star
+                                                <Pencil
                                                     className="mr-1 size-3.5"
                                                     aria-hidden="true"
                                                 />
-                                                {i18n("Make default")}
+                                                {profile.canEdit
+                                                    ? i18n("Edit")
+                                                    : i18n("View")}
                                             </Button>
                                             <Button
                                                 type="button"
                                                 size="sm"
                                                 variant="ghost"
-                                                aria-label={i18n(
-                                                    "Archive {name}",
-                                                    { name: profile.name },
-                                                )}
+                                                aria-label={
+                                                    profile.scope ===
+                                                    "organization"
+                                                        ? i18n(
+                                                              "Duplicate to personal {name}",
+                                                              {
+                                                                  name: profile.name,
+                                                              },
+                                                          )
+                                                        : i18n(
+                                                              "Duplicate {name}",
+                                                              {
+                                                                  name: profile.name,
+                                                              },
+                                                          )
+                                                }
                                                 onClick={() =>
                                                     void mutate(
                                                         profile,
-                                                        "archive",
+                                                        "duplicate",
                                                     )
                                                 }
                                             >
-                                                <Archive
+                                                <Copy
                                                     className="mr-1 size-3.5"
                                                     aria-hidden="true"
                                                 />
-                                                {i18n("Archive")}
+                                                {profile.scope ===
+                                                "organization"
+                                                    ? i18n(
+                                                          "Duplicate to personal",
+                                                      )
+                                                    : i18n("Duplicate")}
                                             </Button>
+                                            {profile.canEdit &&
+                                                !profile.isDefault && (
+                                                    <>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            aria-label={i18n(
+                                                                "Make {name} default",
+                                                                {
+                                                                    name: profile.name,
+                                                                },
+                                                            )}
+                                                            onClick={() =>
+                                                                void mutate(
+                                                                    profile,
+                                                                    "default",
+                                                                )
+                                                            }
+                                                        >
+                                                            <Star
+                                                                className="mr-1 size-3.5"
+                                                                aria-hidden="true"
+                                                            />
+                                                            {i18n(
+                                                                "Make default",
+                                                            )}
+                                                        </Button>
+                                                        <Button
+                                                            type="button"
+                                                            size="sm"
+                                                            variant="ghost"
+                                                            aria-label={i18n(
+                                                                "Archive {name}",
+                                                                {
+                                                                    name: profile.name,
+                                                                },
+                                                            )}
+                                                            onClick={() =>
+                                                                setArchiveTarget(
+                                                                    profile,
+                                                                )
+                                                            }
+                                                        >
+                                                            <Archive
+                                                                className="mr-1 size-3.5"
+                                                                aria-hidden="true"
+                                                            />
+                                                            {i18n("Archive")}
+                                                        </Button>
+                                                    </>
+                                                )}
                                         </>
                                     )}
                                 </div>
@@ -427,6 +511,43 @@ export function ProfilesSection() {
                         );
                     })}
                 </ul>
+            )}
+
+            {archiveTarget && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+                    <div>
+                        <p className="text-sm font-medium">
+                            {i18n("Archive “{name}”?", {
+                                name: archiveTarget.name,
+                            })}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Archived profiles stop appearing in profile choices. You can restore this profile later.",
+                            )}
+                        </p>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setArchiveTarget(null)}
+                        >
+                            {i18n("Cancel")}
+                        </Button>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() =>
+                                void mutate(archiveTarget, "archive")
+                            }
+                        >
+                            {i18n("Archive profile")}
+                        </Button>
+                    </div>
+                </div>
             )}
 
             {pagination && pagination.totalPages > 1 && (
@@ -466,6 +587,7 @@ export function ProfilesSection() {
                 <ProfileEditor
                     profileId={editor.profileId}
                     newChannel={editor.newChannel}
+                    newScope={editor.newScope}
                     open
                     onOpenChange={closeEditor}
                     onSaved={refreshAfterSave}
