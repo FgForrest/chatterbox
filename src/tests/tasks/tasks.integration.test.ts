@@ -19,12 +19,15 @@ import {
 } from "vitest";
 import {
     aiEnhancements,
+    chatterItems,
+    mailMessages,
     people,
     recordingFolders,
     recordingTaskRejections,
     recordingTasks,
     taskUpdateProposals,
     transcriptions,
+    transcriptSpeakers,
     userSettings,
     users,
 } from "@/db/schema";
@@ -97,7 +100,7 @@ import { mergePeople } from "@/lib/knowledge/people";
 import { ensureOrgAccount } from "@/lib/org/account";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
-import { taskFingerprint } from "@/lib/tasks/proposals";
+import { loadTasksPromptContext, taskFingerprint } from "@/lib/tasks/proposals";
 import type { ProposedTask, TaskProposals } from "@/lib/tasks/store";
 import {
     acceptReview,
@@ -199,6 +202,30 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             })
             .returning({ id: transcriptions.id });
         return transcript?.id ?? "";
+    }
+
+    async function addMail(id: string, userId = ALICE) {
+        const occurredAt = new Date("2026-10-07T10:00:00Z");
+        await db()
+            .insert(chatterItems)
+            .values({
+                id,
+                userId,
+                kind: "mail",
+                title: encryptText(`Mail ${id}`),
+                occurredAt,
+            });
+        await db()
+            .insert(mailMessages)
+            .values({
+                id,
+                userId,
+                rawHash: `raw-${id}`,
+                receivedAt: occurredAt,
+                sizeBytes: 1,
+                auth: {},
+                senderVerified: true,
+            });
     }
 
     beforeEach(async () => {
@@ -397,10 +424,15 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
 
     it("merges proposals into the first and remembers the others as rejected", async () => {
         await summarize(REC, [
-            proposal("Draft the pricing page", { dueDate: "2026-10-20" }),
+            proposal("Draft the pricing page", {
+                dueDate: "2026-10-20",
+                evidenceStartMs: 100,
+            }),
             proposal("Share the pricing page draft", {
                 assigneePersonId: bobPrivate,
                 dueDate: "2026-10-16",
+                quote: "share the pricing page draft",
+                evidenceStartMs: 200,
             }),
         ]);
         const { proposals } = await review(alice);
@@ -413,6 +445,10 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             text: "Draft the pricing page; Share the pricing page draft",
             dueDate: "2026-10-16",
             assignee: { personId: bobPrivate, name: "Bob" },
+            quote: "share the pricing page draft",
+            evidenceStartMs: 200,
+            evidenceText: null,
+            evidenceProvenance: null,
         });
         const rejections = await db()
             .select()
@@ -424,6 +460,103 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 taskFingerprint("Share the pricing page draft"),
             ].sort(),
         );
+    });
+
+    it("moves a mail proposal's quote, text anchor and provenance together", async () => {
+        const mailId = "mail-merge";
+        await addMail(mailId);
+        const [first, second] = await db()
+            .insert(recordingTasks)
+            .values([
+                {
+                    itemId: mailId,
+                    userId: ALICE,
+                    status: "proposed" as const,
+                    text: encryptText("Draft the reply"),
+                    evidenceSegmentIndex: 0,
+                    evidenceCharStart: 1,
+                    evidenceCharEnd: 6,
+                    evidenceProvenance: "unverified" as const,
+                    source: "riffado" as const,
+                    position: 0,
+                },
+                {
+                    itemId: mailId,
+                    userId: ALICE,
+                    status: "proposed" as const,
+                    text: encryptText("Send the reply"),
+                    quote: encryptText("send the reply"),
+                    evidenceSegmentIndex: 2,
+                    evidenceCharStart: 10,
+                    evidenceCharEnd: 24,
+                    evidenceProvenance: "quoted" as const,
+                    source: "riffado" as const,
+                    position: 1,
+                },
+            ])
+            .returning({ id: recordingTasks.id });
+
+        const merged = await mergeProposals(alice, mailId, [
+            first?.id ?? "",
+            second?.id ?? "",
+        ]);
+        expect(merged).toMatchObject({
+            quote: "send the reply",
+            evidenceStartMs: null,
+            evidenceText: {
+                segmentIndex: 2,
+                charStart: 10,
+                charEnd: 24,
+            },
+            evidenceProvenance: "quoted",
+        });
+    });
+
+    it("offers a visible mail task to an audio summary, but not another owner's private task", async () => {
+        await db().insert(transcriptSpeakers).values({
+            userId: ALICE,
+            transcriptionId: transcriptId,
+            label: "speaker_0",
+            personId: bobPrivate,
+            source: "user",
+            status: "confirmed",
+            confirmedByUserId: ALICE,
+        });
+        await addMail("mail-candidate");
+        const mailTask = await addTask(alice, "mail-candidate", {
+            text: "Send the mail contract",
+            assigneePersonId: bobPrivate,
+            status: "open",
+        });
+        await addMail("mail-private-other", BOB);
+        const [otherTask] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId: "mail-private-other",
+                userId: BOB,
+                status: "open",
+                text: encryptText("Private task of Bob"),
+                assigneePersonId: bobPrivate,
+                source: "manual",
+            })
+            .returning({ id: recordingTasks.id });
+
+        const context = await loadTasksPromptContext({
+            recording: {
+                id: REC,
+                userId: ALICE,
+                occurredAt: new Date("2026-10-06T10:00:00Z"),
+                timezone: 0,
+                zonemins: 0,
+            },
+            transcriptionId: transcriptId,
+            orgView: false,
+            reviewer: alice,
+        });
+        expect([...context.refs.values()]).toEqual([mailTask.id]);
+        expect(context.text).toContain("Send the mail contract");
+        expect(context.text).not.toContain("Private task of Bob");
+        expect([...context.refs.values()]).not.toContain(otherTask?.id);
     });
 
     it("refuses a stale version", async () => {
@@ -596,6 +729,45 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 .from(taskUpdateProposals)
                 .where(eq(taskUpdateProposals.itemId, LATER)),
         ).toEqual([]);
+    });
+
+    it("applies a ticked follow-up to a task on a mail", async () => {
+        const mailId = "mail-follow-up-target";
+        await addMail(mailId);
+        const task = await addTask(alice, mailId, {
+            text: "Send the signed mail attachment",
+            status: "open",
+        });
+        const [update] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                kind: "done",
+            })
+            .returning({
+                id: taskUpdateProposals.id,
+                version: taskUpdateProposals.version,
+            });
+
+        expect((await review(alice, LATER)).updates[0]?.task.id).toBe(task.id);
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            update?.id ?? "",
+            true,
+            update?.version ?? 0,
+        );
+        expect(await acceptReview(alice, LATER)).toMatchObject({
+            updatesApplied: 1,
+            updatesSkipped: 0,
+        });
+        const [stored] = await db()
+            .select({ status: recordingTasks.status })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored?.status).toBe("done");
     });
 
     it("sorts by due date with undated last, and filters overdue", async () => {

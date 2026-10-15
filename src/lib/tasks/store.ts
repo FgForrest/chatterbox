@@ -1,5 +1,6 @@
-import { and, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { db } from "@/db";
+import { liveFollowUpCondition } from "@/db/queries/tasks";
 import {
     aiEnhancements,
     type EvidenceProvenance,
@@ -9,29 +10,10 @@ import {
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
-import { recordingSharedCondition } from "@/lib/knowledge/org-people";
+
+export { liveFollowUpCondition } from "@/db/queries/tasks";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * SQL: a follow-up still worth a review: its task is open, on a recording
- * not deleted that the follow-up's owner can see (theirs, or shared). The
- * review shows exactly these, and the share gate waits for exactly these.
- */
-export function liveFollowUpCondition(): SQL {
-    return sql`exists (
-        select 1 from recording_tasks target
-        inner join recordings target_recording
-            on target_recording.id = target.recording_id
-        where target.id = ${taskUpdateProposals.taskId}
-            and target.status = 'open'
-            and target_recording.deleted_at is null
-            and (
-                target_recording.user_id = ${taskUpdateProposals.userId}
-                or ${recordingSharedCondition(sql`target_recording.id`)}
-            )
-    )`;
-}
 
 export interface ProposedTask {
     text: string;

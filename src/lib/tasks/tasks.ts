@@ -822,6 +822,7 @@ export async function mergeProposals(
             .sort((a, b) => (a?.dueDate ?? "").localeCompare(b?.dueDate ?? ""));
         const due = dues[0];
         const quoted = ordered.find((row) => row?.quote);
+        const evidence = quoted ?? first;
         await tx
             .update(recordingTasks)
             .set({
@@ -831,9 +832,12 @@ export async function mergeProposals(
                 assigneeHint: assigned ? null : (hinted?.assigneeHint ?? null),
                 dueDate: due?.dueDate ?? null,
                 duePhrase: due?.duePhrase ?? null,
-                quote: quoted?.quote ?? null,
-                evidenceStartMs:
-                    quoted?.evidenceStartMs ?? first.evidenceStartMs,
+                quote: evidence.quote,
+                evidenceStartMs: evidence.evidenceStartMs,
+                evidenceSegmentIndex: evidence.evidenceSegmentIndex,
+                evidenceCharStart: evidence.evidenceCharStart,
+                evidenceCharEnd: evidence.evidenceCharEnd,
+                evidenceProvenance: evidence.evidenceProvenance,
                 ticked: true,
                 source: first.source,
                 version: first.version + 1,
@@ -999,15 +1003,15 @@ export async function acceptReview(
         let updatesSkipped = 0;
         const touched = new Map<string, string>();
         const ticked = updates.filter((row) => row.ticked);
-        // The tasks' recordings, locked in one order as every task write
-        // locks them, so who may change them holds while they change.
+        // The tasks' items, locked in one order as every task write locks
+        // them, so who may change them holds while they change.
         if (ticked.length > 0) {
             await tx
-                .select({ id: recordings.id })
-                .from(recordings)
+                .select({ id: chatterItems.id })
+                .from(chatterItems)
                 .where(
                     inArray(
-                        recordings.id,
+                        chatterItems.id,
                         tx
                             .select({ id: recordingTasks.itemId })
                             .from(recordingTasks)
@@ -1019,7 +1023,7 @@ export async function acceptReview(
                             ),
                     ),
                 )
-                .orderBy(asc(recordings.id))
+                .orderBy(asc(chatterItems.id))
                 .for("update");
         }
         for (const update of ticked) {
@@ -1027,16 +1031,19 @@ export async function acceptReview(
                 .select({
                     status: recordingTasks.status,
                     recordingId: recordingTasks.itemId,
-                    ownerUserId: recordings.userId,
-                    canEdit: sql<boolean>`${taskEditable(viewer)}`,
-                    canClose: sql<boolean>`${taskClosable(viewer)}`,
+                    ownerUserId: chatterItems.userId,
+                    canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
+                    canClose: sql<boolean>`${taskClosable(viewer, ANY_TASK_ITEM)}`,
                 })
                 .from(recordingTasks)
-                .innerJoin(recordings, eq(recordings.id, recordingTasks.itemId))
+                .innerJoin(
+                    chatterItems,
+                    eq(chatterItems.id, recordingTasks.itemId),
+                )
                 .where(
                     and(
                         eq(recordingTasks.id, update.taskId),
-                        isNull(recordings.deletedAt),
+                        isNull(chatterItems.deletedAt),
                     ),
                 )
                 .limit(1);

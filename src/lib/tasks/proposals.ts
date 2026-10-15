@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    chatterItems,
     type EvidenceProvenance,
-    recordings,
     recordingTasks,
 } from "@/db/schema";
 import type { ItemContent } from "@/lib/content/types";
@@ -18,7 +18,11 @@ import {
 } from "@/lib/knowledge/speaker-references";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
-import { type TaskViewer, taskClosable } from "@/lib/tasks/access";
+import {
+    ANY_TASK_ITEM,
+    type TaskViewer,
+    taskClosable,
+} from "@/lib/tasks/access";
 import {
     buildTasksContext,
     recordingOffsetMinutes,
@@ -108,6 +112,7 @@ export async function loadTasksPromptContext({
     orgView,
     reviewer,
     noun,
+    participants = [],
 }: {
     recording: RecordingRow;
     /** The transcript its speakers are confirmed on; null for a mail. */
@@ -115,6 +120,10 @@ export async function loadTasksPromptContext({
     orgView: boolean;
     reviewer: TaskViewer;
     noun?: "recording" | "mail";
+    participants?: readonly Pick<
+        ItemContent["participants"][number],
+        "ref" | "personId"
+    >[];
 }): Promise<TasksPromptContext> {
     const decidedRows = await db
         .select({ text: recordingTasks.text })
@@ -138,6 +147,11 @@ export async function loadTasksPromptContext({
             speaker.label,
         ]),
     );
+    for (const participant of participants) {
+        if (participant.personId && !labelOf.has(participant.personId)) {
+            labelOf.set(participant.personId, participant.ref);
+        }
+    }
     const refs = new Map<string, string>();
     const open: TasksContextTask[] = [];
     if (labelOf.size > 0) {
@@ -149,7 +163,7 @@ export async function loadTasksPromptContext({
                 dueDate: recordingTasks.dueDate,
             })
             .from(recordingTasks)
-            .innerJoin(recordings, eq(recordings.id, recordingTasks.itemId))
+            .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
             .where(
                 and(
                     eq(recordingTasks.status, "open"),
@@ -157,8 +171,8 @@ export async function loadTasksPromptContext({
                         ...labelOf.keys(),
                     ]),
                     ne(recordingTasks.itemId, recording.id),
-                    isNull(recordings.deletedAt),
-                    taskClosable(reviewer),
+                    isNull(chatterItems.deletedAt),
+                    taskClosable(reviewer, ANY_TASK_ITEM),
                 ),
             )
             .orderBy(desc(recordingTasks.createdAt))

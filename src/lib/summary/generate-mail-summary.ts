@@ -143,6 +143,7 @@ export async function generateMailSummary(
             orgView ? ctx.settingsUserId : ctx.ownerUserId,
         ),
         noun: "mail",
+        participants: content.participants,
     }).catch(async (error: unknown) => {
         console.error("[summary] task context unavailable:", error);
         return {

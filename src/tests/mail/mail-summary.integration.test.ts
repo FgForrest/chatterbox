@@ -133,10 +133,12 @@ import { taskFingerprint } from "@/lib/tasks/proposals";
 import { writeTaskProposalsInTx } from "@/lib/tasks/store";
 import {
     acceptReview,
+    addTask,
     listRecordingTasks,
     listTasks,
     recordingsAwaitingTaskReview,
 } from "@/lib/tasks/tasks";
+import { insertRecordings } from "@/tests/integration/items";
 import {
     rawMessage,
     signMessage,
@@ -444,6 +446,38 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        const [eva] = await db()
+            .select({ personId: mailParticipants.personId })
+            .from(mailParticipants)
+            .where(
+                and(
+                    eq(mailParticipants.itemId, itemId),
+                    eq(mailParticipants.ref, "p2"),
+                ),
+            );
+        if (!eva?.personId) throw new Error("Eva was not linked to a person");
+        const audioId = "audio-candidate-for-mail";
+        await insertRecordings(db(), {
+            id: audioId,
+            userId: "u-jan",
+            deviceSn: "MAIL-CANDIDATE",
+            plaudFileId: audioId,
+            filename: encrypt("Candidate audio"),
+            duration: 1,
+            startTime: new Date("2026-10-08T10:00:00Z"),
+            endTime: new Date("2026-10-08T10:00:01Z"),
+            filesize: 1,
+            fileMd5: "1".repeat(32),
+            storageType: "local",
+            storagePath: `u-jan/${audioId}.mp3`,
+            storageFilename: `${audioId}.mp3`,
+            plaudVersion: "1",
+        });
+        await addTask(await taskViewerById("u-jan"), audioId, {
+            text: "Review the audio contract",
+            assigneePersonId: eva.personId,
+            status: "open",
+        });
         createCompletion.mockReset();
         createCompletion.mockResolvedValueOnce(
             reply({
@@ -489,6 +523,8 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(user?.content).not.toContain("jan@company.example");
         expect(user?.content).not.toContain("eva@client.example");
         expect(user?.content).toContain("The mail was sent on");
+        expect(user?.content).toContain("Review the audio contract");
+        expect(user?.content).toContain("T1 (p2)");
 
         const [stored] = await db()
             .select()
