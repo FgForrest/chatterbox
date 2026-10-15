@@ -77,6 +77,11 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
         }
         const input = await readTitleInput(userId, payload.recordingId);
         if (!input) return { skipped: "no title input" };
+        if (input.fence) {
+            input.fence.profileRevisionId = profile.assigned
+                ? profile.revisionId
+                : null;
+        }
         const retitled = await applyGeneratedTitle({
             userId,
             recordingId: payload.recordingId,

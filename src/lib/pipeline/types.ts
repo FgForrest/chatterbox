@@ -17,6 +17,7 @@ export type PhaseState =
     | "done"
     | "skipped"
     | "failed"
+    | "outdated"
     | "not_processed";
 
 export interface ContentRevisionInput {

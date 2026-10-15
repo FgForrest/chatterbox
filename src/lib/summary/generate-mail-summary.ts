@@ -23,6 +23,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { captureServerEvent } from "@/lib/posthog-server";
 import {
     BUILTIN_PROMPTS_VERSION,
@@ -36,6 +37,7 @@ import {
     MAIL_SUMMARY_PROMPT_ID,
     type MailProfileSettings,
 } from "@/lib/profiles/settings";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import type { ContentRunContext } from "@/lib/sharing/run-context";
 import {
@@ -140,9 +142,17 @@ export async function generateMailSummary(
             orgView ? ctx.settingsUserId : ctx.ownerUserId,
         ),
         noun: "mail",
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
         console.error("[summary] task context unavailable:", error);
-        return { text: "", refs: new Map<string, string>() };
+        return {
+            text: "",
+            refs: new Map<string, string>(),
+            scopeFingerprint: await itemScopeFingerprint(
+                itemId,
+                ctx.view,
+                ctx.ownerUserId,
+            ),
+        };
     });
 
     const profile = opts.presetId
@@ -163,6 +173,15 @@ export async function generateMailSummary(
     const profileSettings = profile?.settings as
         | MailProfileSettings
         | undefined;
+    const itemProfileRevisionId =
+        opts.profileRevisionId ??
+        (profile?.assigned ? profile.revisionId : null);
+    const titleFence: TitleInputFence = {
+        contentId: stored.sourceId,
+        contentSourceId: "mail",
+        contentRevision: stored.revision,
+        profileRevisionId: itemProfileRevisionId,
+    };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -357,7 +376,12 @@ export async function generateMailSummary(
         payerUserId: summaryModel.payerUserId,
         inputs: {
             contentId: stored.sourceId,
+            contentSourceId: "mail",
             contentRevision: stored.revision,
+            itemProfileRevisionId,
+            ...(tasksContext.scopeFingerprint
+                ? { scopeFingerprint: tasksContext.scopeFingerprint }
+                : {}),
             multiPass: multiPassOn
                 ? pinnedMultiPass
                     ? "profile"
@@ -371,6 +395,25 @@ export async function generateMailSummary(
         tasks,
     });
     if (!committed) {
+        if (reason === "outdated") {
+            return {
+                ownerUserId: ctx.ownerUserId,
+                summary,
+                keyPoints,
+                actionItems,
+                provider: credentials.provider,
+                model,
+                promptId: usedPromptId,
+                promptFallback:
+                    !profile &&
+                    opts.presetId !== undefined &&
+                    opts.presetId !== MAIL_SUMMARY_PROMPT_ID &&
+                    usedPromptId !== opts.presetId,
+                multiPass,
+                committed: false,
+                titleFence,
+            };
+        }
         if (reason === "cancelled") {
             throw new AppError(
                 ErrorCode.NOT_FOUND,
@@ -417,5 +460,7 @@ export async function generateMailSummary(
             opts.presetId !== MAIL_SUMMARY_PROMPT_ID &&
             usedPromptId !== opts.presetId,
         multiPass,
+        committed: true,
+        titleFence,
     };
 }

@@ -974,7 +974,9 @@ async function transcribeRecordingInner(
             view: ctx.view,
         });
 
-        if (!committed && reason) return refusedResult(reason);
+        if (!committed && reason && reason !== "outdated") {
+            return refusedResult(reason);
+        }
         if (!committed) {
             return {
                 success: false,

@@ -23,6 +23,7 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { captureServerEvent } from "@/lib/posthog-server";
 import {
     BUILTIN_PROMPTS_VERSION,
@@ -33,6 +34,7 @@ import {
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -93,6 +95,10 @@ export interface GenerateSummaryResult {
     actionItems: string[];
     provider: string;
     model: string;
+    /** False when commit fencing discarded output made from old inputs. */
+    committed?: boolean;
+    /** Inputs captured before the title model may run after this summary. */
+    titleFence?: TitleInputFence;
     /** Prompt id actually used. Can differ from the requested preset. */
     promptId: string;
     /**
@@ -265,9 +271,17 @@ export async function generateSummaryForRecording(
         reviewer: await taskViewerById(
             orgView ? ctx.settingsUserId : ctx.ownerUserId,
         ),
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
         console.error("[summary] task context unavailable:", error);
-        return { text: "", refs: new Map<string, string>() };
+        return {
+            text: "",
+            refs: new Map<string, string>(),
+            scopeFingerprint: await itemScopeFingerprint(
+                recordingId,
+                ctx.view,
+                ctx.ownerUserId,
+            ),
+        };
     });
 
     const profile = opts.presetId
@@ -288,6 +302,15 @@ export async function generateSummaryForRecording(
     const profileSettings = profile?.settings as
         | AudioProfileSettings
         | undefined;
+    const itemProfileRevisionId =
+        opts.profileRevisionId ??
+        (profile?.assigned ? profile.revisionId : null);
+    const titleFence: TitleInputFence = {
+        contentId: transcription.id,
+        contentSourceId: transcription.source,
+        contentRevision: transcription.revision,
+        profileRevisionId: itemProfileRevisionId,
+    };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -509,7 +532,12 @@ export async function generateSummaryForRecording(
         payerUserId: summaryModel.payerUserId,
         inputs: {
             contentId: transcription.id,
+            contentSourceId: transcription.source,
             contentRevision: transcription.revision,
+            itemProfileRevisionId,
+            ...(tasksContext.scopeFingerprint
+                ? { scopeFingerprint: tasksContext.scopeFingerprint }
+                : {}),
             multiPass: multiPassOn
                 ? pinnedMultiPass
                     ? "profile"
@@ -524,6 +552,23 @@ export async function generateSummaryForRecording(
     });
 
     if (!committed) {
+        if (reason === "outdated") {
+            return {
+                ownerUserId: ctx.ownerUserId,
+                summary,
+                keyPoints,
+                actionItems,
+                provider: credentials.provider,
+                model,
+                promptId: usedPromptId,
+                promptFallback: profile
+                    ? false
+                    : usedPromptId !== requestedPromptId,
+                multiPass,
+                committed: false,
+                titleFence,
+            };
+        }
         if (reason === "cancelled") {
             throw new AppError(
                 ErrorCode.NOT_FOUND,
@@ -570,5 +615,7 @@ export async function generateSummaryForRecording(
         promptId: usedPromptId,
         promptFallback: profile ? false : usedPromptId !== requestedPromptId,
         multiPass,
+        committed: true,
+        titleFence,
     };
 }

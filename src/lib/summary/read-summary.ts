@@ -12,7 +12,12 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { aiEnhancements } from "@/db/schema";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
-import type { EnhancementSource } from "@/lib/transcription/persist";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
+import type { PipelineView } from "@/lib/pipeline/types";
+import type {
+    EnhancementSource,
+    ProcessingRunInputs,
+} from "@/lib/transcription/persist";
 import type { MultiPassProvenance } from "./multi-pass";
 
 export interface StoredSummary {
@@ -27,6 +32,9 @@ export interface StoredSummary {
     multiPass?: MultiPassProvenance;
     /** What the model read, see `llmInputFingerprint`; null when unknown. */
     inputFingerprint: string | null;
+    scopeChanged: boolean;
+    /** Internal provenance used to fence downstream title generation. */
+    runInputs: ProcessingRunInputs | null;
     createdAt: Date;
 }
 
@@ -34,6 +42,7 @@ export async function readStoredSummary(
     userId: string,
     recordingId: string,
     source?: EnhancementSource,
+    view: PipelineView = "private",
 ): Promise<StoredSummary | null> {
     const conditions = [
         eq(aiEnhancements.itemId, recordingId),
@@ -49,12 +58,19 @@ export async function readStoredSummary(
         ? rows[0]
         : (rows.find((row) => row.source === "riffado") ?? rows[0]);
 
-    return enhancement ? storedSummaryOf(enhancement) : null;
+    if (!enhancement) return null;
+    const inputs = enhancement.inputs as { scopeFingerprint?: unknown } | null;
+    const storedScope = inputs?.scopeFingerprint;
+    const scopeChanged =
+        typeof storedScope === "string" &&
+        storedScope !== (await itemScopeFingerprint(recordingId, view, userId));
+    return storedSummaryOf(enhancement, scopeChanged);
 }
 
 /** A stored summary row, decrypted into the shape clients render. */
 export function storedSummaryOf(
     enhancement: typeof aiEnhancements.$inferSelect,
+    scopeChanged = false,
 ): StoredSummary {
     return {
         // Legacy plaintext rows pass through verbatim during the backfill
@@ -78,6 +94,8 @@ export function storedSummaryOf(
                       merged: enhancement.multiPassMerged ?? false,
                   },
         inputFingerprint: enhancement.inputFingerprint ?? null,
+        scopeChanged,
+        runInputs: enhancement.inputs as ProcessingRunInputs | null,
         createdAt: enhancement.createdAt,
     };
 }
@@ -86,10 +104,34 @@ export function storedSummaryOf(
 export async function readStoredSummaries(
     userId: string,
     recordingId: string,
+    view: PipelineView = "private",
 ): Promise<StoredSummary[]> {
-    const rows = await Promise.all([
-        readStoredSummary(userId, recordingId, "plaud"),
-        readStoredSummary(userId, recordingId, "riffado"),
-    ]);
-    return rows.filter((row): row is StoredSummary => row !== null);
+    const rows = await db
+        .select()
+        .from(aiEnhancements)
+        .where(
+            and(
+                eq(aiEnhancements.itemId, recordingId),
+                eq(aiEnhancements.userId, userId),
+            ),
+        );
+    const hasStoredScope = rows.some((row) => {
+        const inputs = row.inputs as { scopeFingerprint?: unknown } | null;
+        return typeof inputs?.scopeFingerprint === "string";
+    });
+    const currentScope = hasStoredScope
+        ? await itemScopeFingerprint(recordingId, view, userId)
+        : null;
+    const ordered = (["plaud", "riffado"] as const).flatMap((source) => {
+        const row = rows.find((candidate) => candidate.source === source);
+        return row ? [row] : [];
+    });
+    return ordered.map((row) => {
+        const inputs = row.inputs as { scopeFingerprint?: unknown } | null;
+        return storedSummaryOf(
+            row,
+            typeof inputs?.scopeFingerprint === "string" &&
+                inputs.scopeFingerprint !== currentScope,
+        );
+    });
 }

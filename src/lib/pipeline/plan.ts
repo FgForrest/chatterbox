@@ -1,3 +1,7 @@
+import {
+    markPhasesOutdatedForInputs,
+    processAgainPending,
+} from "@/lib/pipeline/outdated";
 import type {
     ContentRevisionInput,
     PhaseRecord,
@@ -72,6 +76,7 @@ function stepRequested(
     return (
         requested?.contentId === input.contentId &&
         requested.contentRevision === input.contentRevision &&
+        requested.state !== "outdated" &&
         (minimumGeneration === undefined ||
             requested.generation >= minimumGeneration)
     );
@@ -511,19 +516,14 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             ? facts.generation
             : (facts.phases.categorize?.generation ?? facts.generation);
 
-    if (facts.manualOnly) {
-        for (const phase of ["transcribe", "learn", "summary"] as const) {
-            const current = facts.phases[phase];
-            if (
-                current?.state === "skipped" &&
-                current.reason === "manual_only" &&
-                current.generation >= minimumGeneration
-            ) {
-                continue;
-            }
-            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
-        }
-        actions.push(...taskReviewActions(facts));
+    const profileHasAutomaticStep =
+        facts.profile?.transcribe?.automatic === true ||
+        Object.values(facts.profile?.automatic ?? {}).some(Boolean);
+    if (
+        processAgainPending(facts.phases) &&
+        !facts.manualOnly &&
+        profileHasAutomaticStep
+    ) {
         planShare(facts, actions);
         return { actions };
     }
@@ -562,6 +562,22 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     }
 
     if (!content) {
+        if (facts.manualOnly) {
+            for (const phase of ["transcribe", "learn", "summary"] as const) {
+                const current = facts.phases[phase];
+                if (
+                    current?.state === "skipped" &&
+                    current.reason === "manual_only" &&
+                    current.generation >= minimumGeneration
+                ) {
+                    continue;
+                }
+                actions.push(markPhase(facts, phase, "skipped", "manual_only"));
+            }
+            actions.push(...taskReviewActions(facts));
+            planShare(facts, actions);
+            return { actions };
+        }
         if (facts.item.kind === "audio") {
             if (transcribeSkipReason) return { actions };
             if (profileTranscription?.automatic) {
@@ -642,6 +658,36 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         contentSourceId: content.contentSourceId,
         contentRevision: content.contentRevision,
     };
+    const outdated = markPhasesOutdatedForInputs(
+        facts.phases,
+        input,
+        facts.generation,
+        facts.at,
+        facts.summary.stale,
+    );
+    for (const phase of outdated.changed) {
+        const record = outdated.phases[phase];
+        if (record) actions.push({ type: "markPhase", phase, record });
+    }
+    facts = { ...facts, phases: outdated.phases };
+
+    if (facts.manualOnly) {
+        for (const phase of ["transcribe", "learn", "summary"] as const) {
+            const current = facts.phases[phase];
+            if (current?.state === "outdated") continue;
+            if (
+                current?.state === "skipped" &&
+                current.reason === "manual_only" &&
+                current.generation >= minimumGeneration
+            ) {
+                continue;
+            }
+            actions.push(markPhase(facts, phase, "skipped", "manual_only"));
+        }
+        actions.push(...taskReviewActions(facts));
+        planShare(facts, actions);
+        return { actions };
+    }
     if (facts.item.kind === "mail") {
         if (
             !phaseMatches(
@@ -777,7 +823,10 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
 
     const skipReason = learnSkipReason(facts, content);
     if (skipReason) {
-        if (!learnSkipMatches(learn, skipReason, minimumGeneration, input)) {
+        if (
+            learn?.state !== "outdated" &&
+            !learnSkipMatches(learn, skipReason, minimumGeneration, input)
+        ) {
             actions.push(
                 markPhase(facts, "learn", "skipped", skipReason, input),
             );

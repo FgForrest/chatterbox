@@ -17,6 +17,7 @@ interface StoredSummary {
     summary: string | null;
     keyPoints?: string[];
     actionItems?: string[];
+    scopeChanged?: boolean;
 }
 
 const NO_SPEAKERS: never[] = [];
@@ -162,6 +163,19 @@ export function MailSummaryCard({
                     organizationOnly={view === "org"}
                     allowAdd={hasSummary}
                 />
+                {summary?.scopeChanged && canChange && (
+                    <p className="text-sm text-amber-600 dark:text-amber-400">
+                        {i18n("Folders changed since this summary:")}{" "}
+                        <button
+                            type="button"
+                            className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                            disabled={running}
+                            onClick={() => void summarize()}
+                        >
+                            {i18n("Match tasks again")}
+                        </button>
+                    </p>
+                )}
                 <RecordingTasks
                     state={taskState}
                     speakers={NO_SPEAKERS}

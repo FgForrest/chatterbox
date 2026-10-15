@@ -9,6 +9,7 @@ import {
     storeGeneratedTitle,
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/view";
 
 /**
@@ -30,6 +31,7 @@ export async function applyGeneratedTitle(input: {
     expectedTitleEditedAt?: Date | null;
     actorUserId?: string;
     view?: RecordingView;
+    fence?: TitleInputFence;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -51,6 +53,7 @@ export async function applyGeneratedTitle(input: {
                   generatedTitle,
                   input.expectedTitleEditedAt,
                   input.actorUserId ?? userId,
+                  input.fence,
               )
             : await storeGeneratedTitle(
                   userId,
@@ -58,6 +61,7 @@ export async function applyGeneratedTitle(input: {
                   generatedTitle,
                   input.expectedTitleEditedAt,
                   input.actorUserId ?? userId,
+                  input.fence,
               )
         : false;
     if (!generatedTitle || !retitled) return false;

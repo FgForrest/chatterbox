@@ -199,10 +199,19 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         if (row.status === "failed") {
             throw appErrorFromJobFailure(row.errorCode, row.lastError);
         }
+        const result = (row.result ?? {}) as Record<string, unknown>;
+        if (result.skipped === "outdated") {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The summary inputs changed while it was being made",
+                409,
+            );
+        }
         const stored = await readStoredSummary(
             access.contentUserId,
             id,
             "riffado",
+            view,
         );
         if (!stored) {
             throw new AppError(
@@ -211,7 +220,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 500,
             );
         }
-        const result = (row.result ?? {}) as Record<string, unknown>;
         return NextResponse.json({
             summary: stored.summary,
             keyPoints: stored.keyPoints,
@@ -223,6 +231,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             promptId: result.promptId,
             promptFallback: result.promptFallback === true,
             multiPass: stored.multiPass,
+            scopeChanged: stored.scopeChanged,
         });
     }
 
@@ -286,15 +295,24 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         code: mapped.code,
                     });
                 } else {
-                    const stored = await readStoredSummary(
-                        access.contentUserId,
-                        id,
-                        "riffado",
-                    );
                     const result = (row.result ?? {}) as Record<
                         string,
                         unknown
                     >;
+                    if (result.skipped === "outdated") {
+                        send({
+                            type: "error",
+                            error: "The summary inputs changed while it was being made",
+                            code: ErrorCode.CONFLICT,
+                        });
+                        return;
+                    }
+                    const stored = await readStoredSummary(
+                        access.contentUserId,
+                        id,
+                        "riffado",
+                        view,
+                    );
                     if (stored) {
                         send({
                             type: "result",
@@ -313,6 +331,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                                 promptId: result.promptId as string | undefined,
                                 promptFallback: result.promptFallback === true,
                                 multiPass: stored.multiPass,
+                                scopeChanged: stored.scopeChanged,
                             },
                         });
                     } else {
@@ -443,7 +462,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
               }
             : undefined;
 
-    const summaries = await readStoredSummaries(access.contentUserId, id);
+    const summaries = await readStoredSummaries(access.contentUserId, id, view);
     const availableSources = summaries.map((summary) => summary.source);
     const stored = summaries.find((summary) => summary.source === source);
 
@@ -470,6 +489,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         // Made from the transcript before its corrections changed: names
         // or terms in it may be stale. Only when both fingerprints exist.
         stale: await summaryIsStale(stored),
+        scopeChanged: stored.scopeChanged,
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
         itemProfileId,

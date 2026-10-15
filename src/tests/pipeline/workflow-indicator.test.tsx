@@ -38,6 +38,7 @@ function processing(
         placements: [],
         intents: [],
         outputs: { transcript: false, summary: false, learn: false },
+        processAgain: false,
         ...overrides,
     };
 }
@@ -235,6 +236,38 @@ describe("workflow indicator", () => {
         );
         expect(screen.getByText("Processed before profiles")).toBeTruthy();
         expect(screen.queryByText("Waiting for you to file it")).toBeNull();
+    });
+
+    it("offers Process again after filing a legacy item or changing its profile", async () => {
+        const fetchMock = vi.fn(async () => Response.json({ requested: true }));
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <WorkflowIndicator
+                initialData={processing({ processAgain: true })}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Process again" }));
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/item-1/process-again",
+                { method: "POST" },
+            ),
+        );
+    });
+
+    it("does not offer Process again for Nothing automatic", () => {
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    manualOnly: true,
+                    processAgain: true,
+                })}
+            />,
+        );
+        expect(
+            screen.queryByRole("button", { name: "Process again" }),
+        ).toBeNull();
     });
 
     it("shows an intended Organization chip and lets the owner cancel it", async () => {

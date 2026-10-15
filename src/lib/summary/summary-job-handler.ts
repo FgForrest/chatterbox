@@ -98,6 +98,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     jobId,
                 });
             let result = await generate(payload.presetId);
+            if (result.committed === false) return { skipped: "outdated" };
             // Corrections that changed while it ran (a review finished
             // meanwhile) found no summary to refresh, and the hold's release
             // found this job running: made again, once, from the reading as
@@ -114,6 +115,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                             ? undefined
                             : (payload.presetId ?? due.presetId),
                     );
+                if (result.committed === false) return { skipped: "outdated" };
             }
 
             if (!orgView) {
@@ -122,6 +124,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     recordingId: payload.recordingId,
                     summary: result.summary,
                     keyPoints: result.keyPoints,
+                    fence: result.titleFence,
                 }).catch((error: unknown) => {
                     console.error(
                         "Failed to update title from summary:",

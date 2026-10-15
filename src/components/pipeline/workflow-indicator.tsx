@@ -60,6 +60,8 @@ function stateIcon(state: DisplayPhase["state"]) {
             return <Clock3 className={className} aria-hidden />;
         case "failed":
             return <CircleX className={className} aria-hidden />;
+        case "outdated":
+            return <TriangleAlert className={className} aria-hidden />;
         case "skipped":
         case "manual":
             return <Minus className={className} aria-hidden />;
@@ -86,6 +88,7 @@ export function WorkflowIndicator({
     const [panelData, setPanelData] =
         useState<CategorizationPanelPresentation | null>(null);
     const [panelLoading, setPanelLoading] = useState(false);
+    const [processingAgain, setProcessingAgain] = useState(false);
     const panelRequest = useRef<Promise<void> | null>(null);
     const activeItemId = data?.itemId;
 
@@ -161,6 +164,9 @@ export function WorkflowIndicator({
         ];
         return names.map((name) => {
             const record = data.phases[name];
+            if (record?.state === "outdated") {
+                return { name, state: "outdated" as const, record };
+            }
             if (
                 name === "transcribe" ||
                 name === "learn" ||
@@ -232,6 +238,8 @@ export function WorkflowIndicator({
                 return i18n("Skipped");
             case "failed":
                 return i18n("Failed");
+            case "outdated":
+                return i18n("Outdated");
             case "not_processed":
                 return i18n("Not processed");
             case "manual":
@@ -283,7 +291,7 @@ export function WorkflowIndicator({
         if (phase.name === "taskReview" && phase.state === "waiting") {
             return { label: i18n("Review tasks"), action: onReviewTasks };
         }
-        if (phase.state !== "manual") return null;
+        if (phase.state !== "manual" && phase.state !== "outdated") return null;
         if (phase.name === "transcribe") {
             return { label: i18n("Transcribe"), action: onTranscribe };
         }
@@ -320,6 +328,26 @@ export function WorkflowIndicator({
         }
         toast.success(i18n("Intended Organization placement cancelled."));
         onChanged?.();
+    };
+    const processAgain = async () => {
+        if (processingAgain) return;
+        setProcessingAgain(true);
+        try {
+            const response = await fetch(
+                `/api/recordings/${encodeURIComponent(data.itemId)}/process-again`,
+                { method: "POST" },
+            );
+            if (!response.ok) throw new Error(String(response.status));
+            setData((current) =>
+                current ? { ...current, processAgain: false } : current,
+            );
+            toast.success(i18n("Processing requested."));
+            onChanged?.();
+        } catch {
+            toast.error(i18n("The item could not be processed again."));
+        } finally {
+            setProcessingAgain(false);
+        }
     };
     const optimisticallyCategorize = (submission: CategorizeSubmission) => {
         const previous = data;
@@ -405,6 +433,22 @@ export function WorkflowIndicator({
                     >
                         {i18n("File it")}
                     </Button>
+                    {data.processAgain && !data.manualOnly && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void processAgain()}
+                            disabled={processingAgain}
+                        >
+                            {processingAgain && (
+                                <Loader2
+                                    className="mr-1 size-3 animate-spin"
+                                    aria-hidden
+                                />
+                            )}
+                            {i18n("Process again")}
+                        </Button>
+                    )}
                 </div>
 
                 {!data.legacy && (

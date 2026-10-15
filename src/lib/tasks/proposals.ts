@@ -17,6 +17,7 @@ import {
     speakerAnchorId,
 } from "@/lib/knowledge/speaker-references";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { type TaskViewer, taskClosable } from "@/lib/tasks/access";
 import {
     buildTasksContext,
@@ -56,6 +57,8 @@ export interface TasksPromptContext {
     text: string;
     /** The `T<n>` references the prompt used, to the tasks they stand for. */
     refs: Map<string, string>;
+    /** Folder scope used for this run's task matching. */
+    scopeFingerprint: string;
 }
 
 interface RecordingRow {
@@ -186,6 +189,11 @@ export async function loadTasksPromptContext({
             open,
         }),
         refs,
+        scopeFingerprint: await itemScopeFingerprint(
+            recording.id,
+            orgView ? "org" : "private",
+            recording.userId,
+        ),
     };
 }
 

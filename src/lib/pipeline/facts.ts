@@ -535,17 +535,6 @@ export async function gatherFacts(
                 )
               : await loadShareGate(db, itemId, userId);
     const summaryExists = summary !== undefined;
-    const learn = phases.learn;
-    const releasedCurrentContent =
-        item.kind === "audio" &&
-        item.summaryDueAt === null &&
-        content !== null &&
-        learn?.state === "done" &&
-        learn.reason === "released" &&
-        learn.inputs?.contentId === content.id &&
-        learn.inputs.contentSourceId === "riffado" &&
-        learn.inputs.contentRevision === content.revision;
-
     return {
         item: {
             exists: true,
@@ -616,10 +605,7 @@ export async function gatherFacts(
         mail: item.kind === "mail" && mail ? { ...mail, shared } : null,
         summary: {
             exists: summaryExists,
-            stale:
-                summaryExists && releasedCurrentContent
-                    ? await isSummaryStale(userId, itemId)
-                    : false,
+            stale: summaryExists ? await isSummaryStale(userId, itemId) : false,
             jobActive: summaryJob !== undefined,
         },
         taskReview: {

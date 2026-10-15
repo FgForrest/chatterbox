@@ -4,6 +4,7 @@ import { recordings, userSettings } from "@/db/schema";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import { titleStillGenerated } from "@/lib/recordings/generated-title";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { emitEvent } from "@/lib/webhooks/emit";
 
 /** Retitle a private recording from its completed summary when enabled. */
@@ -12,6 +13,7 @@ export async function updateTitleAfterSummary(input: {
     recordingId: string;
     summary: string;
     keyPoints: string[];
+    fence?: TitleInputFence;
 }): Promise<void> {
     if (!input.summary.trim()) return;
     const [settings] = await db
@@ -52,6 +54,7 @@ export async function updateTitleAfterSummary(input: {
         source: "summary",
         plaudFileId: recording.plaudFileId,
         syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
+        ...(input.fence ? { fence: input.fence } : {}),
     });
     if (retitled) {
         await emitEvent("recording.updated", input.userId, input.recordingId);

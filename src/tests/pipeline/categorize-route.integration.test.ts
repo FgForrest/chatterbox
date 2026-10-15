@@ -19,6 +19,7 @@ import {
     recordingFolders,
     users,
 } from "@/db/schema";
+import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { defaultProfileSettings } from "@/lib/profiles/settings";
 import {
@@ -89,6 +90,7 @@ vi.mock("@/lib/posthog-server", () => ({
 
 import { POST as PREVIEW } from "@/app/api/recordings/[id]/categorize/preview/route";
 import { POST } from "@/app/api/recordings/[id]/categorize/route";
+import { POST as PROCESS_AGAIN } from "@/app/api/recordings/[id]/process-again/route";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -461,6 +463,26 @@ describeWithDatabase("categorize route", () => {
         expect((await POST(request(["personal-a"]), context())).status).toBe(
             200,
         );
+        const beforeEdit = await processing();
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    ...beforeEdit?.phases,
+                    summary: {
+                        state: "done",
+                        reason: "completed",
+                        generation: 1,
+                        at: "2026-10-15T10:01:00.000Z",
+                    },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, OWNER),
+                ),
+            );
         await db()
             .insert(processingProfileRevisions)
             .values({
@@ -477,6 +499,10 @@ describeWithDatabase("categorize route", () => {
         const resolved = await resolveItemProfile(ITEM, "private", OWNER);
 
         expect(resolved.revisionId).toBe("audio-a-revision");
+        expect((await processing())?.phases.summary).toMatchObject({
+            state: "done",
+            reason: "completed",
+        });
     });
 
     it("records an Organization intent for mail without sharing it", async () => {
@@ -598,6 +624,98 @@ describeWithDatabase("categorize route", () => {
                 categorize: expect.objectContaining({ generation: 2 }),
             },
         });
+    });
+
+    it("offers Process again after another profile is assigned and advances it explicitly", async () => {
+        await addItem();
+        expect((await POST(request(["personal-a"]), context())).status).toBe(
+            200,
+        );
+        await db()
+            .update(itemProcessing)
+            .set({
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 1,
+                        at: "2026-10-15T10:00:00.000Z",
+                    },
+                    summary: {
+                        state: "done",
+                        reason: "completed",
+                        generation: 1,
+                        at: "2026-10-15T10:01:00.000Z",
+                    },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, OWNER),
+                ),
+            );
+
+        expect((await POST(request(["personal-b"]), context())).status).toBe(
+            200,
+        );
+        expect((await processing())?.phases.summary).toMatchObject({
+            state: "outdated",
+            reason: "profile_changed",
+        });
+        expect(
+            (await loadPrivateItemProcessing(OWNER, ITEM))?.processAgain,
+        ).toBe(true);
+
+        const response = await PROCESS_AGAIN(
+            new Request(
+                `https://app.example.test/api/recordings/${ITEM}/process-again`,
+                { method: "POST" },
+            ),
+            context(),
+        );
+        expect(response.status).toBe(200);
+        expect(await processing()).toMatchObject({
+            requestedGeneration: 3,
+            phases: {
+                categorize: expect.objectContaining({
+                    reason: "process_again",
+                    generation: 3,
+                }),
+            },
+        });
+    });
+
+    it("offers Process again when a legacy item is filed later", async () => {
+        await addItem();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: ITEM,
+                userId: OWNER,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        at: "2026-10-15T10:00:00.000Z",
+                    },
+                    summary: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        at: "2026-10-15T10:00:00.000Z",
+                    },
+                },
+            });
+
+        expect((await POST(request(["personal-a"]), context())).status).toBe(
+            200,
+        );
+        expect(
+            (await loadPrivateItemProcessing(OWNER, ITEM))?.processAgain,
+        ).toBe(true);
     });
 
     it("does not let another user categorize the owner's item", async () => {

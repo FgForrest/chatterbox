@@ -607,7 +607,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
     });
 
-    it("does not check summary staleness outside the Learn release path", async () => {
+    it("checks an existing summary for a later Learn decision", async () => {
         await seedAudio();
         await db()
             .insert(aiEnhancements)
@@ -632,7 +632,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
 
         await pipelineAdvanceJobHandler.run(jobContext());
 
-        expect(stale).not.toHaveBeenCalled();
+        expect(stale).toHaveBeenCalledWith(USER_ID, ITEM_ID);
     });
 
     it("checks summary staleness for the current released content", async () => {

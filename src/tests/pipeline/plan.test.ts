@@ -1055,6 +1055,7 @@ describe("planAdvance audio", () => {
         expect(actionTypes(planAdvance(replaced).actions)).toEqual([
             "markPhase",
             "markPhase",
+            "markPhase",
             "queueTitleJob",
             "markPhase",
             "queueTopics",

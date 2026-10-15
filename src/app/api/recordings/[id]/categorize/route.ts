@@ -19,6 +19,7 @@ import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
 import { resolveCategorizationSelection } from "@/lib/pipeline/categorization";
 import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
+import { markPhasesOutdatedForProfileChange } from "@/lib/pipeline/outdated";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
 import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
@@ -110,21 +111,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         .filter(({ scope }) => scope === "org")
         .map(({ folderId }) => folderId);
 
-    const [current] = await db
-        .select({
-            profileId: itemProcessing.profileId,
-            profileRevisionId: itemProcessing.profileRevisionId,
-            manualOnly: itemProcessing.manualOnly,
-        })
-        .from(itemProcessing)
-        .where(
-            and(
-                eq(itemProcessing.itemId, itemId),
-                eq(itemProcessing.userId, ownerUserId),
-                eq(itemProcessing.view, "private"),
-            ),
-        )
-        .limit(1);
     let selectedProfile: ProfileRecord | null = null;
     let selectedManualOnly: boolean | null = null;
     if (parsed.data.profileId) {
@@ -180,6 +166,23 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
 
     const orgUserId = await getOrgUserId();
     const result = await db.transaction(async (tx) => {
+        const [current] = await tx
+            .select({
+                profileId: itemProcessing.profileId,
+                profileRevisionId: itemProcessing.profileRevisionId,
+                manualOnly: itemProcessing.manualOnly,
+                phases: itemProcessing.phases,
+            })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ownerUserId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .for("update")
+            .limit(1);
         let profileId = current?.profileId ?? null;
         let profileRevisionId = current?.profileRevisionId ?? null;
         let manualOnly = current?.manualOnly ?? false;
@@ -345,13 +348,28 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         if (!advance) {
             throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
         }
+        const profileChanged =
+            current !== undefined &&
+            (current.profileId !== profileId ||
+                current.profileRevisionId !== profileRevisionId ||
+                current.manualOnly !== manualOnly ||
+                current.phases.categorize?.reason === "legacy");
+        const now = new Date();
+        const phases = profileChanged
+            ? markPhasesOutdatedForProfileChange(
+                  current.phases,
+                  advance.requestedGeneration,
+                  now.toISOString(),
+              )
+            : current?.phases;
         await tx
             .update(itemProcessing)
             .set({
                 profileId,
                 profileRevisionId,
                 manualOnly,
-                updatedAt: new Date(),
+                ...(phases ? { phases } : {}),
+                updatedAt: now,
             })
             .where(
                 and(
@@ -370,7 +388,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 state: "done",
                 reason: "categorized",
                 generation: advance.requestedGeneration,
-                at: new Date().toISOString(),
+                at: now.toISOString(),
             },
         );
         return { advance, organizationIntentChanged };

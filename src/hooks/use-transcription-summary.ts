@@ -73,6 +73,8 @@ export interface SummaryData {
      * names or terms in it may be stale.
      */
     stale?: boolean;
+    /** The item's effective folder scope differs from the summary run. */
+    scopeChanged?: boolean;
     /**
      * Present on GET when a summary job for this recording is queued or
      * running -- started in another tab, by an automatic run after a sync, or

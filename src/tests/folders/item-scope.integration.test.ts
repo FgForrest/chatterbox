@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -8,6 +9,7 @@ import {
     vi,
 } from "vitest";
 import {
+    aiEnhancements,
     chatterItems,
     mailPendingShares,
     recordingFolderAssignments,
@@ -58,6 +60,8 @@ vi.mock("@/lib/org/config", () => ({
 }));
 
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
+import { readStoredSummary } from "@/lib/summary/read-summary";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -163,5 +167,44 @@ describeWithDatabase("item folder scope (PostgreSQL)", () => {
             "org-parent",
         ]);
         expect(await itemScopeFolderIds(ITEM, "private", OTHER)).toEqual([]);
+    });
+
+    it("reports a summary's scope changed after a folder moves out of its scope", async () => {
+        const scopeFingerprint = await itemScopeFingerprint(
+            ITEM,
+            "private",
+            OWNER,
+        );
+        await db()
+            .insert(aiEnhancements)
+            .values({
+                itemId: ITEM,
+                userId: OWNER,
+                transcriptionId: null,
+                summary: encryptText("Summary"),
+                actionItems: [],
+                keyPoints: [],
+                provider: "test",
+                model: "test",
+                source: "riffado",
+                inputs: {
+                    contentId: "content-1",
+                    contentRevision: 0,
+                    scopeFingerprint,
+                },
+            });
+
+        expect(
+            (await readStoredSummary(OWNER, ITEM, "riffado"))?.scopeChanged,
+        ).toBe(false);
+
+        await db()
+            .update(recordingFolders)
+            .set({ parentId: "org-root" })
+            .where(eq(recordingFolders.id, "org-child"));
+
+        expect(
+            (await readStoredSummary(OWNER, ITEM, "riffado"))?.scopeChanged,
+        ).toBe(true);
     });
 });

@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
+import { processAgainPending } from "@/lib/pipeline/outdated";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 import { parseProfileSettings } from "@/lib/profiles/settings";
 
@@ -58,6 +59,7 @@ export interface ItemProcessingPresentation {
         summary: boolean;
         learn: boolean;
     };
+    processAgain: boolean;
 }
 
 interface StoredFolder {
@@ -327,6 +329,8 @@ export async function loadPrivateItemProcessing(
         transcribe: boolean;
         learn: boolean;
         summary: boolean;
+        title: boolean;
+        topics: boolean;
     } | null = null;
     if (!legacy && item.profileSettings) {
         const storedSettings = JSON.parse(decryptText(item.profileSettings));
@@ -336,6 +340,8 @@ export async function loadPrivateItemProcessing(
                 transcribe: settings.steps.transcribe.automatic,
                 learn: settings.steps.learn.automatic,
                 summary: settings.steps.summary.automatic,
+                title: settings.steps.title.automatic,
+                topics: settings.steps.topics.automatic,
             };
         } else {
             const settings = parseProfileSettings("mail", storedSettings);
@@ -343,6 +349,8 @@ export async function loadPrivateItemProcessing(
                 transcribe: false,
                 learn: settings.steps.learn.automatic,
                 summary: settings.steps.summary.automatic,
+                title: settings.steps.title.automatic,
+                topics: false,
             };
         }
     }
@@ -356,7 +364,11 @@ export async function loadPrivateItemProcessing(
                   id: item.profileId,
                   name: decryptText(item.profileName),
                   revisionId: item.profileRevisionId,
-                  automatic,
+                  automatic: {
+                      transcribe: automatic.transcribe,
+                      learn: automatic.learn,
+                      summary: automatic.summary,
+                  },
               }
             : null;
     const learnDone = finishedLearnRuns.some((run) => {
@@ -421,5 +433,11 @@ export async function loadPrivateItemProcessing(
             summary: summaryCurrent,
             learn: learnDone,
         },
+        processAgain:
+            !legacy &&
+            !(item.manualOnly ?? false) &&
+            automatic !== null &&
+            Object.values(automatic).some(Boolean) &&
+            processAgainPending(item.phases ?? {}),
     };
 }

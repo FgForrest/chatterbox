@@ -1,9 +1,134 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordingItemJoin, touchRecording } from "@/db/items";
-import { chatterItems, recordings } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    mailContents,
+    recordings,
+    transcriptions,
+} from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
+import { nudge } from "@/lib/jobs/nudge";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function titleFenceMatches(
+    tx: Tx,
+    userId: string,
+    itemId: string,
+    kind: "audio" | "mail",
+    fence: TitleInputFence,
+): Promise<boolean> {
+    const [processing] = await tx
+        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, itemId),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
+        .limit(1);
+    if ((processing?.profileRevisionId ?? null) !== fence.profileRevisionId) {
+        return false;
+    }
+    if (kind === "mail") {
+        const [content] = await tx
+            .select({ id: mailContents.id, revision: mailContents.revision })
+            .from(mailContents)
+            .where(
+                and(
+                    eq(mailContents.itemId, itemId),
+                    eq(mailContents.userId, userId),
+                ),
+            )
+            .limit(1);
+        return (
+            content?.id === fence.contentId &&
+            content.revision === fence.contentRevision &&
+            fence.contentSourceId === "mail"
+        );
+    }
+    const [content] = await tx
+        .select({ id: transcriptions.id, revision: transcriptions.revision })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, itemId),
+                eq(transcriptions.userId, userId),
+                eq(transcriptions.source, fence.contentSourceId),
+            ),
+        )
+        .limit(1);
+    return (
+        content?.id === fence.contentId &&
+        content.revision === fence.contentRevision
+    );
+}
+
+async function requestTitleAfterFenceInTx(
+    tx: Tx,
+    userId: string,
+    itemId: string,
+    fence: TitleInputFence,
+): Promise<boolean> {
+    const [processing] = await tx
+        .select({
+            profileRevisionId: itemProcessing.profileRevisionId,
+            phases: itemProcessing.phases,
+        })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, itemId),
+                eq(itemProcessing.userId, userId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
+        .limit(1);
+    if (!processing) return false;
+    const advance = await requestAdvanceInTx(tx, {
+        itemId,
+        userId,
+        view: "private",
+        reason: "title",
+    });
+    if (!advance) return false;
+    const reason =
+        processing.profileRevisionId !== fence.profileRevisionId
+            ? "profile_changed"
+            : "content_changed";
+    const summary = processing.phases.summary;
+    await updatePhaseInTx(tx, itemId, "private", userId, "summary", {
+        ...(summary ?? {
+            state: "outdated",
+            generation: advance.requestedGeneration,
+            at: new Date().toISOString(),
+        }),
+        state: "outdated",
+        reason,
+        generation: advance.requestedGeneration,
+        at: new Date().toISOString(),
+        steps: {
+            ...summary?.steps,
+            title: {
+                contentId: fence.contentId,
+                contentRevision: fence.contentRevision,
+                generation: advance.requestedGeneration,
+                profileRevisionId: fence.profileRevisionId ?? undefined,
+                state: "outdated",
+                reason,
+            },
+        },
+    });
+    return true;
+}
 
 /**
  * Store a generated title as the recording's name. Automatic runs preserve
@@ -20,10 +145,11 @@ export async function storeGeneratedTitle(
     title: string,
     expectedTitleEditedAt?: Date | null,
     actorUserId = userId,
+    fence?: TitleInputFence,
 ): Promise<boolean> {
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
-    return db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -42,7 +168,21 @@ export async function storeGeneratedTitle(
                 orgUserId,
             })
         ) {
-            return false;
+            return { stored: false, advance: false };
+        }
+        if (
+            fence &&
+            !(await titleFenceMatches(tx, userId, recordingId, "audio", fence))
+        ) {
+            return {
+                stored: false,
+                advance: await requestTitleAfterFenceInTx(
+                    tx,
+                    userId,
+                    recordingId,
+                    fence,
+                ),
+            };
         }
         const now = new Date();
         const titleCondition = expectedTitleEditedAt
@@ -64,10 +204,12 @@ export async function storeGeneratedTitle(
                 ),
             )
             .returning({ id: chatterItems.id });
-        if (stored.length === 0) return false;
+        if (stored.length === 0) return { stored: false, advance: false };
         await touchRecording(tx, recordingId, userId, now);
-        return true;
+        return { stored: true, advance: false };
     });
+    if (outcome.advance) nudge();
+    return outcome.stored;
 }
 
 /** Store a generated mail title unless a person edited it meanwhile. */
@@ -77,9 +219,10 @@ export async function storeGeneratedMailTitle(
     title: string,
     expectedTitleEditedAt?: Date | null,
     actorUserId = userId,
+    fence?: TitleInputFence,
 ): Promise<boolean> {
     const orgUserId = await sharingOrgUserId();
-    return db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
         const [item] = await tx
             .select({ id: chatterItems.id })
             .from(chatterItems)
@@ -93,7 +236,7 @@ export async function storeGeneratedMailTitle(
             )
             .for("update")
             .limit(1);
-        if (!item) return false;
+        if (!item) return { stored: false, advance: false };
         if (
             await contentWriterRefusal(tx, {
                 recordingId: itemId,
@@ -102,7 +245,21 @@ export async function storeGeneratedMailTitle(
                 orgUserId,
             })
         ) {
-            return false;
+            return { stored: false, advance: false };
+        }
+        if (
+            fence &&
+            !(await titleFenceMatches(tx, userId, itemId, "mail", fence))
+        ) {
+            return {
+                stored: false,
+                advance: await requestTitleAfterFenceInTx(
+                    tx,
+                    userId,
+                    itemId,
+                    fence,
+                ),
+            };
         }
         const titleCondition = expectedTitleEditedAt
             ? eq(chatterItems.titleEditedAt, expectedTitleEditedAt)
@@ -124,8 +281,10 @@ export async function storeGeneratedMailTitle(
                 ),
             )
             .returning({ id: chatterItems.id });
-        return stored.length > 0;
+        return { stored: stored.length > 0, advance: false };
     });
+    if (outcome.advance) nudge();
+    return outcome.stored;
 }
 
 /**

@@ -6,6 +6,8 @@ import {
     asyncJobs,
     type ChatterItemKind,
     chatterItems,
+    itemProcessing,
+    mailContents,
     recordings,
     transcriptions,
 } from "@/db/schema";
@@ -18,6 +20,7 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
 import {
@@ -43,7 +46,9 @@ export type EnhancementSource = "riffado" | "plaud";
 
 export interface ProcessingRunInputs extends Record<string, unknown> {
     contentId: string;
+    contentSourceId?: string;
     contentRevision: number | string;
+    itemProfileRevisionId?: string | null;
 }
 
 export interface UpsertTranscriptionArgs {
@@ -179,7 +184,7 @@ export interface UpsertEnhancementArgs {
  */
 export interface UpsertResult {
     committed: boolean;
-    reason?: WriterRefusal | "cancelled";
+    reason?: WriterRefusal | "cancelled" | "outdated";
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
@@ -189,6 +194,88 @@ class WriterRefused {
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+interface CurrentFenceInput {
+    contentId: string;
+    contentSourceId: string;
+    contentRevision: number;
+    profileRevisionId: string | null;
+}
+
+async function currentFenceInput(
+    tx: Tx,
+    args: UpsertEnhancementArgs,
+): Promise<CurrentFenceInput | null> {
+    const [processing] = await tx
+        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, args.recordingId),
+                eq(itemProcessing.userId, args.userId),
+                eq(itemProcessing.view, args.view ?? "private"),
+            ),
+        )
+        .limit(1);
+    if (args.kind === "mail") {
+        const [content] = await tx
+            .select({ id: mailContents.id, revision: mailContents.revision })
+            .from(mailContents)
+            .where(
+                and(
+                    eq(mailContents.itemId, args.recordingId),
+                    eq(mailContents.userId, args.userId),
+                ),
+            )
+            .limit(1);
+        return content
+            ? {
+                  contentId: content.id,
+                  contentSourceId: "mail",
+                  contentRevision: content.revision,
+                  profileRevisionId: processing?.profileRevisionId ?? null,
+              }
+            : null;
+    }
+    const source = args.inputs?.contentSourceId;
+    if (source !== "riffado" && source !== "plaud" && source !== "mixed") {
+        return null;
+    }
+    const [content] = await tx
+        .select({ id: transcriptions.id, revision: transcriptions.revision })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, args.recordingId),
+                eq(transcriptions.userId, args.userId),
+                eq(transcriptions.source, source),
+            ),
+        )
+        .limit(1);
+    return content
+        ? {
+              contentId: content.id,
+              contentSourceId: source,
+              contentRevision: content.revision,
+              profileRevisionId: processing?.profileRevisionId ?? null,
+          }
+        : null;
+}
+
+function fenceMatches(
+    inputs: ProcessingRunInputs,
+    current: CurrentFenceInput | null,
+): boolean {
+    if (!current) return false;
+    const sameContent =
+        inputs.contentId === current.contentId &&
+        inputs.contentSourceId === current.contentSourceId &&
+        inputs.contentRevision === current.contentRevision;
+    const sameProfile =
+        !("itemProfileRevisionId" in inputs) ||
+        inputs.itemProfileRevisionId === current.profileRevisionId;
+    return sameContent && sameProfile;
+}
 
 /**
  * Whether the job a write finishes is still running. A cancellation marks
@@ -292,7 +379,6 @@ export async function upsertTranscription(
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
                 throw new WriterRefused("cancelled");
             }
-
             const [current] = await tx
                 .select({
                     id: transcriptions.id,
@@ -456,7 +542,7 @@ export async function upsertEnhancement(
     const isMail = args.kind === "mail";
 
     try {
-        const advance = await db.transaction(async (tx) => {
+        const outcome = await db.transaction(async (tx) => {
             const [stillActive] = isMail
                 ? await tx
                       .select({
@@ -506,6 +592,47 @@ export async function upsertEnhancement(
             if (refusal) throw new WriterRefused(refusal);
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
                 throw new WriterRefused("cancelled");
+            }
+            if (args.inputs?.contentSourceId) {
+                const current = await currentFenceInput(tx, args);
+                if (!fenceMatches(args.inputs, current)) {
+                    const advance =
+                        args.pipeline === "legacy"
+                            ? null
+                            : await requestAdvanceInTx(tx, {
+                                  itemId: recordingId,
+                                  userId,
+                                  view: args.view ?? "private",
+                                  reason: "summary",
+                              });
+                    if (advance && current) {
+                        const profileChanged =
+                            "itemProfileRevisionId" in args.inputs &&
+                            args.inputs.itemProfileRevisionId !==
+                                current.profileRevisionId;
+                        await updatePhaseInTx(
+                            tx,
+                            recordingId,
+                            args.view ?? "private",
+                            userId,
+                            "summary",
+                            {
+                                state: "outdated",
+                                reason: profileChanged
+                                    ? "profile_changed"
+                                    : "content_changed",
+                                generation: advance.requestedGeneration,
+                                inputs: {
+                                    contentId: current.contentId,
+                                    contentSourceId: current.contentSourceId,
+                                    contentRevision: current.contentRevision,
+                                },
+                                at: new Date().toISOString(),
+                            },
+                        );
+                    }
+                    return { advance, outdated: true };
+                }
             }
 
             const [existing] = await tx
@@ -597,16 +724,19 @@ export async function upsertEnhancement(
                         eq(chatterItems.userId, userId),
                     ),
                 );
-            return args.pipeline === "legacy"
-                ? null
-                : requestAdvanceInTx(tx, {
-                      itemId: recordingId,
-                      userId,
-                      view: args.view ?? "private",
-                      reason: "summary",
-                  });
+            const advance =
+                args.pipeline === "legacy"
+                    ? null
+                    : await requestAdvanceInTx(tx, {
+                          itemId: recordingId,
+                          userId,
+                          view: args.view ?? "private",
+                          reason: "summary",
+                      });
+            return { advance, outdated: false };
         });
-        if (advance) nudge();
+        if (outcome.advance) nudge();
+        if (outcome.outdated) return { committed: false, reason: "outdated" };
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };

@@ -49,6 +49,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "recordings/[id]/categorize/preview/route.ts": { POST: "owner" },
     "recordings/[id]/ai-cost/route.ts": { GET: "view" },
     "recordings/[id]/peaks/route.ts": { POST: "access", PUT: "access" },
+    "recordings/[id]/process-again/route.ts": { POST: "owner" },
     "recordings/[id]/erase/route.ts": { POST: "owner" },
     "recordings/[id]/folders/route.ts": {
         POST: "folders",
