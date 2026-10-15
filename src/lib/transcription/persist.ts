@@ -29,7 +29,7 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import {
-    dropTasksWithoutSummaryInTx,
+    dropReplaceableTaskReviewInTx,
     type TaskProposals,
     writeTaskProposalsInTx,
 } from "@/lib/tasks/store";
@@ -457,7 +457,7 @@ export async function upsertTranscription(
                                 ),
                             ),
                         );
-                    await dropTasksWithoutSummaryInTx(tx, {
+                    await dropReplaceableTaskReviewInTx(tx, {
                         recordingId,
                         ownerUserId: userId,
                     });

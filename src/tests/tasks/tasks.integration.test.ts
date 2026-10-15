@@ -141,6 +141,7 @@ import {
     listTasks,
     markTasksSeen,
     mergeProposals,
+    mergeTaskIntoTask,
     recordingsAwaitingTaskReview,
     tickUpdateProposal,
     updateTask,
@@ -148,7 +149,9 @@ import {
 import {
     type UpsertEnhancementArgs,
     upsertEnhancement,
+    upsertTranscription,
 } from "@/lib/transcription/persist";
+import { storeBrowserTranscription } from "@/lib/transcription/transcribe-recording";
 import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -324,7 +327,10 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const result = await upsertEnhancement({
             userId: ALICE,
             recordingId,
-            transcriptionId: transcriptId,
+            kind: recordingId.startsWith("mail-") ? "mail" : "audio",
+            transcriptionId: recordingId.startsWith("mail-")
+                ? null
+                : transcriptId,
             summary: "Summary.",
             keyPoints: [],
             actionItems: tasks.map((task) => task.text),
@@ -2046,7 +2052,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             applyRoutedTaskProposal(bob, LATER, rightsProposal.id),
         ).resolves.toMatchObject({
             state: "obsolete",
-            obsoleteReason: "rights_lost",
+            obsoleteReason: "source_withdrawn",
         });
     });
 
@@ -2296,8 +2302,8 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             version: task.version,
             status: "done",
         });
-        expect((await review(alice, REC)).updates).toHaveLength(1);
-        await expect(share(REC)).rejects.toMatchObject({ statusCode: 409 });
+        expect((await review(alice, REC)).updates).toEqual([]);
+        await expect(share(REC)).resolves.toBeUndefined();
         await acceptReview(alice, REC);
         expect(
             await db()
@@ -2307,7 +2313,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 })
                 .from(taskUpdateProposals),
         ).toEqual([{ state: "obsolete", reason: "earlier_statement" }]);
-        await share(REC);
     });
 
     it("clears the badge for someone who never saved settings, and counts a reassignment", async () => {
@@ -2630,7 +2635,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([]);
     });
 
-    it("does not move an Organization task to another member's private item", async () => {
+    it("keeps an Organization task alive on another member's linked private item", async () => {
         await share(REC);
         const task = await addTask(org, REC, {
             text: "Keep this in the Organization",
@@ -2662,10 +2667,13 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
 
         expect(
             await db()
-                .select()
+                .select({
+                    itemId: recordingTasks.itemId,
+                    userId: recordingTasks.userId,
+                })
                 .from(recordingTasks)
                 .where(eq(recordingTasks.id, task.id)),
-        ).toEqual([]);
+        ).toEqual([{ itemId: bobMail, userId: BOB }]);
     });
 
     it("withdraws a home to another shared mention, or leaves it private", async () => {
@@ -2988,7 +2996,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 recordingId: LATER,
                 kind: "audio",
                 title: `Recording ${LATER}`,
-                proposals: 4,
+                proposals: 3,
             },
             {
                 recordingId: REC,
@@ -3016,7 +3024,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 recordingId: REC,
                 kind: "audio",
                 title: `Recording ${REC}`,
-                proposals: 2,
+                proposals: 1,
             },
         ]);
         expect(await recordingsAwaitingTaskReview(alice)).toEqual([
@@ -3301,13 +3309,33 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 },
             ],
         });
-        expect((await review(alice, earlierItem)).updates).toEqual(
+        expect((await review(alice, earlierItem)).updates).toEqual([
+            expect.objectContaining({
+                kind: "assignee",
+                earlierMention: true,
+            }),
+        ]);
+        expect(
+            await db()
+                .select({
+                    kind: taskUpdateProposals.kind,
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, earlierItem)),
+        ).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ kind: "drop", earlierMention: true }),
-                expect.objectContaining({
+                {
+                    kind: "drop",
+                    state: "obsolete",
+                    reason: "earlier_statement",
+                },
+                {
                     kind: "assignee",
-                    earlierMention: true,
-                }),
+                    state: "obsolete",
+                    reason: "earlier_statement",
+                },
             ]),
         );
         const rows = await db()
@@ -3528,6 +3556,595 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 }),
             ]),
         );
+    });
+
+    it("obsoletes routed proposals when their shared source is withdrawn", async () => {
+        const targetItem = "rec-routed-source-target";
+        await addRecording(targetItem, "2026-10-09T10:00:00Z", BOB);
+        await share(targetItem, BOB);
+        await share(LATER);
+        const target = await addTask(org, targetItem, {
+            text: "Publish the source-withdrawal notes",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        const [proposalRow] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: target.id,
+                itemId: LATER,
+                userId: ALICE,
+                kind: "done",
+                state: "awaiting_target_review",
+                routedTo: [BOB],
+                version: target.version,
+            })
+            .returning({ id: taskUpdateProposals.id });
+
+        expect(
+            (await listRoutedTaskProposals(bob)).map((row) => row.id),
+        ).toContain(proposalRow?.id);
+        await unshareRecording(ALICE, LATER, { withdraw: true });
+
+        expect(
+            (await listRoutedTaskProposals(bob)).map((row) => row.id),
+        ).not.toContain(proposalRow?.id);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, proposalRow?.id ?? "")),
+        ).toEqual([{ state: "obsolete", reason: "source_withdrawn" }]);
+        await expect(
+            applyRoutedTaskProposal(bob, LATER, proposalRow?.id ?? ""),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("obsoletes routed proposals when their target becomes invisible", async () => {
+        const targetItem = "rec-routed-invisible-target";
+        await addRecording(targetItem, "2026-10-09T10:00:00Z", BOB);
+        await share(REC);
+        await share(targetItem, BOB);
+        const target = await addTask(org, targetItem, {
+            text: "Publish the target-withdrawal notes",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        const [proposalRow] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: target.id,
+                itemId: REC,
+                userId: ALICE,
+                kind: "done",
+                state: "awaiting_target_review",
+                routedTo: [ALICE],
+                version: target.version,
+            })
+            .returning({ id: taskUpdateProposals.id });
+
+        await unshareRecording(BOB, targetItem, { withdraw: true });
+
+        expect(
+            (await listRoutedTaskProposals(alice)).map((row) => row.id),
+        ).not.toContain(proposalRow?.id);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, proposalRow?.id ?? "")),
+        ).toEqual([{ state: "obsolete", reason: "task_invisible" }]);
+        await expect(
+            rejectRoutedTaskProposal(alice, REC, proposalRow?.id ?? ""),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it("settles invisible shown review rows without blocking the share gate", async () => {
+        const targetItem = "rec-review-withdrawn-target";
+        await addRecording(targetItem, "2026-10-09T10:00:00Z", BOB);
+        await share(targetItem, BOB);
+        const target = await addTask(org, targetItem, {
+            text: "Review the withdrawn target",
+            status: "open",
+        });
+        await db()
+            .update(recordingTasks)
+            .set({ statusEffectiveAt: new Date("2026-10-01T00:00:00Z") })
+            .where(
+                and(
+                    eq(recordingTasks.id, target.id),
+                    eq(recordingTasks.userId, BOB),
+                ),
+            );
+        await summarize(REC, [], {
+            matches: [match(target.id)],
+            updates: [
+                {
+                    taskId: target.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "this is done",
+                    evidenceStartMs: 1_000,
+                },
+            ],
+        });
+        const shownReview = await review(alice);
+        await unshareRecording(BOB, targetItem, { withdraw: true });
+
+        await expect(
+            acceptReview(alice, REC, {
+                proposals: [],
+                updates: shownReview.updates.map((row) => row.id),
+            }),
+        ).resolves.toBeDefined();
+        await expect(share(REC)).resolves.toBeUndefined();
+        expect(await recordingsAwaitingTaskReview(alice)).toEqual([]);
+        const [update] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                reason: taskUpdateProposals.obsoleteReason,
+                decidedBy: taskUpdateProposals.decidedByUserId,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.itemId, REC));
+        expect(update).toEqual({
+            state: "obsolete",
+            reason: "task_invisible",
+            decidedBy: null,
+        });
+        const [suggestion] = await db()
+            .select({
+                decision: taskMentions.matchDecision,
+                decidedBy: taskMentions.decidedByUserId,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, REC),
+                    eq(taskMentions.taskId, target.id),
+                ),
+            );
+        expect(suggestion).toEqual({ decision: "rejected", decidedBy: null });
+    });
+
+    it("uses each field proposal's own statement time", async () => {
+        const mailId = "mail-proposal-statement-time";
+        await addMail(mailId);
+        await db()
+            .update(chatterItems)
+            .set({ occurredAt: new Date("2026-10-12T12:00:00Z") })
+            .where(
+                and(
+                    eq(chatterItems.id, mailId),
+                    eq(chatterItems.userId, ALICE),
+                ),
+            );
+        const task = await addTask(alice, REC, {
+            text: "Send the chronology note",
+            status: "open",
+        });
+        await db()
+            .update(recordingTasks)
+            .set({ statusEffectiveAt: new Date("2026-10-12T10:00:00Z") })
+            .where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    eq(recordingTasks.userId, ALICE),
+                ),
+            );
+        await summarize(mailId, [], {
+            matches: [
+                match(task.id, {
+                    quote: "Earlier quoted mention",
+                    evidenceProvenance: "quoted",
+                    quotedAt: new Date("2026-10-12T08:00:00.000Z"),
+                }),
+            ],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "It is done",
+                    evidenceStartMs: null,
+                    evidenceProvenance: "unverified",
+                },
+            ],
+        });
+        const [update] = (await review(alice, mailId)).updates;
+        if (!update) throw new Error("missing chronology proposal");
+        expect(update.earlierMention).toBe(false);
+        await tickUpdateProposal(
+            alice,
+            mailId,
+            update.id,
+            true,
+            update.version,
+        );
+        await acceptReview(alice, mailId);
+        expect(
+            (
+                await db()
+                    .select({ status: recordingTasks.status })
+                    .from(recordingTasks)
+                    .where(
+                        and(
+                            eq(recordingTasks.id, task.id),
+                            eq(recordingTasks.userId, ALICE),
+                        ),
+                    )
+            )[0]?.status,
+        ).toBe("done");
+    });
+
+    it("keeps an earlier quoted field statement informational", async () => {
+        const mailId = "mail-earlier-field-statement";
+        await addMail(mailId);
+        await db()
+            .update(chatterItems)
+            .set({ occurredAt: new Date("2026-10-12T12:00:00Z") })
+            .where(
+                and(
+                    eq(chatterItems.id, mailId),
+                    eq(chatterItems.userId, ALICE),
+                ),
+            );
+        const task = await addTask(alice, REC, {
+            text: "Keep the later chronology",
+            status: "open",
+        });
+        await db()
+            .update(recordingTasks)
+            .set({ statusEffectiveAt: new Date("2026-10-12T10:00:00Z") })
+            .where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    eq(recordingTasks.userId, ALICE),
+                ),
+            );
+        await summarize(mailId, [], {
+            matches: [
+                match(task.id, {
+                    quote: "Current mail text",
+                    evidenceProvenance: "unverified",
+                }),
+            ],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "Earlier quoted completion",
+                    evidenceStartMs: null,
+                    evidenceProvenance: "quoted",
+                    quotedAt: new Date("2026-10-12T08:00:00Z"),
+                },
+            ],
+        });
+
+        expect((await review(alice, mailId)).updates).toEqual([
+            expect.objectContaining({ earlierMention: true, ticked: false }),
+        ]);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, mailId)),
+        ).toEqual([{ state: "obsolete", reason: "earlier_statement" }]);
+    });
+
+    it("settles a proposal immediately when an edit makes it earlier", async () => {
+        const task = await addTask(alice, LATER, {
+            text: "Settle the earlier edit",
+            status: "open",
+        });
+        await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: task.id,
+                itemId: REC,
+                userId: ALICE,
+                kind: "due",
+                dueDate: "2026-10-20",
+                statementAt: new Date("2026-10-06T10:00:00Z"),
+            });
+        await updateTask(alice, task.id, {
+            version: task.version,
+            dueDate: "2026-10-21",
+        });
+
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    reason: taskUpdateProposals.obsoleteReason,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.itemId, REC)),
+        ).toEqual([{ state: "obsolete", reason: "earlier_statement" }]);
+        expect((await review(alice, REC)).updates).toEqual([
+            expect.objectContaining({ earlierMention: true }),
+        ]);
+        await expect(share(REC)).resolves.toBeUndefined();
+        expect(await recordingsAwaitingTaskReview(alice)).toEqual([]);
+    });
+
+    it("keeps accepted tasks and other members' mentions on browser and forced retranscription", async () => {
+        await summarize(REC, [proposal("Preserve the accepted task")]);
+        await acceptReview(alice, REC);
+        const [task] = (await review(alice)).tasks;
+        if (!task) throw new Error("missing accepted task");
+        const otherItem = "rec-other-member-mention";
+        await addRecording(otherItem, "2026-10-09T10:00:00Z", BOB);
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: otherItem,
+                userId: BOB,
+                view: "private",
+                statementAt: new Date("2026-10-09T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+
+        await expect(
+            storeBrowserTranscription({
+                userId: ALICE,
+                recordingId: REC,
+                text: "Browser replacement transcript.",
+                detectedLanguage: "en",
+                model: "whisper-tiny",
+            }),
+        ).resolves.toMatchObject({ success: true });
+        expect(
+            await db()
+                .select({ id: recordingTasks.id })
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, task.id)),
+        ).toEqual([{ id: task.id }]);
+        await summarize(REC, []);
+
+        await upsertTranscription({
+            userId: ALICE,
+            recordingId: REC,
+            text: "Replacement transcript.",
+            detectedLanguage: "en",
+            source: "riffado",
+            provider: "openai",
+            model: "whisper-1",
+            allowReaped: true,
+            dropSummaryOnReplace: "riffado",
+        });
+
+        expect(
+            await db()
+                .select({ id: recordingTasks.id })
+                .from(recordingTasks)
+                .where(eq(recordingTasks.id, task.id)),
+        ).toEqual([{ id: task.id }]);
+        expect(
+            await db()
+                .select({ itemId: taskMentions.itemId })
+                .from(taskMentions)
+                .where(eq(taskMentions.taskId, task.id)),
+        ).toEqual(
+            expect.arrayContaining([{ itemId: REC }, { itemId: otherItem }]),
+        );
+    });
+
+    it("ends one recording and one mail review as one task with two mentions", async () => {
+        const mailId = "mail-shared-task-acceptance";
+        await addMail(mailId);
+        await summarize(REC, [proposal("Send the combined follow-up")]);
+        await acceptReview(alice, REC);
+        const [task] = (await review(alice)).tasks;
+        if (!task) throw new Error("missing accepted task");
+
+        await summarize(mailId, [], {
+            matches: [match(task.id, { quote: "send the combined follow-up" })],
+        });
+        await acceptReview(alice, mailId);
+
+        expect(
+            await db()
+                .select({ id: recordingTasks.id })
+                .from(recordingTasks)
+                .where(eq(recordingTasks.userId, ALICE)),
+        ).toEqual([{ id: task.id }]);
+        expect(
+            await db()
+                .select({ itemId: taskMentions.itemId })
+                .from(taskMentions)
+                .where(
+                    and(
+                        eq(taskMentions.taskId, task.id),
+                        eq(taskMentions.userId, ALICE),
+                    ),
+                ),
+        ).toEqual(
+            expect.arrayContaining([{ itemId: REC }, { itemId: mailId }]),
+        );
+    });
+
+    it("routes merge evidence only from current linked Organization mentions", async () => {
+        const targetItem = "rec-merge-target-owner";
+        const privateMail = "mail-private-merge-noise";
+        await addRecording(targetItem, "2026-10-10T10:00:00Z", BOB);
+        await addMail(privateMail);
+        await share(REC);
+        await share(LATER);
+        await share(targetItem, BOB);
+        const source = await addTask(org, REC, {
+            text: "Attach the launch evidence",
+            status: "open",
+        });
+        const target = await addTask(org, targetItem, {
+            text: "Publish the launch evidence",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values([
+                {
+                    taskId: source.id,
+                    itemId: LATER,
+                    userId: ALICE,
+                    view: "org",
+                    quote: encryptText("current shared home evidence"),
+                    statementAt: new Date("2026-10-08T10:00:00Z"),
+                    matchDecision: "accepted",
+                },
+                {
+                    taskId: source.id,
+                    itemId: privateMail,
+                    userId: ALICE,
+                    view: "private",
+                    quote: encryptText("newer private rejected evidence"),
+                    statementAt: new Date("2026-10-12T10:00:00Z"),
+                    matchDecision: "rejected",
+                },
+            ]);
+        await db()
+            .update(recordingTasks)
+            .set({ itemId: LATER })
+            .where(
+                and(
+                    eq(recordingTasks.id, source.id),
+                    eq(recordingTasks.userId, ALICE),
+                ),
+            );
+
+        await mergeTaskIntoTask(alice, source.id, target.id);
+
+        const notice = (await listRoutedTaskProposals(bob)).find(
+            (row) => row.kind === "attach_merge",
+        );
+        expect(notice).toMatchObject({
+            quote: "current shared home evidence",
+            sourceItem: { id: LATER },
+        });
+    });
+
+    it("routes a merge notice without evidence when no linked shared mention remains", async () => {
+        const targetItem = "rec-merge-target-without-evidence";
+        await addRecording(targetItem, "2026-10-10T10:00:00Z", BOB);
+        await share(REC);
+        await share(targetItem, BOB);
+        const source = await addTask(org, REC, {
+            text: "Attach without visible evidence",
+            status: "open",
+        });
+        const target = await addTask(org, targetItem, {
+            text: "Receive the evidence-free notice",
+            status: "open",
+        });
+        await db()
+            .update(taskMentions)
+            .set({ view: "private" })
+            .where(
+                and(
+                    eq(taskMentions.taskId, source.id),
+                    eq(taskMentions.userId, ALICE),
+                ),
+            );
+
+        await mergeTaskIntoTask(alice, source.id, target.id);
+
+        expect(
+            (await listRoutedTaskProposals(bob)).find(
+                (row) => row.kind === "attach_merge",
+            ),
+        ).toMatchObject({ quote: null, sourceItem: null });
+    });
+
+    it("reroutes pending proposals when a task home moves", async () => {
+        const bobHome = "rec-bob-new-task-home";
+        await addRecording(bobHome, "2026-10-10T10:00:00Z", BOB);
+        await share(REC);
+        await share(LATER);
+        await share(bobHome, BOB);
+        const task = await addTask(org, REC, {
+            text: "Move and reroute this task",
+            status: "open",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.id,
+                itemId: bobHome,
+                userId: BOB,
+                view: "org",
+                statementAt: new Date("2026-10-10T10:00:00Z"),
+                matchDecision: "accepted",
+            });
+        const [pending] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                kind: "due",
+                dueDate: "2026-10-30",
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                state: "awaiting_target_review",
+                routedTo: [ALICE],
+                version: task.version,
+            })
+            .returning({ id: taskUpdateProposals.id });
+
+        await db().transaction(async (tx) => {
+            await deleteItemTaskDataInTx(tx, {
+                itemId: REC,
+                ownerUserId: ALICE,
+                actorUserId: ALICE,
+                orgUserId,
+                reason: "deleted",
+            });
+        });
+
+        expect(
+            await db()
+                .select({ routedTo: taskUpdateProposals.routedTo })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, pending?.id ?? "")),
+        ).toEqual([{ routedTo: [BOB] }]);
+        expect(
+            (await listRoutedTaskProposals(bob)).map((row) => row.id),
+        ).toContain(pending?.id);
+        expect(
+            (await listRoutedTaskProposals(org)).map((row) => row.id),
+        ).toContain(pending?.id);
+        await db()
+            .update(taskUpdateProposals)
+            .set({ routedTo: [ALICE, BOB] })
+            .where(eq(taskUpdateProposals.id, pending?.id ?? ""));
+        await expect(
+            rejectRoutedTaskProposal(alice, LATER, pending?.id ?? ""),
+        ).rejects.toMatchObject({ statusCode: 404 });
+        await expect(
+            rejectRoutedTaskProposal(bob, LATER, pending?.id ?? ""),
+        ).resolves.toMatchObject({ state: "rejected" });
     });
 });
 

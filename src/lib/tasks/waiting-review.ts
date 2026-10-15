@@ -1,5 +1,6 @@
 import { and, eq, isNull, notExists } from "drizzle-orm";
 import type { db } from "@/db";
+import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
 import { recordingTasks, taskMentions, taskUpdateProposals } from "@/db/schema";
 
 type Executor = Pick<typeof db, "select">;
@@ -37,6 +38,11 @@ export async function waitingTaskDecisions(
                     eq(taskUpdateProposals.itemId, itemId),
                     eq(taskUpdateProposals.userId, ownerUserId),
                     eq(taskUpdateProposals.state, "awaiting_source_review"),
+                    reviewableTaskTargetCondition(
+                        taskUpdateProposals.taskId,
+                        ownerUserId,
+                        view === "org",
+                    ),
                 ),
             ),
         executor
@@ -48,6 +54,11 @@ export async function waitingTaskDecisions(
                     eq(taskMentions.userId, ownerUserId),
                     eq(taskMentions.matchDecision, "suggested"),
                     view ? eq(taskMentions.view, view) : undefined,
+                    reviewableTaskTargetCondition(
+                        taskMentions.taskId,
+                        ownerUserId,
+                        view === "org",
+                    ),
                     notExists(
                         executor
                             .select({ id: taskUpdateProposals.id })

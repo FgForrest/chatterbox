@@ -1,4 +1,15 @@
-import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+    and,
+    asc,
+    eq,
+    exists,
+    gt,
+    inArray,
+    isNull,
+    lte,
+    or,
+    sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
@@ -15,6 +26,7 @@ import {
     exportRecordingSidecarsIfEnabled,
     refreshExistingRecordingSidecars,
 } from "@/lib/export/document-sidecars";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
@@ -37,7 +49,8 @@ export type ObsoleteProposalReason =
     | "version_changed"
     | "task_closed"
     | "task_invisible"
-    | "rights_lost";
+    | "rights_lost"
+    | "source_withdrawn";
 
 export interface RoutedTaskProposalView {
     id: string;
@@ -63,7 +76,7 @@ export interface RoutedTaskProposalView {
         id: string;
         kind: "audio" | "mail";
         title: string;
-    };
+    } | null;
     attachedBy: { id: string; name: string } | null;
 }
 
@@ -81,6 +94,7 @@ interface SourceUpdate {
     proposedAssigneePersonId: string | null;
     proposedAssigneeHint: string | null;
     proposedAssigneeCheck: boolean;
+    statementAt: Date;
     ticked: boolean;
     version: number;
 }
@@ -151,12 +165,21 @@ async function targetFor(
     return target ?? null;
 }
 
-async function assigneeUserId(tx: Tx, taskId: string): Promise<string | null> {
+async function assigneeUserId(
+    tx: Tx,
+    taskId: string,
+    ownerUserId: string,
+): Promise<string | null> {
     const [assignee] = await tx
         .select({ email: people.primaryEmail })
         .from(recordingTasks)
         .innerJoin(people, eq(people.id, recordingTasks.assigneePersonId))
-        .where(eq(recordingTasks.id, taskId))
+        .where(
+            and(
+                eq(recordingTasks.id, taskId),
+                eq(recordingTasks.userId, ownerUserId),
+            ),
+        )
         .limit(1);
     if (!assignee?.email) return null;
     const email = decryptText(assignee.email);
@@ -175,7 +198,11 @@ async function routingTargets(
 ): Promise<string[]> {
     const ids = new Set([target.ownerUserId]);
     if (kind === "done") {
-        const assignee = await assigneeUserId(tx, target.taskId);
+        const assignee = await assigneeUserId(
+            tx,
+            target.taskId,
+            target.ownerUserId,
+        );
         if (assignee) ids.add(assignee);
     }
     return [...ids];
@@ -260,6 +287,49 @@ async function applyToTarget(
         .where(eq(recordingTasks.id, target.taskId));
 }
 
+/** Settles source-review rows superseded by a field's new effective time. */
+export async function settleEarlierTaskProposalsInTx(
+    tx: Tx,
+    input: {
+        taskId: string;
+        ownerUserId: string;
+        kinds: readonly ProposalKind[];
+        effectiveAt: Date;
+    },
+): Promise<void> {
+    if (input.kinds.length === 0) return;
+    const now = new Date();
+    await tx
+        .update(taskUpdateProposals)
+        .set({
+            state: "obsolete",
+            routedTo: null,
+            decidedByUserId: null,
+            decidedAt: now,
+            obsoleteReason: "earlier_statement",
+            updatedAt: now,
+        })
+        .where(
+            and(
+                eq(taskUpdateProposals.taskId, input.taskId),
+                eq(taskUpdateProposals.state, "awaiting_source_review"),
+                inArray(taskUpdateProposals.kind, input.kinds),
+                lte(taskUpdateProposals.statementAt, input.effectiveAt),
+                exists(
+                    tx
+                        .select({ id: recordingTasks.id })
+                        .from(recordingTasks)
+                        .where(
+                            and(
+                                eq(recordingTasks.id, input.taskId),
+                                eq(recordingTasks.userId, input.ownerUserId),
+                            ),
+                        ),
+                ),
+            ),
+        );
+}
+
 function chronologyAllows(
     proposal: Pick<SourceUpdate, "kind">,
     target: TargetRow,
@@ -280,6 +350,8 @@ export interface RoutedMergeDifference {
     kind: "attach_merge" | "done" | "due" | "due_phrase";
     dueDate?: string | null;
     duePhrase?: string | null;
+    statementAt: Date;
+    source: { itemId: string; userId: string };
     mention: {
         itemId: string;
         userId: string;
@@ -289,7 +361,7 @@ export interface RoutedMergeDifference {
         evidenceCharStart: number | null;
         evidenceCharEnd: number | null;
         evidenceProvenance: "quoted" | "unverified" | "unlocated" | null;
-    };
+    } | null;
 }
 
 /** Route the differences from a cross-owner task attachment to target editors. */
@@ -316,17 +388,21 @@ export async function createRoutedMergeProposalsInTx(
             .insert(taskUpdateProposals)
             .values({
                 taskId: target.taskId,
-                itemId: difference.mention.itemId,
-                userId: difference.mention.userId,
+                itemId: difference.source.itemId,
+                userId: difference.source.userId,
                 kind: difference.kind,
                 dueDate: difference.dueDate ?? null,
                 duePhrase: difference.duePhrase ?? null,
-                quote: difference.mention.quote,
-                evidenceStartMs: difference.mention.evidenceStartMs,
-                evidenceSegmentIndex: difference.mention.evidenceSegmentIndex,
-                evidenceCharStart: difference.mention.evidenceCharStart,
-                evidenceCharEnd: difference.mention.evidenceCharEnd,
-                evidenceProvenance: difference.mention.evidenceProvenance,
+                quote: difference.mention?.quote ?? null,
+                evidenceStartMs: difference.mention?.evidenceStartMs ?? null,
+                evidenceSegmentIndex:
+                    difference.mention?.evidenceSegmentIndex ?? null,
+                evidenceCharStart:
+                    difference.mention?.evidenceCharStart ?? null,
+                evidenceCharEnd: difference.mention?.evidenceCharEnd ?? null,
+                evidenceProvenance:
+                    difference.mention?.evidenceProvenance ?? null,
+                statementAt: difference.statementAt,
                 state: "awaiting_target_review",
                 routedTo: await routingTargets(tx, difference.kind, target),
                 decidedByUserId: input.viewer.userId,
@@ -364,7 +440,7 @@ export async function movePendingTaskProposalsInTx(
             userId: taskUpdateProposals.userId,
             kind: taskUpdateProposals.kind,
             state: taskUpdateProposals.state,
-            sourceOccurredAt: chatterItems.occurredAt,
+            statementAt: taskUpdateProposals.statementAt,
         })
         .from(taskUpdateProposals)
         .innerJoin(
@@ -389,15 +465,6 @@ export async function movePendingTaskProposalsInTx(
             asc(taskUpdateProposals.id),
         );
     if (proposals.length === 0) return;
-    const mentions = await tx
-        .select({
-            itemId: taskMentions.itemId,
-            userId: taskMentions.userId,
-            statementAt: taskMentions.statementAt,
-        })
-        .from(taskMentions)
-        .where(eq(taskMentions.taskId, input.sourceTaskId))
-        .orderBy(asc(taskMentions.createdAt), asc(taskMentions.id));
     const conflicts = await tx
         .select({
             itemId: taskUpdateProposals.itemId,
@@ -409,13 +476,7 @@ export async function movePendingTaskProposalsInTx(
         conflicts.map((proposal) => `${proposal.itemId}\0${proposal.kind}`),
     );
     for (const proposal of proposals) {
-        const statementAt =
-            mentions.find(
-                (mention) =>
-                    mention.itemId === proposal.itemId &&
-                    mention.userId === proposal.userId,
-            )?.statementAt ?? proposal.sourceOccurredAt;
-        if (!chronologyAllows(proposal, target, statementAt)) continue;
+        if (!chronologyAllows(proposal, target, proposal.statementAt)) continue;
         const key = `${proposal.itemId}\0${proposal.kind}`;
         if (held.has(key)) {
             await tx
@@ -453,9 +514,7 @@ export async function settleSourceTaskUpdatesInTx(
         sourceItemId: string;
         sourceOwnerUserId: string;
         sourceShared: boolean;
-        sourceOccurredAt: Date;
         updates: readonly SourceUpdate[];
-        statementAtByTask: ReadonlyMap<string, Date>;
     },
 ): Promise<{
     applied: number;
@@ -469,9 +528,7 @@ export async function settleSourceTaskUpdatesInTx(
     const touched = new Map<string, string>();
     for (const proposal of input.updates) {
         const target = await targetFor(tx, input.viewer, proposal.taskId);
-        const statementAt =
-            input.statementAtByTask.get(proposal.taskId) ??
-            input.sourceOccurredAt;
+        const statementAt = proposal.statementAt;
         if (target && !chronologyAllows(proposal, target, statementAt)) {
             await setProposalState(tx, proposal.id, "obsolete", {
                 actorUserId: input.viewer.userId,
@@ -549,6 +606,17 @@ export async function settleSourceTaskUpdatesInTx(
         await setProposalState(tx, proposal.id, "applied", {
             actorUserId: input.viewer.userId,
             routedTo: null,
+        });
+        await settleEarlierTaskProposalsInTx(tx, {
+            taskId: target.taskId,
+            ownerUserId: target.ownerUserId,
+            kinds:
+                proposal.kind === "done" || proposal.kind === "drop"
+                    ? ["done", "drop"]
+                    : proposal.kind === "assignee"
+                      ? ["assignee"]
+                      : ["due", "due_phrase"],
+            effectiveAt: statementAt,
         });
         touched.set(target.itemId, target.ownerUserId);
         applied += 1;
@@ -658,6 +726,24 @@ export async function listRoutedTaskProposals(
             version: taskUpdateProposals.version,
             sourceItemKind: routedSourceItem.kind,
             sourceItemTitle: routedSourceItem.title,
+            hasEvidence: exists(
+                db
+                    .select({ id: taskMentions.id })
+                    .from(taskMentions)
+                    .where(
+                        and(
+                            eq(taskMentions.taskId, recordingTasks.id),
+                            eq(taskMentions.itemId, taskUpdateProposals.itemId),
+                            eq(taskMentions.userId, taskUpdateProposals.userId),
+                            eq(taskMentions.view, "org"),
+                            inArray(taskMentions.matchDecision, [
+                                "home",
+                                "accepted",
+                            ]),
+                            recordingSharedCondition(taskMentions.itemId),
+                        ),
+                    ),
+            ),
             attachedById: routedActor.id,
             attachedByName: routedActor.name,
             attachedByEmail: routedActor.email,
@@ -694,6 +780,13 @@ export async function listRoutedTaskProposals(
             and(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
                 routedProposalCondition(viewer),
+                isNull(chatterItems.deletedAt),
+                taskVisible(viewer, ANY_TASK_ITEM),
+                isNull(routedSourceItem.deletedAt),
+                or(
+                    eq(routedSourceItem.userId, viewer.userId),
+                    recordingSharedCondition(routedSourceItem.id),
+                ),
             ),
         )
         .orderBy(
@@ -728,11 +821,14 @@ export async function listRoutedTaskProposals(
                       charEnd: row.evidenceCharEnd,
                   }
                 : null,
-        sourceItem: {
-            id: row.sourceItemId,
-            kind: row.sourceItemKind,
-            title: decryptText(row.sourceItemTitle),
-        },
+        sourceItem:
+            row.kind === "attach_merge" && !row.hasEvidence
+                ? null
+                : {
+                      id: row.sourceItemId,
+                      kind: row.sourceItemKind,
+                      title: decryptText(row.sourceItemTitle),
+                  },
         attachedBy: row.attachedById
             ? {
                   id: row.attachedById,
@@ -758,11 +854,25 @@ export async function countRoutedTaskProposals(
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .innerJoin(
+            routedSourceItem,
+            and(
+                eq(routedSourceItem.id, taskUpdateProposals.itemId),
+                eq(routedSourceItem.userId, taskUpdateProposals.userId),
+            ),
+        )
         .where(
             and(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
                 since ? gt(taskUpdateProposals.updatedAt, since) : undefined,
                 routedProposalCondition(viewer),
+                isNull(chatterItems.deletedAt),
+                taskVisible(viewer, ANY_TASK_ITEM),
+                isNull(routedSourceItem.deletedAt),
+                or(
+                    eq(routedSourceItem.userId, viewer.userId),
+                    recordingSharedCondition(routedSourceItem.id),
+                ),
             ),
         );
     return row?.count ?? 0;
@@ -823,9 +933,16 @@ export async function applyRoutedTaskProposal(
                 evidenceCharStart: taskUpdateProposals.evidenceCharStart,
                 evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
                 evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+                statementAt: taskUpdateProposals.statementAt,
                 version: taskUpdateProposals.version,
                 routedTo: taskUpdateProposals.routedTo,
-                sourceOccurredAt: chatterItems.occurredAt,
+                sourceVisible: sql<boolean>`${and(
+                    isNull(chatterItems.deletedAt),
+                    or(
+                        eq(chatterItems.userId, viewer.userId),
+                        recordingSharedCondition(chatterItems.id),
+                    ),
+                )}`,
             })
             .from(taskUpdateProposals)
             .innerJoin(
@@ -863,28 +980,11 @@ export async function applyRoutedTaskProposal(
                 404,
             );
         }
-        const [mention] = await tx
-            .select({ statementAt: taskMentions.statementAt })
-            .from(taskMentions)
-            .where(
-                and(
-                    eq(taskMentions.taskId, proposal.taskId),
-                    eq(taskMentions.itemId, source.itemId),
-                    eq(taskMentions.userId, source.ownerUserId),
-                    inArray(taskMentions.matchDecision, ["accepted", "home"]),
-                ),
-            )
-            .orderBy(
-                desc(
-                    sql`(${taskMentions.quote}, ${taskMentions.evidenceStartMs}, ${taskMentions.evidenceSegmentIndex}, ${taskMentions.evidenceCharStart}, ${taskMentions.evidenceCharEnd}, ${taskMentions.provenance}) is not distinct from (${proposal.quote}, ${proposal.evidenceStartMs}, ${proposal.evidenceSegmentIndex}, ${proposal.evidenceCharStart}, ${proposal.evidenceCharEnd}, ${proposal.evidenceProvenance})`,
-                ),
-                asc(taskMentions.createdAt),
-            )
-            .limit(1);
-        const effectiveAt = mention?.statementAt ?? proposal.sourceOccurredAt;
+        const effectiveAt = proposal.statementAt;
         let reason: ObsoleteProposalReason | null = null;
         const attachmentNotice = proposal.kind === "attach_merge";
-        if (!target?.visible) reason = "task_invisible";
+        if (!proposal.sourceVisible) reason = "source_withdrawn";
+        else if (!target?.visible) reason = "task_invisible";
         else if (target.status !== "open") reason = "task_closed";
         else if (!attachmentNotice && target.version !== proposal.version)
             reason = "version_changed";
@@ -914,6 +1014,19 @@ export async function applyRoutedTaskProposal(
             actorUserId: viewer.userId,
             routedTo: null,
         });
+        if (!attachmentNotice) {
+            await settleEarlierTaskProposalsInTx(tx, {
+                taskId: target.taskId,
+                ownerUserId: target.ownerUserId,
+                kinds:
+                    proposal.kind === "done" || proposal.kind === "drop"
+                        ? ["done", "drop"]
+                        : proposal.kind === "assignee"
+                          ? ["assignee"]
+                          : ["due", "due_phrase"],
+                effectiveAt,
+            });
+        }
         return {
             decision: { state: "applied" as const, obsoleteReason: null },
             changed: attachmentNotice
@@ -933,13 +1046,28 @@ export async function rejectRoutedTaskProposal(
     sourceItemId: string,
     proposalId: string,
 ): Promise<RoutedProposalDecision> {
-    await db.transaction(async (tx) => {
+    return db.transaction(async (tx) => {
         const [proposal] = await tx
             .select({
                 taskId: taskUpdateProposals.taskId,
+                kind: taskUpdateProposals.kind,
                 routedTo: taskUpdateProposals.routedTo,
+                sourceVisible: sql<boolean>`${and(
+                    isNull(chatterItems.deletedAt),
+                    or(
+                        eq(chatterItems.userId, viewer.userId),
+                        recordingSharedCondition(chatterItems.id),
+                    ),
+                )}`,
             })
             .from(taskUpdateProposals)
+            .innerJoin(
+                chatterItems,
+                and(
+                    eq(chatterItems.id, taskUpdateProposals.itemId),
+                    eq(chatterItems.userId, taskUpdateProposals.userId),
+                ),
+            )
             .where(
                 and(
                     eq(taskUpdateProposals.id, proposalId),
@@ -958,8 +1086,8 @@ export async function rejectRoutedTaskProposal(
                 404,
             );
         }
+        const target = await targetFor(tx, viewer, proposal.taskId);
         if (!routedDirectlyTo(proposal.routedTo, viewer)) {
-            const target = await targetFor(tx, viewer, proposal.taskId);
             if (!(viewer.isCurator && target?.shared)) {
                 throw new AppError(
                     ErrorCode.NOT_FOUND,
@@ -967,6 +1095,29 @@ export async function rejectRoutedTaskProposal(
                     404,
                 );
             }
+        }
+        const obsoleteReason = !proposal.sourceVisible
+            ? "source_withdrawn"
+            : !target?.visible
+              ? "task_invisible"
+              : null;
+        if (obsoleteReason) {
+            await setProposalState(tx, proposalId, "obsolete", {
+                actorUserId: viewer.userId,
+                routedTo: null,
+                obsoleteReason,
+            });
+            return { state: "obsolete", obsoleteReason };
+        }
+        if (
+            !target ||
+            (!viewer.isCurator && !mayApply(proposal.kind, target))
+        ) {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                "Task proposal not found",
+                404,
+            );
         }
         await tx
             .update(taskUpdateProposals)
@@ -984,6 +1135,6 @@ export async function rejectRoutedTaskProposal(
                     eq(taskUpdateProposals.state, "awaiting_target_review"),
                 ),
             );
+        return { state: "rejected", obsoleteReason: null };
     });
-    return { state: "rejected", obsoleteReason: null };
 }

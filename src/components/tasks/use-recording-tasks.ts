@@ -57,7 +57,10 @@ function waitingDecisions(data: RecordingTasks): number {
     const newTasks = data.proposals.filter(
         (proposal) => !ambiguousKeys.has(reviewEvidenceKey(proposal)),
     ).length;
-    return data.updates.length + exactMatches + ambiguousKeys.size + newTasks;
+    const actionableUpdates = data.updates.filter(
+        (update) => !update.earlierMention,
+    ).length;
+    return actionableUpdates + exactMatches + ambiguousKeys.size + newTasks;
 }
 
 /** One recording's tasks and the writes on them, shared by its views. */

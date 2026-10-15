@@ -648,6 +648,7 @@ describeWithDatabase("task merges", () => {
                     itemId: "pending-review-item",
                     userId: ALICE,
                     kind: "done",
+                    statementAt: new Date("2026-10-03T00:00:00.000Z"),
                     state: "awaiting_source_review",
                 },
                 {
@@ -657,6 +658,7 @@ describeWithDatabase("task merges", () => {
                     userId: ALICE,
                     kind: "due",
                     dueDate: "2026-10-20",
+                    statementAt: new Date("2026-10-04T00:00:00.000Z"),
                     state: "awaiting_target_review",
                     routedTo: [ALICE],
                 },
@@ -667,6 +669,7 @@ describeWithDatabase("task merges", () => {
                     userId: ALICE,
                     kind: "due_phrase",
                     duePhrase: encryptText("next week"),
+                    statementAt: new Date("2026-10-01T00:00:00.000Z"),
                     state: "awaiting_share",
                 },
                 {
@@ -676,6 +679,7 @@ describeWithDatabase("task merges", () => {
                     userId: ALICE,
                     kind: "due_phrase",
                     duePhrase: encryptText("after approval"),
+                    statementAt: new Date("2026-10-05T00:00:00.000Z"),
                     state: "awaiting_share",
                 },
             ]);

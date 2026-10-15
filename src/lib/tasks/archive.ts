@@ -68,6 +68,7 @@ export interface ArchivedTaskUpdate {
         charEnd: number;
     };
     evidenceProvenance?: EvidenceProvenance;
+    statementAt: string;
     state:
         | "awaiting_source_review"
         | "awaiting_share"
@@ -333,6 +334,7 @@ export async function taskUpdatesForArchive(
             evidenceCharStart: taskUpdateProposals.evidenceCharStart,
             evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+            statementAt: taskUpdateProposals.statementAt,
             state: taskUpdateProposals.state,
             routedTo: taskUpdateProposals.routedTo,
             decidedByUserId: taskUpdateProposals.decidedByUserId,
@@ -402,6 +404,7 @@ export async function taskUpdatesForArchive(
             ...(row.evidenceProvenance
                 ? { evidenceProvenance: row.evidenceProvenance }
                 : {}),
+            statementAt: row.statementAt.toISOString(),
             state: row.state,
             routedTo: row.routedTo ?? null,
             decidedByUserId: row.decidedByUserId,

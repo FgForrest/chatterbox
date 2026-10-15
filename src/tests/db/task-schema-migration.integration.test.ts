@@ -30,6 +30,9 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const MIGRATIONS = join(process.cwd(), "src/db/migrations");
 const LAST_BEFORE_TASK_SCHEMA = 120;
 const BACKFILL_MIGRATION = "0122_backfill_task_mentions.sql";
+const PROPOSAL_TIME_MIGRATION =
+    "0126_backfill_task_proposal_statement_times.sql";
+const EFFECTIVE_TIME_MIGRATION = "0127_repair_task_effective_times.sql";
 
 function migrationsUpTo(lastIdx: number): string {
     const dir = mkdtempSync(join(tmpdir(), "chatterbox-task-schema-"));
@@ -46,6 +49,7 @@ function migrationsUpTo(lastIdx: number): string {
 describeWithDatabase("task schema migration (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
     let partialFolder = "";
+    let taskSchemaFolder = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -121,7 +125,10 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
                 ('mismatched-task', 'shared-item', 'org', 'open', 'enc:task-three',
                  'enc:quote-three', 2500, 'unverified', 'riffado',
                  '2026-10-03 11:00:00', '2026-10-03 12:00:00',
-                 '2026-10-03 10:00:00')
+                 '2026-10-03 10:00:00'),
+                ('z-accepted-only', 'shared-item', 'owner', 'open', 'enc:accepted',
+                 NULL, NULL, NULL, 'riffado', '2026-10-04 11:00:00', NULL,
+                 '2026-10-04 10:00:00')
         `);
         await db().execute(sql`
             UPDATE recording_tasks
@@ -138,6 +145,19 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             )
         `);
 
+        taskSchemaFolder = migrationsUpTo(122);
+        await migrateTestDatabase(
+            testDatabaseUrl ?? "",
+            db(),
+            taskSchemaFolder,
+        );
+        await db().execute(sql`
+            UPDATE recording_tasks
+            SET status_effective_at = '2026-10-05 12:00:00',
+                due_date = '2026-10-20',
+                due_effective_at = '2026-10-05 12:00:00'
+            WHERE id = 'shared-task'
+        `);
         await migrateTestDatabase(testDatabaseUrl ?? "", db());
     }, 240_000);
 
@@ -145,6 +165,9 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
         await database?.dispose();
         if (partialFolder) {
             rmSync(partialFolder, { recursive: true, force: true });
+        }
+        if (taskSchemaFolder) {
+            rmSync(taskSchemaFolder, { recursive: true, force: true });
         }
     }, 30_000);
 
@@ -158,7 +181,7 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             FROM task_mentions
             ORDER BY task_id
         `);
-        expect(mentions).toHaveLength(3);
+        expect(mentions).toHaveLength(4);
         expect(mentions[0]).toMatchObject({
             task_id: "mismatched-task",
             item_id: "shared-item",
@@ -207,6 +230,12 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             ticked: false,
         });
         expect(String(mentions[2]?.statement_at)).toContain("2026-10-01");
+        expect(mentions[3]).toMatchObject({
+            task_id: "z-accepted-only",
+            item_id: "shared-item",
+            user_id: "owner",
+            match_decision: "home",
+        });
 
         const mismatchedMentions = await db().execute<{
             user_id: string;
@@ -247,29 +276,56 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
             id: "shared-task",
             origin_item_id: "shared-item",
         });
-        expect(String(tasks[2]?.status_effective_at)).toContain("2026-10-01");
+        expect(String(tasks[2]?.status_effective_at)).toContain("2026-10-05");
+        expect(tasks[3]).toMatchObject({
+            id: "z-accepted-only",
+            origin_item_id: "shared-item",
+        });
+        expect(String(tasks[3]?.status_effective_at)).toContain("2026-10-01");
 
-        const [update] = await db().execute<{ state: string }>(sql`
-            SELECT state
+        const [update] = await db().execute<{
+            state: string;
+            statement_at: Date;
+        }>(sql`
+            SELECT state, statement_at
             FROM task_update_proposals
             WHERE id = 'existing-update'
         `);
         expect(update?.state).toBe("awaiting_source_review");
+        expect(String(update?.statement_at)).toContain("2026-10-01");
+    });
+
+    it("repairs only the 0122 effective-time backfill values", async () => {
+        const rows = await db().execute<Record<string, unknown>>(sql`
+            SELECT id, status_effective_at, due_effective_at
+            FROM recording_tasks
+            WHERE id IN ('mismatched-task', 'shared-task', 'z-accepted-only')
+            ORDER BY id
+        `);
+        expect(String(rows[0]?.status_effective_at)).toContain("2026-10-03");
+        expect(String(rows[1]?.status_effective_at)).toContain("2026-10-05");
+        expect(String(rows[1]?.due_effective_at)).toContain("2026-10-05");
+        expect(String(rows[2]?.status_effective_at)).toContain("2026-10-01");
     });
 
     it("is a no-op when the data step runs twice", async () => {
         if (!database) throw new Error("test database was not initialized");
-        const migration = readFileSync(
-            join(MIGRATIONS, BACKFILL_MIGRATION),
-            "utf8",
-        );
-        for (const statement of migration.split("--> statement-breakpoint")) {
-            if (statement.trim()) await database.sql.unsafe(statement);
+        for (const name of [
+            BACKFILL_MIGRATION,
+            PROPOSAL_TIME_MIGRATION,
+            EFFECTIVE_TIME_MIGRATION,
+        ]) {
+            const migration = readFileSync(join(MIGRATIONS, name), "utf8");
+            for (const statement of migration.split(
+                "--> statement-breakpoint",
+            )) {
+                if (statement.trim()) await database.sql.unsafe(statement);
+            }
         }
         const [row] = await db().execute<{ count: number }>(sql`
             SELECT count(*)::int AS count FROM task_mentions
         `);
-        expect(row?.count).toBe(3);
+        expect(row?.count).toBe(4);
     });
 
     it("enforces anchor, proposal kind, and proposal state checks", async () => {

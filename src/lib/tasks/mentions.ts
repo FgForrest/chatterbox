@@ -12,6 +12,7 @@ import {
 import { db } from "@/db";
 import {
     chatterItems,
+    people,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -20,6 +21,7 @@ import {
     taskHomeMoves,
     taskMentions,
     taskUpdateProposals,
+    users,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import type { ArchiveScope } from "@/lib/export/archive-scope";
@@ -417,6 +419,29 @@ export async function lockItemTaskGraphInTx(
 
 async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
     const locked = await lockItemTaskGraphInTx(tx, input);
+    const now = new Date();
+    if (input.reason === "withdrawn") {
+        await tx
+            .update(taskUpdateProposals)
+            .set({
+                state: "obsolete",
+                routedTo: null,
+                decidedByUserId: null,
+                decidedAt: now,
+                obsoleteReason: "source_withdrawn",
+                updatedAt: now,
+            })
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, input.itemId),
+                    eq(taskUpdateProposals.userId, input.ownerUserId),
+                    inArray(taskUpdateProposals.state, [
+                        "awaiting_share",
+                        "awaiting_target_review",
+                    ]),
+                ),
+            );
+    }
     const mentioned = new Set(
         (
             await tx
@@ -503,35 +528,12 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
             );
         for (const row of rows) shared.add(row.itemId);
     }
-    const sourceWasShared = input.orgUserId
-        ? (
-              await tx
-                  .select({ id: recordingFolderAssignments.itemId })
-                  .from(recordingFolderAssignments)
-                  .innerJoin(
-                      recordingFolders,
-                      eq(
-                          recordingFolders.id,
-                          recordingFolderAssignments.folderId,
-                      ),
-                  )
-                  .where(
-                      and(
-                          eq(recordingFolderAssignments.itemId, input.itemId),
-                          eq(recordingFolders.userId, input.orgUserId),
-                      ),
-                  )
-                  .limit(1)
-          ).length > 0
-        : false;
-
     const byTask = new Map<string, RemainingMention[]>();
     for (const mention of remaining) {
         const list = byTask.get(mention.taskId) ?? [];
         list.push(mention);
         byTask.set(mention.taskId, list);
     }
-    const now = new Date();
     for (const task of affected) {
         const mentions = byTask.get(task.id) ?? [];
         if (mentions.length === 0) {
@@ -547,11 +549,13 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
             continue;
         }
         if (task.itemId !== input.itemId) continue;
-        const inScope = mentions.filter((mention) =>
-            input.reason === "withdrawn" || sourceWasShared
-                ? mention.view === "org" && shared.has(mention.itemId)
-                : mention.userId === task.userId,
-        );
+        const inScope =
+            input.reason === "withdrawn"
+                ? mentions.filter(
+                      (mention) =>
+                          mention.view === "org" && shared.has(mention.itemId),
+                  )
+                : mentions;
         const next = inScope[0];
         if (!next) {
             if (input.reason === "withdrawn") continue;
@@ -594,6 +598,113 @@ async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
             actorUserId: input.actorUserId,
             createdAt: now,
         });
+    }
+    for (const task of affected) {
+        const [current] = await tx
+            .select({
+                id: recordingTasks.id,
+                itemId: recordingTasks.itemId,
+                userId: recordingTasks.userId,
+                assigneePersonId: recordingTasks.assigneePersonId,
+            })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.id, task.id),
+                    or(
+                        eq(recordingTasks.userId, task.userId),
+                        inArray(
+                            recordingTasks.userId,
+                            remaining.map((mention) => mention.userId),
+                        ),
+                    ),
+                ),
+            );
+        if (!current) continue;
+        const proposals = await tx
+            .select({
+                id: taskUpdateProposals.id,
+                kind: taskUpdateProposals.kind,
+                state: taskUpdateProposals.state,
+                sourceUserId: taskUpdateProposals.userId,
+            })
+            .from(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.taskId, current.id),
+                    inArray(taskUpdateProposals.state, [
+                        "awaiting_share",
+                        "awaiting_target_review",
+                    ]),
+                ),
+            );
+        if (proposals.length === 0) continue;
+        const targetShared = shared.has(current.itemId);
+        let assigneeUserId: string | null = null;
+        if (current.assigneePersonId) {
+            const [person] = await tx
+                .select({ email: people.primaryEmail })
+                .from(people)
+                .where(
+                    and(
+                        eq(people.id, current.assigneePersonId),
+                        or(
+                            eq(people.userId, current.userId),
+                            input.orgUserId
+                                ? eq(people.userId, input.orgUserId)
+                                : undefined,
+                        ),
+                    ),
+                );
+            if (person?.email) {
+                const [assignee] = await tx
+                    .select({ id: users.id })
+                    .from(users)
+                    .where(eq(users.email, decryptText(person.email)));
+                assigneeUserId = assignee?.id ?? null;
+            }
+        }
+        for (const proposal of proposals) {
+            if (!targetShared && proposal.sourceUserId !== current.userId) {
+                await tx
+                    .update(taskUpdateProposals)
+                    .set({
+                        state: "obsolete",
+                        routedTo: null,
+                        decidedByUserId: null,
+                        decidedAt: now,
+                        obsoleteReason: "task_invisible",
+                        updatedAt: now,
+                    })
+                    .where(
+                        and(
+                            eq(taskUpdateProposals.id, proposal.id),
+                            eq(taskUpdateProposals.taskId, current.id),
+                            eq(taskUpdateProposals.state, proposal.state),
+                        ),
+                    );
+                continue;
+            }
+            if (proposal.state === "awaiting_target_review") {
+                const routedTo = new Set([current.userId]);
+                if (proposal.kind === "done" && assigneeUserId) {
+                    routedTo.add(assigneeUserId);
+                }
+                await tx
+                    .update(taskUpdateProposals)
+                    .set({ routedTo: [...routedTo], updatedAt: now })
+                    .where(
+                        and(
+                            eq(taskUpdateProposals.id, proposal.id),
+                            eq(taskUpdateProposals.taskId, current.id),
+                            eq(
+                                taskUpdateProposals.state,
+                                "awaiting_target_review",
+                            ),
+                        ),
+                    );
+            }
+        }
     }
 }
 

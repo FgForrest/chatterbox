@@ -58,7 +58,7 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
+import { dropReplaceableTaskReviewInTx } from "@/lib/tasks/store";
 import {
     type AlmanacTerm,
     almanacTermsFor,
@@ -298,7 +298,7 @@ export async function storeBrowserTranscription(
                         eq(aiEnhancements.source, "riffado"),
                     ),
                 );
-            await dropTasksWithoutSummaryInTx(tx, {
+            await dropReplaceableTaskReviewInTx(tx, {
                 recordingId,
                 ownerUserId: userId,
             });

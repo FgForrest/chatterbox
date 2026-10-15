@@ -538,6 +538,7 @@ export async function writeTaskProposalsInTx(
                             update.evidenceText?.charStart ?? null,
                         evidenceCharEnd: update.evidenceText?.charEnd ?? null,
                         evidenceProvenance: update.evidenceProvenance ?? null,
+                        statementAt: statement,
                         state: earlier
                             ? ("obsolete" as const)
                             : ("awaiting_source_review" as const),
@@ -572,10 +573,46 @@ export async function deleteRecordingTasksInTx(
         .where(eq(recordingTaskRejections.itemId, recordingId));
 }
 
+/** Removes only untouched AI review rows before replacing a transcript summary. */
+export async function dropReplaceableTaskReviewInTx(
+    tx: Tx,
+    { recordingId, ownerUserId }: { recordingId: string; ownerUserId: string },
+): Promise<void> {
+    await tx
+        .delete(recordingTasks)
+        .where(
+            and(
+                eq(recordingTasks.itemId, recordingId),
+                eq(recordingTasks.userId, ownerUserId),
+                eq(recordingTasks.status, "proposed"),
+                eq(recordingTasks.version, 0),
+            ),
+        );
+    await tx
+        .delete(taskUpdateProposals)
+        .where(
+            and(
+                eq(taskUpdateProposals.itemId, recordingId),
+                eq(taskUpdateProposals.userId, ownerUserId),
+                eq(taskUpdateProposals.state, "awaiting_source_review"),
+                sql`${taskUpdateProposals.updatedAt} = ${taskUpdateProposals.createdAt}`,
+            ),
+        );
+    await tx
+        .delete(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.itemId, recordingId),
+                eq(taskMentions.userId, ownerUserId),
+                eq(taskMentions.matchDecision, "suggested"),
+                sql`${taskMentions.updatedAt} = ${taskMentions.createdAt}`,
+            ),
+        );
+}
+
 /**
- * Tasks die with the summary (Johnny, 2026-10-07): once a recording has no
- * summary left (retention, Erase, deleting it), its tasks go too. Call it
- * after deleting a summary, in the same transaction.
+ * Removes one item's task artifacts after its last summary is intentionally
+ * removed. A task survives while another accepted or home mention survives.
  */
 export async function dropTasksWithoutSummaryInTx(
     tx: Tx,

@@ -40,6 +40,8 @@ export function RoutedProposalsInbox() {
                 return i18n("Obsolete: you can no longer see the task.");
             case "rights_lost":
                 return i18n("Obsolete: you can no longer make this change.");
+            case "source_withdrawn":
+                return i18n("Obsolete: the source item is no longer shared.");
             default:
                 return i18n(
                     "Obsolete: this proposal can no longer be applied.",
@@ -104,7 +106,7 @@ export function RoutedProposalsInbox() {
                     return (
                         <li key={row.id} className="space-y-2 py-3 text-sm">
                             <p className="flex items-start gap-1.5">
-                                {notice ? (
+                                {notice && row.sourceItem ? (
                                     i18n(
                                         "{person} attached their task {task} from {item}",
                                         {
@@ -113,6 +115,16 @@ export function RoutedProposalsInbox() {
                                                 i18n("Someone"),
                                             task: row.taskText,
                                             item: row.sourceItem.title,
+                                        },
+                                    )
+                                ) : notice ? (
+                                    i18n(
+                                        "{person} attached their task {task}",
+                                        {
+                                            person:
+                                                row.attachedBy?.name ??
+                                                i18n("Someone"),
+                                            task: row.taskText,
                                         },
                                     )
                                 ) : row.kind === "done" ? (
@@ -177,15 +189,17 @@ export function RoutedProposalsInbox() {
                                     )
                                 )}
                             </p>
-                            <TaskEvidenceLink
-                                evidence={{
-                                    itemId: row.sourceItem.id,
-                                    itemKind: row.sourceItem.kind,
-                                    startMs: row.evidenceStartMs,
-                                    text: row.evidenceText,
-                                }}
-                                quote={row.quote}
-                            />
+                            {row.sourceItem && (
+                                <TaskEvidenceLink
+                                    evidence={{
+                                        itemId: row.sourceItem.id,
+                                        itemKind: row.sourceItem.kind,
+                                        startMs: row.evidenceStartMs,
+                                        text: row.evidenceText,
+                                    }}
+                                    quote={row.quote}
+                                />
+                            )}
                             {result ? (
                                 <output className="text-xs font-medium">
                                     {result.state === "obsolete"

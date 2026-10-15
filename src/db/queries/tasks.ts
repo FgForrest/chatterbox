@@ -1,19 +1,31 @@
-import { type SQL, sql } from "drizzle-orm";
+import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
 import { chatterItems, recordingTasks, taskUpdateProposals } from "@/db/schema";
 import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 
-/** SQL: a follow-up whose open target item is still visible to its owner. */
-export function liveFollowUpCondition(): SQL {
+/** SQL: an open task target that the named reviewer can currently see. */
+export function reviewableTaskTargetCondition(
+    taskId: SQLWrapper | string,
+    reviewerUserId: SQLWrapper | string,
+    organizationOnly = false,
+): SQL {
     return sql`exists (
         select 1 from ${recordingTasks} target
         inner join ${chatterItems} target_item
             on target_item.id = target.recording_id
-        where target.id = ${taskUpdateProposals.taskId}
+        where target.id = ${taskId}
             and target.status = 'open'
             and target_item.deleted_at is null
             and (
-                target_item.user_id = ${taskUpdateProposals.userId}
+                ${organizationOnly ? sql`false` : sql`target_item.user_id = ${reviewerUserId}`}
                 or ${recordingSharedCondition(sql`target_item.id`)}
             )
     )`;
+}
+
+/** SQL: a follow-up whose open target item is still visible to its owner. */
+export function liveFollowUpCondition(): SQL {
+    return reviewableTaskTargetCondition(
+        taskUpdateProposals.taskId,
+        taskUpdateProposals.userId,
+    );
 }

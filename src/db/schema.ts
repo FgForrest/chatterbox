@@ -3005,6 +3005,7 @@ export const taskUpdateProposals = pgTable(
         evidenceProvenance: varchar("evidence_provenance", {
             length: 16,
         }).$type<EvidenceProvenance>(),
+        statementAt: timestamp("statement_at").notNull().defaultNow(),
         state: varchar("state", { length: 32 })
             .$type<
                 | "awaiting_source_review"

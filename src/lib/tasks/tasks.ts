@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
+import { reviewableTaskTargetCondition } from "@/db/queries/tasks";
 import {
     chatterItems,
     type EvidenceProvenance,
@@ -39,6 +40,7 @@ import {
 } from "@/lib/export/document-sidecars";
 import { folderCondition } from "@/lib/folders/condition";
 import { nudge } from "@/lib/jobs/nudge";
+import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 import { assertOrgScopeWritable } from "@/lib/org/config";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { notifyIfShared } from "@/lib/sharing/notify";
@@ -65,6 +67,7 @@ import {
     createRoutedMergeProposalsInTx,
     movePendingTaskProposalsInTx,
     type RoutedMergeDifference,
+    settleEarlierTaskProposalsInTx,
     settleSourceTaskUpdatesInTx,
 } from "@/lib/tasks/routing";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
@@ -473,11 +476,11 @@ async function listSuggestedMatches(
                 eq(taskMentions.userId, ownerUserId),
                 eq(taskMentions.view, view),
                 eq(taskMentions.matchDecision, "suggested"),
-                isNull(matchCandidateHome.deletedAt),
-                taskVisible(viewer, {
-                    id: matchCandidateHome.id,
-                    userId: matchCandidateHome.userId,
-                }),
+                reviewableTaskTargetCondition(
+                    taskMentions.taskId,
+                    viewer.userId,
+                    viewer.isOrg,
+                ),
             ),
         )
         .orderBy(asc(taskMentions.createdAt));
@@ -562,6 +565,7 @@ async function listUpdateProposals(
             evidenceCharStart: taskUpdateProposals.evidenceCharStart,
             evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+            statementAt: taskUpdateProposals.statementAt,
             state: taskUpdateProposals.state,
             obsoleteReason: taskUpdateProposals.obsoleteReason,
             decidedByUserId: taskUpdateProposals.decidedByUserId,
@@ -608,51 +612,19 @@ async function listUpdateProposals(
                         isNull(taskUpdateProposals.decidedByUserId),
                     ),
                 ),
-                isNull(chatterItems.deletedAt),
-                taskVisible(viewer, ANY_TASK_ITEM),
+                reviewableTaskTargetCondition(
+                    taskUpdateProposals.taskId,
+                    viewer.userId,
+                    viewer.isOrg,
+                ),
             ),
         )
         .orderBy(asc(taskUpdateProposals.createdAt));
-    const [[source], mentionRows] = await Promise.all([
-        db
-            .select({ occurredAt: chatterItems.occurredAt })
-            .from(chatterItems)
-            .where(
-                and(
-                    eq(chatterItems.id, recordingId),
-                    eq(chatterItems.userId, ownerUserId),
-                ),
-            )
-            .limit(1),
-        rows.length > 0
-            ? db
-                  .select({
-                      taskId: taskMentions.taskId,
-                      statementAt: taskMentions.statementAt,
-                  })
-                  .from(taskMentions)
-                  .where(
-                      and(
-                          eq(taskMentions.itemId, recordingId),
-                          eq(taskMentions.userId, ownerUserId),
-                          inArray(
-                              taskMentions.taskId,
-                              rows.map((row) => row.taskId),
-                          ),
-                      ),
-                  )
-            : Promise.resolve([]),
-    ]);
-    const statementAt = new Map(
-        mentionRows.map((row) => [row.taskId, row.statementAt] as const),
-    );
     return rows.map((row) => {
         const earlierMention =
             row.state === "obsolete" ||
             !fieldProposalIsLater(
-                statementAt.get(row.taskId) ??
-                    source?.occurredAt ??
-                    new Date(0),
+                row.statementAt,
                 row.kind === "done" || row.kind === "drop"
                     ? row.taskStatusEffectiveAt
                     : row.kind === "assignee"
@@ -1096,6 +1068,30 @@ export async function updateTask(
             .update(recordingTasks)
             .set(set)
             .where(eq(recordingTasks.id, taskId));
+        if (change.status !== undefined && change.status !== task.status) {
+            await settleEarlierTaskProposalsInTx(tx, {
+                taskId,
+                ownerUserId: task.ownerUserId,
+                kinds: ["done", "drop"],
+                effectiveAt: now,
+            });
+        }
+        if (change.dueDate !== undefined) {
+            await settleEarlierTaskProposalsInTx(tx, {
+                taskId,
+                ownerUserId: task.ownerUserId,
+                kinds: ["due", "due_phrase"],
+                effectiveAt: now,
+            });
+        }
+        if (change.assigneePersonId !== undefined) {
+            await settleEarlierTaskProposalsInTx(tx, {
+                taskId,
+                ownerUserId: task.ownerUserId,
+                kinds: ["assignee"],
+                effectiveAt: now,
+            });
+        }
         return task;
     });
     await tasksChanged(task.ownerUserId, task.recordingId);
@@ -1130,6 +1126,7 @@ interface MergeTaskRow {
     duePhrase: string | null;
     statusEffectiveAt: Date | null;
     dueEffectiveAt: Date | null;
+    occurredAt: Date;
     visible: boolean;
     shared: boolean;
 }
@@ -1155,6 +1152,7 @@ interface MergeMentionRow {
         | "undone"
         | "kept_new";
     ticked: boolean;
+    shared: boolean;
 }
 
 function mergeRule(message: string): AppError {
@@ -1215,6 +1213,7 @@ async function lockMergeTasks(
                 duePhrase: recordingTasks.duePhrase,
                 statusEffectiveAt: recordingTasks.statusEffectiveAt,
                 dueEffectiveAt: recordingTasks.dueEffectiveAt,
+                occurredAt: chatterItems.occurredAt,
                 visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
                 shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
             })
@@ -1346,34 +1345,53 @@ function mergeDifferences(
     target: MergeTaskRow,
     mentions: readonly MergeMentionRow[],
 ): RoutedMergeDifference[] {
+    const eligible = mentions.filter(
+        (mention) =>
+            linkedMention(mention) && mention.view === "org" && mention.shared,
+    );
     const home =
-        mentions.find(
-            (mention) =>
-                mention.itemId === source.itemId &&
-                mention.matchDecision === "home",
-        ) ?? mentions[0];
-    if (!home) return [];
+        eligible.find((mention) => mention.itemId === source.itemId) ??
+        eligible[0] ??
+        null;
+    const sourceRef = { itemId: source.itemId, userId: source.ownerUserId };
+    const baseStatementAt =
+        source.statusEffectiveAt ??
+        source.dueEffectiveAt ??
+        home?.statementAt ??
+        source.occurredAt;
     const differences: RoutedMergeDifference[] = [
-        { kind: "attach_merge", mention: home },
+        {
+            kind: "attach_merge",
+            source: sourceRef,
+            mention: home,
+            statementAt: baseStatementAt,
+        },
     ];
     if (
         source.status === "done" &&
         target.status === "open" &&
         fieldProposalIsLater(
-            source.statusEffectiveAt ?? home.statementAt,
+            source.statusEffectiveAt ?? home?.statementAt ?? source.occurredAt,
             target.statusEffectiveAt,
         )
     ) {
         differences.push({
             kind: "done",
-            mention: mentionAt(mentions, source.statusEffectiveAt, home),
+            source: sourceRef,
+            mention: home
+                ? mentionAt(eligible, source.statusEffectiveAt, home)
+                : null,
+            statementAt:
+                source.statusEffectiveAt ??
+                home?.statementAt ??
+                source.occurredAt,
         });
     }
     if (
         (source.dueDate !== target.dueDate ||
             source.duePhrase !== target.duePhrase) &&
         fieldProposalIsLater(
-            source.dueEffectiveAt ?? home.statementAt,
+            source.dueEffectiveAt ?? home?.statementAt ?? source.occurredAt,
             target.dueEffectiveAt,
         )
     ) {
@@ -1382,14 +1400,28 @@ function mergeDifferences(
                 kind: "due",
                 dueDate: source.dueDate,
                 duePhrase: encryptText(source.duePhrase),
-                mention: mentionAt(mentions, source.dueEffectiveAt, home),
+                source: sourceRef,
+                mention: home
+                    ? mentionAt(eligible, source.dueEffectiveAt, home)
+                    : null,
+                statementAt:
+                    source.dueEffectiveAt ??
+                    home?.statementAt ??
+                    source.occurredAt,
             });
         } else if (source.duePhrase) {
             differences.push({
                 kind: "due_phrase",
                 dueDate: null,
                 duePhrase: encryptText(source.duePhrase),
-                mention: mentionAt(mentions, source.dueEffectiveAt, home),
+                source: sourceRef,
+                mention: home
+                    ? mentionAt(eligible, source.dueEffectiveAt, home)
+                    : null,
+                statementAt:
+                    source.dueEffectiveAt ??
+                    home?.statementAt ??
+                    source.occurredAt,
             });
         }
     }
@@ -1485,6 +1517,9 @@ export async function mergeTaskIntoTask(
                 statementAt: taskMentions.statementAt,
                 matchDecision: taskMentions.matchDecision,
                 ticked: taskMentions.ticked,
+                shared: sql<boolean>`${recordingSharedCondition(
+                    taskMentions.itemId,
+                )}`,
             })
             .from(taskMentions)
             .where(inArray(taskMentions.taskId, [source.id, target.id]))
@@ -1782,6 +1817,12 @@ export async function acceptReview(
                 state: taskUpdateProposals.state,
                 obsoleteReason: taskUpdateProposals.obsoleteReason,
                 decidedByUserId: taskUpdateProposals.decidedByUserId,
+                statementAt: taskUpdateProposals.statementAt,
+                reviewable: sql<boolean>`${reviewableTaskTargetCondition(
+                    taskUpdateProposals.taskId,
+                    viewer.userId,
+                    viewer.isOrg,
+                )}`,
             })
             .from(taskUpdateProposals)
             .where(
@@ -1801,6 +1842,33 @@ export async function acceptReview(
                     ),
                 ),
             );
+        const now = new Date();
+        const invisibleUpdateIds = updateRows
+            .filter(
+                (row) =>
+                    row.state === "awaiting_source_review" && !row.reviewable,
+            )
+            .map((row) => row.id);
+        if (invisibleUpdateIds.length > 0) {
+            await tx
+                .update(taskUpdateProposals)
+                .set({
+                    state: "obsolete",
+                    obsoleteReason: "task_invisible",
+                    routedTo: null,
+                    decidedByUserId: null,
+                    decidedAt: now,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        inArray(taskUpdateProposals.id, invisibleUpdateIds),
+                        eq(taskUpdateProposals.itemId, recordingId),
+                        eq(taskUpdateProposals.userId, recording.ownerUserId),
+                        eq(taskUpdateProposals.state, "awaiting_source_review"),
+                    ),
+                );
+        }
         const systemUpdateIds = new Set(
             updateRows
                 .filter(
@@ -1812,14 +1880,20 @@ export async function acceptReview(
                 .map((row) => row.id),
         );
         const updates = updateRows.filter(
-            (row) => row.state === "awaiting_source_review",
+            (row) => row.state === "awaiting_source_review" && row.reviewable,
         );
-        const suggestedMatches = await tx
+        const invisibleUpdateIdSet = new Set(invisibleUpdateIds);
+        const suggestedMatchRows = await tx
             .select({
                 id: taskMentions.id,
                 taskId: taskMentions.taskId,
                 statementAt: taskMentions.statementAt,
                 ticked: taskMentions.ticked,
+                reviewable: sql<boolean>`${reviewableTaskTargetCondition(
+                    taskMentions.taskId,
+                    viewer.userId,
+                    viewer.isOrg,
+                )}`,
             })
             .from(taskMentions)
             .where(
@@ -1830,6 +1904,31 @@ export async function acceptReview(
                     eq(taskMentions.matchDecision, "suggested"),
                 ),
             );
+        const invisibleMatchIds = suggestedMatchRows
+            .filter((row) => !row.reviewable)
+            .map((row) => row.id);
+        if (invisibleMatchIds.length > 0) {
+            await tx
+                .update(taskMentions)
+                .set({
+                    matchDecision: "rejected",
+                    decidedByUserId: null,
+                    decidedAt: now,
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        inArray(taskMentions.id, invisibleMatchIds),
+                        eq(taskMentions.itemId, recordingId),
+                        eq(taskMentions.userId, recording.ownerUserId),
+                        eq(taskMentions.matchDecision, "suggested"),
+                    ),
+                );
+        }
+        const suggestedMatches = suggestedMatchRows.filter(
+            (row) => row.reviewable,
+        );
+        const invisibleMatchIdSet = new Set(invisibleMatchIds);
         // Accept what the reviewer saw: a summary made meanwhile replaced
         // the proposals.
         if (
@@ -1839,12 +1938,18 @@ export async function acceptReview(
                 proposals.map((row) => row.id),
             ) ||
                 !sameIds(
-                    shown.updates.filter((id) => !systemUpdateIds.has(id)),
+                    shown.updates.filter(
+                        (id) =>
+                            !systemUpdateIds.has(id) &&
+                            !invisibleUpdateIdSet.has(id),
+                    ),
                     updates.map((row) => row.id),
                 ) ||
                 (shown.matches !== undefined &&
                     !sameIds(
-                        shown.matches,
+                        shown.matches.filter(
+                            (id) => !invisibleMatchIdSet.has(id),
+                        ),
                         suggestedMatches.map((row) => row.id),
                     )))
         ) {
@@ -1877,7 +1982,6 @@ export async function acceptReview(
                 400,
             );
         }
-        const now = new Date();
         const accepted = proposals.filter((row) => row.ticked);
         const rejected = proposals.filter((row) => !row.ticked);
         // Unticked only because the assignee wanted a look, and never looked
@@ -1944,7 +2048,8 @@ export async function acceptReview(
         }
 
         let updatesApplied = 0;
-        let updatesSkipped = 0;
+        let updatesSkipped =
+            invisibleUpdateIds.length + invisibleMatchIds.length;
         let touched = new Map<string, string>();
         const selectedMatchTaskIds = new Set<string>();
         const mayAcceptMatches =
@@ -1980,19 +2085,12 @@ export async function acceptReview(
                 updatesSkipped += 1;
             }
         }
-        const mentionStatements = new Map(
-            suggestedMatches.map(
-                (row) => [row.taskId, row.statementAt] as const,
-            ),
-        );
         const updateResult = await settleSourceTaskUpdatesInTx(tx, {
             viewer,
             sourceItemId: recordingId,
             sourceOwnerUserId: recording.ownerUserId,
             sourceShared: recording.shared,
-            sourceOccurredAt: recording.occurredAt,
             updates,
-            statementAtByTask: mentionStatements,
         });
         updatesApplied = updateResult.applied;
         updatesSkipped += updateResult.skipped;
@@ -2151,6 +2249,11 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
                         id: taskUpdateProposals.itemId,
                         userId: taskUpdateProposals.userId,
                     }),
+                    reviewableTaskTargetCondition(
+                        taskUpdateProposals.taskId,
+                        viewer.userId,
+                        viewer.isOrg,
+                    ),
                 ),
             ),
         db
@@ -2166,6 +2269,11 @@ export async function recordingsAwaitingTaskReview(viewer: TaskViewer): Promise<
                         id: taskMentions.itemId,
                         userId: taskMentions.userId,
                     }),
+                    reviewableTaskTargetCondition(
+                        taskMentions.taskId,
+                        viewer.userId,
+                        viewer.isOrg,
+                    ),
                     notExists(
                         db
                             .select({ id: taskUpdateProposals.id })
