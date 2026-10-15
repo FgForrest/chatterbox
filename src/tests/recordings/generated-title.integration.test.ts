@@ -17,7 +17,12 @@ import {
     it,
     vi,
 } from "vitest";
-import { chatterItems, users } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    transcriptions,
+    users,
+} from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -130,6 +135,80 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         expect(await storeGeneratedTitle(ALICE, REC, "Weekly sync")).toBe(true);
         expect(await title()).toBe("Weekly sync");
         expect(await titleStillGenerated(ALICE, REC)).toBe(true);
+    });
+
+    it("marks the queued title step and Summary phase done atomically", async () => {
+        const [transcript] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: ALICE,
+                text: encryptText("Weekly planning"),
+                detectedLanguage: "en",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+                revision: 2,
+            })
+            .returning({ id: transcriptions.id });
+        const fence = {
+            contentId: transcript?.id ?? "",
+            contentSourceId: "riffado",
+            contentRevision: 2,
+            profileRevisionId: null,
+        };
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: REC,
+                userId: ALICE,
+                view: "private",
+                phases: {
+                    summary: {
+                        state: "pending",
+                        reason: "transcript",
+                        generation: 1,
+                        inputs: fence,
+                        at: "2026-10-15T00:00:00.000Z",
+                        steps: {
+                            title: {
+                                ...fence,
+                                profileRevisionId: undefined,
+                                generation: 1,
+                            },
+                        },
+                    },
+                },
+            });
+
+        await expect(
+            storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Weekly sync",
+                undefined,
+                ALICE,
+                fence,
+            ),
+        ).resolves.toBe(true);
+
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, REC));
+        expect(processing?.phases.summary).toMatchObject({
+            state: "done",
+            reason: "completed",
+            inputs: fence,
+            steps: {
+                title: {
+                    contentId: fence.contentId,
+                    contentSourceId: fence.contentSourceId,
+                    contentRevision: fence.contentRevision,
+                    state: "done",
+                },
+            },
+        });
     });
 
     it("keeps a title a person set", async () => {

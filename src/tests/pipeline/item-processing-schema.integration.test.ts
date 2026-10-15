@@ -68,6 +68,20 @@ describeWithDatabase("item_processing schema", () => {
         ).resolves.toBeDefined();
     });
 
+    it("indexes the automatic transcription retry sweep", async () => {
+        if (!database) throw new Error("test database was not initialized");
+
+        const [index] = await database.sql<
+            { indexdef: string }[]
+        >`select indexdef from pg_indexes where schemaname = 'public' and indexname = 'item_processing_auto_transcription_retry_idx'`;
+        expect(index?.indexdef).toContain(
+            "((phases -> 'transcribe'::text) ->> 'at'::text)",
+        );
+        expect(index?.indexdef).toContain(
+            "((phases -> 'transcribe'::text) ->> 'state'::text) = 'failed'::text",
+        );
+    });
+
     it("rejects a view outside private and org", async () => {
         if (!database) throw new Error("test database was not initialized");
 

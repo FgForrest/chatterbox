@@ -127,9 +127,9 @@ Response:
       "filesize_bytes": 1234567,
       "device": { "serial_number": "...", "name": "Plaud Note", "model": "..." },
       "has_transcription": true,
-      "has_summary": false,
+      "has_summary": true,
       "audio_reaped": false,
-      "processing": { "phase": "summary", "state": "running" },
+      "processing": { "phase": "summary", "state": "done" },
       "links": {
         "self": "/api/v1/recordings/...",
         "transcript": "/api/v1/recordings/.../transcript",
@@ -149,7 +149,8 @@ the audio. The recording and its metadata remain; `links.audio` answers
 `processing` reports the recording's current workflow phase and that phase's
 state. Recordings processed before the workflow report their last settled
 phase, or `{ "phase": "categorize", "state": "skipped" }` when they have no
-processing row. They are never waiting.
+processing row. They do not wait unless new content arrives after the workflow
+is enabled.
 
 Pagination is **cursor-based, descending by `updated_at`**. When
 `has_more` is `true`, pass `next_cursor` back in the next request.

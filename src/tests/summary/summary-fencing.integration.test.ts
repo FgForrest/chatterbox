@@ -120,6 +120,25 @@ describeWithDatabase("summary commit fencing (PostgreSQL)", () => {
                         generation: 1,
                         at: "2026-10-15T00:00:00.000Z",
                     },
+                    summary: {
+                        state: "pending",
+                        reason: "transcript",
+                        generation: 1,
+                        inputs: {
+                            contentId: TRANSCRIPT,
+                            contentSourceId: "riffado",
+                            contentRevision: 0,
+                        },
+                        at: "2026-10-15T00:00:00.000Z",
+                        steps: {
+                            summary: {
+                                contentId: TRANSCRIPT,
+                                contentSourceId: "riffado",
+                                contentRevision: 0,
+                                generation: 1,
+                            },
+                        },
+                    },
                 },
             });
         await db()
@@ -194,5 +213,54 @@ describeWithDatabase("summary commit fencing (PostgreSQL)", () => {
         expect(
             (await db().select().from(itemProcessing))[0]?.phases.summary,
         ).toMatchObject({ state: "outdated", reason: "content_changed" });
+    });
+
+    it("marks the Summary step and phase done with the committed input", async () => {
+        await expect(
+            upsertEnhancement({
+                userId: USER,
+                recordingId: ITEM,
+                transcriptionId: TRANSCRIPT,
+                summary: "Committed result",
+                keyPoints: [],
+                actionItems: [],
+                source: "riffado",
+                provider: "test",
+                model: "test",
+                inputs: {
+                    contentId: TRANSCRIPT,
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                    itemProfileRevisionId: null,
+                },
+            }),
+        ).resolves.toEqual({ committed: true });
+
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM),
+                    eq(itemProcessing.userId, USER),
+                ),
+            );
+        expect(processing?.phases.summary).toMatchObject({
+            state: "done",
+            reason: "completed",
+            inputs: {
+                contentId: TRANSCRIPT,
+                contentSourceId: "riffado",
+                contentRevision: 0,
+            },
+            steps: {
+                summary: {
+                    contentId: TRANSCRIPT,
+                    contentSourceId: "riffado",
+                    contentRevision: 0,
+                    state: "done",
+                },
+            },
+        });
     });
 });

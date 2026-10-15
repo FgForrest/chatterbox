@@ -6,6 +6,7 @@ import {
     mailPendingShares,
     processingProfiles,
 } from "@/db/schema";
+import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { listFolderOrganization } from "@/lib/folders/folders";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
@@ -51,6 +52,7 @@ export interface CategorizationPanelPresentation {
     resolution: ProcessingResolution;
     currentProfile: ProcessingProfileSummary | null;
     currentManualOnly: boolean;
+    canCreateOrganizationFolders: boolean;
 }
 
 function profileSummary(profile: ProfileRecord): ProcessingProfileSummary {
@@ -146,7 +148,12 @@ export async function loadPrivateCategorizationPanel(
             ? [orgUserId]
             : []),
     ];
-    const [folderOrganization, profilePages, intents] = await Promise.all([
+    const [
+        folderOrganization,
+        profilePages,
+        intents,
+        canCreateOrganizationFolders,
+    ] = await Promise.all([
         listFolderOrganization(ownerUserId),
         Promise.all(
             profileOwners.map((profileOwnerUserId) =>
@@ -167,6 +174,9 @@ export async function loadPrivateCategorizationPanel(
                     eq(mailPendingShares.userId, ownerUserId),
                 ),
             ),
+        isOrgScopeEnabled()
+            ? userCuratesOrganizationNow(ownerUserId)
+            : Promise.resolve(false),
     ]);
     const byId = new Map(
         folderOrganization.folders.map((folder) => [folder.id, folder]),
@@ -226,5 +236,6 @@ export async function loadPrivateCategorizationPanel(
         resolution,
         currentProfile,
         currentManualOnly: item.currentManualOnly ?? false,
+        canCreateOrganizationFolders,
     };
 }

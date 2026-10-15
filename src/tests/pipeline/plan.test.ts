@@ -378,7 +378,7 @@ describe("planAdvance audio", () => {
         ]);
     });
 
-    it("does not decide Task review after the proposals disappear", () => {
+    it("marks Task review done after the proposals disappear", () => {
         const facts = audioFacts({
             phases: {
                 ...audioFacts().phases,
@@ -397,14 +397,36 @@ describe("planAdvance audio", () => {
                 strict: true,
             },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "done",
+                    reason: "reviewed",
+                }),
+            }),
         ]);
-        expect(
-            planAdvance(facts).actions.some(
-                (action) =>
-                    action.type === "markPhase" &&
-                    action.phase === "taskReview",
-            ),
-        ).toBe(false);
+    });
+
+    it("puts Task review back to waiting when a new proposal arrives", () => {
+        const facts = audioFacts({
+            taskReview: { proposals: 1, followUps: 0 },
+            phases: {
+                ...audioFacts().phases,
+                taskReview: phase("done", "reviewed"),
+            },
+        });
+
+        expect(planAdvance(facts).actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "waiting",
+                    reason: "needs_review",
+                }),
+            }),
+        );
     });
 
     it("leaves a legacy item idle until its content identity changes", () => {
@@ -796,6 +818,42 @@ describe("planAdvance audio", () => {
         ]);
     });
 
+    it.each([
+        ["content_reaped", { contentReaped: true }],
+        ["audio_reaped", { audioReaped: true }],
+        ["shared", { shared: true }],
+    ] as const)("keeps Transcribe done when content exists and the recording is %s", (_reason, guard) => {
+        const result = planAdvance(
+            audioFacts({
+                phases: { transcribe: undefined },
+                transcription: {
+                    riffado: audioFacts().content,
+                    plaud: null,
+                    jobActive: false,
+                    ...guard,
+                },
+            } as Partial<PipelineFacts>),
+        );
+
+        expect(result.actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "transcribe",
+                record: expect.objectContaining({
+                    state: "done",
+                    reason: "content-available",
+                }),
+            }),
+        );
+        expect(result.actions).not.toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "transcribe",
+                record: expect.objectContaining({ state: "skipped" }),
+            }),
+        );
+    });
+
     it("records the terminal automatic transcription error", () => {
         const result = planAdvance(
             audioFacts({
@@ -968,6 +1026,36 @@ describe("planAdvance audio", () => {
         );
         expect(actionTypes(actions)).toContain("queueTitleJob");
         expect(actionTypes(actions)).not.toContain("queueTopics");
+    });
+
+    it("finishes Summary when every automatic step is skipped", () => {
+        const actions = planAdvance(
+            audioFacts({
+                stepAvailability: {
+                    title: "no_provider",
+                    topics: "no_provider",
+                    summary: "no_provider",
+                },
+            }),
+        ).actions;
+        const summaryMarks = actions.filter(
+            (action) =>
+                action.type === "markPhase" && action.phase === "summary",
+        );
+
+        expect(summaryMarks.at(-1)).toEqual(
+            expect.objectContaining({
+                record: expect.objectContaining({
+                    state: "done",
+                    reason: "completed",
+                    steps: {
+                        title: expect.objectContaining({ state: "skipped" }),
+                        topics: expect.objectContaining({ state: "skipped" }),
+                        summary: expect.objectContaining({ state: "skipped" }),
+                    },
+                }),
+            }),
+        );
     });
 
     it("emits every queue action immediately before its durable mark", () => {
@@ -1170,7 +1258,7 @@ describe("planAdvance mail", () => {
         {
             name: "no enhancement credential",
             facts: mailFacts({ hasEnhancementCredential: false }),
-            expected: [],
+            expected: ["markPhase", "markPhase", "markPhase"],
         },
         {
             name: "normal mail without Learn",

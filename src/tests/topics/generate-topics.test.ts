@@ -40,14 +40,17 @@ vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
 }));
 
-const { createMock, curatesNow, runAsCurator } = vi.hoisted(() => ({
-    createMock: vi.fn(),
-    curatesNow: vi.fn(),
-    runAsCurator: { value: false },
-}));
+const { createMock, curatesNow, markSummaryStepDoneInTx, runAsCurator } =
+    vi.hoisted(() => ({
+        createMock: vi.fn(),
+        curatesNow: vi.fn(),
+        markSummaryStepDoneInTx: vi.fn(),
+        runAsCurator: { value: false },
+    }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: curatesNow,
 }));
+vi.mock("@/lib/pipeline/state", () => ({ markSummaryStepDoneInTx }));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -199,6 +202,10 @@ const run = () =>
     generateTopicsForTranscript("user-1", "rec-1", "plaud", {
         trigger: "manual",
     });
+const runAutomatic = () =>
+    generateTopicsForTranscript("user-1", "rec-1", "plaud", {
+        trigger: "auto",
+    });
 
 describe("generateTopicsForTranscript", () => {
     beforeEach(() => {
@@ -207,6 +214,7 @@ describe("generateTopicsForTranscript", () => {
         writeMatches = true;
         runAsCurator.value = false;
         curatesNow.mockReset().mockResolvedValue(true);
+        markSummaryStepDoneInTx.mockReset();
     });
     afterEach(() => {
         createMock.mockReset();
@@ -247,8 +255,35 @@ describe("generateTopicsForTranscript", () => {
         expect(writes[0].set).not.toHaveProperty("builtinPromptsVersion");
         expect(writes[0].set).not.toHaveProperty("payerUserId");
         expect(writes[0].set).not.toHaveProperty("inputs");
+        expect(markSummaryStepDoneInTx).not.toHaveBeenCalled();
         expect(createMock.mock.calls[0]?.[0].messages[0].content).toContain(
             "the language the transcription is predominantly spoken in",
+        );
+    });
+
+    it("marks an automatic topics step done with its committed input", async () => {
+        stage();
+        reply(
+            JSON.stringify({
+                topics: [{ start: "00:18", title: "Objednání jízdenky" }],
+            }),
+        );
+
+        await runAutomatic();
+
+        expect(markSummaryStepDoneInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                itemId: "rec-1",
+                userId: "user-1",
+                view: "private",
+                step: "topics",
+                content: {
+                    contentId: "tr-1",
+                    contentSourceId: "plaud",
+                    contentRevision: 7,
+                },
+            },
         );
     });
 

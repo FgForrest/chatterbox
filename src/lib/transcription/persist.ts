@@ -20,7 +20,7 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
-import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { PipelineView } from "@/lib/pipeline/types";
 import {
@@ -733,6 +733,25 @@ export async function upsertEnhancement(
                           view: args.view ?? "private",
                           reason: "summary",
                       });
+            if (
+                advance &&
+                args.inputs &&
+                typeof args.inputs.contentSourceId === "string" &&
+                typeof args.inputs.contentRevision === "number"
+            ) {
+                await markSummaryStepDoneInTx(tx, {
+                    itemId: recordingId,
+                    userId,
+                    view: args.view ?? "private",
+                    step: "summary",
+                    content: {
+                        contentId: args.inputs.contentId,
+                        contentSourceId: args.inputs.contentSourceId,
+                        contentRevision: args.inputs.contentRevision,
+                    },
+                    generation: advance.requestedGeneration,
+                });
+            }
             return { advance, outdated: false };
         });
         if (outcome.advance) nudge();

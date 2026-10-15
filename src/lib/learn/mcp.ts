@@ -27,6 +27,8 @@ export const MCP_TOOL_BUDGET = 320;
 export const MCP_MAX_BODY_BYTES = 64 * 1024;
 const MAX_ID_LENGTH = 200;
 const PROTOCOL_VERSION = "2025-06-18";
+const SCOPE_USAGE_CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_SCOPE_USAGE_CACHE_ENTRIES = 1_000;
 
 export interface McpRun {
     id: string;
@@ -57,6 +59,45 @@ export type JsonRpcResponse =
       };
 
 export { LEARN_MCP_TOOLS };
+
+type ScopeUsage = Awaited<ReturnType<typeof itemScopeAlmanacUsage>>;
+const scopeUsageByRun = new Map<
+    string,
+    { expiresAt: number; value: Promise<ScopeUsage> }
+>();
+
+function scopeUsageForRun(run: McpRun): Promise<ScopeUsage> {
+    const now = Date.now();
+    const key = JSON.stringify([
+        run.kind ?? "learn",
+        run.id,
+        run.userId,
+        run.itemId,
+        run.view,
+    ]);
+    const cached = scopeUsageByRun.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+
+    for (const [cachedKey, entry] of scopeUsageByRun) {
+        if (entry.expiresAt <= now) scopeUsageByRun.delete(cachedKey);
+    }
+    if (scopeUsageByRun.size >= MAX_SCOPE_USAGE_CACHE_ENTRIES) {
+        const oldestKey = scopeUsageByRun.keys().next().value;
+        if (oldestKey) scopeUsageByRun.delete(oldestKey);
+    }
+
+    const value = itemScopeAlmanacUsage(run.itemId, run.view, run.userId);
+    scopeUsageByRun.set(key, {
+        expiresAt: now + SCOPE_USAGE_CACHE_TTL_MS,
+        value,
+    });
+    value.catch(() => {
+        if (scopeUsageByRun.get(key)?.value === value) {
+            scopeUsageByRun.delete(key);
+        }
+    });
+    return value;
+}
 
 /** An id JSON-RPC allows, short enough to echo back. */
 function isId(value: unknown): boolean {
@@ -210,11 +251,7 @@ export async function handleLearnMcp(
                 language: run.language ?? null,
                 scopeUsage:
                     name === "find_entities"
-                        ? await itemScopeAlmanacUsage(
-                              run.itemId,
-                              run.view,
-                              run.userId,
-                          )
+                        ? await scopeUsageForRun(run)
                         : undefined,
             };
             if (name === "find_entities") {

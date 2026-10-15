@@ -32,9 +32,6 @@ vi.mock("@/lib/recordings/storage-reconciliation-job", () => ({
         created: true,
     }),
 }));
-vi.mock("@/lib/transcription/auto-transcribe-new-recording", () => ({
-    autoTranscribeNewRecording: vi.fn().mockResolvedValue(false),
-}));
 vi.mock("@/lib/uploads/audio-duration", () => ({
     readAudioDurationMs: vi.fn().mockResolvedValue(60_000),
 }));

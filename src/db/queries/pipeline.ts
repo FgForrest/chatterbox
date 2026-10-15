@@ -241,6 +241,7 @@ export async function listStalledPipelineRows(
 export async function listAutomaticTranscriptionRetryRows(
     limit: number,
 ): Promise<AutomaticTranscriptionRetryRow[]> {
+    const retryBefore = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const rows = await db.execute<AutomaticTranscriptionRetryRow>(sql`
         select
             item_processing.item_id as "itemId",
@@ -264,8 +265,7 @@ export async function listAutomaticTranscriptionRetryRows(
                 (item_processing.phases -> 'transcribe' ->> 'automatic')::boolean,
                 false
               )
-          and (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz
-                < now() - interval '30 minutes'
+          and item_processing.phases -> 'transcribe' ->> 'at' < ${retryBefore}
           and not exists (
               select 1
               from recording_folder_assignments
@@ -295,7 +295,7 @@ export async function listAutomaticTranscriptionRetryRows(
                 and async_jobs.payload ->> 'trigger' <> 'manual'
                 and async_jobs.completed_at >= now() - interval '24 hours'
           ) < 3
-        order by (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz asc
+        order by item_processing.phases -> 'transcribe' ->> 'at' asc
         limit ${limit}
     `);
     return rows;

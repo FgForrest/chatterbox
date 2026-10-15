@@ -230,7 +230,7 @@ describe("v1 recordings", () => {
             { phase: "transcribe", state: "running" },
         ],
         [
-            "done",
+            "summary done",
             {
                 categorize: {
                     state: "done" as const,
@@ -242,8 +242,29 @@ describe("v1 recordings", () => {
                     generation: 1,
                     at: now.toISOString(),
                 },
+                summary: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
             },
-            { phase: "transcribe", state: "done" },
+            { phase: "summary", state: "done" },
+        ],
+        [
+            "task review done",
+            {
+                summary: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+                taskReview: {
+                    state: "done" as const,
+                    generation: 1,
+                    at: now.toISOString(),
+                },
+            },
+            { phase: "taskReview", state: "done" },
         ],
         [
             "legacy",

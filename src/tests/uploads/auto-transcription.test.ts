@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
     transcribeRecording: vi.fn(),
     allowManualArtifactGeneration: vi.fn(),
     requestAdvance: vi.fn(),
-    resolveItemProfile: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -33,17 +32,12 @@ vi.mock("@/lib/recordings/erase", () => ({
 vi.mock("@/lib/pipeline/trigger", () => ({
     requestAdvance: mocks.requestAdvance,
 }));
-vi.mock("@/lib/profiles/resolve", () => ({
-    resolveItemProfile: mocks.resolveItemProfile,
-}));
 
 import { ErrorCode } from "@/lib/errors";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
-import { autoTranscribeNewRecording } from "@/lib/transcription/auto-transcribe-new-recording";
 import {
     enqueueTranscriptionJob,
     parseTranscriptionJobPayload,
-    TRANSCRIPTION_JOB_KIND,
     TRANSCRIPTION_MAX_ATTEMPTS,
 } from "@/lib/transcription/transcription-job";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
@@ -81,48 +75,6 @@ describe("automatic upload transcription", () => {
             requestedGeneration: 2,
             enqueued: true,
         });
-        mocks.resolveItemProfile.mockResolvedValue({
-            settings: {
-                steps: { transcribe: { automatic: true } },
-            },
-        });
-    });
-
-    it("does not queue when the recording profile's automatic transcription is disabled", async () => {
-        mocks.resolveItemProfile.mockResolvedValue({
-            settings: {
-                steps: { transcribe: { automatic: false } },
-            },
-        });
-
-        await expect(
-            autoTranscribeNewRecording("user-1", "recording-1"),
-        ).resolves.toBe(false);
-        expect(mocks.enqueueJob).not.toHaveBeenCalled();
-    });
-
-    it("queues when the recording profile's transcription automation is enabled", async () => {
-        await expect(
-            autoTranscribeNewRecording("user-1", "recording-1"),
-        ).resolves.toBe(true);
-        expect(mocks.enqueueJob).toHaveBeenCalledWith(
-            expect.objectContaining({
-                userId: "user-1",
-                kind: TRANSCRIPTION_JOB_KIND,
-                subjectId: "recording-1",
-                maxAttempts: TRANSCRIPTION_MAX_ATTEMPTS,
-                payload: {
-                    recordingId: "recording-1",
-                    trigger: "upload",
-                    force: false,
-                },
-            }),
-        );
-        expect(mocks.resolveItemProfile).toHaveBeenCalledWith(
-            "recording-1",
-            "private",
-            "user-1",
-        );
     });
 
     it("deduplicates by recording and wakes the worker", async () => {

@@ -505,7 +505,16 @@ describe("Share planning", () => {
             },
             generation: 3,
         });
-        expect(planAdvance(cancelled).actions).toEqual([]);
+        expect(planAdvance(cancelled).actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "done",
+                    reason: "reviewed",
+                }),
+            }),
+        ]);
     });
 
     it("does not execute Share twice in one generation", () => {
@@ -517,7 +526,16 @@ describe("Share planning", () => {
             },
         });
 
-        expect(planAdvance(attempted).actions).toEqual([]);
+        expect(planAdvance(attempted).actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "taskReview",
+                record: expect.objectContaining({
+                    state: "done",
+                    reason: "reviewed",
+                }),
+            }),
+        ]);
     });
 
     it.each([

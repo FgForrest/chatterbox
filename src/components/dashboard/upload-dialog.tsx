@@ -123,6 +123,9 @@ export function UploadDialog({
                             ))}
                         </SelectContent>
                     </Select>
+                    <p className="text-xs text-muted-foreground">
+                        {i18n("Create folders from the Folders sidebar.")}
+                    </p>
                 </div>
                 <DialogFooter>
                     <Button

@@ -12,6 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     Select,
@@ -70,6 +71,7 @@ export function CategorizePanel({
     onOptimisticCategorize,
 }: CategorizePanelProps) {
     const i18n = useExtracted();
+    const [folders, setFolders] = useState(data.folders);
     const [folderIds, setFolderIds] = useState(data.selectedFolderIds);
     const [preview, setPreview] = useState<ProcessingResolution>(
         data.resolution,
@@ -79,13 +81,21 @@ export function CategorizePanel({
     );
     const [previewing, setPreviewing] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [creatingFolder, setCreatingFolder] = useState(false);
+    const [newFolderOpen, setNewFolderOpen] = useState(false);
+    const [newFolderName, setNewFolderName] = useState("");
+    const [newFolderParentId, setNewFolderParentId] = useState("");
     const previewError = i18n("The profile preview could not be loaded.");
 
     useEffect(() => {
         if (!open) return;
+        setFolders(data.folders);
         setFolderIds(data.selectedFolderIds);
         setPreview(data.resolution);
         setProfileChoice(initialProfileChoice(data));
+        setNewFolderOpen(false);
+        setNewFolderName("");
+        setNewFolderParentId("");
     }, [data, open]);
 
     useEffect(() => {
@@ -151,8 +161,16 @@ export function CategorizePanel({
     const prefilledChoice = data.currentProfile
         ? initialProfileChoice(data)
         : resolutionChoice(preview);
-    const selectedOrganization = data.folders.some(
+    const selectedOrganization = folders.some(
         (folder) => folder.scope === "org" && folderIds.includes(folder.id),
+    );
+    const folderParents = folders.filter(
+        (folder) =>
+            (folder.scope === "personal" && folder.parentId === null) ||
+            (folder.scope === "org" && data.canCreateOrganizationFolders),
+    );
+    const hasFileableFolder = folders.some(
+        (folder) => folder.parentId !== null,
     );
     const profileOptions = useMemo(() => {
         const byId = new Map(
@@ -172,6 +190,58 @@ export function CategorizePanel({
         }
         return [...byId.values()];
     }, [data.currentProfile, data.profiles, preview]);
+
+    const createFolder = async () => {
+        const name = newFolderName.trim();
+        const parent = folders.find(
+            (folder) => folder.id === newFolderParentId,
+        );
+        if (!name || !parent) return;
+        setCreatingFolder(true);
+        try {
+            const response = await fetch("/api/folders", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ parentId: parent.id, name }),
+            });
+            if (!response.ok) {
+                toast.error(
+                    await getApiErrorMessage(
+                        response,
+                        i18n("The folder could not be created."),
+                    ),
+                );
+                return;
+            }
+            const { folder } = (await response.json()) as {
+                folder: {
+                    id: string;
+                    parentId: string | null;
+                    name: string;
+                    scope: "personal" | "org";
+                };
+            };
+            const created = {
+                ...folder,
+                path: `${parent.path} › ${folder.name}`,
+            };
+            setFolders((current) => [...current, created]);
+            setFolderIds((current) =>
+                current.includes(folder.id) ? current : [...current, folder.id],
+            );
+            if (!data.currentProfile) {
+                setPreviewing(true);
+                setProfileChoice("");
+            }
+            setNewFolderName("");
+            setNewFolderOpen(false);
+            toast.success(i18n("Folder created."));
+        } catch {
+            toast.error(i18n("The folder could not be created."));
+        } finally {
+            setCreatingFolder(false);
+        }
+    };
 
     const submit = async () => {
         if (folderIds.length === 0 || !profileChoice || previewing) return;
@@ -233,7 +303,12 @@ export function CategorizePanel({
                     <legend className="px-1 text-sm font-medium">
                         {i18n("Folders")}
                     </legend>
-                    {data.folders.map((folder) => {
+                    {!hasFileableFolder && (
+                        <p className="px-2 py-1 text-sm text-muted-foreground">
+                            {i18n("Create a folder to file this item")}
+                        </p>
+                    )}
+                    {folders.map((folder) => {
                         const root = folder.parentId === null;
                         return (
                             <Label
@@ -263,6 +338,84 @@ export function CategorizePanel({
                             </Label>
                         );
                     })}
+                    {newFolderOpen ? (
+                        <div className="space-y-3 border-t pt-3">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="categorize-new-folder-name">
+                                    {i18n("Folder name")}
+                                </Label>
+                                <Input
+                                    id="categorize-new-folder-name"
+                                    value={newFolderName}
+                                    onChange={(event) =>
+                                        setNewFolderName(event.target.value)
+                                    }
+                                />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label>{i18n("Parent folder")}</Label>
+                                <Select
+                                    value={newFolderParentId}
+                                    onValueChange={setNewFolderParentId}
+                                >
+                                    <SelectTrigger
+                                        className="w-full"
+                                        aria-label={i18n("Parent folder")}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {folderParents.map((folder) => (
+                                            <SelectItem
+                                                key={folder.id}
+                                                value={folder.id}
+                                            >
+                                                {folder.path}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => setNewFolderOpen(false)}
+                                    disabled={creatingFolder}
+                                >
+                                    {i18n("Cancel")}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    onClick={() => void createFolder()}
+                                    disabled={
+                                        creatingFolder ||
+                                        !newFolderName.trim() ||
+                                        !newFolderParentId
+                                    }
+                                >
+                                    {creatingFolder
+                                        ? i18n("Creating…")
+                                        : i18n("Create folder")}
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            className="mt-2 w-full"
+                            disabled={folderParents.length === 0}
+                            onClick={() => {
+                                setNewFolderParentId(
+                                    folderParents[0]?.id ?? "",
+                                );
+                                setNewFolderOpen(true);
+                            }}
+                        >
+                            {i18n("New folder")}
+                        </Button>
+                    )}
                 </fieldset>
 
                 <div className="space-y-2">

@@ -10,7 +10,7 @@ import {
 } from "@/db/schema";
 import { encryptText } from "@/lib/encryption/fields";
 import { nudge } from "@/lib/jobs/nudge";
-import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
@@ -130,6 +130,25 @@ async function requestTitleAfterFenceInTx(
     return true;
 }
 
+async function markTitleDoneInTx(
+    tx: Tx,
+    userId: string,
+    itemId: string,
+    fence: TitleInputFence,
+): Promise<boolean> {
+    return markSummaryStepDoneInTx(tx, {
+        itemId,
+        userId,
+        view: "private",
+        step: "title",
+        content: {
+            contentId: fence.contentId,
+            contentSourceId: fence.contentSourceId,
+            contentRevision: fence.contentRevision,
+        },
+    });
+}
+
 /**
  * Store a generated title as the recording's name. Automatic runs preserve
  * a person's edit; an explicit regeneration may replace the edit observed
@@ -206,7 +225,12 @@ export async function storeGeneratedTitle(
             .returning({ id: chatterItems.id });
         if (stored.length === 0) return { stored: false, advance: false };
         await touchRecording(tx, recordingId, userId, now);
-        return { stored: true, advance: false };
+        return {
+            stored: true,
+            advance: fence
+                ? await markTitleDoneInTx(tx, userId, recordingId, fence)
+                : false,
+        };
     });
     if (outcome.advance) nudge();
     return outcome.stored;
@@ -281,7 +305,13 @@ export async function storeGeneratedMailTitle(
                 ),
             )
             .returning({ id: chatterItems.id });
-        return { stored: stored.length > 0, advance: false };
+        if (stored.length === 0) return { stored: false, advance: false };
+        return {
+            stored: true,
+            advance: fence
+                ? await markTitleDoneInTx(tx, userId, itemId, fence)
+                : false,
+        };
     });
     if (outcome.advance) nudge();
     return outcome.stored;

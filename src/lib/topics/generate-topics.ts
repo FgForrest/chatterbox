@@ -22,9 +22,11 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
+import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { modelInput } from "@/lib/learn/llm-input";
+import { markSummaryStepDoneInTx } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { resolveTopicPrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
@@ -315,7 +317,7 @@ export async function generateTopicsForTranscript(
     const actsForOrganization =
         ctx.actsForOrganization &&
         (await userCuratesOrganizationNow(ctx.actorUserId));
-    const written = await db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -334,7 +336,7 @@ export async function generateTopicsForTranscript(
             actsForOrganization,
         });
         if (shared) throw writerRefusalError(shared);
-        return tx
+        const written = await tx
             .update(transcriptions)
             .set({
                 topics: encryptJsonField(stored),
@@ -343,18 +345,35 @@ export async function generateTopicsForTranscript(
             .where(
                 and(
                     eq(transcriptions.id, transcript.id),
+                    eq(transcriptions.userId, userId),
                     eq(transcriptions.text, transcript.text),
                 ),
             )
             .returning({ id: transcriptions.id });
+        const advance =
+            written.length > 0 && opts.trigger === "auto"
+                ? await markSummaryStepDoneInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: ctx.view,
+                      step: "topics",
+                      content: {
+                          contentId: transcript.id,
+                          contentSourceId: source,
+                          contentRevision: transcript.revision,
+                      },
+                  })
+                : false;
+        return { written, advance };
     });
-    if (written.length === 0) {
+    if (outcome.written.length === 0) {
         throw new AppError(
             ErrorCode.CONFLICT,
             "The transcript changed while its topics were being detected. Detect them again.",
             409,
         );
     }
+    if (outcome.advance) nudge();
 
     await captureServerEvent({
         distinctId: ctx.actorUserId,

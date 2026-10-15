@@ -140,9 +140,9 @@ Odpověď:
       "filesize_bytes": 1234567,
       "device": { "serial_number": "...", "name": "Plaud Note", "model": "..." },
       "has_transcription": true,
-      "has_summary": false,
+      "has_summary": true,
       "audio_reaped": false,
-      "processing": { "phase": "summary", "state": "running" },
+      "processing": { "phase": "summary", "state": "done" },
       "links": {
         "self": "/api/v1/recordings/...",
         "transcript": "/api/v1/recordings/.../transcript",
@@ -162,7 +162,8 @@ vlastníka. Nahrávka i její metadata zůstávají; `links.audio` odpovídá
 `processing` uvádí aktuální fázi zpracování nahrávky a její stav. Nahrávky
 zpracované před zavedením tohoto postupu vracejí svou poslední ustálenou fázi,
 nebo `{ "phase": "categorize", "state": "skipped" }`, pokud nemají řádek
-zpracování. Nikdy nečekají.
+zpracování. Do čekajícího stavu přejdou až tehdy, když po zavedení postupu
+dorazí nový obsah.
 
 Stránkování je **kurzorové, sestupně dle `updated_at`**. Když
 `has_more` je `true`, předejte `next_cursor` v dalším dotazu.

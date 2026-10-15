@@ -141,12 +141,24 @@ function skippedSummaryStepMarker(
         state: "skipped",
         reason,
     };
+    const currentSteps = Object.values(steps).filter(
+        (candidate) =>
+            candidate.contentId === input.contentId &&
+            (candidate.contentSourceId ??
+                facts.phases.summary?.inputs?.contentSourceId) ===
+                input.contentSourceId &&
+            candidate.contentRevision === input.contentRevision,
+    );
+    const done = currentSteps.every(
+        (candidate) =>
+            candidate.state === "done" || candidate.state === "skipped",
+    );
     return {
         type: "markPhase",
         phase: "summary",
         record: {
-            state: "pending",
-            reason,
+            state: done ? "done" : "pending",
+            reason: done ? "completed" : reason,
             generation: facts.generation,
             inputs: input,
             at: facts.at,
@@ -204,6 +216,23 @@ function planMail(
 
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
+    for (const step of ["title", "summary"] as const) {
+        if (
+            facts.profile?.automatic[step] &&
+            !stepProviderAvailable(facts, step) &&
+            !stepRequested(facts.phases.summary, step, input, minimumGeneration)
+        ) {
+            actions.push(
+                skippedSummaryStepMarker(
+                    facts,
+                    input,
+                    step,
+                    steps,
+                    "no_provider",
+                ),
+            );
+        }
+    }
     if (
         facts.profile?.automatic.title &&
         stepProviderAvailable(facts, "title") &&
@@ -324,6 +353,23 @@ function planReleasedAudio(
                 ? releaseGeneration
                 : Math.max(releaseGeneration, minimumGeneration),
         );
+    for (const step of ["title", "topics", "summary"] as const) {
+        if (
+            facts.profile?.automatic[step] &&
+            !stepProviderAvailable(facts, step) &&
+            notRequested(step)
+        ) {
+            actions.push(
+                skippedSummaryStepMarker(
+                    facts,
+                    input,
+                    step,
+                    steps,
+                    "no_provider",
+                ),
+            );
+        }
+    }
 
     if (
         facts.profile?.automatic.title &&
@@ -379,6 +425,26 @@ function planTranscriptAudio(
 ): PipelineAction[] {
     const actions: PipelineAction[] = [];
     const steps = { ...facts.phases.summary?.steps };
+    const providerSteps = input.timed
+        ? (["title", "topics", "summary"] as const)
+        : (["title", "summary"] as const);
+    for (const step of providerSteps) {
+        if (
+            facts.profile?.automatic[step] &&
+            !stepProviderAvailable(facts, step) &&
+            !stepRequested(facts.phases.summary, step, input, minimumGeneration)
+        ) {
+            actions.push(
+                skippedSummaryStepMarker(
+                    facts,
+                    input,
+                    step,
+                    steps,
+                    "no_provider",
+                ),
+            );
+        }
+    }
 
     if (
         facts.profile?.automatic.title &&
@@ -471,9 +537,25 @@ function legacyContentAlreadyHandled(facts: PipelineFacts): boolean {
     );
 }
 
-function taskReviewActions(facts: PipelineFacts): PipelineAction[] {
-    if (facts.taskReview.proposals + facts.taskReview.followUps === 0)
-        return [];
+function taskReviewActions(
+    facts: PipelineFacts,
+    summarySettled = facts.phases.summary?.state === "done" ||
+        facts.phases.summary?.state === "skipped",
+): PipelineAction[] {
+    if (facts.taskReview.proposals + facts.taskReview.followUps === 0) {
+        if (
+            (!summarySettled && !facts.phases.taskReview) ||
+            phaseMatches(
+                facts.phases.taskReview,
+                "done",
+                "reviewed",
+                facts.generation,
+            )
+        ) {
+            return [];
+        }
+        return [markPhase(facts, "taskReview", "done", "reviewed")];
+    }
     if (
         phaseMatches(
             facts.phases.taskReview,
@@ -669,22 +751,21 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
           : facts.transcription?.shared
             ? "shared"
             : null;
-    if (
-        facts.item.kind === "audio" &&
-        transcribeSkipReason &&
-        !phaseMatches(
-            facts.phases.transcribe,
-            "skipped",
-            transcribeSkipReason,
-            minimumGeneration,
-        )
-    ) {
-        actions.push(
-            markPhase(facts, "transcribe", "skipped", transcribeSkipReason),
-        );
-    }
-
     if (!content) {
+        if (
+            facts.item.kind === "audio" &&
+            transcribeSkipReason &&
+            !phaseMatches(
+                facts.phases.transcribe,
+                "skipped",
+                transcribeSkipReason,
+                minimumGeneration,
+            )
+        ) {
+            actions.push(
+                markPhase(facts, "transcribe", "skipped", transcribeSkipReason),
+            );
+        }
         if (facts.manualOnly) {
             for (const phase of ["transcribe", "learn", "summary"] as const) {
                 const current = facts.phases[phase];
@@ -698,7 +779,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 }
                 actions.push(markPhase(facts, phase, "skipped", "manual_only"));
             }
-            actions.push(...taskReviewActions(facts));
+            actions.push(...taskReviewActions(facts, true));
             planShare(facts, actions);
             return { actions };
         }
@@ -808,7 +889,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     }
 
     if (facts.manualOnly) {
-        for (const phase of ["transcribe", "learn", "summary"] as const) {
+        for (const phase of ["learn", "summary"] as const) {
             const current = facts.phases[phase];
             if (current?.state === "outdated") continue;
             if (
@@ -821,7 +902,7 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
             }
             actions.push(markPhase(facts, phase, "skipped", "manual_only"));
         }
-        actions.push(...taskReviewActions(facts));
+        actions.push(...taskReviewActions(facts, true));
         planShare(facts, actions);
         return { actions };
     }
@@ -844,7 +925,6 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 ? "plaud-transcript"
                 : "content-available";
         if (
-            !transcribeSkipReason &&
             !phaseMatches(
                 facts.phases.transcribe,
                 "done",
@@ -885,7 +965,17 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
                 ...planTranscriptAudio(facts, content, minimumGeneration),
             );
         }
-        actions.push(...taskReviewActions(facts));
+        const summarySettled =
+            facts.phases.summary?.state === "done" ||
+            facts.phases.summary?.state === "skipped" ||
+            actions.some(
+                (action) =>
+                    action.type === "markPhase" &&
+                    action.phase === "summary" &&
+                    (action.record.state === "done" ||
+                        action.record.state === "skipped"),
+            );
+        actions.push(...taskReviewActions(facts, summarySettled));
         planShare(facts, actions);
     };
 

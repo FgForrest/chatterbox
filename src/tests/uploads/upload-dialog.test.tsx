@@ -67,5 +67,8 @@ describe("UploadDialog", () => {
         expect(
             screen.getByRole("combobox", { name: "Folder" }).textContent,
         ).toBe("File later");
+        expect(
+            screen.getByText("Create folders from the Folders sidebar."),
+        ).toBeTruthy();
     });
 });

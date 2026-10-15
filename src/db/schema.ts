@@ -704,6 +704,13 @@ export const itemProcessing = pgTable(
             .where(
                 sql`${table.processedGeneration} < ${table.requestedGeneration}`,
             ),
+        automaticTranscriptionRetryIdx: index(
+            "item_processing_auto_transcription_retry_idx",
+        )
+            .on(sql`(${table.phases} -> 'transcribe' ->> 'at')`)
+            .where(
+                sql`${table.view} = 'private' and ${table.phases} -> 'transcribe' ->> 'state' = 'failed' and coalesce((${table.phases} -> 'transcribe' ->> 'automatic')::boolean, false)`,
+            ),
         viewCheck: check(
             "item_processing_view_check",
             sql`${table.view} in ('private', 'org')`,

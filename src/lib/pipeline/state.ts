@@ -13,6 +13,7 @@ import {
 import { nudge } from "@/lib/jobs/nudge";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type {
+    ContentRevisionInput,
     PhaseName,
     PhaseRecord,
     PipelinePhases,
@@ -63,6 +64,103 @@ export function updatePhaseInTx(
     record: PhaseRecord,
 ): Promise<boolean> {
     return updateProcessingPhaseInTx(tx, itemId, view, userId, phase, record);
+}
+
+function stepUsesInput(
+    step: NonNullable<PhaseRecord["steps"]>[SummaryStepName],
+    summary: PhaseRecord,
+    input: ContentRevisionInput,
+): boolean {
+    return (
+        step?.contentId === input.contentId &&
+        (step.contentSourceId ?? summary.inputs?.contentSourceId) ===
+            input.contentSourceId &&
+        step.contentRevision === input.contentRevision
+    );
+}
+
+/** Mark a pipeline-queued Summary step done in its output transaction. */
+export async function markSummaryStepDoneInTx(
+    tx: Tx,
+    input: {
+        itemId: string;
+        userId: string;
+        view: PipelineView;
+        step: SummaryStepName;
+        content: ContentRevisionInput;
+        generation?: number;
+    },
+): Promise<boolean> {
+    const [processing] = await tx
+        .select({ phases: itemProcessing.phases })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, input.itemId),
+                eq(itemProcessing.userId, input.userId),
+                eq(itemProcessing.view, input.view),
+            ),
+        )
+        .for("update")
+        .limit(1);
+    const summary = processing?.phases.summary;
+    const step = summary?.steps?.[input.step];
+    if (
+        !summary ||
+        summary.state === "outdated" ||
+        !stepUsesInput(step, summary, input.content) ||
+        step?.state === "outdated"
+    ) {
+        return false;
+    }
+
+    const generation =
+        input.generation ??
+        (
+            await requestAdvanceInTx(tx, {
+                itemId: input.itemId,
+                userId: input.userId,
+                view: input.view,
+                reason: input.step === "title" ? "title" : "summary",
+            })
+        )?.requestedGeneration;
+    if (generation === undefined) return false;
+
+    const steps = {
+        ...summary.steps,
+        [input.step]: {
+            ...step,
+            contentSourceId: input.content.contentSourceId,
+            generation,
+            state: "done" as const,
+            reason: "generated",
+        },
+    };
+    const currentSteps = Object.values(steps).filter((candidate) =>
+        stepUsesInput(candidate, summary, input.content),
+    );
+    const done =
+        currentSteps.length > 0 &&
+        currentSteps.every(
+            (candidate) =>
+                candidate?.state === "done" || candidate?.state === "skipped",
+        );
+    return updatePhaseInTx(
+        tx,
+        input.itemId,
+        input.view,
+        input.userId,
+        "summary",
+        {
+            ...summary,
+            state: done ? "done" : "pending",
+            reason: done ? "completed" : summary.reason,
+            generation,
+            inputs: summary.inputs ?? input.content,
+            at: new Date().toISOString(),
+            steps,
+        },
+    );
 }
 
 /** Mark a pipeline-queued Summary step terminal and request the next decision. */

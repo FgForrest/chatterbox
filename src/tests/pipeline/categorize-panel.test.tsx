@@ -22,6 +22,7 @@ vi.mock("next-intl", () => ({
 
 const base: CategorizePanelData = {
     itemId: "item-1",
+    canCreateOrganizationFolders: true,
     folders: [
         {
             id: "private-root",
@@ -259,5 +260,57 @@ describe("categorization panel", () => {
                 }),
             ),
         );
+    });
+
+    it("creates and selects a folder when only roots exist", async () => {
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            if (url === "/api/folders") {
+                return Response.json(
+                    {
+                        folder: {
+                            id: "new-folder",
+                            parentId: "private-root",
+                            name: "Clients",
+                            scope: "personal",
+                        },
+                    },
+                    { status: 201 },
+                );
+            }
+            return previewResponse(base.resolution);
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        renderPanel({
+            ...base,
+            folders: base.folders.filter((folder) => folder.parentId === null),
+            selectedFolderIds: [],
+        });
+
+        expect(
+            screen.getByText("Create a folder to file this item"),
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "New folder" }));
+        fireEvent.change(screen.getByRole("textbox", { name: "Folder name" }), {
+            target: { value: "Clients" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/folders",
+                expect.objectContaining({
+                    method: "POST",
+                    body: JSON.stringify({
+                        parentId: "private-root",
+                        name: "Clients",
+                    }),
+                }),
+            ),
+        );
+        expect(
+            (screen.getByLabelText("Private › Clients") as HTMLInputElement)
+                .checked,
+        ).toBe(true);
     });
 });

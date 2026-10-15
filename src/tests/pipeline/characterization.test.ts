@@ -280,7 +280,6 @@ vi.mock("@/lib/webhooks/emit", () => ({
 }));
 
 import * as autoLearn from "@/lib/learn/auto-learn";
-import { processNewMail } from "@/lib/mail/auto-process";
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
 import type { PipelineFacts } from "@/lib/pipeline/types";
 import { transcribeRecording } from "@/lib/transcription/transcribe-recording";
@@ -424,7 +423,12 @@ async function transcribeAndAdvance(
 
 async function processMailAndAdvance() {
     pipelineRequested = false;
-    await processNewMail(USER_ID, ITEM_ID);
+    await mocks.requestAdvance({
+        itemId: ITEM_ID,
+        userId: USER_ID,
+        view: "private",
+        reason: "arrival",
+    });
     if (pipelineRequested) await runPipelineAdvance();
 }
 
@@ -872,7 +876,7 @@ describe("transcribeRecording post-write triggers", () => {
     });
 });
 
-describe("processNewMail triggers", () => {
+describe("mail arrival pipeline triggers", () => {
     it("does nothing when automatic mail processing is off", async () => {
         mountMail({ mailAutoProcess: false });
 
@@ -970,14 +974,6 @@ describe("processNewMail triggers", () => {
             { strict: true },
         );
         expect(mocks.startLearnRun).not.toHaveBeenCalled();
-    });
-
-    it("does not let a processing error escape", async () => {
-        mountMail();
-        mocks.requestAdvance.mockRejectedValueOnce(new Error("queue failed"));
-        vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-        await expect(processNewMail(USER_ID, ITEM_ID)).resolves.toBeUndefined();
     });
 
     it("does nothing without an enhancement credential", async () => {
