@@ -1,4 +1,5 @@
-import { and, asc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     chatterItems,
@@ -32,6 +33,7 @@ type ProposalKind = (typeof taskUpdateProposals.$inferSelect)["kind"];
 
 export type RoutedProposalState = "applied" | "rejected" | "obsolete";
 export type ObsoleteProposalReason =
+    | "earlier_statement"
     | "version_changed"
     | "task_closed"
     | "task_invisible"
@@ -47,6 +49,12 @@ export interface RoutedTaskProposalView {
     duePhrase: string | null;
     quote: string | null;
     version: number;
+    sourceItem: {
+        id: string;
+        kind: "audio" | "mail";
+        title: string;
+    };
+    attachedBy: { id: string; name: string } | null;
 }
 
 export interface RoutedProposalDecision {
@@ -188,6 +196,7 @@ async function applyToTarget(
     actorUserId: string,
     effectiveAt: Date,
 ): Promise<void> {
+    if (proposal.kind === "attach_merge") return;
     const now = new Date();
     await tx
         .update(recordingTasks)
@@ -219,12 +228,182 @@ function chronologyAllows(
     target: TargetRow,
     statementAt: Date,
 ): boolean {
+    if (proposal.kind === "attach_merge") return true;
     return fieldProposalIsLater(
         statementAt,
         proposal.kind === "done"
             ? target.statusEffectiveAt
             : target.dueEffectiveAt,
     );
+}
+
+export interface RoutedMergeDifference {
+    kind: "attach_merge" | "done" | "due" | "due_phrase";
+    dueDate?: string | null;
+    duePhrase?: string | null;
+    mention: {
+        itemId: string;
+        userId: string;
+        quote: string | null;
+        evidenceStartMs: number | null;
+        evidenceSegmentIndex: number | null;
+        evidenceCharStart: number | null;
+        evidenceCharEnd: number | null;
+        evidenceProvenance: "quoted" | "unverified" | "unlocated" | null;
+    };
+}
+
+/** Route the differences from a cross-owner task attachment to target editors. */
+export async function createRoutedMergeProposalsInTx(
+    tx: Tx,
+    input: {
+        viewer: TaskViewer;
+        targetTaskId: string;
+        differences: readonly RoutedMergeDifference[];
+    },
+): Promise<void> {
+    if (input.differences.length === 0) return;
+    const target = await targetFor(tx, input.viewer, input.targetTaskId);
+    if (!target?.visible || target.status !== "open") {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Merge rule: the target must remain a visible open task",
+            403,
+        );
+    }
+    const now = new Date();
+    for (const difference of input.differences) {
+        await tx
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: target.taskId,
+                itemId: difference.mention.itemId,
+                userId: difference.mention.userId,
+                kind: difference.kind,
+                dueDate: difference.dueDate ?? null,
+                duePhrase: difference.duePhrase ?? null,
+                quote: difference.mention.quote,
+                evidenceStartMs: difference.mention.evidenceStartMs,
+                evidenceSegmentIndex: difference.mention.evidenceSegmentIndex,
+                evidenceCharStart: difference.mention.evidenceCharStart,
+                evidenceCharEnd: difference.mention.evidenceCharEnd,
+                evidenceProvenance: difference.mention.evidenceProvenance,
+                state: "awaiting_target_review",
+                routedTo: await routingTargets(tx, difference.kind, target),
+                decidedByUserId: input.viewer.userId,
+                decidedAt: now,
+                ticked: false,
+                version: target.version,
+                createdAt: now,
+                updatedAt: now,
+            })
+            .onConflictDoNothing();
+    }
+}
+
+/** Move pending updates from a merged task onto its surviving target. */
+export async function movePendingTaskProposalsInTx(
+    tx: Tx,
+    input: {
+        viewer: TaskViewer;
+        sourceTaskId: string;
+        targetTaskId: string;
+    },
+): Promise<void> {
+    const target = await targetFor(tx, input.viewer, input.targetTaskId);
+    if (!target?.visible || target.status !== "open") {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Merge rule: the target must remain a visible open task",
+            403,
+        );
+    }
+    const proposals = await tx
+        .select({
+            id: taskUpdateProposals.id,
+            itemId: taskUpdateProposals.itemId,
+            userId: taskUpdateProposals.userId,
+            kind: taskUpdateProposals.kind,
+            state: taskUpdateProposals.state,
+            sourceOccurredAt: chatterItems.occurredAt,
+        })
+        .from(taskUpdateProposals)
+        .innerJoin(
+            chatterItems,
+            and(
+                eq(chatterItems.id, taskUpdateProposals.itemId),
+                eq(chatterItems.userId, taskUpdateProposals.userId),
+            ),
+        )
+        .where(
+            and(
+                eq(taskUpdateProposals.taskId, input.sourceTaskId),
+                inArray(taskUpdateProposals.state, [
+                    "awaiting_source_review",
+                    "awaiting_share",
+                    "awaiting_target_review",
+                ]),
+            ),
+        )
+        .orderBy(
+            asc(taskUpdateProposals.createdAt),
+            asc(taskUpdateProposals.id),
+        );
+    if (proposals.length === 0) return;
+    const mentions = await tx
+        .select({
+            itemId: taskMentions.itemId,
+            userId: taskMentions.userId,
+            statementAt: taskMentions.statementAt,
+        })
+        .from(taskMentions)
+        .where(eq(taskMentions.taskId, input.sourceTaskId))
+        .orderBy(asc(taskMentions.createdAt), asc(taskMentions.id));
+    const conflicts = await tx
+        .select({
+            itemId: taskUpdateProposals.itemId,
+            kind: taskUpdateProposals.kind,
+        })
+        .from(taskUpdateProposals)
+        .where(eq(taskUpdateProposals.taskId, input.targetTaskId));
+    const held = new Set(
+        conflicts.map((proposal) => `${proposal.itemId}\0${proposal.kind}`),
+    );
+    for (const proposal of proposals) {
+        const statementAt =
+            mentions.find(
+                (mention) =>
+                    mention.itemId === proposal.itemId &&
+                    mention.userId === proposal.userId,
+            )?.statementAt ?? proposal.sourceOccurredAt;
+        if (!chronologyAllows(proposal, target, statementAt)) continue;
+        const key = `${proposal.itemId}\0${proposal.kind}`;
+        if (held.has(key)) {
+            await tx
+                .delete(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, proposal.id));
+            continue;
+        }
+        held.add(key);
+        await tx
+            .update(taskUpdateProposals)
+            .set({
+                taskId: target.taskId,
+                version: target.version,
+                routedTo:
+                    proposal.state === "awaiting_target_review"
+                        ? await routingTargets(tx, proposal.kind, target)
+                        : undefined,
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(taskUpdateProposals.id, proposal.id),
+                    eq(taskUpdateProposals.taskId, input.sourceTaskId),
+                    eq(taskUpdateProposals.state, proposal.state),
+                ),
+            );
+    }
 }
 
 /** Settles one source item's accepted and rejected follow-up proposals. */
@@ -292,7 +471,7 @@ export async function settleSourceTaskUpdatesInTx(
             await setProposalState(tx, proposal.id, "obsolete", {
                 actorUserId: input.viewer.userId,
                 routedTo: null,
-                obsoleteReason: "version_changed",
+                obsoleteReason: "earlier_statement",
             });
             skipped += 1;
             continue;
@@ -399,7 +578,10 @@ export async function routeAwaitingShareTaskProposalsInTx(
     }
 }
 
-/** Lists pending target-review proposals routed to this viewer. */
+const routedSourceItem = alias(chatterItems, "routed_source_item");
+const routedActor = alias(users, "routed_actor");
+
+/** Lists pending target-review changes and attachment notices for this viewer. */
 export async function listRoutedTaskProposals(
     viewer: TaskViewer,
 ): Promise<RoutedTaskProposalView[]> {
@@ -414,6 +596,11 @@ export async function listRoutedTaskProposals(
             duePhrase: taskUpdateProposals.duePhrase,
             quote: taskUpdateProposals.quote,
             version: taskUpdateProposals.version,
+            sourceItemKind: routedSourceItem.kind,
+            sourceItemTitle: routedSourceItem.title,
+            attachedById: routedActor.id,
+            attachedByName: routedActor.name,
+            attachedByEmail: routedActor.email,
         })
         .from(taskUpdateProposals)
         .innerJoin(
@@ -421,6 +608,17 @@ export async function listRoutedTaskProposals(
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .innerJoin(
+            routedSourceItem,
+            and(
+                eq(routedSourceItem.id, taskUpdateProposals.itemId),
+                eq(routedSourceItem.userId, taskUpdateProposals.userId),
+            ),
+        )
+        .leftJoin(
+            routedActor,
+            eq(routedActor.id, taskUpdateProposals.decidedByUserId),
+        )
         .where(
             and(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
@@ -436,6 +634,20 @@ export async function listRoutedTaskProposals(
         taskText: decryptText(row.taskText),
         duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
         quote: row.quote ? decryptText(row.quote) : null,
+        sourceItem: {
+            id: row.sourceItemId,
+            kind: row.sourceItemKind,
+            title: decryptText(row.sourceItemTitle),
+        },
+        attachedBy: row.attachedById
+            ? {
+                  id: row.attachedById,
+                  name:
+                      row.attachedByName ??
+                      row.attachedByEmail ??
+                      row.attachedById,
+              }
+            : null,
     }));
 }
 
@@ -506,6 +718,12 @@ export async function applyRoutedTaskProposal(
                 kind: taskUpdateProposals.kind,
                 dueDate: taskUpdateProposals.dueDate,
                 duePhrase: taskUpdateProposals.duePhrase,
+                quote: taskUpdateProposals.quote,
+                evidenceStartMs: taskUpdateProposals.evidenceStartMs,
+                evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
+                evidenceCharStart: taskUpdateProposals.evidenceCharStart,
+                evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
+                evidenceProvenance: taskUpdateProposals.evidenceProvenance,
                 version: taskUpdateProposals.version,
                 routedTo: taskUpdateProposals.routedTo,
                 sourceOccurredAt: chatterItems.occurredAt,
@@ -546,12 +764,38 @@ export async function applyRoutedTaskProposal(
                 404,
             );
         }
+        const [mention] = await tx
+            .select({ statementAt: taskMentions.statementAt })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.taskId, proposal.taskId),
+                    eq(taskMentions.itemId, source.itemId),
+                    eq(taskMentions.userId, source.ownerUserId),
+                    inArray(taskMentions.matchDecision, ["accepted", "home"]),
+                ),
+            )
+            .orderBy(
+                desc(
+                    sql`(${taskMentions.quote}, ${taskMentions.evidenceStartMs}, ${taskMentions.evidenceSegmentIndex}, ${taskMentions.evidenceCharStart}, ${taskMentions.evidenceCharEnd}, ${taskMentions.provenance}) is not distinct from (${proposal.quote}, ${proposal.evidenceStartMs}, ${proposal.evidenceSegmentIndex}, ${proposal.evidenceCharStart}, ${proposal.evidenceCharEnd}, ${proposal.evidenceProvenance})`,
+                ),
+                asc(taskMentions.createdAt),
+            )
+            .limit(1);
+        const effectiveAt = mention?.statementAt ?? proposal.sourceOccurredAt;
         let reason: ObsoleteProposalReason | null = null;
+        const attachmentNotice = proposal.kind === "attach_merge";
         if (!target?.visible) reason = "task_invisible";
         else if (target.status !== "open") reason = "task_closed";
-        else if (target.version !== proposal.version)
+        else if (!attachmentNotice && target.version !== proposal.version)
             reason = "version_changed";
-        else if (!mayApply(proposal.kind, target)) reason = "rights_lost";
+        else if (
+            !attachmentNotice &&
+            !chronologyAllows(proposal, target, effectiveAt)
+        )
+            reason = "earlier_statement";
+        else if (!attachmentNotice && !mayApply(proposal.kind, target))
+            reason = "rights_lost";
         if (reason || !target) {
             await setProposalState(tx, proposal.id, "obsolete", {
                 actorUserId: viewer.userId,
@@ -566,32 +810,16 @@ export async function applyRoutedTaskProposal(
                 changed: null,
             };
         }
-        const [mention] = await tx
-            .select({ statementAt: taskMentions.statementAt })
-            .from(taskMentions)
-            .where(
-                and(
-                    eq(taskMentions.taskId, proposal.taskId),
-                    eq(taskMentions.itemId, source.itemId),
-                    eq(taskMentions.userId, source.ownerUserId),
-                    inArray(taskMentions.matchDecision, ["accepted", "home"]),
-                ),
-            )
-            .limit(1);
-        await applyToTarget(
-            tx,
-            proposal,
-            target,
-            viewer.userId,
-            mention?.statementAt ?? proposal.sourceOccurredAt,
-        );
+        await applyToTarget(tx, proposal, target, viewer.userId, effectiveAt);
         await setProposalState(tx, proposal.id, "applied", {
             actorUserId: viewer.userId,
             routedTo: null,
         });
         return {
             decision: { state: "applied" as const, obsoleteReason: null },
-            changed: { ownerUserId: target.ownerUserId, itemId: target.itemId },
+            changed: attachmentNotice
+                ? null
+                : { ownerUserId: target.ownerUserId, itemId: target.itemId },
         };
     });
     if (result.changed) {
@@ -600,7 +828,7 @@ export async function applyRoutedTaskProposal(
     return result.decision;
 }
 
-/** Rejects a routed proposal as one of its current target editors. */
+/** Reject a routed change; for `attach_merge`, record dismissal of the notice only. */
 export async function rejectRoutedTaskProposal(
     viewer: TaskViewer,
     sourceItemId: string,

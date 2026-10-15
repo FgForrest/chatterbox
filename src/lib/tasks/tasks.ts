@@ -43,6 +43,7 @@ import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
     assignedToViewer,
+    mayMergeTaskOwners,
     type TaskViewer,
     taskClosable,
     taskEditable,
@@ -50,6 +51,7 @@ import {
     taskRecordingShared,
     taskVisible,
 } from "@/lib/tasks/access";
+import { fieldProposalIsLater } from "@/lib/tasks/chronology";
 import {
     type LoadedTaskMentions,
     loadVisibleTaskMentions,
@@ -58,6 +60,9 @@ import {
 import { taskFingerprint } from "@/lib/tasks/proposals";
 import {
     countRoutedTaskProposals,
+    createRoutedMergeProposalsInTx,
+    movePendingTaskProposalsInTx,
+    type RoutedMergeDifference,
     settleSourceTaskUpdatesInTx,
 } from "@/lib/tasks/routing";
 import { isoDateOrNull } from "@/lib/tasks/summary-items";
@@ -997,6 +1002,420 @@ async function rejectInTx(
             })),
         )
         .onConflictDoNothing();
+}
+
+interface MergeTaskRow {
+    id: string;
+    itemId: string;
+    ownerUserId: string;
+    status: TaskStatus;
+    version: number;
+    dueDate: string | null;
+    duePhrase: string | null;
+    statusEffectiveAt: Date | null;
+    dueEffectiveAt: Date | null;
+    visible: boolean;
+    shared: boolean;
+}
+
+interface MergeMentionRow {
+    id: string;
+    taskId: string;
+    itemId: string;
+    userId: string;
+    view: "private" | "org";
+    quote: string | null;
+    evidenceStartMs: number | null;
+    evidenceSegmentIndex: number | null;
+    evidenceCharStart: number | null;
+    evidenceCharEnd: number | null;
+    evidenceProvenance: EvidenceProvenance | null;
+    statementAt: Date;
+    matchDecision:
+        | "home"
+        | "suggested"
+        | "accepted"
+        | "rejected"
+        | "undone"
+        | "kept_new";
+    ticked: boolean;
+}
+
+function mergeRule(message: string): AppError {
+    return new AppError(ErrorCode.FORBIDDEN, `Merge rule: ${message}`, 403);
+}
+
+async function lockMergeTasks(
+    tx: Tx,
+    viewer: TaskViewer,
+    sourceTaskId: string,
+    targetTaskId: string,
+): Promise<{ source: MergeTaskRow; target: MergeTaskRow }> {
+    const ids = [sourceTaskId, targetTaskId].sort();
+    const refs = await tx
+        .select({
+            taskId: recordingTasks.id,
+            itemId: chatterItems.id,
+            kind: chatterItems.kind,
+        })
+        .from(recordingTasks)
+        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(inArray(recordingTasks.id, ids));
+    if (refs.length !== 2) throw notFound();
+    let itemRefs: { itemId: string; kind: "audio" | "mail" }[] = [
+        ...new Map(refs.map((row) => [row.itemId, row])).values(),
+    ].sort((left, right) => left.itemId.localeCompare(right.itemId));
+    const lockItems = async (
+        pending: readonly { itemId: string; kind: "audio" | "mail" }[],
+    ) => {
+        for (const ref of [...pending].sort((left, right) =>
+            left.itemId.localeCompare(right.itemId),
+        )) {
+            if (ref.kind === "audio") {
+                await tx
+                    .select({ id: recordings.id })
+                    .from(recordings)
+                    .where(eq(recordings.id, ref.itemId))
+                    .for("update");
+            } else {
+                await tx
+                    .select({ id: chatterItems.id })
+                    .from(chatterItems)
+                    .where(eq(chatterItems.id, ref.itemId))
+                    .for("update");
+            }
+        }
+    };
+    await lockItems(itemRefs);
+    const readTasks = () =>
+        tx
+            .select({
+                id: recordingTasks.id,
+                itemId: recordingTasks.itemId,
+                ownerUserId: recordingTasks.userId,
+                status: recordingTasks.status,
+                version: recordingTasks.version,
+                dueDate: recordingTasks.dueDate,
+                duePhrase: recordingTasks.duePhrase,
+                statusEffectiveAt: recordingTasks.statusEffectiveAt,
+                dueEffectiveAt: recordingTasks.dueEffectiveAt,
+                visible: sql<boolean>`${taskVisible(viewer, ANY_TASK_ITEM)}`,
+                shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
+            })
+            .from(recordingTasks)
+            .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+            .where(inArray(recordingTasks.id, ids))
+            .orderBy(asc(recordingTasks.id))
+            .for("update", { of: recordingTasks });
+    let rows = await readTasks();
+    if (rows.length !== 2) throw notFound();
+    const lockedItemIds = new Set(itemRefs.map((ref) => ref.itemId));
+    const driftedItemIds = [
+        ...new Set(
+            rows
+                .map((row) => row.itemId)
+                .filter((itemId) => !lockedItemIds.has(itemId)),
+        ),
+    ];
+    if (driftedItemIds.length > 0) {
+        const driftedRefs = await tx
+            .select({ itemId: chatterItems.id, kind: chatterItems.kind })
+            .from(chatterItems)
+            .where(inArray(chatterItems.id, driftedItemIds))
+            .orderBy(asc(chatterItems.id));
+        await lockItems(driftedRefs);
+        itemRefs = [...itemRefs, ...driftedRefs];
+        rows = await readTasks();
+        if (rows.length !== 2) throw notFound();
+        const relockedItemIds = new Set(itemRefs.map((ref) => ref.itemId));
+        if (rows.some((row) => !relockedItemIds.has(row.itemId))) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "A task home changed meanwhile; retry the merge",
+                409,
+            );
+        }
+    }
+    const normalized = rows.map((row) => ({
+        ...row,
+        duePhrase: decryptOptional(row.duePhrase),
+    }));
+    const source = normalized.find((row) => row.id === sourceTaskId);
+    const target = normalized.find((row) => row.id === targetTaskId);
+    if (!source || !target) throw notFound();
+    return { source, target };
+}
+
+function linkedMention(mention: MergeMentionRow): boolean {
+    return (
+        mention.matchDecision === "home" || mention.matchDecision === "accepted"
+    );
+}
+
+async function collapseMergedMentions(
+    tx: Tx,
+    input: {
+        sourceTaskId: string;
+        targetTaskId: string;
+        viewerUserId: string;
+        mentions: readonly MergeMentionRow[];
+        now: Date;
+    },
+): Promise<void> {
+    const groups = new Map<string, MergeMentionRow[]>();
+    for (const mention of input.mentions) {
+        const key = `${mention.itemId}\0${mention.view}`;
+        groups.set(key, [...(groups.get(key) ?? []), mention]);
+    }
+    for (const mentions of groups.values()) {
+        const ordered = [...mentions].sort((left, right) => {
+            const priority = (mention: MergeMentionRow) => {
+                const onTarget = mention.taskId === input.targetTaskId;
+                if (linkedMention(mention)) return onTarget ? 0 : 1;
+                if (mention.matchDecision === "suggested") {
+                    return onTarget ? 2 : 3;
+                }
+                return onTarget ? 4 : 5;
+            };
+            return priority(left) - priority(right);
+        });
+        const winner = ordered[0];
+        if (!winner) continue;
+        const losers = ordered.slice(1).map((mention) => mention.id);
+        if (losers.length > 0) {
+            await tx
+                .delete(taskMentions)
+                .where(inArray(taskMentions.id, losers));
+        }
+        const moved = winner.taskId === input.sourceTaskId;
+        const acceptedHome = moved && winner.matchDecision === "home";
+        const ticked =
+            winner.matchDecision === "suggested"
+                ? mentions.some(
+                      (mention) =>
+                          mention.matchDecision === "suggested" &&
+                          mention.ticked,
+                  )
+                : winner.ticked;
+        await tx
+            .update(taskMentions)
+            .set({
+                taskId: moved ? input.targetTaskId : winner.taskId,
+                matchDecision: acceptedHome ? "accepted" : winner.matchDecision,
+                ticked,
+                decidedByUserId: acceptedHome ? input.viewerUserId : undefined,
+                decidedAt: acceptedHome ? input.now : undefined,
+                updatedAt: input.now,
+            })
+            .where(eq(taskMentions.id, winner.id));
+    }
+}
+
+function mentionAt(
+    mentions: readonly MergeMentionRow[],
+    effectiveAt: Date | null,
+    fallback: MergeMentionRow,
+): MergeMentionRow {
+    if (!effectiveAt) return fallback;
+    return (
+        mentions.find(
+            (mention) =>
+                mention.statementAt.getTime() === effectiveAt.getTime(),
+        ) ?? fallback
+    );
+}
+
+function mergeDifferences(
+    source: MergeTaskRow,
+    target: MergeTaskRow,
+    mentions: readonly MergeMentionRow[],
+): RoutedMergeDifference[] {
+    const home =
+        mentions.find(
+            (mention) =>
+                mention.itemId === source.itemId &&
+                mention.matchDecision === "home",
+        ) ?? mentions[0];
+    if (!home) return [];
+    const differences: RoutedMergeDifference[] = [
+        { kind: "attach_merge", mention: home },
+    ];
+    if (
+        source.status === "done" &&
+        target.status === "open" &&
+        fieldProposalIsLater(
+            source.statusEffectiveAt ?? home.statementAt,
+            target.statusEffectiveAt,
+        )
+    ) {
+        differences.push({
+            kind: "done",
+            mention: mentionAt(mentions, source.statusEffectiveAt, home),
+        });
+    }
+    if (
+        (source.dueDate !== target.dueDate ||
+            source.duePhrase !== target.duePhrase) &&
+        fieldProposalIsLater(
+            source.dueEffectiveAt ?? home.statementAt,
+            target.dueEffectiveAt,
+        )
+    ) {
+        if (source.dueDate) {
+            differences.push({
+                kind: "due",
+                dueDate: source.dueDate,
+                duePhrase: encryptText(source.duePhrase),
+                mention: mentionAt(mentions, source.dueEffectiveAt, home),
+            });
+        } else if (source.duePhrase) {
+            differences.push({
+                kind: "due_phrase",
+                dueDate: null,
+                duePhrase: encryptText(source.duePhrase),
+                mention: mentionAt(mentions, source.dueEffectiveAt, home),
+            });
+        }
+    }
+    return differences;
+}
+
+/** Merge one task or reviewed proposal into an open target task. */
+export async function mergeTaskIntoTask(
+    viewer: TaskViewer,
+    sourceTaskId: string,
+    targetTaskId: string,
+    options: { reviewItemId?: string } = {},
+): Promise<TaskView> {
+    if (sourceTaskId === targetTaskId) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A task cannot be merged into itself",
+            400,
+            { field: "targetTaskId" },
+        );
+    }
+    const changed = await db.transaction(async (tx) => {
+        const { source, target } = await lockMergeTasks(
+            tx,
+            viewer,
+            sourceTaskId,
+            targetTaskId,
+        );
+        if (!source.visible || !target.visible) {
+            throw mergeRule("both tasks must be visible to the person merging");
+        }
+        if (target.status !== "open") {
+            throw mergeRule("the target must be an open task");
+        }
+        if (source.shared && !target.shared) {
+            throw mergeRule(
+                "an Organization task can be merged only into an Organization task",
+            );
+        }
+        const proposal = source.status === "proposed";
+        if (proposal) {
+            if (options.reviewItemId !== source.itemId) {
+                throw mergeRule(
+                    "a proposal may be merged only from its item's review",
+                );
+            }
+            if (
+                source.ownerUserId !== viewer.userId &&
+                !(viewer.isCurator && source.shared)
+            ) {
+                throw mergeRule(
+                    "only the item's owner or a curator may accept its match",
+                );
+            }
+        } else if (
+            !mayMergeTaskOwners(viewer, source.ownerUserId, target.ownerUserId)
+        ) {
+            if (target.ownerUserId === viewer.userId) {
+                throw mergeRule(
+                    "merging someone else's task into your own requires a curator",
+                );
+            }
+            if (source.ownerUserId === target.ownerUserId) {
+                throw mergeRule(
+                    "only the home owner or a curator may merge that owner's tasks",
+                );
+            }
+            throw mergeRule(
+                "only the merged task's home owner may attach it to someone else's task",
+            );
+        }
+        if (!source.shared && target.shared) {
+            throw mergeRule(
+                "a private task can join an Organization task only after its home item is shared",
+            );
+        }
+        if (viewer.isCurator && (source.shared || target.shared)) {
+            assertOrgScopeWritable();
+        }
+        const mentions = await tx
+            .select({
+                id: taskMentions.id,
+                taskId: taskMentions.taskId,
+                itemId: taskMentions.itemId,
+                userId: taskMentions.userId,
+                view: taskMentions.view,
+                quote: taskMentions.quote,
+                evidenceStartMs: taskMentions.evidenceStartMs,
+                evidenceSegmentIndex: taskMentions.evidenceSegmentIndex,
+                evidenceCharStart: taskMentions.evidenceCharStart,
+                evidenceCharEnd: taskMentions.evidenceCharEnd,
+                evidenceProvenance: taskMentions.provenance,
+                statementAt: taskMentions.statementAt,
+                matchDecision: taskMentions.matchDecision,
+                ticked: taskMentions.ticked,
+            })
+            .from(taskMentions)
+            .where(inArray(taskMentions.taskId, [source.id, target.id]))
+            .orderBy(desc(taskMentions.statementAt), asc(taskMentions.id));
+        const sourceMentions = mentions.filter(
+            (mention) => mention.taskId === source.id,
+        );
+        const now = new Date();
+        await movePendingTaskProposalsInTx(tx, {
+            viewer,
+            sourceTaskId: source.id,
+            targetTaskId: target.id,
+        });
+        if (source.ownerUserId !== target.ownerUserId) {
+            await createRoutedMergeProposalsInTx(tx, {
+                viewer,
+                targetTaskId: target.id,
+                differences: mergeDifferences(source, target, sourceMentions),
+            });
+        }
+        await collapseMergedMentions(tx, {
+            sourceTaskId: source.id,
+            targetTaskId: target.id,
+            viewerUserId: viewer.userId,
+            mentions,
+            now,
+        });
+        await tx
+            .delete(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.id, source.id),
+                    eq(recordingTasks.userId, source.ownerUserId),
+                ),
+            );
+        return {
+            sourceItemId: source.itemId,
+            sourceOwnerUserId: source.ownerUserId,
+            targetItemId: target.itemId,
+            targetOwnerUserId: target.ownerUserId,
+        };
+    });
+    await tasksChanged(changed.sourceOwnerUserId, changed.sourceItemId);
+    if (changed.targetItemId !== changed.sourceItemId) {
+        await tasksChanged(changed.targetOwnerUserId, changed.targetItemId);
+    }
+    return requireTaskView(viewer, targetTaskId);
 }
 
 /**

@@ -111,6 +111,56 @@ function normalizedWords(text: string): Set<string> {
     );
 }
 
+function searchTokens(text: string): string[] {
+    const folded = text
+        .normalize("NFKD")
+        .replace(/\p{M}+/gu, "")
+        .toLocaleLowerCase("und");
+    return [
+        ...new Set(
+            (folded.match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+                (word) => word.length >= 2,
+            ),
+        ),
+    ];
+}
+
+function searchTokenMatches(queryToken: string, taskToken: string): boolean {
+    if (taskToken.startsWith(queryToken)) return true;
+    return (
+        queryToken.length >= 4 &&
+        queryToken.length === taskToken.length &&
+        /[aeiouy]$/u.test(queryToken) &&
+        /[aeiouy]$/u.test(taskToken) &&
+        queryToken.slice(0, -1) === taskToken.slice(0, -1)
+    );
+}
+
+/** Group lexical search matches while preserving the supplied ranking. */
+export function rankTaskSearchCandidates<T extends TaskRankingCandidate>(
+    ranked: readonly RankedTaskCandidate<T>[],
+    queryText: string,
+    includeUnmatched: boolean,
+): RankedTaskCandidate<T>[] {
+    const queryTokens = searchTokens(queryText);
+    if (queryTokens.length === 0) return includeUnmatched ? [...ranked] : [];
+    const complete: RankedTaskCandidate<T>[] = [];
+    const partial: RankedTaskCandidate<T>[] = [];
+    const unmatched: RankedTaskCandidate<T>[] = [];
+    for (const entry of ranked) {
+        const taskTokens = searchTokens(entry.candidate.text);
+        const matched = queryTokens.filter((queryToken) =>
+            taskTokens.some((taskToken) =>
+                searchTokenMatches(queryToken, taskToken),
+            ),
+        ).length;
+        if (matched === queryTokens.length) complete.push(entry);
+        else if (matched > 0) partial.push(entry);
+        else unmatched.push(entry);
+    }
+    return [...complete, ...partial, ...(includeUnmatched ? unmatched : [])];
+}
+
 function wordOverlap(left: Set<string>, rightText: string): number {
     const right = normalizedWords(rightText);
     if (left.size === 0 || right.size === 0) return 0;

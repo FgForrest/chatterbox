@@ -1,6 +1,7 @@
 import { requireApiSessionActor } from "@/lib/auth-server";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
+import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 
 /** A task change is a few short fields; nothing near this. */
@@ -56,4 +57,25 @@ export function optionalNullableString(
     if (value === undefined) return undefined;
     if (value === null || typeof value === "string") return value;
     throw invalid(`${field} must be a string or null`, field);
+}
+
+/** Bound repeated full-scope merge searches for one signed-in user. */
+export async function enforceTaskMergeSearchRateLimit(
+    viewer: TaskViewer,
+): Promise<void> {
+    const result = await consumeRateLimitBucket(
+        `tasks:merge-search:user:${viewer.userId}`,
+        { limit: 60, windowMs: 60_000 },
+    );
+    if (result.allowed) return;
+    const retryAfter = Math.max(
+        1,
+        Math.ceil((result.resetAt.getTime() - Date.now()) / 1_000),
+    );
+    throw new AppError(
+        ErrorCode.RATE_LIMITED,
+        "Too many task merge searches",
+        429,
+        { retryAfter },
+    );
 }

@@ -88,7 +88,10 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // whoever may change it, closed also by the owner and the assignee.
     "recordings/[id]/tasks/route.ts": { GET: "tasks", POST: "tasks" },
     "recordings/[id]/tasks/accept/route.ts": { POST: "tasks" },
-    "recordings/[id]/tasks/merge/route.ts": { POST: "tasks" },
+    "recordings/[id]/tasks/merge/route.ts": {
+        GET: "tasks",
+        POST: "tasks",
+    },
     "recordings/[id]/tasks/updates/[updateId]/route.ts": { PATCH: "tasks" },
     "recordings/[id]/topics/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcribe/route.ts": { GET: "view", POST: "view" },

@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -68,7 +69,10 @@ vi.mock("@/lib/knowledge/embeddings", () => ({
     embeddingClient: embeddingClientMock,
 }));
 
-import { loadTasksPromptContext } from "@/lib/tasks/proposals";
+import {
+    loadTasksPromptContext,
+    searchMergeCandidates,
+} from "@/lib/tasks/proposals";
 import { TASK_CANDIDATE_LIMIT } from "@/lib/tasks/ranking";
 
 const testDatabaseUrl = getTestDatabaseUrl();
@@ -406,6 +410,302 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
 
         expect([...context.refs.values()]).toEqual(
             ids.slice(0, TASK_CANDIDATE_LIMIT),
+        );
+    });
+
+    it("searches the scope with the same visibility and linked-mention rules", async () => {
+        const sources = [
+            ["search-in", OWNER, "private-a-child"],
+            ["search-out", OWNER, "private-outside"],
+            ["search-other-private", OTHER, "private-a-child"],
+            ["search-other-shared-mention", OTHER, "org-team-child"],
+            ["search-suggested", OWNER, "private-a-child"],
+        ] as const;
+        for (const [id, userId, folderId] of sources) {
+            await item(id, userId, "mail");
+            await db().insert(recordingFolderAssignments).values({
+                itemId: id,
+                userId,
+                folderId,
+            });
+        }
+        await candidate({
+            id: "search-task-in",
+            itemId: "search-in",
+            userId: OWNER,
+            text: "Prepare the quarterly launch brief",
+            view: "private",
+        });
+        await candidate({
+            id: "search-task-out",
+            itemId: "search-out",
+            userId: OWNER,
+            text: "Prepare the quarterly launch brief outside",
+            view: "private",
+        });
+        await candidate({
+            id: "search-task-other-private",
+            itemId: "search-other-private",
+            userId: OTHER,
+            text: "Prepare the quarterly launch brief privately",
+            view: "private",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                id: "search-task-other-private-shared-mention",
+                taskId: "search-task-other-private",
+                itemId: "search-other-shared-mention",
+                userId: OTHER,
+                view: "org",
+                statementAt: new Date("2026-10-02T00:00:00.000Z"),
+                matchDecision: "accepted",
+            });
+        await candidate({
+            id: "search-task-suggested",
+            itemId: "search-suggested",
+            userId: OWNER,
+            text: "Prepare the quarterly launch brief suggestion",
+            view: "private",
+            decision: "suggested",
+        });
+
+        const result = await searchMergeCandidates(reviewer, TARGET, {
+            text: "quarterly launch brief",
+            offset: 0,
+            limit: 20,
+        });
+
+        expect(result.candidates.map((row) => row.id)).toEqual([
+            "search-task-in",
+        ]);
+        expect(result.nextOffset).toBeNull();
+    });
+
+    it("finds a matching task outside the summary's top 40 and paginates", async () => {
+        await item("search-many-source", OWNER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "search-many-source",
+            userId: OWNER,
+            folderId: "private-a-child",
+        });
+        const ordinaryIds = Array.from(
+            { length: TASK_CANDIDATE_LIMIT + 1 },
+            (_, index) => `search-many-${String(index).padStart(2, "0")}`,
+        );
+        for (const id of ordinaryIds) {
+            await candidate({
+                id,
+                itemId: "search-many-source",
+                userId: OWNER,
+                text: "Routine status follow up",
+                view: "private",
+            });
+        }
+        await candidate({
+            id: "search-many-exact",
+            itemId: "search-many-source",
+            userId: OWNER,
+            text: "Calibrate the cobalt spectrometer",
+            view: "private",
+            statementAt: new Date("2026-09-01T00:00:00.000Z"),
+        });
+        await candidate({
+            id: "search-many-second",
+            itemId: "search-many-source",
+            userId: OWNER,
+            text: "Inspect the cobalt spectrometer",
+            view: "private",
+            statementAt: new Date("2026-08-01T00:00:00.000Z"),
+        });
+
+        const context = await loadTasksPromptContext({
+            recording: {
+                id: TARGET,
+                userId: OWNER,
+                occurredAt: new Date("2026-10-15T10:00:00.000Z"),
+                timezone: null,
+                zonemins: null,
+            },
+            transcriptionId: null,
+            orgView: false,
+            reviewer,
+            noun: "mail",
+            itemText: "Routine status follow up",
+        });
+        expect([...context.refs.values()]).not.toContain("search-many-exact");
+
+        const first = await searchMergeCandidates(reviewer, TARGET, {
+            text: "cobalt spectrometer calibration",
+            offset: 0,
+            limit: 1,
+        });
+        const second = await searchMergeCandidates(reviewer, TARGET, {
+            text: "cobalt spectrometer calibration",
+            offset: first.nextOffset ?? 0,
+            limit: 1,
+        });
+
+        expect(first.candidates.map((row) => row.id)).toEqual([
+            "search-many-exact",
+        ]);
+        expect(first.nextOffset).toBe(1);
+        expect(second.candidates.map((row) => row.id)).toEqual([
+            "search-many-second",
+        ]);
+    });
+
+    it("matches prefixes without diacritics", async () => {
+        await item("search-prefix-source", OWNER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "search-prefix-source",
+            userId: OWNER,
+            folderId: "private-a-child",
+        });
+        await candidate({
+            id: "search-prefix-task",
+            itemId: "search-prefix-source",
+            userId: OWNER,
+            text: "Inspect the mólo crane",
+            view: "private",
+        });
+
+        const result = await searchMergeCandidates(reviewer, TARGET, {
+            text: "mol",
+            offset: 0,
+            limit: 20,
+        });
+
+        expect(result.candidates.map((row) => row.id)).toEqual([
+            "search-prefix-task",
+        ]);
+    });
+
+    it("ranks an empty search against the item's content", async () => {
+        await db()
+            .update(chatterItems)
+            .set({ title: encryptText("Calibrate the cobalt spectrometer") })
+            .where(eq(chatterItems.id, TARGET));
+        await item("search-empty-similar", OWNER, "mail");
+        await item("search-empty-recent", OWNER, "mail");
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                {
+                    itemId: "search-empty-similar",
+                    userId: OWNER,
+                    folderId: "private-a-child",
+                },
+                {
+                    itemId: "search-empty-recent",
+                    userId: OWNER,
+                    folderId: "private-a-child",
+                },
+            ]);
+        await candidate({
+            id: "search-empty-similar-task",
+            itemId: "search-empty-similar",
+            userId: OWNER,
+            text: "Calibrate the cobalt spectrometer",
+            view: "private",
+            statementAt: new Date("2026-09-01T00:00:00.000Z"),
+        });
+        await candidate({
+            id: "search-empty-recent-task",
+            itemId: "search-empty-recent",
+            userId: OWNER,
+            text: "Book catering",
+            view: "private",
+            statementAt: new Date("2026-10-10T00:00:00.000Z"),
+        });
+
+        const result = await searchMergeCandidates(reviewer, TARGET, {
+            text: "",
+            offset: 0,
+            limit: 1,
+        });
+
+        expect(result.candidates.map((row) => row.id)).toEqual([
+            "search-empty-similar-task",
+        ]);
+        expect(result.nextOffset).toBe(1);
+    });
+
+    it("keeps private and Organization merge targets in their matching scope", async () => {
+        await item("search-private-org-home", OTHER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "search-private-org-home",
+            userId: OTHER,
+            folderId: "org-team-child",
+        });
+        await candidate({
+            id: "search-private-org-task",
+            itemId: "search-private-org-home",
+            userId: OTHER,
+            text: "Scoped launch target",
+            view: "org",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                id: "search-private-org-private-mention",
+                taskId: "search-private-org-task",
+                itemId: TARGET,
+                userId: OWNER,
+                view: "private",
+                statementAt: new Date("2026-10-02T00:00:00.000Z"),
+                matchDecision: "accepted",
+            });
+        expect(
+            (
+                await searchMergeCandidates(reviewer, TARGET, {
+                    text: "scoped launch",
+                    offset: 0,
+                    limit: 20,
+                })
+            ).candidates,
+        ).toEqual([]);
+
+        await db().insert(recordingFolderAssignments).values({
+            itemId: TARGET,
+            userId: OWNER,
+            folderId: "org-team",
+        });
+        await item("search-org-private-home", OWNER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "search-org-private-home",
+            userId: OWNER,
+            folderId: "private-a-child",
+        });
+        await candidate({
+            id: "search-org-private-task",
+            itemId: "search-org-private-home",
+            userId: OWNER,
+            text: "Scoped launch target",
+            view: "private",
+        });
+        await db()
+            .insert(taskMentions)
+            .values({
+                id: "search-org-private-org-mention",
+                taskId: "search-org-private-task",
+                itemId: "search-private-org-home",
+                userId: OTHER,
+                view: "org",
+                statementAt: new Date("2026-10-03T00:00:00.000Z"),
+                matchDecision: "accepted",
+            });
+
+        const organization = await searchMergeCandidates(reviewer, TARGET, {
+            text: "scoped launch",
+            offset: 0,
+            limit: 20,
+        });
+        expect(organization.candidates.map((row) => row.id)).toContain(
+            "search-private-org-task",
+        );
+        expect(organization.candidates.map((row) => row.id)).not.toContain(
+            "search-org-private-task",
         );
     });
 

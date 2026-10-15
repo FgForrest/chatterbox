@@ -8,6 +8,7 @@ import {
     isNull,
     ne,
     or,
+    sql,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
@@ -20,8 +21,10 @@ import {
     taskMentions,
     taskVectors,
 } from "@/db/schema";
+import { readItemContent } from "@/lib/content/read-item-content";
 import type { ItemContent } from "@/lib/content/types";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
+import { AppError, ErrorCode } from "@/lib/errors";
 import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { getTranscriptSpeakers } from "@/lib/knowledge/attribution";
 import { embeddingClient } from "@/lib/knowledge/embeddings";
@@ -39,8 +42,12 @@ import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
     ANY_TASK_ITEM,
+    mayMergeTaskOwners,
     type TaskViewer,
     taskClosable,
+    taskEditable,
+    taskRecordingShared,
+    taskVisible,
 } from "@/lib/tasks/access";
 import {
     buildTasksContext,
@@ -57,8 +64,10 @@ import {
     normalizeTaskText,
 } from "@/lib/tasks/quote";
 import {
+    type RankedTaskCandidate,
     rankTaskCandidates,
     rankTaskCandidatesWithEmbeddings,
+    rankTaskSearchCandidates,
     TASK_CANDIDATE_LIMIT,
     type TaskRankingCandidate,
 } from "@/lib/tasks/ranking";
@@ -108,9 +117,15 @@ interface RecordingRow {
 interface CandidateTask extends TaskRankingCandidate {
     userId: string;
     dueDate: string | null;
+    duePhrase: string | null;
+    homeItemId: string;
+    homeItemKind: "audio" | "mail";
+    homeItemTitle: string;
+    shared: boolean;
 }
 
 const candidateMentionItem = alias(chatterItems, "candidate_mention_item");
+const candidateHomeItem = alias(chatterItems, "candidate_home_item");
 
 function confirmedSpeakerMap(
     rows: Awaited<ReturnType<typeof getTranscriptSpeakers>>,
@@ -145,7 +160,7 @@ async function confirmedSpeakers(
 }
 
 async function scopedCandidates(
-    recording: RecordingRow,
+    recording: Pick<RecordingRow, "id">,
     reviewer: TaskViewer,
     scopeFolderIds: readonly string[],
 ): Promise<CandidateTask[]> {
@@ -182,10 +197,22 @@ async function scopedCandidates(
             text: recordingTasks.text,
             assigneePersonId: recordingTasks.assigneePersonId,
             dueDate: recordingTasks.dueDate,
+            duePhrase: recordingTasks.duePhrase,
+            homeItemId: candidateHomeItem.id,
+            homeItemKind: candidateHomeItem.kind,
+            homeItemTitle: candidateHomeItem.title,
+            shared: sql<boolean>`${taskRecordingShared(reviewer, {
+                id: candidateHomeItem.id,
+                userId: candidateHomeItem.userId,
+            })}`,
             statementAt: taskMentions.statementAt,
         })
         .from(recordingTasks)
         .innerJoin(taskMentions, eq(taskMentions.taskId, recordingTasks.id))
+        .innerJoin(
+            candidateHomeItem,
+            eq(candidateHomeItem.id, recordingTasks.itemId),
+        )
         .innerJoin(
             candidateMentionItem,
             eq(candidateMentionItem.id, taskMentions.itemId),
@@ -194,6 +221,11 @@ async function scopedCandidates(
             and(
                 eq(recordingTasks.status, "open"),
                 ne(recordingTasks.itemId, recording.id),
+                isNull(candidateHomeItem.deletedAt),
+                taskVisible(reviewer, {
+                    id: candidateHomeItem.id,
+                    userId: candidateHomeItem.userId,
+                }),
                 linkedTaskMentionCondition(),
                 taskMentionVisible(
                     reviewer,
@@ -222,6 +254,8 @@ async function scopedCandidates(
         candidates.set(row.id, {
             ...row,
             text: decryptText(row.text),
+            duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+            homeItemTitle: decryptText(row.homeItemTitle),
         });
     }
     const values = [...candidates.values()];
@@ -294,6 +328,14 @@ async function unfiledCandidates(
             text: recordingTasks.text,
             assigneePersonId: recordingTasks.assigneePersonId,
             dueDate: recordingTasks.dueDate,
+            duePhrase: recordingTasks.duePhrase,
+            homeItemId: chatterItems.id,
+            homeItemKind: chatterItems.kind,
+            homeItemTitle: chatterItems.title,
+            shared: sql<boolean>`${taskRecordingShared(
+                reviewer,
+                ANY_TASK_ITEM,
+            )}`,
             createdAt: recordingTasks.createdAt,
         })
         .from(recordingTasks)
@@ -320,6 +362,11 @@ async function unfiledCandidates(
         text: decryptText(row.text),
         assigneePersonId: row.assigneePersonId,
         dueDate: row.dueDate,
+        duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+        homeItemId: row.homeItemId,
+        homeItemKind: row.homeItemKind,
+        homeItemTitle: decryptText(row.homeItemTitle),
+        shared: row.shared,
         statementAt: statements.get(row.id) ?? row.createdAt,
     }));
 }
@@ -403,20 +450,24 @@ async function persistTaskVectors(
     }
 }
 
-async function rankedCandidates(
+async function rankedCandidateEntries(
     candidates: readonly CandidateTask[],
     itemText: string,
     participantPersonIds: readonly string[],
-): Promise<CandidateTask[]> {
+): Promise<{
+    ranked: RankedTaskCandidate<CandidateTask>[];
+    usedEmbeddings: boolean;
+}> {
     const client = embeddingClient();
     if (!client) {
-        return rankTaskCandidates({
-            itemText,
-            participantPersonIds,
-            candidates,
-        })
-            .slice(0, TASK_CANDIDATE_LIMIT)
-            .map((entry) => entry.candidate);
+        return {
+            ranked: rankTaskCandidates({
+                itemText,
+                participantPersonIds,
+                candidates,
+            }),
+            usedEmbeddings: false,
+        };
     }
     try {
         const generation = vectorGenerationFor(client.model);
@@ -448,22 +499,174 @@ async function rankedCandidates(
                 result.generatedVectors,
             );
         }
-        return result.ranked
-            .slice(0, TASK_CANDIDATE_LIMIT)
-            .map((entry) => entry.candidate);
+        return {
+            ranked: result.ranked,
+            usedEmbeddings: result.usedEmbeddings,
+        };
     } catch (error) {
         console.warn(
             "[tasks] task vectors unavailable; using word overlap:",
             error,
         );
-        return rankTaskCandidates({
-            itemText,
-            participantPersonIds,
-            candidates,
-        })
-            .slice(0, TASK_CANDIDATE_LIMIT)
-            .map((entry) => entry.candidate);
+        return {
+            ranked: rankTaskCandidates({
+                itemText,
+                participantPersonIds,
+                candidates,
+            }),
+            usedEmbeddings: false,
+        };
     }
+}
+
+async function rankedCandidates(
+    candidates: readonly CandidateTask[],
+    itemText: string,
+    participantPersonIds: readonly string[],
+): Promise<CandidateTask[]> {
+    return (
+        await rankedCandidateEntries(candidates, itemText, participantPersonIds)
+    ).ranked
+        .slice(0, TASK_CANDIDATE_LIMIT)
+        .map((entry) => entry.candidate);
+}
+
+export interface MergeCandidateView {
+    id: string;
+    text: string;
+    dueDate: string | null;
+    duePhrase: string | null;
+    homeItem: {
+        id: string;
+        kind: "audio" | "mail";
+        title: string;
+    };
+}
+
+export interface MergeCandidatePage {
+    candidates: MergeCandidateView[];
+    nextOffset: number | null;
+}
+
+/** Search every mergeable open task in an item's folder scope. */
+export async function searchMergeCandidates(
+    reviewer: TaskViewer,
+    itemId: string,
+    query: {
+        text: string;
+        sourceTaskId?: string | null;
+        offset: number;
+        limit: number;
+    },
+): Promise<MergeCandidatePage> {
+    const text = query.text.trim();
+    const [item] = await db
+        .select({
+            id: chatterItems.id,
+            userId: chatterItems.userId,
+            kind: chatterItems.kind,
+            title: chatterItems.title,
+            occurredAt: chatterItems.occurredAt,
+            shared: sql<boolean>`${taskRecordingShared(
+                reviewer,
+                ANY_TASK_ITEM,
+            )}`,
+            canReview: sql<boolean>`${taskEditable(reviewer, ANY_TASK_ITEM)}`,
+        })
+        .from(chatterItems)
+        .where(and(eq(chatterItems.id, itemId), isNull(chatterItems.deletedAt)))
+        .limit(1);
+    if (!item?.canReview) {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Merge search is limited to the item's owner or a curator",
+            403,
+        );
+    }
+    const [source] = query.sourceTaskId
+        ? await db
+              .select({
+                  id: recordingTasks.id,
+                  userId: recordingTasks.userId,
+                  status: recordingTasks.status,
+              })
+              .from(recordingTasks)
+              .where(
+                  and(
+                      eq(recordingTasks.id, query.sourceTaskId),
+                      eq(recordingTasks.itemId, item.id),
+                      eq(recordingTasks.userId, item.userId),
+                  ),
+              )
+              .limit(1)
+        : [];
+    if (query.sourceTaskId && !source) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Task not found", 404);
+    }
+    const scopeFolderIds = await itemScopeFolderIds(
+        item.id,
+        item.shared ? "org" : "private",
+        item.userId,
+    );
+    if (scopeFolderIds.length === 0) {
+        return { candidates: [], nextOffset: null };
+    }
+    const eligible = (await scopedCandidates(item, reviewer, scopeFolderIds))
+        .filter((candidate) => candidate.id !== query.sourceTaskId)
+        .filter((candidate) => {
+            if (!source || source.status === "proposed") return true;
+            return mayMergeTaskOwners(
+                reviewer,
+                source.userId,
+                candidate.userId,
+            );
+        })
+        .filter((candidate) => candidate.shared === item.shared);
+    const content = text ? null : await readItemContent(item.userId, item.id);
+    const rankingText = text
+        ? text
+        : [
+              ...(item.kind === "mail" ? [decryptText(item.title)] : []),
+              ...(content?.segments.flatMap((segment) =>
+                  segment.knownItemId ? [] : [segment.text],
+              ) ?? []),
+          ].join("\n");
+    const participantPersonIds = text
+        ? []
+        : [
+              ...new Set(
+                  content?.participants.flatMap((participant) =>
+                      participant.personId ? [participant.personId] : [],
+                  ) ?? [],
+              ),
+          ];
+    const ranking = await rankedCandidateEntries(
+        eligible,
+        rankingText,
+        participantPersonIds,
+    );
+    const matching = text
+        ? rankTaskSearchCandidates(ranking.ranked, text, ranking.usedEmbeddings)
+        : ranking.ranked;
+    const page = matching.slice(query.offset, query.offset + query.limit);
+    const nextOffset =
+        query.offset + page.length < matching.length
+            ? query.offset + page.length
+            : null;
+    return {
+        candidates: page.map(({ candidate }) => ({
+            id: candidate.id,
+            text: candidate.text,
+            dueDate: candidate.dueDate,
+            duePhrase: candidate.duePhrase,
+            homeItem: {
+                id: candidate.homeItemId,
+                kind: candidate.homeItemKind,
+                title: candidate.homeItemTitle,
+            },
+        })),
+        nextOffset,
+    };
 }
 
 /**

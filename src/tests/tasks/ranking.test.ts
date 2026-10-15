@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     rankTaskCandidates,
     rankTaskCandidatesWithEmbeddings,
+    rankTaskSearchCandidates,
     TASK_CANDIDATE_LIMIT,
     topTaskCandidates,
 } from "@/lib/tasks/ranking";
@@ -72,6 +73,36 @@ describe("task candidate ranking", () => {
 
         expect(ranked[0]?.candidate.id).toBe("match");
         expect(ranked[0]?.similarity).toBe(1);
+    });
+
+    it("groups complete and partial prefix matches without disturbing ranking order", () => {
+        const ranked = rankTaskCandidates({
+            itemText: "unrelated",
+            participantPersonIds: [],
+            candidates: [
+                candidate("partial", "Mólo crane"),
+                candidate("complete", "Inspect the mólo crane"),
+                candidate("inflected", "Secure the lana"),
+                candidate("none", "Book catering"),
+            ],
+        });
+
+        expect(
+            rankTaskSearchCandidates(ranked, "inspect mol", false).map(
+                (entry) => entry.candidate.id,
+            ),
+        ).toEqual(["complete", "partial"]);
+        expect(
+            rankTaskSearchCandidates(ranked, "lano", false).map(
+                (entry) => entry.candidate.id,
+            ),
+        ).toEqual(["inflected"]);
+        expect(
+            rankTaskSearchCandidates(ranked, "inspect mol", true).map(
+                (entry) => entry.candidate.id,
+            ),
+        ).toEqual(["complete", "partial", "inflected", "none"]);
+        expect(rankTaskSearchCandidates(ranked, "m", false)).toEqual([]);
     });
 
     it("uses mocked content and task embeddings", async () => {

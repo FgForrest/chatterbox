@@ -95,3 +95,17 @@ export function taskEditable(
     const shared = taskRecordingShared(viewer, item);
     return viewer.isCurator ? (or(own, shared) as SQL) : own;
 }
+
+/** Whether the viewer may remove `sourceOwnerUserId`'s task into the target. */
+export function mayMergeTaskOwners(
+    viewer: TaskViewer,
+    sourceOwnerUserId: string,
+    targetOwnerUserId: string,
+): boolean {
+    if (sourceOwnerUserId === viewer.userId) return true;
+    if (!viewer.isCurator) return false;
+    return (
+        sourceOwnerUserId === targetOwnerUserId ||
+        targetOwnerUserId === viewer.userId
+    );
+}
