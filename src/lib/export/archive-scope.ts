@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { chatterItems, recordings } from "@/db/schema";
+import { chatterItems, processingProfiles, recordings } from "@/db/schema";
 import {
     sharedItemCondition,
     sharedRecordingCondition,
@@ -40,5 +40,16 @@ export function archivedItemCondition(scope: ArchiveScope) {
             ? eq(chatterItems.userId, scope.userId)
             : sharedItemCondition(scope.orgUserId),
         isNull(chatterItems.deletedAt),
+    );
+}
+
+/** SQL predicate on `processing_profiles`: profiles owned by this scope. */
+export function archivedProfileCondition(scope: ArchiveScope) {
+    return and(
+        eq(processingProfiles.ownerUserId, scopeUserId(scope)),
+        eq(
+            processingProfiles.scope,
+            scope.kind === "personal" ? "personal" : "organization",
+        ),
     );
 }

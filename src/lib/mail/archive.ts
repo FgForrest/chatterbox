@@ -37,12 +37,24 @@ export interface ArchivedMail {
     segments: unknown[];
     /** Its summaries, one per source. */
     summaries: {
+        id: string;
         source: string;
         summary: string | null;
         keyPoints: unknown;
         actionItems: unknown;
+        transcriptionId: string | null;
         provider: string;
         model: string;
+        profileRevisionId: string | null;
+        builtinPromptsVersion: string | null;
+        inputs: Record<string, unknown> | null;
+        outputLanguage: string | null;
+        outputFormatLocale: string | null;
+        multiPassRounds: number | null;
+        multiPassUsed: number | null;
+        multiPassMerged: boolean | null;
+        producedByUserId: string | null;
+        payerUserId: string | null;
         createdAt: string;
     }[];
     /** Where its raw message is stored, encrypted; null once reaped. */
@@ -108,13 +120,25 @@ export async function collectArchivedMail(
             .where(inArray(mailContents.itemId, ids)),
         db
             .select({
+                id: aiEnhancements.id,
                 itemId: aiEnhancements.itemId,
                 source: aiEnhancements.source,
                 summary: aiEnhancements.summary,
                 keyPoints: aiEnhancements.keyPoints,
                 actionItems: aiEnhancements.actionItems,
+                transcriptionId: aiEnhancements.transcriptionId,
                 provider: aiEnhancements.provider,
                 model: aiEnhancements.model,
+                profileRevisionId: aiEnhancements.profileRevisionId,
+                builtinPromptsVersion: aiEnhancements.builtinPromptsVersion,
+                inputs: aiEnhancements.inputs,
+                outputLanguage: aiEnhancements.outputLanguage,
+                outputFormatLocale: aiEnhancements.outputFormatLocale,
+                multiPassRounds: aiEnhancements.multiPassRounds,
+                multiPassUsed: aiEnhancements.multiPassUsed,
+                multiPassMerged: aiEnhancements.multiPassMerged,
+                producedByUserId: aiEnhancements.producedByUserId,
+                payerUserId: aiEnhancements.payerUserId,
                 createdAt: aiEnhancements.createdAt,
             })
             .from(aiEnhancements)
@@ -161,12 +185,24 @@ export async function collectArchivedMail(
         summaries: summaries
             .filter((summary) => summary.itemId === row.id)
             .map((summary) => ({
+                id: summary.id,
                 source: summary.source,
                 summary: summary.summary ? decryptText(summary.summary) : null,
                 keyPoints: decryptJsonField(summary.keyPoints) ?? [],
                 actionItems: decryptJsonField(summary.actionItems) ?? [],
+                transcriptionId: summary.transcriptionId,
                 provider: summary.provider,
                 model: summary.model,
+                profileRevisionId: summary.profileRevisionId,
+                builtinPromptsVersion: summary.builtinPromptsVersion,
+                inputs: summary.inputs,
+                outputLanguage: summary.outputLanguage,
+                outputFormatLocale: summary.outputFormatLocale,
+                multiPassRounds: summary.multiPassRounds,
+                multiPassUsed: summary.multiPassUsed,
+                multiPassMerged: summary.multiPassMerged,
+                producedByUserId: summary.producedByUserId,
+                payerUserId: summary.payerUserId,
                 createdAt: summary.createdAt.toISOString(),
             })),
         rawStoragePath: row.rawStoragePath,
