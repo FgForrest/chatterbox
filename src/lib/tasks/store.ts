@@ -57,9 +57,12 @@ export interface TextEvidence {
 
 export interface ProposedTaskUpdate {
     taskId: string;
-    kind: "done" | "due" | "due_phrase";
+    kind: "done" | "drop" | "due" | "due_phrase" | "assignee";
     dueDate: string | null;
     duePhrase: string | null;
+    assigneePersonId?: string | null;
+    assigneeHint?: string | null;
+    assigneeCheck?: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceText?: TextEvidence | null;
@@ -238,11 +241,14 @@ export async function writeTaskProposalsInTx(
     // What the summary named may have gone while it ran (minutes, with
     // several passes): a person deleted, a task closed or deleted.
     const assignees = [
-        ...new Set(
-            proposals.tasks.flatMap((task) =>
+        ...new Set([
+            ...proposals.tasks.flatMap((task) =>
                 task.assigneePersonId ? [task.assigneePersonId] : [],
             ),
-        ),
+            ...proposals.updates.flatMap((update) =>
+                update.assigneePersonId ? [update.assigneePersonId] : [],
+            ),
+        ]),
     ];
     const livePeople = new Set(
         assignees.length > 0
@@ -301,8 +307,11 @@ export async function writeTaskProposalsInTx(
                       .select({
                           id: recordingTasks.id,
                           version: recordingTasks.version,
+                          status: recordingTasks.status,
                           statusEffectiveAt: recordingTasks.statusEffectiveAt,
                           dueEffectiveAt: recordingTasks.dueEffectiveAt,
+                          assigneeEffectiveAt:
+                              recordingTasks.assigneeEffectiveAt,
                       })
                       .from(recordingTasks)
                       .innerJoin(
@@ -312,7 +321,10 @@ export async function writeTaskProposalsInTx(
                       .where(
                           and(
                               inArray(recordingTasks.id, targets),
-                              eq(recordingTasks.status, "open"),
+                              inArray(recordingTasks.status, [
+                                  "open",
+                                  "dropped",
+                              ]),
                               isNull(chatterItems.deletedAt),
                               proposals.reviewer
                                   ? taskVisible(
@@ -421,7 +433,7 @@ export async function writeTaskProposalsInTx(
     const mentionByTask = new Map<string, ProposedMatchEvidence>();
     for (const match of proposedMatches) {
         if (
-            !openTasks.has(match.taskId) ||
+            openTasks.get(match.taskId)?.status !== "open" ||
             existingMentions.has(match.taskId) ||
             mentionByTask.has(match.taskId)
         ) {
@@ -433,8 +445,15 @@ export async function writeTaskProposalsInTx(
         });
     }
     for (const update of proposals.updates) {
+        const target = openTasks.get(update.taskId);
+        const statement = statementAt(item.occurredAt, update);
+        const available =
+            target?.status === "open" ||
+            (update.kind === "drop" &&
+                target?.status === "dropped" &&
+                !fieldProposalIsLater(statement, target.statusEffectiveAt));
         if (
-            !openTasks.has(update.taskId) ||
+            !available ||
             existingMentions.has(update.taskId) ||
             mentionByTask.has(update.taskId)
         ) {
@@ -465,11 +484,20 @@ export async function writeTaskProposalsInTx(
         );
     }
 
-    const updates = proposals.updates.filter(
-        (update) =>
-            openTasks.has(update.taskId) &&
-            !existingMentions.has(update.taskId),
-    );
+    const updates = proposals.updates.filter((update) => {
+        const target = openTasks.get(update.taskId);
+        const statement = statementAt(item.occurredAt, update);
+        return (
+            (target?.status === "open" ||
+                (update.kind === "drop" &&
+                    target?.status === "dropped" &&
+                    !fieldProposalIsLater(
+                        statement,
+                        target.statusEffectiveAt,
+                    ))) &&
+            !existingMentions.has(update.taskId)
+        );
+    });
     if (updates.length > 0) {
         const now = new Date();
         await tx
@@ -478,11 +506,15 @@ export async function writeTaskProposalsInTx(
                 updates.map((update) => {
                     const statement = statementAt(item.occurredAt, update);
                     const target = openTasks.get(update.taskId);
+                    const effectiveAt =
+                        update.kind === "done" || update.kind === "drop"
+                            ? target?.statusEffectiveAt
+                            : update.kind === "assignee"
+                              ? target?.assigneeEffectiveAt
+                              : target?.dueEffectiveAt;
                     const earlier = !fieldProposalIsLater(
                         statement,
-                        update.kind === "done"
-                            ? target?.statusEffectiveAt
-                            : target?.dueEffectiveAt,
+                        effectiveAt,
                     );
                     return {
                         taskId: update.taskId,
@@ -491,6 +523,13 @@ export async function writeTaskProposalsInTx(
                         kind: update.kind,
                         dueDate: update.dueDate,
                         duePhrase: encryptText(update.duePhrase),
+                        proposedAssigneePersonId:
+                            update.assigneePersonId &&
+                            livePeople.has(update.assigneePersonId)
+                                ? update.assigneePersonId
+                                : null,
+                        proposedAssigneeHint: encryptText(update.assigneeHint),
+                        proposedAssigneeCheck: update.assigneeCheck ?? false,
                         quote: encryptText(update.quote),
                         evidenceStartMs: update.evidenceStartMs,
                         evidenceSegmentIndex:

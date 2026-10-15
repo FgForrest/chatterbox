@@ -172,6 +172,7 @@ export async function generateMailSummary(
                   zonemins: null,
               },
               transcriptionId: null,
+              language: content.language,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,

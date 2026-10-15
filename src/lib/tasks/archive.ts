@@ -1,4 +1,5 @@
 import { and, eq, inArray, ne, or, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     chatterItems,
@@ -55,6 +56,9 @@ export interface ArchivedTaskUpdate {
     kind: TaskUpdateProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
+    proposedAssignee: { personId: string; name: string } | null;
+    proposedAssigneeHint: string | null;
+    proposedAssigneeCheck: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     /** As on a task of a mail. */
@@ -308,6 +312,7 @@ export async function taskUpdatesForArchive(
     if (recordingIds.length === 0 || archivedTaskIds.size === 0) {
         return byRecording;
     }
+    const proposedAssignee = alias(people, "archived_proposed_assignee");
     const rows = await db
         .select({
             id: taskUpdateProposals.id,
@@ -317,6 +322,11 @@ export async function taskUpdatesForArchive(
             kind: taskUpdateProposals.kind,
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
+            proposedAssigneePersonId:
+                taskUpdateProposals.proposedAssigneePersonId,
+            proposedAssigneeName: proposedAssignee.displayName,
+            proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+            proposedAssigneeCheck: taskUpdateProposals.proposedAssigneeCheck,
             quote: taskUpdateProposals.quote,
             evidenceStartMs: taskUpdateProposals.evidenceStartMs,
             evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
@@ -341,6 +351,13 @@ export async function taskUpdatesForArchive(
                 eq(chatterItems.userId, taskUpdateProposals.userId),
             ),
         )
+        .leftJoin(
+            proposedAssignee,
+            eq(
+                proposedAssignee.id,
+                taskUpdateProposals.proposedAssigneePersonId,
+            ),
+        )
         .where(
             and(
                 scope.kind === "personal"
@@ -360,6 +377,15 @@ export async function taskUpdatesForArchive(
             kind: row.kind,
             dueDate: row.dueDate,
             duePhrase: optional(row.duePhrase),
+            proposedAssignee:
+                row.proposedAssigneePersonId && row.proposedAssigneeName
+                    ? {
+                          personId: row.proposedAssigneePersonId,
+                          name: decryptText(row.proposedAssigneeName),
+                      }
+                    : null,
+            proposedAssigneeHint: optional(row.proposedAssigneeHint),
+            proposedAssigneeCheck: row.proposedAssigneeCheck,
             quote: optional(row.quote),
             evidenceStartMs: row.evidenceStartMs,
             ...(row.evidenceSegmentIndex !== null &&

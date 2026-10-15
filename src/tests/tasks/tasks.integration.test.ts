@@ -111,9 +111,17 @@ import { gatherFacts } from "@/lib/pipeline/facts";
 import { eraseLocalArtifact } from "@/lib/recordings/erase";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
-import { type TaskArchiveScope, tasksForArchive } from "@/lib/tasks/archive";
+import {
+    type TaskArchiveScope,
+    tasksForArchive,
+    taskUpdatesForArchive,
+} from "@/lib/tasks/archive";
 import { deleteItemTaskDataInTx } from "@/lib/tasks/mentions";
-import { loadTasksPromptContext, taskFingerprint } from "@/lib/tasks/proposals";
+import {
+    loadTasksPromptContext,
+    resolveTaskProposals,
+    taskFingerprint,
+} from "@/lib/tasks/proposals";
 import {
     applyRoutedTaskProposal,
     listRoutedTaskProposals,
@@ -1200,6 +1208,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         });
         expect([...context.refs.values()]).toEqual([mailTask.id]);
         expect(context.text).toContain("Send the mail contract");
+        expect(context.text).toContain("speaker_0");
         expect(context.text).not.toContain("Private task of Bob");
         expect([...context.refs.values()]).not.toContain(otherTask?.id);
     });
@@ -3033,6 +3042,492 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await expect(
             acceptReview(alice, REC, { proposals: shown, updates: [] }),
         ).rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it("[A] drops without deleting, leaves open lists, keeps evidence, and restores", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Prepare the obsolete launch deck",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "drop",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "We no longer need that launch deck",
+                    evidenceStartMs: 4_000,
+                },
+            ],
+        });
+        const [drop] = (await review(alice, LATER)).updates;
+        if (!drop) throw new Error("missing drop proposal");
+        expect(drop).toMatchObject({
+            kind: "drop",
+            quote: "We no longer need that launch deck",
+            evidenceStartMs: 4_000,
+            ticked: false,
+        });
+        await tickUpdateProposal(alice, LATER, drop.id, true, drop.version);
+        await acceptReview(alice, LATER);
+
+        const [stored] = await db()
+            .select({
+                status: recordingTasks.status,
+                effectiveAt: recordingTasks.statusEffectiveAt,
+            })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored).toEqual({
+            status: "dropped",
+            effectiveAt: new Date("2026-10-08T10:00:00.000Z"),
+        });
+        expect(
+            (
+                await listTasks(alice, {
+                    ...query("tracked"),
+                    state: "open",
+                })
+            ).map((row) => row.id),
+        ).not.toContain(task.id);
+        const dropped = (await listTasks(alice, query("tracked"))).find(
+            (row) => row.id === task.id,
+        );
+        expect(dropped?.status).toBe("dropped");
+        await updateTask(alice, task.id, {
+            version: dropped?.version ?? -1,
+            status: "open",
+        });
+        expect(
+            (
+                await listTasks(alice, {
+                    ...query("tracked"),
+                    state: "open",
+                })
+            ).map((row) => row.id),
+        ).toContain(task.id);
+    });
+
+    it("[B] resolves and applies a reassignment without inventing a person", async () => {
+        await db().insert(transcriptSpeakers).values({
+            userId: ALICE,
+            transcriptionId: transcriptId,
+            label: "speaker_0",
+            personId: bobPrivate,
+            source: "user",
+            status: "confirmed",
+            confirmedByUserId: ALICE,
+        });
+        const task = await addTask(alice, REC, {
+            text: "Prepare the handoff",
+            status: "open",
+        });
+        const refs = new Map([["T1", task.id]]);
+        const resolved = await resolveTaskProposals({
+            source: "riffado",
+            items: [],
+            updates: [
+                {
+                    ref: "T1",
+                    kind: "assignee",
+                    due: null,
+                    assignee: "speaker_0",
+                    quote: "Bob is taking over the handoff",
+                },
+            ],
+            refs,
+            ownerUserId: ALICE,
+            transcriptionId: transcriptId,
+            turns: [
+                {
+                    speaker: "speaker_0",
+                    startMs: 0,
+                    endMs: 1_000,
+                    text: "Bob is taking over the handoff",
+                },
+            ],
+            language: "en",
+            orgView: false,
+            reviewer: alice,
+            summaryText: "",
+        });
+        expect(resolved.updates).toEqual([
+            expect.objectContaining({
+                kind: "assignee",
+                assigneePersonId: bobPrivate,
+                assigneeHint: null,
+                assigneeCheck: false,
+            }),
+        ]);
+        const unresolved = await resolveTaskProposals({
+            source: "riffado",
+            items: [],
+            updates: [
+                {
+                    ref: "T1",
+                    kind: "assignee",
+                    due: null,
+                    assignee: "Dana Unknown",
+                    quote: null,
+                },
+            ],
+            refs,
+            ownerUserId: ALICE,
+            transcriptionId: null,
+            turns: null,
+            language: "en",
+            orgView: false,
+            reviewer: alice,
+            summaryText: "",
+        });
+        expect(unresolved.updates).toEqual([
+            expect.objectContaining({
+                assigneePersonId: null,
+                assigneeHint: "Dana Unknown",
+                assigneeCheck: false,
+            }),
+        ]);
+
+        await summarize(LATER, [], { updates: resolved.updates });
+        const [handoff] = (await review(alice, LATER)).updates;
+        if (!handoff) throw new Error("missing reassignment proposal");
+        expect(handoff).toMatchObject({
+            kind: "assignee",
+            proposedAssignee: { personId: bobPrivate, name: "Bob" },
+            ticked: false,
+        });
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            handoff.id,
+            true,
+            handoff.version,
+        );
+        await acceptReview(alice, LATER);
+        const [stored] = await db()
+            .select({
+                assigneePersonId: recordingTasks.assigneePersonId,
+                effectiveAt: recordingTasks.assigneeEffectiveAt,
+            })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, task.id));
+        expect(stored).toEqual({
+            assigneePersonId: bobPrivate,
+            effectiveAt: new Date("2026-10-08T10:00:00.000Z"),
+        });
+    });
+
+    it("[C] settles older drop and assignee statements while later statements win", async () => {
+        const earlierItem = "rec-earlier-stage-4b";
+        await addRecording(earlierItem, "2026-10-07T10:00:00Z");
+        const dropTask = await addTask(alice, REC, {
+            text: "Drop in chronological order",
+            status: "open",
+        });
+        const assigneeTask = await addTask(alice, REC, {
+            text: "Assign in chronological order",
+            status: "open",
+        });
+        await db()
+            .update(recordingTasks)
+            .set({
+                statusEffectiveAt: new Date("2026-10-01T00:00:00.000Z"),
+                assigneeEffectiveAt: new Date("2026-10-01T00:00:00.000Z"),
+            })
+            .where(inArray(recordingTasks.id, [dropTask.id, assigneeTask.id]));
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: dropTask.id,
+                    kind: "drop",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "later cancellation",
+                    evidenceStartMs: null,
+                },
+                {
+                    taskId: assigneeTask.id,
+                    kind: "assignee",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: bobPrivate,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "later handoff",
+                    evidenceStartMs: null,
+                },
+            ],
+        });
+        for (const update of (await review(alice, LATER)).updates) {
+            await tickUpdateProposal(
+                alice,
+                LATER,
+                update.id,
+                true,
+                update.version,
+            );
+        }
+        await acceptReview(alice, LATER);
+        await summarize(earlierItem, [], {
+            updates: [
+                {
+                    taskId: dropTask.id,
+                    kind: "drop",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "older cancellation",
+                    evidenceStartMs: null,
+                },
+                {
+                    taskId: assigneeTask.id,
+                    kind: "assignee",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: "Dana Unknown",
+                    assigneeCheck: false,
+                    quote: "older handoff",
+                    evidenceStartMs: null,
+                },
+            ],
+        });
+        expect((await review(alice, earlierItem)).updates).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ kind: "drop", earlierMention: true }),
+                expect.objectContaining({
+                    kind: "assignee",
+                    earlierMention: true,
+                }),
+            ]),
+        );
+        const rows = await db()
+            .select({
+                id: recordingTasks.id,
+                status: recordingTasks.status,
+                assigneePersonId: recordingTasks.assigneePersonId,
+            })
+            .from(recordingTasks)
+            .where(inArray(recordingTasks.id, [dropTask.id, assigneeTask.id]));
+        expect(rows).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: dropTask.id, status: "dropped" }),
+                expect.objectContaining({
+                    id: assigneeTask.id,
+                    assigneePersonId: bobPrivate,
+                }),
+            ]),
+        );
+    });
+
+    it("[D] treats drop and reassignment as edit rights and re-checks routed apply", async () => {
+        await share(REC);
+        const task = await addTask(alice, REC, {
+            text: "Owner-only edit",
+            assigneePersonId: bobOrg,
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "assignee",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: bobPrivate,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "Bob is taking this over",
+                    evidenceStartMs: null,
+                },
+            ],
+        });
+        const [handoff] = (await review(alice, LATER)).updates;
+        if (!handoff) throw new Error("missing private reassignment proposal");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            handoff.id,
+            true,
+            handoff.version,
+        );
+        await acceptReview(alice, LATER);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    routedTo: taskUpdateProposals.routedTo,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, handoff.id)),
+        ).toEqual([{ state: "awaiting_share", routedTo: null }]);
+        expect((await review(alice, REC)).tasks).toContainEqual(
+            expect.objectContaining({
+                id: task.id,
+                assignee: expect.objectContaining({ personId: bobOrg }),
+            }),
+        );
+
+        await share(LATER);
+        expect(
+            await db()
+                .select({
+                    state: taskUpdateProposals.state,
+                    routedTo: taskUpdateProposals.routedTo,
+                    proposedAssigneePersonId:
+                        taskUpdateProposals.proposedAssigneePersonId,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.id, handoff.id)),
+        ).toEqual([
+            {
+                state: "awaiting_target_review",
+                routedTo: [ALICE],
+                proposedAssigneePersonId: bobOrg,
+            },
+        ]);
+        expect(
+            (await listRoutedTaskProposals(org)).map((row) => row.id),
+        ).toContain(handoff.id);
+
+        const [drop] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: task.id,
+                itemId: LATER,
+                userId: ALICE,
+                kind: "drop",
+                state: "awaiting_target_review",
+                routedTo: [BOB],
+                version: task.version,
+            })
+            .returning({ id: taskUpdateProposals.id });
+        expect(
+            await applyRoutedTaskProposal(bob, LATER, drop?.id ?? ""),
+        ).toEqual({ state: "obsolete", obsoleteReason: "rights_lost" });
+    });
+
+    it("[F] refuses selected completion and drop alternatives for one task", async () => {
+        const task = await addTask(alice, REC, {
+            text: "One outcome only",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            matches: [
+                match(task.id, {
+                    quote: "this is the same task",
+                    ticked: true,
+                }),
+            ],
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "done",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "done",
+                    evidenceStartMs: null,
+                },
+                {
+                    taskId: task.id,
+                    kind: "drop",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "cancelled",
+                    evidenceStartMs: null,
+                },
+            ],
+        });
+        const conflictReview = await review(alice, LATER);
+        expect(conflictReview.matches).toEqual([
+            expect.objectContaining({
+                candidate: expect.objectContaining({ id: task.id }),
+                ticked: true,
+            }),
+        ]);
+        expect(conflictReview.updates.map((update) => update.kind)).toEqual([
+            "done",
+            "drop",
+        ]);
+        for (const update of conflictReview.updates) {
+            await tickUpdateProposal(
+                alice,
+                LATER,
+                update.id,
+                true,
+                update.version,
+            );
+        }
+        await expect(acceptReview(alice, LATER)).rejects.toMatchObject({
+            statusCode: 400,
+            message: expect.stringMatching(/completion.*no longer needed/i),
+        });
+    });
+
+    it("[G] archives the new kinds and proposed assignee", async () => {
+        const task = await addTask(alice, REC, {
+            text: "Archive proposal fields",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            updates: [
+                {
+                    taskId: task.id,
+                    kind: "drop",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: null,
+                    assigneeHint: null,
+                    assigneeCheck: false,
+                    quote: "cancel this",
+                    evidenceStartMs: null,
+                },
+                {
+                    taskId: task.id,
+                    kind: "assignee",
+                    dueDate: null,
+                    duePhrase: null,
+                    assigneePersonId: bobPrivate,
+                    assigneeHint: null,
+                    assigneeCheck: true,
+                    quote: "Bob took this",
+                    evidenceStartMs: null,
+                },
+            ],
+        });
+        const archived = await taskUpdatesForArchive(
+            { kind: "personal", userId: ALICE },
+            [LATER],
+            new Set([task.id]),
+        );
+        expect(archived.get(LATER)).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ kind: "drop" }),
+                expect.objectContaining({
+                    kind: "assignee",
+                    proposedAssignee: {
+                        personId: bobPrivate,
+                        name: "Bob",
+                    },
+                    proposedAssigneeCheck: true,
+                }),
+            ]),
+        );
     });
 });
 

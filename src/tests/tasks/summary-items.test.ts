@@ -153,6 +153,53 @@ describe("readTaskUpdates", () => {
             { ref: "T1", kind: "done", due: null, quote: "hotovo" },
         ]);
     });
+
+    it("[A, B] reads drop and reassignment outcomes with their evidence", () => {
+        expect(
+            readTaskUpdates([
+                {
+                    ref: "T1",
+                    kind: "drop",
+                    quote: "we no longer need the launch deck",
+                },
+                {
+                    ref: "T2",
+                    kind: "assignee",
+                    assignee: "speaker_3",
+                    quote: "I handed the report to Dana",
+                },
+                {
+                    ref: "T3",
+                    kind: "assignee",
+                    assignee: "Dana Nováková",
+                },
+            ]),
+        ).toEqual([
+            {
+                ref: "T1",
+                kind: "drop",
+                due: null,
+                assignee: null,
+                quote: "we no longer need the launch deck",
+            },
+            {
+                ref: "T2",
+                kind: "assignee",
+                due: null,
+                assignee: "speaker_3",
+                quote: "I handed the report to Dana",
+            },
+            {
+                ref: "T3",
+                kind: "assignee",
+                due: null,
+                assignee: "Dana Nováková",
+                quote: null,
+            },
+        ]);
+        expect(shouldPreselectTaskOutcome("drop", 1, null)).toBe(false);
+        expect(shouldPreselectTaskOutcome("assignee", 1, null)).toBe(false);
+    });
 });
 
 describe("task outcome preselection", () => {
@@ -240,6 +287,25 @@ describe("parseSummaryPayload", () => {
             "done",
         ]);
     });
+
+    it("[E] removes every task outcome when the profile has Tasks off", () => {
+        const payload = parseSummaryPayload(
+            JSON.stringify({
+                summary: "s",
+                keyPoints: [],
+                actionItems: [{ text: "New task" }],
+                taskUpdates: [
+                    { ref: "T1", kind: "drop" },
+                    { ref: "T2", kind: "assignee", assignee: "Dana" },
+                ],
+            }),
+            { tasksEnabled: false },
+        );
+
+        expect(payload.actionItems).toEqual([]);
+        expect(payload.taskItems).toEqual([]);
+        expect(payload.taskUpdates).toEqual([]);
+    });
 });
 
 describe("dates", () => {
@@ -312,8 +378,40 @@ describe("buildTasksContext", () => {
         expect(text).toContain("- T2: Poslat podepsanou smlouvu");
         expect(text).toContain('"kind": "match"');
         expect(text).toContain('"kind": "due_phrase"');
+        expect(text).toContain('"kind": "drop"');
+        expect(text).toContain('"kind": "assignee"');
         expect(text).not.toContain("reopen");
         expect(SUMMARY_TASKS_DIRECTIVE).toContain('"candidates"');
+    });
+
+    it("adds the approved Czech drop and mail-assignee outcomes without changing candidate data", () => {
+        const text = buildTasksContext({
+            noun: "mail",
+            language: "cs-CZ",
+            recordedAt: new Date("2026-10-06T10:00:00Z"),
+            offsetMinutes: 0,
+            decided: [],
+            open: [
+                {
+                    ref: "T1",
+                    text: "Poslat podepsanou smlouvu",
+                    speaker: null,
+                    assigneeName: "Eva",
+                    dueDate: null,
+                },
+            ],
+        });
+
+        expect(text).toContain(
+            "Pokud je úkol výslovně zrušený, už není potřeba nebo ho nahradil jiný úkol",
+        );
+        expect(text).toContain('"kind": "assignee", "assignee": "pN" | string');
+        expect(text).toContain(
+            "Pokud je tato osoba účastníkem e-mailu, použijte její označení účastníka",
+        );
+        expect(text).toContain(
+            "- T1 (assigned to Eva): Poslat podepsanou smlouvu",
+        );
     });
 
     it("says nothing of tasks when there are none", () => {

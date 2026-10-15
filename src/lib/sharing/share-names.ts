@@ -3,6 +3,7 @@ import type { db } from "@/db";
 import {
     people,
     recordingTasks,
+    taskUpdateProposals,
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
@@ -131,6 +132,25 @@ export async function publishTaskAssigneesInTx(
                 sql`not ${orgOwnedCondition(people.userId)}`,
             ),
         );
+    const proposalRows = await tx
+        .selectDistinct({
+            personId: taskUpdateProposals.proposedAssigneePersonId,
+        })
+        .from(taskUpdateProposals)
+        .innerJoin(
+            people,
+            eq(people.id, taskUpdateProposals.proposedAssigneePersonId),
+        )
+        .where(
+            and(
+                eq(taskUpdateProposals.itemId, recordingId),
+                inArray(taskUpdateProposals.state, [
+                    "awaiting_source_review",
+                    "awaiting_share",
+                ]),
+                sql`not ${orgOwnedCondition(people.userId)}`,
+            ),
+        );
     // From now on its assignees see these tasks: news for their badge.
     await tx
         .update(recordingTasks)
@@ -142,9 +162,13 @@ export async function publishTaskAssigneesInTx(
                 sql`${recordingTasks.assigneePersonId} is not null`,
             ),
         );
-    const personIds = rows.flatMap((row) =>
-        row.personId ? [row.personId] : [],
-    );
+    const personIds = [
+        ...new Set(
+            [...rows, ...proposalRows].flatMap((row) =>
+                row.personId ? [row.personId] : [],
+            ),
+        ),
+    ];
     const scopes = new Set<string>();
     if (personIds.length > 0) {
         for (const scope of await scopesNamingInTx(tx, { personIds })) {
@@ -157,6 +181,15 @@ export async function publishTaskAssigneesInTx(
                     .update(recordingTasks)
                     .set({ assigneePersonId: promoted })
                     .where(eq(recordingTasks.assigneePersonId, personId));
+                await tx
+                    .update(taskUpdateProposals)
+                    .set({ proposedAssigneePersonId: promoted })
+                    .where(
+                        eq(
+                            taskUpdateProposals.proposedAssigneePersonId,
+                            personId,
+                        ),
+                    );
             }
         }
     }

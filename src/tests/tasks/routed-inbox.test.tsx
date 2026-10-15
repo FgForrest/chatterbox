@@ -28,6 +28,10 @@ const dueProposal = {
     taskText: "Send the contract",
     dueDate: "2026-10-29",
     duePhrase: null,
+    currentAssigneeName: "Ada",
+    proposedAssignee: null,
+    proposedAssigneeHint: null,
+    proposedAssigneeCheck: false,
     quote: "Move it to next Thursday",
     evidenceStartMs: null,
     evidenceText: { segmentIndex: 1, charStart: 4, charEnd: 28 },
@@ -98,6 +102,37 @@ describe("routed proposals inbox", () => {
                 expect.objectContaining({ method: "PATCH" }),
             ),
         );
+    });
+
+    it("[H] renders routed drop and reassignment rows", async () => {
+        const fetchMock = vi.fn().mockResolvedValueOnce(
+            Response.json({
+                proposals: [
+                    {
+                        ...dueProposal,
+                        id: "routed-drop",
+                        kind: "drop",
+                        dueDate: null,
+                    },
+                    {
+                        ...dueProposal,
+                        id: "routed-assignee",
+                        kind: "assignee",
+                        dueDate: null,
+                        proposedAssignee: {
+                            personId: "person-2",
+                            name: "Dana",
+                        },
+                    },
+                ],
+            }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        render(<RoutedProposalsInbox />);
+
+        expect(await screen.findByText("No longer needed")).toBeTruthy();
+        expect(screen.getByText("Handed to someone else")).toBeTruthy();
+        expect(screen.getByText("Ada → Dana")).toBeTruthy();
     });
 
     it("shows the routed-proposal count in the Tasks navigation badge", async () => {

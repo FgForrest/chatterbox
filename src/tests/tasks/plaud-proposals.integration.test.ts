@@ -172,7 +172,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
             });
     }
 
-    it("writes unmatched proposals and replaces only untouched ones", async () => {
+    it("[E] writes only new Plaud tasks, never drop or assignee updates", async () => {
         const firstItems = ["Keep the signed decision", "Draft the report"];
         await storePlaudSummary(firstItems);
         const firstFingerprint = plaudActionItemsFingerprint(firstItems);

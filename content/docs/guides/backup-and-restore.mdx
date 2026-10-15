@@ -32,7 +32,8 @@ noted in the manifest and skipped, so you still get everything else.
 **Tasks** come along per recording: `tasks.json` holds the accepted
 tasks and the proposals still waiting for review (with whether each is
 ticked), and `task-updates.json` the follow-ups heard on that recording
-("mark done", "move the due date") for tasks in the same archive. People
+("mark done", "no longer needed", "move the due date", "handed to someone
+else") for tasks in the same archive. People
 the tasks are assigned to are listed in `knowledge/people.json`. A task
 follows its recording, not its assignee: a task a colleague assigned to
 you on their shared recording is in the Organization's backup, not yours.
@@ -58,6 +59,8 @@ Archive format **2.3** also preserves the task's evidence and decisions:
   `version` and `updatedAt`. Mail keeps the same rows in `mail.json` under
   `taskUpdates`. System-settled earlier statements have `state: "obsolete"`,
   `obsoleteReason: "earlier_statement"` and no deciding user.
+  Reassignment rows also carry `proposedAssignee`,
+  `proposedAssigneeHint` and `proposedAssigneeCheck`.
 
 A personal backup contains the owner's home tasks and mentions on the
 owner's own items. Mentions on another owner's item are reference-only. The

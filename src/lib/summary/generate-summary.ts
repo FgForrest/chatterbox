@@ -305,6 +305,7 @@ export async function generateSummaryForRecording(
         ? await loadTasksPromptContext({
               recording,
               transcriptionId: transcription.id,
+              language: transcription.detectedLanguage,
               orgView,
               reviewer: await taskViewerById(
                   orgView ? ctx.settingsUserId : ctx.ownerUserId,

@@ -120,6 +120,9 @@ export interface TaskUpdateView {
     kind: TaskUpdateProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
+    proposedAssignee: { personId: string; name: string } | null;
+    proposedAssigneeHint: string | null;
+    proposedAssigneeCheck: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceText: {
@@ -408,6 +411,7 @@ export async function listRecordingTasks(
 }
 
 const matchCandidateHome = alias(chatterItems, "match_candidate_home");
+const proposedUpdateAssignee = alias(people, "proposed_update_assignee");
 
 function evidenceKey(evidence: {
     quote: string | null;
@@ -547,6 +551,11 @@ async function listUpdateProposals(
             kind: taskUpdateProposals.kind,
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
+            proposedAssigneePersonId:
+                taskUpdateProposals.proposedAssigneePersonId,
+            proposedAssigneeName: proposedUpdateAssignee.displayName,
+            proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+            proposedAssigneeCheck: taskUpdateProposals.proposedAssigneeCheck,
             quote: taskUpdateProposals.quote,
             evidenceStartMs: taskUpdateProposals.evidenceStartMs,
             evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
@@ -566,6 +575,7 @@ async function listUpdateProposals(
             taskStatus: recordingTasks.status,
             taskStatusEffectiveAt: recordingTasks.statusEffectiveAt,
             taskDueEffectiveAt: recordingTasks.dueEffectiveAt,
+            taskAssigneeEffectiveAt: recordingTasks.assigneeEffectiveAt,
             recordingTitle: chatterItems.title,
             assigneeName: people.displayName,
         })
@@ -576,6 +586,13 @@ async function listUpdateProposals(
         )
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
         .leftJoin(people, assigneeJoin())
+        .leftJoin(
+            proposedUpdateAssignee,
+            eq(
+                proposedUpdateAssignee.id,
+                taskUpdateProposals.proposedAssigneePersonId,
+            ),
+        )
         .where(
             and(
                 eq(taskUpdateProposals.itemId, recordingId),
@@ -636,15 +653,26 @@ async function listUpdateProposals(
                 statementAt.get(row.taskId) ??
                     source?.occurredAt ??
                     new Date(0),
-                row.kind === "done"
+                row.kind === "done" || row.kind === "drop"
                     ? row.taskStatusEffectiveAt
-                    : row.taskDueEffectiveAt,
+                    : row.kind === "assignee"
+                      ? row.taskAssigneeEffectiveAt
+                      : row.taskDueEffectiveAt,
             );
         return {
             id: row.id,
             kind: row.kind,
             dueDate: row.dueDate,
             duePhrase: decryptOptional(row.duePhrase),
+            proposedAssignee:
+                row.proposedAssigneePersonId && row.proposedAssigneeName
+                    ? {
+                          personId: row.proposedAssigneePersonId,
+                          name: decryptText(row.proposedAssigneeName),
+                      }
+                    : null,
+            proposedAssigneeHint: decryptOptional(row.proposedAssigneeHint),
+            proposedAssigneeCheck: row.proposedAssigneeCheck,
             quote: decryptOptional(row.quote),
             evidenceStartMs: row.evidenceStartMs,
             evidenceText:
@@ -1744,6 +1772,11 @@ export async function acceptReview(
                 kind: taskUpdateProposals.kind,
                 dueDate: taskUpdateProposals.dueDate,
                 duePhrase: taskUpdateProposals.duePhrase,
+                proposedAssigneePersonId:
+                    taskUpdateProposals.proposedAssigneePersonId,
+                proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+                proposedAssigneeCheck:
+                    taskUpdateProposals.proposedAssigneeCheck,
                 ticked: taskUpdateProposals.ticked,
                 version: taskUpdateProposals.version,
                 state: taskUpdateProposals.state,
@@ -1819,6 +1852,29 @@ export async function acceptReview(
                 ErrorCode.CONFLICT,
                 "The proposals changed meanwhile; review them again",
                 409,
+            );
+        }
+        const selectedStatusKinds = new Map<string, Set<string>>();
+        for (const update of updates) {
+            if (
+                !update.ticked ||
+                (update.kind !== "done" && update.kind !== "drop")
+            ) {
+                continue;
+            }
+            const kinds = selectedStatusKinds.get(update.taskId) ?? new Set();
+            kinds.add(update.kind);
+            selectedStatusKinds.set(update.taskId, kinds);
+        }
+        if (
+            [...selectedStatusKinds.values()].some(
+                (kinds) => kinds.has("done") && kinds.has("drop"),
+            )
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Choose either completion or no longer needed for the same task, not both",
+                400,
             );
         }
         const now = new Date();

@@ -33,9 +33,11 @@ export interface SummaryTaskItem {
 export interface SummaryTaskUpdate {
     /** The `T<n>` reference of an open task the prompt listed. */
     ref: string;
-    kind: "match" | "done" | "due" | "due_phrase";
+    kind: "match" | "done" | "drop" | "due" | "due_phrase" | "assignee";
     /** The new deadline, for `due` or `due_phrase`. */
     due: SummaryTaskDue | null;
+    /** The new assignee's speaker/participant reference or exact heard name. */
+    assignee?: string | null;
     quote: string | null;
 }
 
@@ -187,8 +189,10 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
             !ref ||
             (kind !== "match" &&
                 kind !== "done" &&
+                kind !== "drop" &&
                 kind !== "due" &&
-                kind !== "due_phrase")
+                kind !== "due_phrase" &&
+                kind !== "assignee")
         ) {
             continue;
         }
@@ -198,6 +202,12 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
                 : null;
         if (kind === "due" && !due?.date) continue;
         if (kind === "due_phrase" && (!due || due.date !== null)) continue;
+        const assignee =
+            kind === "assignee"
+                ? (speakerLabelOf(record.assignee) ??
+                  cleanString(record.assignee, MAX_FIELD))
+                : null;
+        if (kind === "assignee" && !assignee) continue;
         const key = `${ref}\u0000${kind}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -205,6 +215,7 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
             ref,
             kind,
             due,
+            ...(kind === "drop" || kind === "assignee" ? { assignee } : {}),
             quote: cleanString(record.quote, MAX_FIELD),
         });
     }

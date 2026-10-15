@@ -1,6 +1,14 @@
 "use client";
 
-import { Combine, ListChecks, Loader2, Plus, X } from "lucide-react";
+import {
+    Ban,
+    Combine,
+    ListChecks,
+    Loader2,
+    Plus,
+    UserRoundPen,
+    X,
+} from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { HelpLink } from "@/components/help/help-button";
@@ -747,6 +755,66 @@ function UpdateRow({
                             {i18n("Needs confirmation")}
                         </span>
                         {update.task.text}
+                    </span>
+                </label>
+            ) : update.kind === "drop" ? (
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={update.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Confirm task is no longer needed")}
+                    />
+                    <span>
+                        <span className="flex items-center gap-1 font-medium">
+                            <Ban className="size-3.5" />
+                            {i18n("No longer needed")}
+                        </span>
+                        {update.task.text}
+                    </span>
+                </label>
+            ) : update.kind === "assignee" ? (
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={update.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Confirm new assignee")}
+                    />
+                    <span>
+                        <span className="flex items-center gap-1 font-medium">
+                            <UserRoundPen className="size-3.5" />
+                            {i18n("Handed to someone else")}
+                        </span>
+                        <span>{update.task.text}</span>
+                        <span
+                            className={cn(
+                                "block text-xs text-muted-foreground",
+                                (update.proposedAssigneeCheck ||
+                                    update.proposedAssigneeHint) &&
+                                    "text-amber-700 dark:text-amber-400",
+                            )}
+                            title={
+                                update.proposedAssigneeHint
+                                    ? i18n(
+                                          "Heard {name}, who is not in Almanac.",
+                                          {
+                                              name: update.proposedAssigneeHint,
+                                          },
+                                      )
+                                    : update.proposedAssigneeCheck
+                                      ? i18n("Check this assignment")
+                                      : undefined
+                            }
+                        >
+                            {update.task.assigneeName ?? i18n("Unassigned")} →{" "}
+                            {update.proposedAssignee?.name ??
+                                (update.proposedAssigneeHint
+                                    ? `${update.proposedAssigneeHint}?`
+                                    : i18n("Unassigned"))}
+                        </span>
                     </span>
                 </label>
             ) : (

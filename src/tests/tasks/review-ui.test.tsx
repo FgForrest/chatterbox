@@ -89,6 +89,9 @@ function update(overrides: Partial<TaskUpdateView> = {}): TaskUpdateView {
         kind: "due",
         dueDate: "2026-10-29",
         duePhrase: null,
+        proposedAssignee: null,
+        proposedAssigneeHint: null,
+        proposedAssigneeCheck: false,
         quote: "Move it to next Thursday",
         evidenceStartMs: null,
         evidenceText: { segmentIndex: 2, charStart: 8, charEnd: 31 },
@@ -249,6 +252,40 @@ describe("task review rows", () => {
         expect(screen.getByText("Needs confirmation")).toBeTruthy();
         expect(
             screen.getByRole("checkbox", { name: "Confirm task completion" }),
+        ).toHaveProperty("checked", false);
+    });
+
+    it("[H] labels drop and reassignment, shows current to new, and leaves both unselected", () => {
+        openReview({
+            updates: [
+                update({
+                    id: "drop-1",
+                    kind: "drop",
+                    dueDate: null,
+                    quote: "We no longer need it",
+                }),
+                update({
+                    id: "assignee-1",
+                    kind: "assignee",
+                    dueDate: null,
+                    proposedAssignee: { personId: "person-2", name: "Dana" },
+                    proposedAssigneeCheck: true,
+                    quote: "Dana took this over",
+                }),
+            ],
+        });
+
+        expect(screen.getByText("No longer needed")).toBeTruthy();
+        expect(screen.getByText("Handed to someone else")).toBeTruthy();
+        expect(screen.getByText("Ada → Dana")).toBeTruthy();
+        expect(screen.getByTitle("Check this assignment")).toBeTruthy();
+        expect(
+            screen.getByRole("checkbox", {
+                name: "Confirm task is no longer needed",
+            }),
+        ).toHaveProperty("checked", false);
+        expect(
+            screen.getByRole("checkbox", { name: "Confirm new assignee" }),
         ).toHaveProperty("checked", false);
     });
 

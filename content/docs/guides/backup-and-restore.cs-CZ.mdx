@@ -34,7 +34,8 @@ zůstávají zachovány.
 **Úkoly** jsou zahrnuty zvlášť pro každou nahrávku: `tasks.json` obsahuje akceptované
 úkoly a návrhy čekající na posouzení (včetně jejich stavu),
 zatímco `task-updates.json` mapuje následné akce u dané nahrávky
-("označit jako splněné", "posunout termín splnění") pro úkoly
+("označit jako splněné", "už není potřeba", "posunout termín splnění",
+"předat někomu jinému") pro úkoly
 ve stejném archivu. Osoby, kterým jsou úkoly přiřazeny, jsou uvedeny v `knowledge/people.json`. Úkol
 následuje svou nahrávku, nikoliv osobu: úkol, který Vám kolega přiřadil
 na své sdílené nahrávce, je v záloze organizace, ne ve Vaší.
@@ -62,6 +63,8 @@ Formát archivu **2.3** uchovává také důkazy a rozhodnutí k úkolům:
   `taskUpdates`. Systémem vypořádaná dřívější tvrzení mají
   `state: "obsolete"`, `obsoleteReason: "earlier_statement"` a nemají
   rozhodujícího uživatele.
+  Řádky se změnou řešitele obsahují také `proposedAssignee`,
+  `proposedAssigneeHint` a `proposedAssigneeCheck`.
 
 Osobní záloha obsahuje domovské úkoly vlastníka a zmínky na jeho vlastních
 položkách. Zmínky na položce jiného vlastníka jsou pouze referencemi. Záloha

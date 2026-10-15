@@ -47,6 +47,10 @@ export interface RoutedTaskProposalView {
     taskText: string;
     dueDate: string | null;
     duePhrase: string | null;
+    currentAssigneeName: string | null;
+    proposedAssignee: { personId: string; name: string } | null;
+    proposedAssigneeHint: string | null;
+    proposedAssigneeCheck: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceText: {
@@ -74,6 +78,9 @@ interface SourceUpdate {
     kind: ProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
+    proposedAssigneePersonId: string | null;
+    proposedAssigneeHint: string | null;
+    proposedAssigneeCheck: boolean;
     ticked: boolean;
     version: number;
 }
@@ -86,6 +93,7 @@ interface TargetRow {
     version: number;
     statusEffectiveAt: Date | null;
     dueEffectiveAt: Date | null;
+    assigneeEffectiveAt: Date | null;
     shared: boolean;
     visible: boolean;
     canEdit: boolean;
@@ -127,6 +135,7 @@ async function targetFor(
             version: recordingTasks.version,
             statusEffectiveAt: recordingTasks.statusEffectiveAt,
             dueEffectiveAt: recordingTasks.dueEffectiveAt,
+            assigneeEffectiveAt: recordingTasks.assigneeEffectiveAt,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
             visible: sql<boolean>`${and(
                 isNull(chatterItems.deletedAt),
@@ -197,35 +206,57 @@ async function setProposalState(
 
 async function applyToTarget(
     tx: Tx,
-    proposal: Pick<SourceUpdate, "kind" | "dueDate" | "duePhrase">,
+    proposal: Pick<
+        SourceUpdate,
+        | "kind"
+        | "dueDate"
+        | "duePhrase"
+        | "proposedAssigneePersonId"
+        | "proposedAssigneeHint"
+        | "proposedAssigneeCheck"
+    >,
     target: TargetRow,
     actorUserId: string,
     effectiveAt: Date,
 ): Promise<void> {
     if (proposal.kind === "attach_merge") return;
     const now = new Date();
+    const changes =
+        proposal.kind === "done" || proposal.kind === "drop"
+            ? {
+                  status:
+                      proposal.kind === "done"
+                          ? ("done" as const)
+                          : ("dropped" as const),
+                  statusChangedAt: now,
+                  statusChangedByUserId: actorUserId,
+                  statusEffectiveAt: effectiveAt,
+                  updatedAt: now,
+                  updatedByUserId: actorUserId,
+                  version: sql`${recordingTasks.version} + 1`,
+              }
+            : proposal.kind === "assignee"
+              ? {
+                    assigneePersonId: proposal.proposedAssigneePersonId,
+                    assigneeHint: proposal.proposedAssigneeHint,
+                    assigneeCheck: proposal.proposedAssigneeCheck,
+                    assignedAt: proposal.proposedAssigneePersonId ? now : null,
+                    assigneeEffectiveAt: effectiveAt,
+                    updatedAt: now,
+                    updatedByUserId: actorUserId,
+                    version: sql`${recordingTasks.version} + 1`,
+                }
+              : {
+                    dueDate: proposal.dueDate,
+                    duePhrase: proposal.duePhrase,
+                    dueEffectiveAt: effectiveAt,
+                    updatedAt: now,
+                    updatedByUserId: actorUserId,
+                    version: sql`${recordingTasks.version} + 1`,
+                };
     await tx
         .update(recordingTasks)
-        .set(
-            proposal.kind === "done"
-                ? {
-                      status: "done",
-                      statusChangedAt: now,
-                      statusChangedByUserId: actorUserId,
-                      statusEffectiveAt: effectiveAt,
-                      updatedAt: now,
-                      updatedByUserId: actorUserId,
-                      version: sql`${recordingTasks.version} + 1`,
-                  }
-                : {
-                      dueDate: proposal.dueDate,
-                      duePhrase: proposal.duePhrase,
-                      dueEffectiveAt: effectiveAt,
-                      updatedAt: now,
-                      updatedByUserId: actorUserId,
-                      version: sql`${recordingTasks.version} + 1`,
-                  },
-        )
+        .set(changes)
         .where(eq(recordingTasks.id, target.taskId));
 }
 
@@ -237,9 +268,11 @@ function chronologyAllows(
     if (proposal.kind === "attach_merge") return true;
     return fieldProposalIsLater(
         statementAt,
-        proposal.kind === "done"
+        proposal.kind === "done" || proposal.kind === "drop"
             ? target.statusEffectiveAt
-            : target.dueEffectiveAt,
+            : proposal.kind === "assignee"
+              ? target.assigneeEffectiveAt
+              : target.dueEffectiveAt,
     );
 }
 
@@ -595,6 +628,8 @@ export async function routeAwaitingShareTaskProposalsInTx(
 
 const routedSourceItem = alias(chatterItems, "routed_source_item");
 const routedActor = alias(users, "routed_actor");
+const routedCurrentAssignee = alias(people, "routed_current_assignee");
+const routedProposedAssignee = alias(people, "routed_proposed_assignee");
 
 /** Lists pending target-review changes and attachment notices for this viewer. */
 export async function listRoutedTaskProposals(
@@ -609,6 +644,12 @@ export async function listRoutedTaskProposals(
             taskText: recordingTasks.text,
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
+            currentAssigneeName: routedCurrentAssignee.displayName,
+            proposedAssigneePersonId:
+                taskUpdateProposals.proposedAssigneePersonId,
+            proposedAssigneeName: routedProposedAssignee.displayName,
+            proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+            proposedAssigneeCheck: taskUpdateProposals.proposedAssigneeCheck,
             quote: taskUpdateProposals.quote,
             evidenceStartMs: taskUpdateProposals.evidenceStartMs,
             evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
@@ -627,6 +668,17 @@ export async function listRoutedTaskProposals(
             eq(recordingTasks.id, taskUpdateProposals.taskId),
         )
         .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .leftJoin(
+            routedCurrentAssignee,
+            eq(routedCurrentAssignee.id, recordingTasks.assigneePersonId),
+        )
+        .leftJoin(
+            routedProposedAssignee,
+            eq(
+                routedProposedAssignee.id,
+                taskUpdateProposals.proposedAssigneePersonId,
+            ),
+        )
         .innerJoin(
             routedSourceItem,
             and(
@@ -652,6 +704,19 @@ export async function listRoutedTaskProposals(
         ...row,
         taskText: decryptText(row.taskText),
         duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
+        currentAssigneeName: row.currentAssigneeName
+            ? decryptText(row.currentAssigneeName)
+            : null,
+        proposedAssignee:
+            row.proposedAssigneePersonId && row.proposedAssigneeName
+                ? {
+                      personId: row.proposedAssigneePersonId,
+                      name: decryptText(row.proposedAssigneeName),
+                  }
+                : null,
+        proposedAssigneeHint: row.proposedAssigneeHint
+            ? decryptText(row.proposedAssigneeHint)
+            : null,
         quote: row.quote ? decryptText(row.quote) : null,
         evidenceText:
             row.evidenceSegmentIndex !== null &&
@@ -747,6 +812,11 @@ export async function applyRoutedTaskProposal(
                 kind: taskUpdateProposals.kind,
                 dueDate: taskUpdateProposals.dueDate,
                 duePhrase: taskUpdateProposals.duePhrase,
+                proposedAssigneePersonId:
+                    taskUpdateProposals.proposedAssigneePersonId,
+                proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+                proposedAssigneeCheck:
+                    taskUpdateProposals.proposedAssigneeCheck,
                 quote: taskUpdateProposals.quote,
                 evidenceStartMs: taskUpdateProposals.evidenceStartMs,
                 evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,

@@ -85,6 +85,7 @@ import type {
 import {
     resolveOfferedTaskReference,
     shouldPreselectTaskOutcome,
+    speakerLabelOf,
 } from "@/lib/tasks/summary-items";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
@@ -705,6 +706,7 @@ export async function loadTasksPromptContext({
     orgView,
     reviewer,
     noun,
+    language = null,
     participants = [],
     itemText = "",
 }: {
@@ -714,6 +716,7 @@ export async function loadTasksPromptContext({
     orgView: boolean;
     reviewer: TaskViewer;
     noun?: "recording" | "mail";
+    language?: string | null;
     participants?: readonly Pick<
         ItemContent["participants"][number],
         "ref" | "personId"
@@ -786,6 +789,9 @@ export async function loadTasksPromptContext({
             speaker: row.assigneePersonId
                 ? (labelOf.get(row.assigneePersonId) ?? null)
                 : null,
+            assigneeName: row.assigneeName
+                ? decryptText(row.assigneeName)
+                : null,
             dueDate: row.dueDate,
         });
     });
@@ -798,6 +804,7 @@ export async function loadTasksPromptContext({
                 recording.timezone,
                 recording.zonemins,
             ),
+            language,
             decided: decidedRows.map((row) => decryptText(row.text)),
             open,
         }),
@@ -861,15 +868,29 @@ export async function resolveTaskProposals({
     const nameOf = (label: string) =>
         speakers.get(speakerAnchorId(label))?.name ?? null;
     const offset = inferSummarySpeakerNumberOffset(
-        [summaryText, ...items.map((item) => item.text)].join("\n"),
+        [
+            summaryText,
+            ...items.map((item) => item.text),
+            ...updates.flatMap((update) =>
+                update.kind === "assignee" && update.assignee
+                    ? [update.assignee]
+                    : [],
+            ),
+        ].join("\n"),
         (turns ?? []).map((turn) => turn.speaker),
     );
 
-    const needsLookup = items.some(
-        (item) =>
-            (!item.speaker && item.assignee) ||
-            (mail && item.speaker && participantName(item.speaker)),
-    );
+    const needsLookup =
+        items.some(
+            (item) =>
+                (!item.speaker && item.assignee) ||
+                (mail && item.speaker && participantName(item.speaker)),
+        ) ||
+        updates.some((update) => {
+            if (update.kind !== "assignee" || !update.assignee) return false;
+            const ref = speakerLabelOf(update.assignee);
+            return !ref || Boolean(mail && participantName(ref));
+        });
     const view = needsLookup
         ? await knowledgeView({
               kind: "recording",
@@ -879,24 +900,22 @@ export async function resolveTaskProposals({
         : null;
 
     const tasks: ProposedTask[] = [];
-    for (const item of items) {
-        const text = projectSummarySpeakerReferencesForExport(
-            item.text,
-            nameOf,
-            offset,
-        ).trim();
-        if (!text) continue;
+    const resolveAssignee = (
+        speaker: string | null,
+        namedAssignee: string | null,
+    ): {
+        assigneePersonId: string | null;
+        assigneeHint: string | null;
+        assigneeCheck: boolean;
+    } => {
         let assigneePersonId: string | null = null;
         let assigneeHint: string | null = null;
         let assigneeCheck = false;
         const heard = mail
-            ? (item.assignee ??
-              (item.speaker ? participantName(item.speaker) : null))
-            : null;
-        const known =
-            mail && item.speaker ? participantOf(item.speaker) : undefined;
+            ? (namedAssignee ?? (speaker ? participantName(speaker) : null))
+            : namedAssignee;
+        const known = mail && speaker ? participantOf(speaker) : undefined;
         if (known?.personId) {
-            // The participant's address is the person's: no guess.
             assigneePersonId = known.personId;
         } else if (mail) {
             const person =
@@ -910,27 +929,37 @@ export async function resolveTaskProposals({
             } else {
                 assigneeHint = heard;
             }
-        } else if (item.speaker) {
-            const speaker = speakers.get(
-                speakerAnchorId(offsetSpeakerLabel(item.speaker, offset)),
+        } else if (speaker) {
+            const resolvedSpeaker = speakers.get(
+                speakerAnchorId(offsetSpeakerLabel(speaker, offset)),
             );
-            if (speaker) {
-                assigneePersonId = speaker.personId;
-                // The summary counted its speakers from 1: worth a look.
+            if (resolvedSpeaker) {
+                assigneePersonId = resolvedSpeaker.personId;
                 assigneeCheck = offset !== 0;
             }
-        } else if (item.assignee && view) {
-            const person = matchPerson(view, item.assignee, language);
+        } else if (namedAssignee && view) {
+            const person = matchPerson(view, namedAssignee, language);
             if (person) {
                 assigneePersonId = person.id;
-                assigneeCheck = heardIsFirstNameOnly(item.assignee, {
+                assigneeCheck = heardIsFirstNameOnly(namedAssignee, {
                     name: person.name,
                     aliases: person.aliases,
                 });
             } else {
-                assigneeHint = item.assignee;
+                assigneeHint = namedAssignee;
             }
         }
+        return { assigneePersonId, assigneeHint, assigneeCheck };
+    };
+    for (const item of items) {
+        const text = projectSummarySpeakerReferencesForExport(
+            item.text,
+            nameOf,
+            offset,
+        ).trim();
+        if (!text) continue;
+        const { assigneePersonId, assigneeHint, assigneeCheck } =
+            resolveAssignee(item.speaker, item.assignee);
         const candidateTaskIds = [
             ...new Set(
                 (item.candidates ?? []).flatMap((ref) => {
@@ -978,11 +1007,25 @@ export async function resolveTaskProposals({
             });
             continue;
         }
+        const assigneeRef =
+            update.kind === "assignee" ? speakerLabelOf(update.assignee) : null;
+        const proposedAssignee =
+            update.kind === "assignee"
+                ? resolveAssignee(
+                      assigneeRef,
+                      assigneeRef ? null : (update.assignee ?? null),
+                  )
+                : {
+                      assigneePersonId: null,
+                      assigneeHint: null,
+                      assigneeCheck: false,
+                  };
         proposedUpdates.push({
             taskId,
             kind: update.kind,
             dueDate: update.due?.date ?? null,
             duePhrase: update.due?.phrase ?? null,
+            ...proposedAssignee,
             quote: update.quote,
             ...located,
             ticked: false,

@@ -291,10 +291,19 @@ describeWithDatabase("task schema migration (PostgreSQL)", () => {
                 INSERT INTO task_update_proposals (
                     id, task_id, recording_id, user_id, kind
                 ) VALUES (
-                    'bad-kind', 'shared-task', 'shared-item', 'owner', 'drop'
+                    'bad-kind', 'shared-task', 'shared-item', 'owner', 'reopen'
                 )
             `),
         ).rejects.toThrow();
+        await expect(
+            db().execute(sql`
+                INSERT INTO task_update_proposals (
+                    id, task_id, recording_id, user_id, kind
+                ) VALUES
+                    ('drop-kind', 'shared-task', 'shared-item', 'owner', 'drop'),
+                    ('assignee-kind', 'shared-task', 'shared-item', 'owner', 'assignee')
+            `),
+        ).resolves.toBeDefined();
         await expect(
             db().execute(sql`
                 INSERT INTO task_update_proposals (

@@ -517,8 +517,10 @@ export type EvidenceProvenance = "quoted" | "unverified" | "unlocated";
 
 export type TaskUpdateProposalKind =
     | "done"
+    | "drop"
     | "due"
     | "due_phrase"
+    | "assignee"
     | "attach_merge";
 
 // The Chatter pile: one row per item of any kind, sharing its id with the
@@ -2962,8 +2964,8 @@ export const recordingTaskRejections = pgTable(
     }),
 );
 
-// What a later recording's summary heard about an open task: it was done,
-// or its deadline moved. Reviewed with that recording's task proposals.
+// What a later item's summary heard about an open task: its status, deadline
+// or assignee changed. Reviewed with that item's task proposals.
 export const taskUpdateProposals = pgTable(
     "task_update_proposals",
     {
@@ -2986,6 +2988,14 @@ export const taskUpdateProposals = pgTable(
         dueDate: date("due_date", { mode: "string" }),
         // Encrypted, as on `recording_tasks`.
         duePhrase: text("due_phrase"),
+        proposedAssigneePersonId: text(
+            "proposed_assignee_person_id",
+        ).references(() => people.id, { onDelete: "set null" }),
+        // Encrypted unresolved name, and whether a resolved name needs review.
+        proposedAssigneeHint: text("proposed_assignee_hint"),
+        proposedAssigneeCheck: boolean("proposed_assignee_check")
+            .notNull()
+            .default(false),
         quote: text("quote"),
         evidenceStartMs: integer("evidence_start_ms"),
         evidenceSegmentIndex: integer("evidence_segment_index"),
@@ -3034,9 +3044,12 @@ export const taskUpdateProposals = pgTable(
         decidedByIdx: index("task_update_proposals_decided_by_user_id_idx").on(
             table.decidedByUserId,
         ),
+        proposedAssigneeIdx: index(
+            "task_update_proposals_proposed_assignee_person_id_idx",
+        ).on(table.proposedAssigneePersonId),
         kindCheck: check(
             "task_update_proposals_kind_check",
-            sql`${table.kind} in ('done', 'due', 'due_phrase', 'attach_merge')`,
+            sql`${table.kind} in ('done', 'drop', 'due', 'due_phrase', 'assignee', 'attach_merge')`,
         ),
         stateCheck: check(
             "task_update_proposals_state_check",

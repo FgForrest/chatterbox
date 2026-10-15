@@ -1,6 +1,6 @@
 "use client";
 
-import { Inbox, Loader2 } from "lucide-react";
+import { Ban, Inbox, Loader2, UserRoundPen } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -103,32 +103,79 @@ export function RoutedProposalsInbox() {
                     const notice = row.kind === "attach_merge";
                     return (
                         <li key={row.id} className="space-y-2 py-3 text-sm">
-                            <p>
-                                {notice
-                                    ? i18n(
-                                          "{person} attached their task {task} from {item}",
-                                          {
-                                              person:
-                                                  row.attachedBy?.name ??
-                                                  i18n("Someone"),
-                                              task: row.taskText,
-                                              item: row.sourceItem.title,
-                                          },
-                                      )
-                                    : row.kind === "done"
-                                      ? i18n("Mark done: {task}", {
+                            <p className="flex items-start gap-1.5">
+                                {notice ? (
+                                    i18n(
+                                        "{person} attached their task {task} from {item}",
+                                        {
+                                            person:
+                                                row.attachedBy?.name ??
+                                                i18n("Someone"),
                                             task: row.taskText,
-                                        })
-                                      : i18n(
-                                            "Change the deadline for {task} to {due}",
-                                            {
-                                                task: row.taskText,
-                                                due:
-                                                    row.dueDate ??
-                                                    row.duePhrase ??
-                                                    i18n("No due date"),
-                                            },
-                                        )}
+                                            item: row.sourceItem.title,
+                                        },
+                                    )
+                                ) : row.kind === "done" ? (
+                                    i18n("Mark done: {task}", {
+                                        task: row.taskText,
+                                    })
+                                ) : row.kind === "drop" ? (
+                                    <>
+                                        <Ban className="mt-0.5 size-3.5 shrink-0" />
+                                        <span>
+                                            <span className="font-medium">
+                                                {i18n("No longer needed")}
+                                            </span>
+                                            : {row.taskText}
+                                        </span>
+                                    </>
+                                ) : row.kind === "assignee" ? (
+                                    <>
+                                        <UserRoundPen className="mt-0.5 size-3.5 shrink-0" />
+                                        <span>
+                                            <span className="font-medium">
+                                                {i18n("Handed to someone else")}
+                                            </span>
+                                            : {row.taskText}
+                                            <span
+                                                className="block text-xs text-muted-foreground"
+                                                title={
+                                                    row.proposedAssigneeHint
+                                                        ? i18n(
+                                                              "Heard {name}, who is not in Almanac.",
+                                                              {
+                                                                  name: row.proposedAssigneeHint,
+                                                              },
+                                                          )
+                                                        : row.proposedAssigneeCheck
+                                                          ? i18n(
+                                                                "Check this assignment",
+                                                            )
+                                                          : undefined
+                                                }
+                                            >
+                                                {row.currentAssigneeName ??
+                                                    i18n("Unassigned")}{" "}
+                                                →{" "}
+                                                {row.proposedAssignee?.name ??
+                                                    (row.proposedAssigneeHint
+                                                        ? `${row.proposedAssigneeHint}?`
+                                                        : i18n("Unassigned"))}
+                                            </span>
+                                        </span>
+                                    </>
+                                ) : (
+                                    i18n(
+                                        "Change the deadline for {task} to {due}",
+                                        {
+                                            task: row.taskText,
+                                            due:
+                                                row.dueDate ??
+                                                row.duePhrase ??
+                                                i18n("No due date"),
+                                        },
+                                    )
+                                )}
                             </p>
                             <TaskEvidenceLink
                                 evidence={{

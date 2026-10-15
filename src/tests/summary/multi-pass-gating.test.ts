@@ -446,7 +446,7 @@ describe("multi-pass gating", () => {
         );
     });
 
-    it("drops task output and task prompt context when Tasks are off", async () => {
+    it("[E] drops every task outcome and prompt context when Tasks are off", async () => {
         stage({ summaryMultiPass: false });
         tasksEnabled.current = false;
         plaudActionItems.current = ["Do not pass this hint"];
@@ -459,7 +459,12 @@ describe("multi-pass gating", () => {
                             keyPoints: ["k"],
                             actionItems: [{ text: "Ignored task" }],
                             taskUpdates: [
-                                { ref: "T1", kind: "done", quote: "done" },
+                                { ref: "T1", kind: "drop", quote: "cancelled" },
+                                {
+                                    ref: "T2",
+                                    kind: "assignee",
+                                    assignee: "Dana",
+                                },
                             ],
                         }),
                     },
@@ -481,7 +486,7 @@ describe("multi-pass gating", () => {
         expect(userPrompt).not.toContain("Plaud's action-item suggestions");
     });
 
-    it("removes task data and directives from a Tasks-off multi-pass merge", async () => {
+    it("[E] removes drop and assignee data from a Tasks-off multi-pass merge", async () => {
         stage({ summaryMultiPass: true, summaryMultiPassRounds: 2 });
         tasksEnabled.current = false;
         createMock.mockResolvedValue({
@@ -492,7 +497,14 @@ describe("multi-pass gating", () => {
                             summary: "s",
                             keyPoints: ["k"],
                             actionItems: [{ text: "Ignored task" }],
-                            taskUpdates: [{ ref: "T1", kind: "match" }],
+                            taskUpdates: [
+                                { ref: "T1", kind: "drop" },
+                                {
+                                    ref: "T2",
+                                    kind: "assignee",
+                                    assignee: "Dana",
+                                },
+                            ],
                         }),
                     },
                 },
