@@ -4,6 +4,7 @@ import {
     Check,
     Clipboard,
     Download,
+    ExternalLink,
     Plug,
     RefreshCw,
     Trash2,
@@ -20,7 +21,10 @@ import {
     browserRecorderExtensionClient,
     type RecorderExtensionState,
 } from "@/lib/recorder-extension/client";
-import { RECORDER_EXTENSION_ID } from "@/lib/recorder-extension/extension-id";
+import {
+    RECORDER_EXTENSION_ID,
+    RECORDER_EXTENSION_STORE_URL,
+} from "@/lib/recorder-extension/extension-id";
 
 type RecorderKey = {
     id: string;
@@ -79,6 +83,9 @@ export function RecorderSection() {
     const [busy, setBusy] = useState(false);
     const [manualKey, setManualKey] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
+    const [isCompatibleBrowser, setIsCompatibleBrowser] = useState<
+        boolean | null
+    >(null);
     const [rebindTargets, setRebindTargets] = useState<Record<string, string>>(
         {},
     );
@@ -118,6 +125,10 @@ export function RecorderSection() {
     }, [i18n]);
 
     useEffect(() => {
+        setIsCompatibleBrowser(
+            /\b(?:Chrome|Chromium|Edg|OPR)\//.test(navigator.userAgent) &&
+                !/Android|Mobile|iPhone|iPad|iPod/.test(navigator.userAgent),
+        );
         void detect();
         void loadStatus();
         const client = browserRecorderExtensionClient();
@@ -310,30 +321,53 @@ export function RecorderSection() {
             />
 
             <SettingsCard title={i18n("Browser extension")} icon={Plug}>
+                {isCompatibleBrowser && (
+                    <Button
+                        asChild
+                        variant={
+                            extension?.kind === "reachable" ||
+                            extension?.kind === "installed-unreachable"
+                                ? "outline"
+                                : "default"
+                        }
+                    >
+                        <a
+                            href={RECORDER_EXTENSION_STORE_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            <ExternalLink
+                                className="size-4"
+                                aria-hidden="true"
+                            />
+                            {extension?.kind === "reachable" ||
+                            extension?.kind === "installed-unreachable"
+                                ? i18n("View in Chrome Web Store")
+                                : i18n("Install from Chrome Web Store")}
+                        </a>
+                    </Button>
+                )}
+
+                {isCompatibleBrowser === false && (
+                    <p className="text-sm text-muted-foreground">
+                        {i18n(
+                            "To install the meeting recorder, open this page in desktop Chrome, Edge, Brave, or another Chromium-based browser.",
+                        )}
+                    </p>
+                )}
+
                 {extension === null && (
                     <p className="text-sm text-muted-foreground">
                         {i18n("Looking for the extension…")}
                     </p>
                 )}
 
-                {extension?.kind === "not-installed" && (
-                    <div className="space-y-3">
-                        <p className="text-sm">
-                            {i18n(
-                                "The Chatterbox Meeting Recorder extension is not installed in this browser.",
-                            )}
-                        </p>
-                        <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
-                            <li>
-                                {i18n("Install the extension: load the")}{" "}
-                                <code>extensions/recorder</code>{" "}
-                                {i18n("unpacked, or use the packaged build.")}
-                            </li>
-                            <li>
-                                {i18n("Come back here and click Re-check.")}
-                            </li>
-                        </ol>
-                    </div>
+                {isCompatibleBrowser && extension?.kind === "not-installed" && (
+                    <p className="text-sm">
+                        {i18n(
+                            "The Chatterbox Meeting Recorder extension is not installed in this browser.",
+                        )}
+                    </p>
                 )}
 
                 {extension?.kind === "installed-unreachable" && (
@@ -419,6 +453,35 @@ export function RecorderSection() {
                             </Button>
                         </div>
                     )}
+                {isCompatibleBrowser && (
+                    <div className="space-y-2 border-t pt-3">
+                        <h3 className="text-sm font-medium">
+                            {i18n("Quick setup")}
+                        </h3>
+                        <ol className="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+                            <li>
+                                {i18n(
+                                    "Install Chatterbox Meeting Recorder from the Chrome Web Store and pin it to your browser toolbar.",
+                                )}
+                            </li>
+                            <li>
+                                {i18n(
+                                    "Open the extension's options, review and accept the data-use disclosure, then allow microphone access.",
+                                )}
+                            </li>
+                            <li>
+                                {i18n(
+                                    "Return here and click Re-check. If the extension needs site access, open its toolbar icon and choose Connect to this site.",
+                                )}
+                            </li>
+                            <li>
+                                {i18n(
+                                    "Click Set up recorder here, then confirm this server in the extension's options and allow access when prompted.",
+                                )}
+                            </li>
+                        </ol>
+                    </div>
+                )}
             </SettingsCard>
 
             {status && status.keys.length > 0 && (
@@ -683,6 +746,16 @@ export function RecorderSection() {
                             {i18n("Generate recorder key")}
                         </Button>
                     )}
+                    <details className="text-xs text-muted-foreground">
+                        <summary className="cursor-pointer">
+                            {i18n("Developer installation")}
+                        </summary>
+                        <p className="mt-2">
+                            {i18n("Install the extension: load the")}{" "}
+                            <code>extensions/recorder</code>{" "}
+                            {i18n("unpacked, or use the packaged build.")}
+                        </p>
+                    </details>
                 </div>
             </details>
         </div>

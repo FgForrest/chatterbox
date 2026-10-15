@@ -3,10 +3,11 @@
  *
  * `NEXT_PUBLIC_*` values are inlined at build time, so this must read
  * `process.env` directly rather than go through the server env module.
- * The default is the published build's pinned id (see
- * `extensions/recorder/manifest.json` `key`).
+ * The default is the Chrome Web Store listing's id.
  */
-export const DEFAULT_RECORDER_EXTENSION_ID = "hiipabbdnlhdkgldhkdndmohejoaecnh";
+export const DEFAULT_RECORDER_EXTENSION_ID = "pojdfnhpfijfolehkjidbomgjemonkge";
+
+export const RECORDER_EXTENSION_STORE_URL = `https://chromewebstore.google.com/detail/chatterbox-meeting-record/${DEFAULT_RECORDER_EXTENSION_ID}`;
 
 export const RECORDER_EXTENSION_ID: string =
     process.env.NEXT_PUBLIC_RECORDER_EXTENSION_ID &&
