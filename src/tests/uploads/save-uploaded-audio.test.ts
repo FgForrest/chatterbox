@@ -17,6 +17,13 @@ vi.mock("@/lib/env", () => ({
 vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue({
+        requestedGeneration: 1,
+        enqueued: true,
+    }),
+}));
 vi.mock("@/lib/recordings/filename", () => ({
     buildRecordingStagingPath: vi.fn(() => "user-1/recording-1/audio.mp3"),
 }));
@@ -35,6 +42,7 @@ vi.mock("@/lib/uploads/audio-duration", () => ({
 import { db } from "@/db";
 import { chatterItems, recordings } from "@/db/schema";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { saveUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
 
 describe("saveUploadedAudio", () => {
@@ -96,5 +104,11 @@ describe("saveUploadedAudio", () => {
         expect(values.mock.calls[1]?.[0]).toEqual(
             expect.objectContaining({ id: "recording-1", waveformPeaks }),
         );
+        expect(requestAdvanceInTx).toHaveBeenCalledWith(expect.anything(), {
+            itemId: "recording-1",
+            userId: "user-1",
+            view: "private",
+            reason: "arrival",
+        });
     });
 });

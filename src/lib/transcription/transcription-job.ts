@@ -11,7 +11,7 @@ export const TRANSCRIPTION_TIMEOUT_MS = 60 * 60 * 1000;
 
 export interface TranscriptionJobPayload {
     recordingId: string;
-    trigger: "manual" | "sync" | "upload";
+    trigger: "manual" | "sync" | "upload" | "pipeline";
     providerId?: string;
     model?: string;
     attributionSource?: "riffado" | "plaud" | "mixed";
@@ -33,11 +33,12 @@ export function parseTranscriptionJobPayload(
     if (
         raw.trigger !== "manual" &&
         raw.trigger !== "sync" &&
-        raw.trigger !== "upload"
+        raw.trigger !== "upload" &&
+        raw.trigger !== "pipeline"
     ) {
         throw new InvalidJobPayloadError(
             TRANSCRIPTION_JOB_KIND,
-            'trigger must be "manual", "sync", or "upload"',
+            'trigger must be "manual", "sync", "upload", or "pipeline"',
         );
     }
     if (raw.providerId !== undefined && typeof raw.providerId !== "string") {
@@ -94,7 +95,7 @@ export function parseTranscriptionJobPayload(
 export async function enqueueTranscriptionJob(input: {
     userId: string;
     recordingId: string;
-    trigger: "manual" | "sync" | "upload";
+    trigger: "manual" | "sync" | "upload" | "pipeline";
     providerId?: string;
     model?: string;
     attributionSource?: "riffado" | "plaud" | "mixed";

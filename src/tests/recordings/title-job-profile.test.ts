@@ -47,11 +47,18 @@ describe("title job profile switch", () => {
             const chain = {
                 from: () => chain,
                 innerJoin: () => chain,
+                leftJoin: () => chain,
                 where: () => chain,
                 limit: () =>
                     Promise.resolve(
                         recording
-                            ? [{ plaudFileId: "plaud-1", titleEditedAt: null }]
+                            ? [
+                                  {
+                                      kind: "audio",
+                                      plaudFileId: "plaud-1",
+                                      titleEditedAt: null,
+                                  },
+                              ]
                             : [{ syncTitleToPlaud: false }],
                     ),
             };

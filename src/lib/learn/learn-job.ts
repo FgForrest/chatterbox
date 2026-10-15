@@ -24,6 +24,7 @@ import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { vocabularyVersion } from "@/lib/knowledge/vocabulary";
 import { learnRunDead, learnRunOpen } from "@/lib/learn/learn-open";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
@@ -486,13 +487,30 @@ async function insertMailRunInTx(
  * (buried after a crash, or never queued): nothing will finish them.
  */
 export async function settleDeadLearnRuns(recordingId: string): Promise<void> {
-    await db
-        .update(learnRuns)
-        .set({
-            status: "failed",
-            errorCode: ErrorCode.INTERNAL_ERROR,
-            finishedAt: new Date(),
-            updatedAt: new Date(),
-        })
-        .where(and(eq(learnRuns.itemId, recordingId), learnRunDead()));
+    const advances = await db.transaction(async (tx) => {
+        const settled = await tx
+            .update(learnRuns)
+            .set({
+                status: "failed",
+                errorCode: ErrorCode.INTERNAL_ERROR,
+                finishedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(and(eq(learnRuns.itemId, recordingId), learnRunDead()))
+            .returning({ userId: learnRuns.userId, view: learnRuns.view });
+        const unique = new Map(
+            settled.map((run) => [`${run.userId}:${run.view}`, run]),
+        );
+        return Promise.all(
+            [...unique.values()].map((run) =>
+                requestAdvanceInTx(tx, {
+                    itemId: recordingId,
+                    userId: run.userId,
+                    view: run.view,
+                    reason: "learn-settled",
+                }),
+            ),
+        );
+    });
+    if (advances.some(Boolean)) nudge();
 }

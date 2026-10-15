@@ -70,6 +70,64 @@ export async function storeGeneratedTitle(
     });
 }
 
+/** Store a generated mail title unless a person edited it meanwhile. */
+export async function storeGeneratedMailTitle(
+    userId: string,
+    itemId: string,
+    title: string,
+    expectedTitleEditedAt?: Date | null,
+    actorUserId = userId,
+): Promise<boolean> {
+    const orgUserId = await sharingOrgUserId();
+    return db.transaction(async (tx) => {
+        const [item] = await tx
+            .select({ id: chatterItems.id })
+            .from(chatterItems)
+            .where(
+                and(
+                    eq(chatterItems.id, itemId),
+                    eq(chatterItems.userId, userId),
+                    eq(chatterItems.kind, "mail"),
+                    isNull(chatterItems.deletedAt),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!item) return false;
+        if (
+            await contentWriterRefusal(tx, {
+                recordingId: itemId,
+                ownerUserId: userId,
+                actorUserId,
+                orgUserId,
+            })
+        ) {
+            return false;
+        }
+        const titleCondition = expectedTitleEditedAt
+            ? eq(chatterItems.titleEditedAt, expectedTitleEditedAt)
+            : isNull(chatterItems.titleEditedAt);
+        const stored = await tx
+            .update(chatterItems)
+            .set({
+                title: encryptText(title),
+                ...(expectedTitleEditedAt ? { titleEditedAt: null } : {}),
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(chatterItems.id, itemId),
+                    eq(chatterItems.userId, userId),
+                    eq(chatterItems.kind, "mail"),
+                    isNull(chatterItems.deletedAt),
+                    titleCondition,
+                ),
+            )
+            .returning({ id: chatterItems.id });
+        return stored.length > 0;
+    });
+}
+
 /**
  * Whether no person has set the recording's title since a generated one was
  * stored. Read right before the title leaves Riffado, e.g. for Plaud: a

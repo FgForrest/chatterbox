@@ -87,6 +87,9 @@ vi.mock("@/lib/profiles/resolve", () => ({
         resolvedAudioProfile({ defaultTranscriptionLanguage: "cs" }),
     ),
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 import { db } from "@/db";
 import { almanacTermsFor } from "@/lib/transcription/almanac-terms";

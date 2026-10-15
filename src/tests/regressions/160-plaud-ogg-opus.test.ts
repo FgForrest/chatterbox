@@ -74,6 +74,9 @@ vi.mock("@/lib/profiles/resolve", () => ({
         },
     }),
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({

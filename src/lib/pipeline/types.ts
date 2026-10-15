@@ -30,11 +30,15 @@ export interface PhaseStepRecord {
     contentRevision: number;
     generation: number;
     profileRevisionId?: string;
+    state?: PhaseState;
+    reason?: string;
 }
 
 export interface PhaseRecord {
     state: PhaseState;
     reason?: string;
+    /** Identifies Transcribe failures owned by automatic pipeline processing. */
+    automatic?: boolean;
     generation: number;
     inputs?: ContentRevisionInput;
     at: string;
@@ -46,6 +50,11 @@ export type PipelinePhases = Partial<Record<PhaseName, PhaseRecord>>;
 
 export interface PipelineProfileFacts {
     revisionId: string;
+    transcribe?: {
+        enabled: boolean;
+        automatic: boolean;
+        plaudTranscript: "use" | "also_transcribe";
+    };
     automatic: {
         learn: boolean;
         summary: boolean;
@@ -69,6 +78,18 @@ export interface PipelineFacts {
     view: PipelineView;
     generation: number;
     content: (ContentRevisionInput & { timed: boolean }) | null;
+    transcription?: {
+        riffado: (ContentRevisionInput & { timed: boolean }) | null;
+        plaud: (ContentRevisionInput & { timed: boolean }) | null;
+        jobActive: boolean;
+        contentReaped?: boolean;
+        audioReaped?: boolean;
+        shared?: boolean;
+        failed?: {
+            errorCode: string;
+            completedAt: string;
+        };
+    };
     summaryDueAt: string | null;
     profile: PipelineProfileFacts | null;
     categorization: {
@@ -102,7 +123,14 @@ export type PipelineAction =
           presetId: string | null;
           strict: boolean;
       }
-    | { type: "queueTopics"; strict: boolean }
+    | {
+          type: "queueTranscription";
+      }
+    | {
+          type: "queueTopics";
+          strict: boolean;
+          source?: "riffado" | "plaud";
+      }
     | { type: "queueTitleJob" }
     | { type: "startAutoLearnMail" }
     | { type: "markPhase"; phase: PhaseName; record: PhaseRecord };

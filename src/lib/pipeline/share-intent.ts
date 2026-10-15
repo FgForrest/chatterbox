@@ -8,7 +8,9 @@ import {
     orgTreeChanged,
     shareItemToOrganizationFolderInTx,
 } from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -16,7 +18,12 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 /** Record an owner's intended placement in a non-root Organization folder. */
 export async function recordIntendedPlacementInTx(
     tx: Tx,
-    input: { ownerUserId: string; itemId: string; folderId: string },
+    input: {
+        ownerUserId: string;
+        itemId: string;
+        folderId: string;
+        requestPipeline?: boolean;
+    },
 ): Promise<void> {
     const folder = await assertCategorizableFolder(
         input.ownerUserId,
@@ -52,6 +59,14 @@ export async function recordIntendedPlacementInTx(
             folderId: folder.folderId,
         })
         .onConflictDoNothing();
+    if (input.requestPipeline !== false) {
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+    }
 }
 
 /**
@@ -137,7 +152,10 @@ export async function executeIntendedShares(
         if (result.problems.length > 0) return result.problems;
         shared ||= result.shared;
     }
-    if (shared) await orgTreeChanged();
+    if (shared) {
+        nudge();
+        await orgTreeChanged();
+    }
     return [];
 }
 
@@ -147,13 +165,22 @@ export async function cancelIntendedPlacement(
     itemId: string,
     folderId: string,
 ): Promise<void> {
-    await db
-        .delete(mailPendingShares)
-        .where(
-            and(
-                eq(mailPendingShares.userId, ownerUserId),
-                eq(mailPendingShares.itemId, itemId),
-                eq(mailPendingShares.folderId, folderId),
-            ),
-        );
+    await db.transaction(async (tx) => {
+        await tx
+            .delete(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.userId, ownerUserId),
+                    eq(mailPendingShares.itemId, itemId),
+                    eq(mailPendingShares.folderId, folderId),
+                ),
+            );
+        await requestAdvanceInTx(tx, {
+            itemId,
+            userId: ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+    });
+    nudge();
 }

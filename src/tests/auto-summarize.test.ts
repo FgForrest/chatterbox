@@ -14,6 +14,7 @@ const pipelineMocks = vi.hoisted(() => ({
     gatherFacts: vi.fn(),
     readProcessing: vi.fn(),
     requestAdvance: vi.fn(),
+    requestAdvanceInTx: vi.fn(),
     updatePhaseInTx: vi.fn(),
 }));
 
@@ -80,6 +81,7 @@ vi.mock("@/lib/pipeline/state", () => ({
 vi.mock("@/lib/pipeline/trigger", () => ({
     PIPELINE_ADVANCE_JOB_KIND: "pipeline.advance",
     requestAdvance: pipelineMocks.requestAdvance,
+    requestAdvanceInTx: pipelineMocks.requestAdvanceInTx,
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -350,9 +352,9 @@ async function transcribeAndAdvance(
     recordingId: string,
     opts: Parameters<typeof transcribeRecording>[2] = {},
 ) {
-    const requestsBefore = pipelineMocks.requestAdvance.mock.calls.length;
+    const requestsBefore = pipelineMocks.requestAdvanceInTx.mock.calls.length;
     const result = await transcribeRecording(userId, recordingId, opts);
-    if (pipelineMocks.requestAdvance.mock.calls.length > requestsBefore) {
+    if (pipelineMocks.requestAdvanceInTx.mock.calls.length > requestsBefore) {
         await pipelineAdvanceJobHandler.run({
             jobId: "pipeline-job-1",
             userId,
@@ -377,6 +379,10 @@ describe("Auto-summarize integration with transcribeRecording", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         pipelineMocks.requestAdvance.mockResolvedValue({
+            requestedGeneration: 1,
+            enqueued: true,
+        });
+        pipelineMocks.requestAdvanceInTx.mockResolvedValue({
             requestedGeneration: 1,
             enqueued: true,
         });

@@ -26,6 +26,7 @@ import {
     isMynahConfigured,
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
+import { nudge } from "@/lib/jobs/nudge";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
@@ -35,7 +36,7 @@ import {
 } from "@/lib/knowledge/transcript-rewrite";
 import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
-import { requestAdvance } from "@/lib/pipeline/trigger";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     captureServerEvent,
     captureServerException,
@@ -46,7 +47,6 @@ import {
 } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import type { AudioProfileSettings } from "@/lib/profiles/settings";
-import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -113,12 +113,8 @@ export interface StoreBrowserTranscriptionInput {
  * Persist a transcription produced in the browser by Transformers.js.
  *
  * Mirrors the persistence half of `transcribeRecording` (tombstone check,
- * at-rest encryption, upsert, `transcription.completed` event) but skips
- * the server-side provider call. Auto-generated title and Plaud title
- * sync are intentionally NOT run from this path; browser-only users
- * typically have no AI provider configured and the title generation
- * would silently fail. If a browser-transcribing user later wants a
- * generated title they can trigger it once they configure an AI key.
+ * at-rest encryption, upsert, pipeline trigger and `transcription.completed`
+ * event) but skips the server-side provider call.
  */
 export async function storeBrowserTranscription(
     input: StoreBrowserTranscriptionInput,
@@ -180,7 +176,7 @@ export async function storeBrowserTranscription(
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             const [stillActive] = await tx
                 .select({ deletedAt: recordings.deletedAt })
                 .from(recordings)
@@ -318,7 +314,14 @@ export async function storeBrowserTranscription(
                         isNull(chatterItems.deletedAt),
                     ),
                 );
+            return requestAdvanceInTx(tx, {
+                itemId: recordingId,
+                userId,
+                view: "private",
+                reason: "transcript",
+            });
         });
+        if (advance) nudge();
     } catch (txError) {
         if (txError === RECORDING_REFUSED && refused) {
             return refusedResult(refused);
@@ -368,7 +371,7 @@ export interface TranscribeOptions {
      */
     force?: boolean;
     /** What triggered this call. Drives the `recording_transcribed` event's `trigger` property. */
-    trigger?: "manual" | "sync" | "upload";
+    trigger?: "manual" | "sync" | "upload" | "pipeline";
     /**
      * `org` transcribes the Organization view of a shared recording: the
      * caller is the actor whose provider runs, not the owner.
@@ -543,13 +546,18 @@ async function transcribeRecordingInner(
         );
         const profileSettings = profile.settings as AudioProfileSettings;
         const transcribeStep = profileSettings.steps.transcribe;
+        const categorized = orgView || profile.assigned === true;
+        const manualBeforeCategorization =
+            (opts.trigger ?? "manual") === "manual" && !categorized;
         let resolved: ResolvedStepProvider;
         try {
             resolved = await resolveStepProvider({
                 step: "transcription",
                 pin: opts.providerId
                     ? { credentialId: opts.providerId, scope: "personal" }
-                    : transcribeStep.provider,
+                    : manualBeforeCategorization
+                      ? null
+                      : transcribeStep.provider,
                 actorUserId: ctx.actorUserId,
             });
         } catch (error) {
@@ -566,7 +574,7 @@ async function transcribeRecordingInner(
             }
             if (
                 !opts.providerId &&
-                !transcribeStep.provider &&
+                (manualBeforeCategorization || !transcribeStep.provider) &&
                 error instanceof AppError &&
                 error.code === ErrorCode.NO_TRANSCRIPTION_PROVIDER
             ) {
@@ -591,13 +599,6 @@ async function transcribeRecordingInner(
                 ? settings?.defaultTranscriptionLanguage || undefined
                 : transcribeStep.language || undefined;
         const quality = transcribeStep.quality;
-        // Title, Plaud and automation side effects act on the owner's
-        // recording; a run on the Organization view never triggers them.
-        const autoGenerateTitle =
-            !orgView &&
-            profileSettings.steps.title.enabled &&
-            profileSettings.steps.title.automatic;
-        const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
         void quality;
 
         const credentials =
@@ -964,6 +965,7 @@ async function transcribeRecordingInner(
             // The audio this run downloaded, not whatever a sync put there
             // meanwhile.
             audioMd5: recording.fileMd5,
+            view: ctx.view,
         });
 
         if (!committed && reason) return refusedResult(reason);
@@ -1032,25 +1034,14 @@ async function transcribeRecordingInner(
         // without the title, which follows as `recording.updated`.
         const heldForLearn =
             !orgView &&
+            categorized &&
             (await holdForAutoLearn({
                 userId,
                 recordingId,
                 timed: Boolean(turns?.length),
             }));
 
-        if (!heldForLearn && autoGenerateTitle && transcriptionText.trim()) {
-            try {
-                await applyGeneratedTitle({
-                    userId,
-                    recordingId,
-                    text: transcriptionText,
-                    plaudFileId: recording.plaudFileId,
-                    syncTitleToPlaud,
-                });
-            } catch (error) {
-                console.error("Failed to generate title:", error);
-            }
-        }
+        void heldForLearn;
 
         await emitEvent("transcription.completed", userId, recordingId);
         await notifyIfShared(recordingId);
@@ -1064,22 +1055,6 @@ async function transcribeRecordingInner(
                 detected_language: detectedLanguage ?? null,
             },
         });
-
-        if (!orgView) {
-            try {
-                await requestAdvance({
-                    itemId: recordingId,
-                    userId,
-                    view: "private",
-                    reason: "transcript",
-                });
-            } catch (error) {
-                console.error(
-                    `Failed to queue transcript follow-ups for recording ${recordingId}:`,
-                    error,
-                );
-            }
-        }
 
         return {
             success: true,

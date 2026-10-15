@@ -37,8 +37,6 @@ import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
-import { resolveDefaultProfile } from "@/lib/profiles/resolve";
-import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import {
@@ -47,18 +45,9 @@ import {
 } from "@/lib/sharing/shared";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import {
-    claimAutoTranscribeIds,
-    listAutoTranscribeRetryIds,
-    releaseAutoTranscribeIds,
-} from "@/lib/sync/auto-transcribe-state";
-import { resolveTaskProposals } from "@/lib/tasks/proposals";
-import { readTaskItems } from "@/lib/tasks/summary-items";
-import { queueAutoTopics } from "@/lib/topics/topics-job";
-import {
     upsertEnhancement,
     upsertTranscription,
 } from "@/lib/transcription/persist";
-import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
 import { emitEvent } from "@/lib/webhooks/emit";
 import type { PlaudRecording } from "@/types/plaud";
 
@@ -72,7 +61,6 @@ interface SyncResult {
     newRecordings: number;
     updatedRecordings: number;
     errors: string[];
-    pendingTranscriptionIds: string[];
     /**
      * Set when sync ended at one of the expected-state early returns
      * (no connection yet, suspended, hosted lockout) rather than an
@@ -97,11 +85,8 @@ const inFlightSyncs = new Map<string, Promise<SyncResult>>();
 
 interface SyncContext {
     userId: string;
-    autoTranscribe: boolean;
     /** Master opt-in: import Plaud's native transcript/summary on sync (#204). */
     importPlaudContent: boolean;
-    /** 'plaud_only' (default) | 'keep_both' — see runSyncRecordingsForUser. */
-    transcriptMode: string;
     emailNotifications: boolean;
     barkNotifications: boolean;
     notificationEmail: string | null;
@@ -664,12 +649,16 @@ async function processRecording(
             };
         }
 
-        const newRecording = await insertAudioItem(db, {
-            id: recordingId,
-            ...recordingData,
-            title,
-            occurredAt,
-        });
+        const newRecording = await insertAudioItem(
+            db,
+            {
+                id: recordingId,
+                ...recordingData,
+                title,
+                occurredAt,
+            },
+            { pipeline: "arrival" },
+        );
 
         seenRecordingIds.add(newRecording.id);
 
@@ -834,7 +823,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
         newRecordings: 0,
         updatedRecordings: 0,
         errors: [],
-        pendingTranscriptionIds: [],
     };
 
     try {
@@ -855,28 +843,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             .from(userSettings)
             .where(eq(userSettings.userId, userId))
             .limit(1);
-        let autoTranscribe = false;
-        let transcriptMode = "plaud_only";
-        try {
-            const profile = await resolveDefaultProfile(userId, "audio");
-            const profileSettings = profile.settings as AudioProfileSettings;
-            const transcribe = profileSettings.steps.transcribe;
-            autoTranscribe = transcribe.enabled && transcribe.automatic;
-            transcriptMode =
-                transcribe.plaudTranscript === "also_transcribe"
-                    ? "keep_both"
-                    : "plaud_only";
-        } catch (error) {
-            console.error(
-                `[sync] Failed to resolve default audio profile for user ${userId}`,
-            );
-            captureServerException(error, {
-                source: "sync",
-                distinctId: userId,
-                reason: "profile_resolution",
-            });
-        }
-
         const [user] = await db
             .select({
                 email: users.email,
@@ -906,9 +872,7 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
 
         const context: SyncContext = {
             userId,
-            autoTranscribe,
             importPlaudContent: settings?.importPlaudContent ?? false,
-            transcriptMode,
             emailNotifications: settings?.emailNotifications ?? false,
             barkNotifications: settings?.barkNotifications ?? false,
             notificationEmail:
@@ -977,9 +941,6 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
                 result.newRecordings += batchResult.newCount;
                 result.updatedRecordings += batchResult.updatedCount;
                 result.errors.push(...batchResult.errors);
-                result.pendingTranscriptionIds.push(
-                    ...batchResult.newRecordingIds,
-                );
                 allNewRecordingNames.push(...batchResult.newRecordingNames);
                 importCandidates.push(...batchResult.importCandidates);
             }
@@ -1087,47 +1048,15 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
             }
         }
 
-        // Import Plaud-native transcript/summary content (#204) before
-        // deciding what to auto-transcribe. Runs after all recording rows are
-        // committed; never throws out of sync.
-        let plaudTranscriptImported = new Set<string>();
+        // Import Plaud-native transcript/summary content (#204). Runs after
+        // all recording rows are committed; never throws out of sync.
         if (context.importPlaudContent && importCandidates.length > 0) {
-            plaudTranscriptImported = await importPlaudContent(
+            await importPlaudContent(
                 importCandidates,
                 context,
                 plaudClient,
                 result,
             );
-        }
-
-        // Auto-transcribe with the user's own provider. 'plaud_only' skips
-        // recordings that received a Plaud transcript (saves AI credits);
-        // 'keep_both' runs anyway so both coexist. Recordings whose Plaud
-        // transcript wasn't ready/failed fall back here naturally.
-        if (context.autoTranscribe) {
-            let retryIds: string[] = [];
-            try {
-                retryIds = await listAutoTranscribeRetryIds(userId, {
-                    transcriptMode: context.transcriptMode,
-                    excludeSharedWith: context.orgUserId,
-                });
-            } catch (error) {
-                console.error("Auto-transcribe retry lookup failed:", error);
-            }
-            const mergedIds = [
-                ...new Set([...result.pendingTranscriptionIds, ...retryIds]),
-            ];
-            const eligibleIds =
-                context.transcriptMode === "keep_both"
-                    ? mergedIds
-                    : mergedIds.filter(
-                          (id) => !plaudTranscriptImported.has(id),
-                      );
-            const idsToTranscribe = claimAutoTranscribeIds(eligibleIds);
-
-            if (idsToTranscribe.length > 0) {
-                await enqueueTranscriptions(userId, idsToTranscribe);
-            }
         }
 
         return result;
@@ -1167,34 +1096,10 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
     }
 }
 
-async function enqueueTranscriptions(
-    userId: string,
-    recordingIds: string[],
-): Promise<void> {
-    try {
-        for (const recordingId of recordingIds) {
-            try {
-                await enqueueTranscriptionJob({
-                    userId,
-                    recordingId,
-                    trigger: "sync",
-                });
-            } catch (error) {
-                console.error(
-                    `Could not queue auto-transcription for recording ${recordingId}:`,
-                    error,
-                );
-            }
-        }
-    } finally {
-        releaseAutoTranscribeIds(recordingIds);
-    }
-}
-
 /**
  * Import Plaud-native transcript/summary content for recordings Plaud has
- * already processed. Runs AFTER recording rows are committed and BEFORE
- * auto-transcribe, sequentially — gentle on the short-lived workspace token
+ * already processed. Runs after recording rows are committed, sequentially
+ * and gently on the short-lived workspace token
  * (#203). Non-destructive: only fills gaps, never overwrites an existing
  * transcript/summary. Never throws out of sync; a dead token (401) stops the
  * pass, any other failure skips that one item.
@@ -1261,13 +1166,6 @@ async function importPlaudContent(
                         audioMd5: candidate.audioMd5,
                     });
                     if (committed) {
-                        if (turns) {
-                            await queueAutoTopics(
-                                context.userId,
-                                candidate.recordingId,
-                                "plaud",
-                            );
-                        }
                         transcriptImported.add(candidate.recordingId);
                         await exportRecordingSidecarsIfEnabled(
                             context.userId,
@@ -1323,25 +1221,6 @@ async function importPlaudContent(
                             source: "plaud",
                             provider: "plaud",
                             model: "plaud-native",
-                            // Plaud's own action items are proposals too.
-                            tasks: await resolveTaskProposals({
-                                source: "plaud",
-                                items: readTaskItems(parsed.actionItems),
-                                updates: [],
-                                refs: new Map(),
-                                ownerUserId: context.userId,
-                                transcriptionId: plaudTranscript.id,
-                                turns: null,
-                                language: null,
-                                orgView: false,
-                                summaryText: parsed.summary,
-                            }).catch((error: unknown) => {
-                                console.error(
-                                    "[sync] task proposals unavailable:",
-                                    error,
-                                );
-                                return undefined;
-                            }),
                         });
                         if (committed) {
                             await exportRecordingSidecarsIfEnabled(
@@ -1360,7 +1239,8 @@ async function importPlaudContent(
                 error.code === ErrorCode.PLAUD_INVALID_TOKEN
             ) {
                 // Workspace token died mid-pass (#203). Stop; audio already
-                // synced and auto-transcribe remains the fallback.
+                // synced and the processing pipeline can use its configured
+                // transcription path.
                 tokenDead = true;
                 result.errors.push(
                     "Plaud content import stopped: access token expired",

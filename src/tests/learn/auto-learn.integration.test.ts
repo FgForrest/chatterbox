@@ -628,8 +628,8 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(await dueAt()).not.toBeNull();
         await rewrite("riffado");
         expect(await dueAt()).toBeNull();
-        // Nothing queued: that transcription makes its own, or holds again.
-        expect(await kinds()).toEqual([]);
+        // The transcript write durably requests the pipeline in its transaction.
+        expect(await kinds()).toEqual(["pipeline.advance"]);
     });
 
     it("makes the summary again where the one there was made from an older reading", async () => {

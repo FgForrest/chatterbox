@@ -7,7 +7,7 @@ import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { resolveTitlePrompt } from "@/lib/profiles/prompts";
 import { resolveStepProvider } from "@/lib/profiles/providers";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
-import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import type { ProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/view";
 import { buildChatCompletionParams } from "./chat-completion-params";
 import { getAiOutputLanguageDirective } from "./summary-presets";
@@ -27,7 +27,7 @@ export async function generateTitleFromTranscription(
         ownerUserId,
         userId,
     );
-    const settings = profile.settings as AudioProfileSettings;
+    const settings = profile.settings as ProfileSettings;
     const [transcript] = await db
         .select({ detectedLanguage: transcriptions.detectedLanguage })
         .from(transcriptions)
@@ -105,8 +105,8 @@ export async function generateTitleFromTranscription(
 
         const baseSystem =
             source === "summary"
-                ? "You are a helpful assistant that generates concise, descriptive titles for audio recordings. The supplied text is a summary of the complete recording; title the recording by its main subject. Always follow the rules strictly."
-                : "You are a helpful assistant that generates concise, descriptive titles for audio recordings based on transcriptions. Always follow the rules strictly.";
+                ? "You are a helpful assistant that generates concise, descriptive titles. The supplied text is a summary of the complete item; title it by its main subject. Always follow the rules strictly."
+                : "You are a helpful assistant that generates concise, descriptive titles from supplied content. Always follow the rules strictly.";
         const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective}`;
 
         await resolved.reserveCall();

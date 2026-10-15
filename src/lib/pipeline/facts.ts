@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -10,6 +10,7 @@ import {
     mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     recordingTasks,
     taskUpdateProposals,
     transcriptions,
@@ -28,6 +29,7 @@ import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
+import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 async function readShared(itemId: string, userId: string): Promise<boolean> {
     const [row] = await db
@@ -122,6 +124,7 @@ export async function gatherFacts(
             .select({
                 kind: chatterItems.kind,
                 deletedAt: chatterItems.deletedAt,
+                contentReapedAt: chatterItems.contentReapedAt,
                 summaryDueAt: chatterItems.summaryDueAt,
             })
             .from(chatterItems)
@@ -154,6 +157,7 @@ export async function gatherFacts(
             view,
             generation: processing?.requestedGeneration ?? 0,
             content: null,
+            transcription: undefined,
             summaryDueAt: null,
             profile: null,
             categorization: {
@@ -241,6 +245,33 @@ export async function gatherFacts(
                   )
                   .limit(1)
             : Promise.resolve([]);
+    const plaudTranscriptPromise =
+        item.kind === "audio"
+            ? db
+                  .select({
+                      id: transcriptions.id,
+                      revision: transcriptions.revision,
+                      turns: transcriptions.turns,
+                  })
+                  .from(transcriptions)
+                  .where(
+                      and(
+                          eq(transcriptions.recordingId, itemId),
+                          eq(transcriptions.userId, userId),
+                          eq(transcriptions.source, "plaud"),
+                      ),
+                  )
+                  .limit(1)
+                  .then(([row]) =>
+                      row
+                          ? {
+                                id: row.id,
+                                revision: row.revision,
+                                timed: row.turns !== null,
+                            }
+                          : null,
+                  )
+            : Promise.resolve(null);
     const [
         content,
         [mail],
@@ -251,6 +282,10 @@ export async function gatherFacts(
         intents,
         proposals,
         followUps,
+        plaudTranscript,
+        [transcriptionJob],
+        [failedTranscriptionJob],
+        [recording],
     ] = await Promise.all([
         contentPromise,
         mailPromise,
@@ -277,9 +312,7 @@ export async function gatherFacts(
                 ),
             )
             .limit(1),
-        item.kind === "mail"
-            ? readShared(itemId, userId)
-            : Promise.resolve(false),
+        readShared(itemId, userId),
         db
             .select({ folderId: recordingFolderAssignments.folderId })
             .from(recordingFolderAssignments)
@@ -322,6 +355,61 @@ export async function gatherFacts(
                     eq(taskUpdateProposals.userId, userId),
                 ),
             ),
+        plaudTranscriptPromise,
+        item.kind === "audio"
+            ? db
+                  .select({ id: asyncJobs.id })
+                  .from(asyncJobs)
+                  .where(
+                      and(
+                          eq(asyncJobs.userId, userId),
+                          eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                          eq(
+                              asyncJobs.subjectId,
+                              recordingJobSubject(itemId, view),
+                          ),
+                          inArray(asyncJobs.status, ["pending", "processing"]),
+                      ),
+                  )
+                  .limit(1)
+            : Promise.resolve([]),
+        item.kind === "audio"
+            ? db
+                  .select({
+                      errorCode: asyncJobs.errorCode,
+                      completedAt: asyncJobs.completedAt,
+                  })
+                  .from(asyncJobs)
+                  .where(
+                      and(
+                          eq(asyncJobs.userId, userId),
+                          eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                          eq(
+                              asyncJobs.subjectId,
+                              recordingJobSubject(itemId, view),
+                          ),
+                          eq(asyncJobs.status, "failed"),
+                          sql`${asyncJobs.payload} ->> 'trigger' <> 'manual'`,
+                      ),
+                  )
+                  .orderBy(
+                      desc(asyncJobs.completedAt),
+                      desc(asyncJobs.createdAt),
+                  )
+                  .limit(1)
+            : Promise.resolve([]),
+        item.kind === "audio"
+            ? db
+                  .select({ audioReapedAt: recordings.audioReapedAt })
+                  .from(recordings)
+                  .where(
+                      and(
+                          eq(recordings.id, itemId),
+                          eq(recordings.userId, userId),
+                      ),
+                  )
+                  .limit(1)
+            : Promise.resolve([]),
     ]);
     const placementFolderIds = placements.map((row) => row.folderId);
     const intendedFolderIds = intents.map((row) => row.folderId);
@@ -360,6 +448,20 @@ export async function gatherFacts(
     const profile = resolvedProfile
         ? {
               revisionId: resolvedProfile.revisionId,
+              transcribe:
+                  "transcribe" in resolvedProfile.settings.steps
+                      ? {
+                            enabled:
+                                resolvedProfile.settings.steps.transcribe
+                                    .enabled,
+                            automatic:
+                                resolvedProfile.settings.steps.transcribe
+                                    .automatic,
+                            plaudTranscript:
+                                resolvedProfile.settings.steps.transcribe
+                                    .plaudTranscript,
+                        }
+                      : undefined,
               automatic: {
                   learn:
                       resolvedProfile.settings.steps.learn.enabled &&
@@ -406,6 +508,42 @@ export async function gatherFacts(
                   timed: content.timed,
               }
             : null,
+        transcription:
+            item.kind === "audio"
+                ? {
+                      riffado: content
+                          ? {
+                                contentId: content.id,
+                                contentSourceId: "riffado",
+                                contentRevision: content.revision,
+                                timed: content.timed,
+                            }
+                          : null,
+                      plaud: plaudTranscript
+                          ? {
+                                contentId: plaudTranscript.id,
+                                contentSourceId: "plaud",
+                                contentRevision: plaudTranscript.revision,
+                                timed: plaudTranscript.timed,
+                            }
+                          : null,
+                      jobActive: transcriptionJob !== undefined,
+                      contentReaped: item.contentReapedAt !== null,
+                      audioReaped: recording?.audioReapedAt != null,
+                      shared,
+                      ...(failedTranscriptionJob?.completedAt
+                          ? {
+                                failed: {
+                                    errorCode:
+                                        failedTranscriptionJob.errorCode ??
+                                        "TRANSCRIPTION_FAILED",
+                                    completedAt:
+                                        failedTranscriptionJob.completedAt.toISOString(),
+                                },
+                            }
+                          : {}),
+                  }
+                : undefined,
         summaryDueAt: item.summaryDueAt?.toISOString() ?? null,
         profile,
         categorization: {

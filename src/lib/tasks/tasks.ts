@@ -33,7 +33,9 @@ import {
     refreshExistingRecordingSidecars,
 } from "@/lib/export/document-sidecars";
 import { folderCondition } from "@/lib/folders/condition";
+import { nudge } from "@/lib/jobs/nudge";
 import { assertOrgScopeWritable } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import {
     ANY_TASK_ITEM,
@@ -1072,6 +1074,12 @@ export async function acceptReview(
         await tx
             .delete(taskUpdateProposals)
             .where(eq(taskUpdateProposals.itemId, recordingId));
+        await requestAdvanceInTx(tx, {
+            itemId: recordingId,
+            userId: recording.ownerUserId,
+            view: viewer.isOrg ? "org" : "private",
+            reason: "task-review",
+        });
         return {
             accepted: accepted.length,
             rejected: rejected.length,
@@ -1081,6 +1089,7 @@ export async function acceptReview(
             ownerUserId: recording.ownerUserId,
         };
     });
+    nudge();
     await tasksChanged(result.ownerUserId, recordingId);
     for (const [other, owner] of result.touched) {
         await tasksChanged(owner, other);

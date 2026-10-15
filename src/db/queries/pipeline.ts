@@ -17,6 +17,15 @@ export interface StalledPipelineRow {
     view: PipelineView;
 }
 
+/** One private-view automatic transcription eligible for another pipeline run. */
+export interface AutomaticTranscriptionRetryRow
+    extends Record<string, unknown> {
+    itemId: string;
+    userId: string;
+    view: "private";
+    requestedGeneration: number;
+}
+
 /** Increment one owner-scoped processing request, creating its row if needed. */
 export async function incrementProcessingRequestInTx(
     tx: Tx,
@@ -214,6 +223,70 @@ export async function listStalledPipelineRows(
                 and async_jobs.completed_at >= now() - interval '24 hours'
           ) < 3
         order by item_processing.updated_at asc
+        limit ${limit}
+    `);
+    return rows;
+}
+
+/** Failed automatic transcriptions eligible for a bounded delayed retry. */
+export async function listAutomaticTranscriptionRetryRows(
+    limit: number,
+): Promise<AutomaticTranscriptionRetryRow[]> {
+    const rows = await db.execute<AutomaticTranscriptionRetryRow>(sql`
+        select
+            item_processing.item_id as "itemId",
+            item_processing.user_id as "userId",
+            item_processing.view as "view",
+            item_processing.requested_generation as "requestedGeneration"
+        from item_processing
+        inner join chatter_items
+            on chatter_items.id = item_processing.item_id
+           and chatter_items.user_id = item_processing.user_id
+        inner join recordings
+            on recordings.id = item_processing.item_id
+           and recordings.user_id = item_processing.user_id
+        where item_processing.view = 'private'
+          and chatter_items.deleted_at is null
+          and chatter_items.content_reaped_at is null
+          and recordings.deleted_at is null
+          and recordings.audio_reaped_at is null
+          and item_processing.phases -> 'transcribe' ->> 'state' = 'failed'
+          and coalesce(
+                (item_processing.phases -> 'transcribe' ->> 'automatic')::boolean,
+                false
+              )
+          and (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz
+                < now() - interval '30 minutes'
+          and not exists (
+              select 1
+              from recording_folder_assignments
+              inner join recording_folders
+                  on recording_folders.id = recording_folder_assignments.folder_id
+              inner join users organization_user
+                  on organization_user.id = recording_folders.user_id
+                 and organization_user.role = 'org'
+              where recording_folder_assignments.recording_id = item_processing.item_id
+                and recording_folder_assignments.user_id = item_processing.user_id
+          )
+          and not exists (
+              select 1
+              from async_jobs
+              where async_jobs.user_id = item_processing.user_id
+                and async_jobs.kind = 'transcription'
+                and async_jobs.subject_id = item_processing.item_id
+                and async_jobs.status in ('pending', 'processing')
+          )
+          and (
+              select count(*)
+              from async_jobs
+              where async_jobs.user_id = item_processing.user_id
+                and async_jobs.kind = 'transcription'
+                and async_jobs.subject_id = item_processing.item_id
+                and async_jobs.status = 'failed'
+                and async_jobs.payload ->> 'trigger' <> 'manual'
+                and async_jobs.completed_at >= now() - interval '24 hours'
+          ) < 3
+        order by (item_processing.phases -> 'transcribe' ->> 'at')::timestamptz asc
         limit ${limit}
     `);
     return rows;

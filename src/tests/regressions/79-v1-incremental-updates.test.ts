@@ -4,6 +4,9 @@ import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 const openAiMocks = vi.hoisted(() => ({
     audioCreate: vi.fn(),

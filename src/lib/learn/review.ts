@@ -97,6 +97,7 @@ import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
     resolveItemProfile,
@@ -768,7 +769,7 @@ export async function finishReview(
         readScopes,
         profile.settings.steps.learn.correctAfterLearn,
     );
-    if (finished.correcting) nudge();
+    nudge();
     // The last review done releases what automatic Learn held back, unless
     // the correction pass it queued is still to run (that releases it).
     await releaseAutoLearnHold(access.recordingId);
@@ -1066,6 +1067,12 @@ function finishInTx(
                 .update(learnRuns)
                 .set({ status: "superseded", updatedAt: new Date() })
                 .where(eq(learnRuns.id, run.id));
+            await requestAdvanceInTx(tx, {
+                itemId: run.itemId,
+                userId: run.userId,
+                view: run.view,
+                reason: "review-finished",
+            });
             return {
                 status: "superseded",
                 applied: 0,
@@ -1695,6 +1702,12 @@ function finishInTx(
                   correctAfterLearn,
               )
             : false;
+        await requestAdvanceInTx(tx, {
+            itemId: run.itemId,
+            userId: run.userId,
+            view: run.view,
+            reason: "review-finished",
+        });
         return {
             status: "finished",
             applied,

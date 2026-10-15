@@ -13,9 +13,11 @@ import {
     aiEnhancements,
     apiCredentials,
     asyncJobs,
+    chatterItems,
     itemProcessing,
     recordingFolderAssignments,
     recordingFolders,
+    recordings,
     transcriptions,
     userSettings,
     users,
@@ -101,7 +103,11 @@ vi.mock("@/lib/topics/topics-job", () => ({
 }));
 
 import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
-import { sweepStalledPipelines } from "@/lib/pipeline/sweep";
+import {
+    sweepAutomaticTranscriptionRetries,
+    sweepStalledPipelines,
+} from "@/lib/pipeline/sweep";
+import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -230,6 +236,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         });
         await db().insert(userSettings).values({
             userId: USER_ID,
+            autoTranscribe: true,
             autoDetectTopics: true,
             autoGenerateTitle: true,
             autoSummarize: true,
@@ -591,6 +598,233 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
         await pipelineAdvanceJobHandler.run(jobContext());
 
         expect(stale).toHaveBeenCalledWith(USER_ID, ITEM_ID);
+    });
+
+    it("does not recreate a reaped transcript after a placement trigger", async () => {
+        await seedAudio();
+        await db()
+            .delete(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, ITEM_ID),
+                    eq(transcriptions.userId, USER_ID),
+                ),
+            );
+        await db()
+            .update(chatterItems)
+            .set({ contentReapedAt: new Date() })
+            .where(
+                and(
+                    eq(chatterItems.id, ITEM_ID),
+                    eq(chatterItems.userId, USER_ID),
+                ),
+            );
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect((await processing())?.phases.transcribe).toMatchObject({
+            state: "skipped",
+            reason: "content_reaped",
+        });
+        expect(
+            await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.userId, USER_ID),
+                        eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                        eq(asyncJobs.subjectId, ITEM_ID),
+                    ),
+                ),
+        ).toEqual([]);
+    });
+
+    it("leaves a triggered legacy item without a transcript idle", async () => {
+        await seedAudio();
+        await db()
+            .delete(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, ITEM_ID),
+                    eq(transcriptions.userId, USER_ID),
+                ),
+            );
+        await db()
+            .update(itemProcessing)
+            .set({
+                profileId: null,
+                profileRevisionId: null,
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "legacy",
+                        generation: 0,
+                        at: new Date().toISOString(),
+                    },
+                },
+            })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, ITEM_ID),
+                    eq(itemProcessing.userId, USER_ID),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await requestAdvance({
+            itemId: ITEM_ID,
+            userId: USER_ID,
+            view: "private",
+            reason: "placement",
+        });
+
+        await pipelineAdvanceJobHandler.run(jobContext());
+
+        expect(
+            await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.userId, USER_ID),
+                        eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                        eq(asyncJobs.subjectId, ITEM_ID),
+                    ),
+                ),
+        ).toEqual([]);
+    });
+
+    it("retries an old automatic transcription failure within the daily bound", async () => {
+        const ids = {
+            eligible: "transcription-retry-eligible",
+            recent: "transcription-retry-recent",
+            poison: "transcription-retry-poison",
+            contentReaped: "transcription-retry-content-reaped",
+            audioReaped: "transcription-retry-audio-reaped",
+            shared: "transcription-retry-shared",
+        };
+        const now = new Date();
+        const old = new Date(now.getTime() - 31 * 60_000);
+        for (const itemId of Object.values(ids)) {
+            await seedAudio(itemId);
+            await db()
+                .delete(transcriptions)
+                .where(
+                    and(
+                        eq(transcriptions.recordingId, itemId),
+                        eq(transcriptions.userId, USER_ID),
+                    ),
+                );
+            await db()
+                .update(itemProcessing)
+                .set({
+                    phases: {
+                        categorize: {
+                            state: "done",
+                            reason: "categorized",
+                            generation: 0,
+                            at: old.toISOString(),
+                        },
+                        transcribe: {
+                            state: "failed",
+                            reason: "TRANSCRIPTION_FAILED",
+                            generation: 1,
+                            at:
+                                itemId === ids.recent
+                                    ? now.toISOString()
+                                    : old.toISOString(),
+                            automatic: true,
+                        },
+                    },
+                    requestedGeneration: 1,
+                    processedGeneration: 1,
+                })
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, itemId),
+                        eq(itemProcessing.userId, USER_ID),
+                    ),
+                );
+        }
+        await db()
+            .update(chatterItems)
+            .set({ contentReapedAt: now })
+            .where(eq(chatterItems.id, ids.contentReaped));
+        await db()
+            .update(recordings)
+            .set({ audioReapedAt: now })
+            .where(eq(recordings.id, ids.audioReaped));
+        await db().insert(users).values({
+            id: "pipeline-org",
+            email: "org@example.test",
+            role: "org",
+        });
+        await db().insert(recordingFolders).values({
+            id: "pipeline-org-root",
+            userId: "pipeline-org",
+            parentId: null,
+            name: "Organization",
+            nameHash: "pipeline-org-root-hash",
+            kind: "private",
+        });
+        await db().insert(recordingFolderAssignments).values({
+            userId: USER_ID,
+            itemId: ids.shared,
+            folderId: "pipeline-org-root",
+        });
+        await db()
+            .insert(asyncJobs)
+            .values(
+                Object.values(ids).flatMap((itemId) =>
+                    Array.from(
+                        { length: itemId === ids.poison ? 3 : 1 },
+                        (_, index) => ({
+                            id: `failed-transcription-${itemId}-${index}`,
+                            userId: USER_ID,
+                            kind: TRANSCRIPTION_JOB_KIND,
+                            subjectId: itemId,
+                            payload: {
+                                recordingId: itemId,
+                                trigger: "pipeline",
+                                force: false,
+                            },
+                            status: "failed" as const,
+                            attempts: 3,
+                            maxAttempts: 3,
+                            errorCode: "TRANSCRIPTION_FAILED",
+                            completedAt: old,
+                        }),
+                    ),
+                ),
+            );
+
+        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(1);
+        await expect(sweepAutomaticTranscriptionRetries()).resolves.toBe(0);
+
+        expect(
+            (await processing(ids.eligible))?.phases.transcribe,
+        ).toMatchObject({
+            state: "pending",
+            reason: "automatic_retry",
+            automatic: true,
+        });
+        const pipelineSubjects = await db()
+            .select({ subjectId: asyncJobs.subjectId })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, USER_ID),
+                    eq(asyncJobs.kind, PIPELINE_ADVANCE_JOB_KIND),
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                ),
+            );
+        expect(pipelineSubjects).toEqual([{ subjectId: ids.eligible }]);
     });
 
     it("sweeps only old, unclaimed, non-poison stalled rows", async () => {

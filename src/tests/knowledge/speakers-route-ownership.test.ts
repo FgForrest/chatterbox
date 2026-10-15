@@ -203,6 +203,8 @@ describe("speakers route and ownership", () => {
             [],
             // The person named, as they are now: not merged away.
             [{ id: "person-1", mergedIntoId: null }],
+            // The changed transcript identifies the item whose share gate moved.
+            [{ recordingId: RECORDING_ID }],
             [],
         );
         const values = vi.fn().mockReturnValue({

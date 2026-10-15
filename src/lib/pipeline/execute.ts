@@ -5,6 +5,7 @@ import type { PipelineAction, PipelineView } from "@/lib/pipeline/types";
 import { enqueueTitleJob } from "@/lib/recordings/title-job";
 import { queueAutoSummary } from "@/lib/summary/auto-summary";
 import { queueAutoTopics } from "@/lib/topics/topics-job";
+import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
 
 export interface ExecutePipelineActionInput {
     action: PipelineAction;
@@ -31,12 +32,29 @@ export async function executePipelineAction(
             return;
         case "queueTopics":
             if (action.strict) {
-                await queueAutoTopics(userId, itemId, "riffado", {
-                    strict: true,
-                });
+                await queueAutoTopics(
+                    userId,
+                    itemId,
+                    action.source ?? "riffado",
+                    {
+                        strict: true,
+                    },
+                );
             } else {
-                await queueAutoTopics(userId, itemId, "riffado");
+                await queueAutoTopics(
+                    userId,
+                    itemId,
+                    action.source ?? "riffado",
+                );
             }
+            return;
+        case "queueTranscription":
+            await enqueueTranscriptionJob({
+                userId,
+                recordingId: itemId,
+                trigger: "pipeline",
+                view,
+            });
             return;
         case "queueTitleJob":
             await enqueueTitleJob(userId, itemId);

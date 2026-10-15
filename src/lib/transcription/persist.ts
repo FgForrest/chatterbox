@@ -11,12 +11,15 @@ import {
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { nudge } from "@/lib/jobs/nudge";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import type { PipelineView } from "@/lib/pipeline/types";
 import {
     contentWriterRefusal,
     sharingOrgUserId,
@@ -98,6 +101,9 @@ export interface UpsertTranscriptionArgs {
      */
     audioMd5?: string | null;
     jobId?: string;
+    view?: PipelineView;
+    /** Demo/restore writes remain on the synthesized legacy pipeline state. */
+    pipeline?: "trigger" | "legacy";
 }
 
 export interface UpsertEnhancementArgs {
@@ -150,11 +156,14 @@ export interface UpsertEnhancementArgs {
     inputs?: ProcessingRunInputs | null;
     /** See `UpsertTranscriptionArgs.jobId`. */
     jobId?: string;
+    view?: PipelineView;
     /**
      * The task proposals the summary made, stored with it in its
      * transaction: they replace the ones its source made before.
      */
     tasks?: TaskProposals;
+    /** Demo/restore writes remain on the synthesized legacy pipeline state. */
+    pipeline?: "trigger" | "legacy";
 }
 
 /**
@@ -244,7 +253,7 @@ export async function upsertTranscription(
     const actsForOrganization = await curatesNow(args, actorUserId);
 
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             const [stillActive] = await tx
                 .select({
                     deletedAt: recordings.deletedAt,
@@ -395,7 +404,16 @@ export async function upsertTranscription(
                         eq(chatterItems.userId, userId),
                     ),
                 );
+            return args.pipeline === "legacy"
+                ? null
+                : requestAdvanceInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: args.view ?? "private",
+                      reason: "transcript",
+                  });
         });
+        if (advance) nudge();
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };
@@ -438,7 +456,7 @@ export async function upsertEnhancement(
     const isMail = args.kind === "mail";
 
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             const [stillActive] = isMail
                 ? await tx
                       .select({
@@ -579,7 +597,16 @@ export async function upsertEnhancement(
                         eq(chatterItems.userId, userId),
                     ),
                 );
+            return args.pipeline === "legacy"
+                ? null
+                : requestAdvanceInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: args.view ?? "private",
+                      reason: "summary",
+                  });
         });
+        if (advance) nudge();
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };

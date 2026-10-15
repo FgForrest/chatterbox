@@ -15,7 +15,16 @@ export type PipelineAdvanceReason =
     | "transcript"
     | "arrival"
     | "learn-released"
-    | "categorized";
+    | "categorized"
+    | "placement"
+    | "summary"
+    | "learn-settled"
+    | "review-finished"
+    | "correction-finished"
+    | "task-review"
+    | "share-gate"
+    | "transcription-failed"
+    | "transcription-retry";
 
 export interface RequestAdvanceInput {
     itemId: string;

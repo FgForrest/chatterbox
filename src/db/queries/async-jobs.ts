@@ -15,7 +15,9 @@ import { asyncJobStatusEnum, asyncJobs } from "@/db/schema";
  * `async_job_status`, named from the schema so a rename cannot leave a stale
  * literal behind in the raw SQL below.
  */
-const STATUS_TYPE = sql.identifier(asyncJobStatusEnum.enumName);
+function statusType() {
+    return sql.identifier(asyncJobStatusEnum.enumName);
+}
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -58,7 +60,9 @@ export interface ClaimedAsyncJob {
  * A job still to be finished. Also the predicate of `async_jobs_active_unique`,
  * which `enqueueJob` names as its conflict target, so the two must match.
  */
-const IS_ACTIVE = sql`${asyncJobs.status} in ('pending', 'processing')`;
+function isActive() {
+    return sql`${asyncJobs.status} in ('pending', 'processing')`;
+}
 
 /**
  * A queued job that finishes between a conflicting insert and the read that
@@ -144,7 +148,7 @@ export async function enqueueJobInTx(
         })
         .onConflictDoNothing({
             target: [asyncJobs.kind, asyncJobs.subjectId],
-            where: IS_ACTIVE,
+            where: isActive(),
         })
         .returning({ id: asyncJobs.id });
     return row !== undefined;
@@ -169,7 +173,7 @@ export async function enqueueJob(
             .values(values)
             .onConflictDoNothing({
                 target: [asyncJobs.kind, asyncJobs.subjectId],
-                where: IS_ACTIVE,
+                where: isActive(),
             })
             .returning();
         if (row) return { job: row as AsyncJobRow, created: true };
@@ -261,7 +265,7 @@ export async function getActiveJob(
             and(
                 eq(asyncJobs.kind, kind),
                 eq(asyncJobs.subjectId, subjectId),
-                IS_ACTIVE,
+                isActive(),
             ),
         )
         .limit(1);
@@ -477,7 +481,7 @@ export async function failJobAttempt(input: {
         set last_error = ${input.message},
             error_code = ${input.code ?? null},
             updated_at = now(),
-            status = (case when ${buried} then 'failed' else 'pending' end)::${STATUS_TYPE},
+            status = (case when ${buried} then 'failed' else 'pending' end)::${statusType()},
             claim_token = case when ${buried} then claim_token else null end,
             started_at = case when ${buried} then started_at else null end,
             completed_at = case when ${buried} then now() else null end,
@@ -662,7 +666,7 @@ export async function listJobsForUser(
     const filters = [eq(asyncJobs.userId, userId)];
     if (opts.kind) filters.push(eq(asyncJobs.kind, opts.kind));
     if (opts.activeOnly) {
-        filters.push(IS_ACTIVE);
+        filters.push(isActive());
     }
     const rows = await db
         .select()

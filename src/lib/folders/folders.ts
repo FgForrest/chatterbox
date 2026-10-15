@@ -14,6 +14,7 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
+import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -31,6 +32,7 @@ import {
     isOrgScopeEnabled,
 } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
@@ -1026,6 +1028,18 @@ export async function shareItemToOrganizationFolderInTx(
             throw error;
         }
         await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "org",
+            reason: "placement",
+        });
         return [];
     }
 
@@ -1038,6 +1052,18 @@ export async function shareItemToOrganizationFolderInTx(
         })
         .onConflictDoNothing();
     await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+    await requestAdvanceInTx(tx, {
+        itemId: input.itemId,
+        userId: input.ownerUserId,
+        view: "private",
+        reason: "placement",
+    });
+    await requestAdvanceInTx(tx, {
+        itemId: input.itemId,
+        userId: input.ownerUserId,
+        view: "org",
+        reason: "placement",
+    });
     if (wasShared) return [];
 
     const names = await publishSpeakerNamesInTx(tx, {
@@ -1132,6 +1158,12 @@ export async function addRecordingToFolder(input: {
                 target.ownerId,
                 input.recordingId,
             );
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: input.userId,
+                view: "private",
+                reason: "placement",
+            });
             return [];
         }),
     );
@@ -1145,6 +1177,7 @@ export async function addRecordingToFolder(input: {
             { problems },
         );
     }
+    nudge();
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
@@ -1179,15 +1212,27 @@ export async function removeRecordingFromFolder(input: {
     if (!target) return;
 
     if (target.scope === "personal") {
-        await db
-            .delete(recordingFolderAssignments)
-            .where(
-                and(
-                    eq(recordingFolderAssignments.userId, input.userId),
-                    eq(recordingFolderAssignments.itemId, input.recordingId),
-                    eq(recordingFolderAssignments.folderId, input.folderId),
-                ),
-            );
+        await db.transaction(async (tx) => {
+            await tx
+                .delete(recordingFolderAssignments)
+                .where(
+                    and(
+                        eq(recordingFolderAssignments.userId, input.userId),
+                        eq(
+                            recordingFolderAssignments.itemId,
+                            input.recordingId,
+                        ),
+                        eq(recordingFolderAssignments.folderId, input.folderId),
+                    ),
+                );
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: input.userId,
+                view: "private",
+                reason: "placement",
+            });
+        });
+        nudge();
         await scheduleFolderExportProjection(input.userId);
         return;
     }
@@ -1228,7 +1273,27 @@ export async function removeRecordingFromFolder(input: {
             tx,
             await endSharingIfUnfiled(tx, target.ownerId, input.recordingId),
         );
+        const [owner] = await tx
+            .select({ userId: chatterItems.userId })
+            .from(chatterItems)
+            .where(eq(chatterItems.id, input.recordingId))
+            .limit(1);
+        if (owner) {
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: owner.userId,
+                view: "private",
+                reason: "placement",
+            });
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: owner.userId,
+                view: "org",
+                reason: "placement",
+            });
+        }
     });
+    nudge();
     await orgTreeChanged();
 }
 
@@ -1266,9 +1331,31 @@ export async function unshareRecording(
             tx,
             await withdrawRecordingInTx(tx, orgUserId, recordingId),
         );
+        const [owner] = await tx
+            .select({ userId: chatterItems.userId })
+            .from(chatterItems)
+            .where(eq(chatterItems.id, recordingId))
+            .limit(1);
+        if (owner) {
+            await requestAdvanceInTx(tx, {
+                itemId: recordingId,
+                userId: owner.userId,
+                view: "private",
+                reason: "placement",
+            });
+            await requestAdvanceInTx(tx, {
+                itemId: recordingId,
+                userId: owner.userId,
+                view: "org",
+                reason: "placement",
+            });
+        }
         return true;
     });
-    if (withdrew) await orgTreeChanged();
+    if (withdrew) {
+        nudge();
+        await orgTreeChanged();
+    }
 }
 
 /**
@@ -1512,7 +1599,14 @@ export async function moveRecordingBetweenFolders(input: {
                 ),
             );
         await pruneRedundantAssignmentsInTx(tx, to.ownerId, input.recordingId);
+        await requestAdvanceInTx(tx, {
+            itemId: input.recordingId,
+            userId: existing.userId,
+            view: from.scope === "org" ? "org" : "private",
+            reason: "placement",
+        });
     });
+    nudge();
     if (to.scope === "org") {
         await orgTreeChanged();
     } else {

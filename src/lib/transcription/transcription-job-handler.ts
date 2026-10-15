@@ -1,6 +1,7 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
+import { requestAdvance } from "@/lib/pipeline/trigger";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import {
     type TranscribeErrorCode,
@@ -77,6 +78,16 @@ export const transcriptionJobHandler: JobHandler<TranscriptionJobPayload> = {
         error instanceof CompletedTranscriptionFailure
             ? false
             : isRetryableError(error),
+
+    async onTerminalFailure({ payload, userId }): Promise<void> {
+        if (payload.trigger === "manual") return;
+        await requestAdvance({
+            itemId: payload.recordingId,
+            userId,
+            view: payload.view ?? "private",
+            reason: "transcription-failed",
+        });
+    },
 
     async run({ payload, userId, jobId }): Promise<JobResult> {
         const allowed =

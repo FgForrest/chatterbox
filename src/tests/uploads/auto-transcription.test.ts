@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     select: vi.fn(),
     transcribeRecording: vi.fn(),
     allowManualArtifactGeneration: vi.fn(),
+    requestAdvance: vi.fn(),
     resolveItemProfile: vi.fn(),
 }));
 
@@ -28,6 +29,9 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
 }));
 vi.mock("@/lib/recordings/erase", () => ({
     allowManualArtifactGeneration: mocks.allowManualArtifactGeneration,
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvance: mocks.requestAdvance,
 }));
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: mocks.resolveItemProfile,
@@ -73,6 +77,10 @@ describe("automatic upload transcription", () => {
             created: true,
         });
         mocks.allowManualArtifactGeneration.mockResolvedValue(true);
+        mocks.requestAdvance.mockResolvedValue({
+            requestedGeneration: 2,
+            enqueued: true,
+        });
         mocks.resolveItemProfile.mockResolvedValue({
             settings: {
                 steps: { transcribe: { enabled: true, automatic: true } },
@@ -222,6 +230,26 @@ describe("automatic upload transcription", () => {
             message: "No transcription provider is configured",
         });
         expect(transcriptionJobHandler.isRetryable?.(failure)).toBe(false);
+    });
+
+    it("requests the private pipeline after a pipeline transcription fails", async () => {
+        await transcriptionJobHandler.onTerminalFailure?.({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: {
+                recordingId: "recording-1",
+                trigger: "pipeline",
+                force: false,
+            },
+            errorCode: ErrorCode.TRANSCRIPTION_FAILED,
+        });
+
+        expect(mocks.requestAdvance).toHaveBeenCalledWith({
+            itemId: "recording-1",
+            userId: "user-1",
+            view: "private",
+            reason: "transcription-failed",
+        });
     });
 
     it("does not recreate an erased transcript from an upload job", async () => {

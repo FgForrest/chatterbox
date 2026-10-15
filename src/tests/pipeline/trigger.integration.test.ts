@@ -8,7 +8,10 @@ import {
     it,
     vi,
 } from "vitest";
+import { insertAudioItem } from "@/db/items";
 import { asyncJobs, chatterItems, itemProcessing, users } from "@/db/schema";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { upsertTranscription } from "@/lib/transcription/persist";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -40,6 +43,22 @@ const { dbProxy, dbRef } = vi.hoisted(() => {
 });
 
 vi.mock("@/db", () => ({ db: dbProxy, sqlClient: null }));
+vi.mock("@/lib/env", () => ({
+    env: {
+        IS_HOSTED: false,
+        SELF_HOST_MODE: "shared",
+        ORG_ACCOUNT_EMAIL: "org@example.test",
+        ORG_ACCOUNT_PASSWORD: "organization-password",
+        ENCRYPTION_KEY:
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        BETTER_AUTH_SECRET: "test-secret-test-secret-test-secret-00",
+        DATABASE_URL: "postgres://unused",
+    },
+}));
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerEvent: vi.fn().mockResolvedValue(undefined),
+    captureServerException: vi.fn(),
+}));
 
 import {
     PIPELINE_ADVANCE_JOB_KIND,
@@ -325,5 +344,99 @@ describeWithDatabase("pipeline triggers (PostgreSQL)", () => {
                 }),
             ]),
         );
+    });
+
+    it("advances a newly inserted audio item to Categorize waiting", async () => {
+        const itemId = "pipeline-arrival-audio";
+        await insertAudioItem(
+            db(),
+            {
+                id: itemId,
+                userId: USER_ID,
+                deviceSn: "upload",
+                plaudFileId: "upload-pipeline-arrival-audio",
+                title: "Arrival audio",
+                duration: 1_000,
+                occurredAt: new Date("2026-10-14T02:00:00.000Z"),
+                endTime: new Date("2026-10-14T02:00:01.000Z"),
+                filesize: 100,
+                fileMd5: "0".repeat(32),
+                storageType: "local",
+                storagePath: `${USER_ID}/${itemId}.mp3`,
+                plaudVersion: "1",
+            },
+            { pipeline: "arrival" },
+        );
+
+        await pipelineAdvanceJobHandler.run({
+            jobId: "arrival-job",
+            userId: USER_ID,
+            payload: {
+                itemId,
+                view: "private",
+                reason: "arrival",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+
+        const [processing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, USER_ID),
+                ),
+            );
+        expect(processing?.phases.categorize).toMatchObject({
+            state: "waiting",
+            reason: "needs_folder",
+        });
+    });
+
+    it("leaves a restored audio item on the legacy path", async () => {
+        const itemId = "pipeline-legacy-audio";
+        await insertAudioItem(
+            db(),
+            {
+                id: itemId,
+                userId: USER_ID,
+                deviceSn: "restore",
+                plaudFileId: "restore-pipeline-legacy-audio",
+                title: "Restored audio",
+                duration: 1_000,
+                occurredAt: new Date("2026-10-14T03:00:00.000Z"),
+                endTime: new Date("2026-10-14T03:00:01.000Z"),
+                filesize: 100,
+                fileMd5: "1".repeat(32),
+                storageType: "local",
+                storagePath: `${USER_ID}/${itemId}.mp3`,
+                plaudVersion: "1",
+            },
+            { pipeline: "legacy" },
+        );
+        await upsertTranscription({
+            userId: USER_ID,
+            recordingId: itemId,
+            text: "Restored transcript",
+            detectedLanguage: "en",
+            source: "riffado",
+            provider: "restore",
+            model: "restore",
+            pipeline: "legacy",
+        });
+
+        expect(
+            await db()
+                .select()
+                .from(itemProcessing)
+                .where(eq(itemProcessing.itemId, itemId)),
+        ).toEqual([]);
+        expect(
+            (await pipelineJobs()).some((job) => job.subjectId === itemId),
+        ).toBe(false);
     });
 });

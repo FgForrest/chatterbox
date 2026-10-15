@@ -451,25 +451,29 @@ async function seedRecording(
     const fileMd5 = md5Of(fixture.key);
     const uploaded = fixture.origin !== "plaud";
 
-    const { id: recordingId } = await insertAudioItem(db, {
-        userId,
-        deviceSn: uploaded ? "local" : DEVICE_SN,
-        plaudFileId: uploaded
-            ? `uploaded-demo-${fixture.key}`
-            : `demo-${fixture.key}`,
-        title: encryptText(fixture.title),
-        duration: durationMs,
-        occurredAt: startTime,
-        endTime: new Date(startTime.getTime() + durationMs),
-        filesize: fixture.durationMinutes * 60 * 2_000,
-        fileMd5,
-        storageType: "local",
-        storagePath,
-        storageFilename,
-        plaudVersion: "1",
-        downloadedAt: startTime,
-        waveformPeaks: waveformPeaks(fixture.key),
-    });
+    const { id: recordingId } = await insertAudioItem(
+        db,
+        {
+            userId,
+            deviceSn: uploaded ? "local" : DEVICE_SN,
+            plaudFileId: uploaded
+                ? `uploaded-demo-${fixture.key}`
+                : `demo-${fixture.key}`,
+            title: encryptText(fixture.title),
+            duration: durationMs,
+            occurredAt: startTime,
+            endTime: new Date(startTime.getTime() + durationMs),
+            filesize: fixture.durationMinutes * 60 * 2_000,
+            fileMd5,
+            storageType: "local",
+            storagePath,
+            storageFilename,
+            plaudVersion: "1",
+            downloadedAt: startTime,
+            waveformPeaks: waveformPeaks(fixture.key),
+        },
+        { pipeline: "legacy" },
+    );
     const audio = {
         storagePath,
         durationSeconds: fixture.durationMinutes * 60,
@@ -489,6 +493,7 @@ async function seedRecording(
         model: transcript.model,
         turns,
         audioMd5: fileMd5,
+        pipeline: "legacy",
     });
     if (!written.committed)
         throw new Error(`Transcript of ${fixture.key} refused`);
@@ -580,6 +585,7 @@ async function seedRecording(
             source: "riffado",
             provider: summary.provider,
             model: summary.model,
+            pipeline: "legacy",
             multiPass: summary.multiPass
                 ? {
                       roundsRequested: summary.multiPass.rounds,

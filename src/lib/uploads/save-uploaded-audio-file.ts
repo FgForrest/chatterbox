@@ -13,7 +13,6 @@ import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
 import type { StorageProvider } from "@/lib/storage/types";
-import { autoTranscribeNewRecording } from "@/lib/transcription/auto-transcribe-new-recording";
 import { readAudioFileDurationMs } from "@/lib/uploads/audio-duration";
 import type { SavedUploadedAudio } from "@/lib/uploads/save-uploaded-audio";
 import { getAudioMimeType } from "@/lib/utils";
@@ -67,24 +66,28 @@ export async function saveUploadedAudioFile(input: {
         getAudioMimeType(storageKey),
     );
     try {
-        await insertAudioItem(db, {
-            id: recordingId,
-            userId: input.userId,
-            deviceSn: "local",
-            plaudFileId: input.fileId,
-            title: encryptText(input.basename),
-            duration: durationMs,
-            occurredAt: input.recordedAt,
-            endTime: new Date(input.recordedAt.getTime() + durationMs),
-            filesize: info.size,
-            fileMd5: md5,
-            storageType: env.DEFAULT_STORAGE_TYPE,
-            storagePath: storageKey,
-            waveformPeaks,
-            downloadedAt: new Date(),
-            plaudVersion: "1",
-            isTrash: false,
-        });
+        await insertAudioItem(
+            db,
+            {
+                id: recordingId,
+                userId: input.userId,
+                deviceSn: "local",
+                plaudFileId: input.fileId,
+                title: encryptText(input.basename),
+                duration: durationMs,
+                occurredAt: input.recordedAt,
+                endTime: new Date(input.recordedAt.getTime() + durationMs),
+                filesize: info.size,
+                fileMd5: md5,
+                storageType: env.DEFAULT_STORAGE_TYPE,
+                storagePath: storageKey,
+                waveformPeaks,
+                downloadedAt: new Date(),
+                plaudVersion: "1",
+                isTrash: false,
+            },
+            { pipeline: "arrival" },
+        );
     } catch (error) {
         await input.storage
             .deleteFile(storageKey)
@@ -112,9 +115,6 @@ export async function saveUploadedAudioFile(input: {
         recordingId,
     }).catch((error) =>
         console.error("Could not queue filename reconciliation:", error),
-    );
-    await autoTranscribeNewRecording(input.userId, recordingId).catch((error) =>
-        console.error("Could not queue automatic transcription:", error),
     );
     return {
         recordingId,

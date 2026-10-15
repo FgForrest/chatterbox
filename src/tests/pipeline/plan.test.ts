@@ -271,6 +271,8 @@ describe("planAdvance audio", () => {
         expect(actionTypes(actions)).toEqual([
             "markPhase",
             "markPhase",
+            "queueTitleJob",
+            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -292,6 +294,11 @@ describe("planAdvance audio", () => {
                     },
                     steps: {
                         summary: {
+                            contentId: "transcription-1",
+                            contentRevision: 7,
+                            generation: 4,
+                        },
+                        title: {
                             contentId: "transcription-1",
                             contentRevision: 7,
                             generation: 4,
@@ -325,6 +332,8 @@ describe("planAdvance audio", () => {
         });
 
         expect(planAdvance(facts).actions).toEqual([
+            { type: "queueTitleJob" },
+            expect.objectContaining({ type: "markPhase", phase: "summary" }),
             { type: "queueTopics", strict: false },
             expect.objectContaining({ type: "markPhase", phase: "summary" }),
             {
@@ -407,10 +416,17 @@ describe("planAdvance audio", () => {
         {
             name: "a timed transcript",
             facts: audioFacts(),
-            expected: ["queueTopics", "markPhase", "queueSummary", "markPhase"],
+            expected: [
+                "queueTitleJob",
+                "markPhase",
+                "queueTopics",
+                "markPhase",
+                "queueSummary",
+                "markPhase",
+            ],
         },
         {
-            name: "automatic titles off (the inline title remains at the trigger)",
+            name: "automatic titles off",
             facts: audioFacts({
                 profile: profileAutomatic({ title: false }),
             }),
@@ -426,7 +442,14 @@ describe("planAdvance audio", () => {
                     timed: false,
                 },
             }),
-            expected: ["queueSummary", "markPhase"],
+            expected: [
+                "markPhase",
+                "queueTitleJob",
+                "markPhase",
+                "markPhase",
+                "queueSummary",
+                "markPhase",
+            ],
         },
         {
             name: "the Organization view",
@@ -438,7 +461,12 @@ describe("planAdvance audio", () => {
             facts: audioFacts({
                 profile: profileAutomatic({ summary: false }),
             }),
-            expected: ["queueTopics", "markPhase"],
+            expected: [
+                "queueTitleJob",
+                "markPhase",
+                "queueTopics",
+                "markPhase",
+            ],
         },
     ])("reproduces the transcript path for $name", ({ facts, expected }) => {
         expect(actionTypes(planAdvance(facts).actions)).toEqual(expected);
@@ -473,11 +501,11 @@ describe("planAdvance audio", () => {
             audioFacts({ phases: { learn: releasedLearn() }, summary }),
         );
         expect(actionTypes(result.actions)).toEqual([
-            ...(expectedSummary ? ["queueSummary", "markPhase"] : []),
-            "queueTopics",
-            "markPhase",
             "queueTitleJob",
             "markPhase",
+            "queueTopics",
+            "markPhase",
+            ...(expectedSummary ? ["queueSummary", "markPhase"] : []),
         ]);
         for (const action of result.actions) {
             if (
@@ -495,9 +523,9 @@ describe("planAdvance audio", () => {
             profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueTopics",
-            "markPhase",
             "queueTitleJob",
+            "markPhase",
+            "queueTopics",
             "markPhase",
         ]);
     });
@@ -508,9 +536,9 @@ describe("planAdvance audio", () => {
             profile: profileAutomatic({ title: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueSummary",
-            "markPhase",
             "queueTopics",
+            "markPhase",
+            "queueSummary",
             "markPhase",
         ]);
     });
@@ -521,9 +549,9 @@ describe("planAdvance audio", () => {
             profile: profileAutomatic({ summary: false }),
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueTopics",
-            "markPhase",
             "queueTitleJob",
+            "markPhase",
+            "queueTopics",
             "markPhase",
         ]);
     });
@@ -534,11 +562,11 @@ describe("planAdvance audio", () => {
             generation: 5,
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
-            "queueSummary",
+            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
-            "queueTitleJob",
+            "queueSummary",
             "markPhase",
         ]);
     });
@@ -553,11 +581,11 @@ describe("planAdvance audio", () => {
         released.generation = 5;
         released.phases.learn = releasedLearn(7, 5);
         expect(actionTypes(planAdvance(released).actions)).toEqual([
-            "queueSummary",
+            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
-            "queueTitleJob",
+            "queueSummary",
             "markPhase",
         ]);
     });
@@ -583,6 +611,8 @@ describe("planAdvance audio", () => {
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
             "markPhase",
+            "markPhase",
+            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
@@ -630,6 +660,261 @@ describe("planAdvance audio", () => {
         ]);
     });
 
+    it("queues automatic transcription only after Categorize is done", () => {
+        const uncategorized = audioFacts({
+            content: null,
+            categorization: {
+                placementFolderIds: [],
+                intendedFolderIds: [],
+                profileAssigned: false,
+                resolution: null,
+            },
+            phases: { categorize: undefined, transcribe: undefined },
+            transcription: {
+                riffado: null,
+                plaud: null,
+                jobActive: false,
+            },
+        } as Partial<PipelineFacts>);
+        expect(actionTypes(planAdvance(uncategorized).actions)).not.toContain(
+            "queueTranscription",
+        );
+
+        const categorized = audioFacts({
+            content: null,
+            phases: { transcribe: undefined },
+            transcription: {
+                riffado: null,
+                plaud: null,
+                jobActive: false,
+            },
+            profile: {
+                ...DEFAULT_PROFILE,
+                transcribe: {
+                    enabled: true,
+                    automatic: true,
+                    plaudTranscript: "use",
+                },
+            },
+        } as Partial<PipelineFacts>);
+        expect(actionTypes(planAdvance(categorized).actions)).toEqual([
+            "queueTranscription",
+            "markPhase",
+        ]);
+    });
+
+    it.each([
+        ["content_reaped", { contentReaped: true }],
+        ["audio_reaped", { audioReaped: true }],
+        ["shared", { shared: true }],
+    ] as const)("skips automatic transcription when the recording is %s", (reason, guard) => {
+        const result = planAdvance(
+            audioFacts({
+                content: null,
+                phases: { transcribe: undefined },
+                transcription: {
+                    riffado: null,
+                    plaud: null,
+                    jobActive: false,
+                    ...guard,
+                },
+                profile: {
+                    ...DEFAULT_PROFILE,
+                    transcribe: {
+                        enabled: true,
+                        automatic: true,
+                        plaudTranscript: "use",
+                    },
+                },
+            } as Partial<PipelineFacts>),
+        );
+
+        expect(result.actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "transcribe",
+                record: expect.objectContaining({
+                    state: "skipped",
+                    reason,
+                }),
+            }),
+        ]);
+    });
+
+    it("records the terminal automatic transcription error", () => {
+        const result = planAdvance(
+            audioFacts({
+                content: null,
+                phases: {
+                    transcribe: {
+                        ...phase("running", "automatic"),
+                        automatic: true,
+                    },
+                },
+                transcription: {
+                    riffado: null,
+                    plaud: null,
+                    jobActive: false,
+                    failed: {
+                        errorCode: "TRANSCRIPTION_FAILED",
+                        completedAt: "2026-10-14T12:01:00.000Z",
+                    },
+                },
+                profile: {
+                    ...DEFAULT_PROFILE,
+                    transcribe: {
+                        enabled: true,
+                        automatic: true,
+                        plaudTranscript: "use",
+                    },
+                },
+            } as Partial<PipelineFacts>),
+        );
+
+        expect(result.actions).toEqual([
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "transcribe",
+                record: expect.objectContaining({
+                    state: "failed",
+                    reason: "TRANSCRIPTION_FAILED",
+                    automatic: true,
+                }),
+            }),
+        ]);
+    });
+
+    it("retries automatic transcription only after the sweeper marks it pending", () => {
+        const base = audioFacts({
+            content: null,
+            phases: {
+                transcribe: {
+                    ...phase("failed", "TRANSCRIPTION_FAILED"),
+                    automatic: true,
+                },
+            },
+            transcription: {
+                riffado: null,
+                plaud: null,
+                jobActive: false,
+                failed: {
+                    errorCode: "TRANSCRIPTION_FAILED",
+                    completedAt: "2026-10-14T12:01:00.000Z",
+                },
+            },
+            profile: {
+                ...DEFAULT_PROFILE,
+                transcribe: {
+                    enabled: true,
+                    automatic: true,
+                    plaudTranscript: "use",
+                },
+            },
+        } as Partial<PipelineFacts>);
+
+        expect(planAdvance(base).actions).toEqual([]);
+        expect(
+            actionTypes(
+                planAdvance({
+                    ...base,
+                    generation: 5,
+                    phases: {
+                        ...base.phases,
+                        transcribe: {
+                            ...phase("pending", "automatic_retry", 5),
+                            automatic: true,
+                        },
+                    },
+                }).actions,
+            ),
+        ).toEqual(["queueTranscription", "markPhase"]);
+    });
+
+    it("leaves a legacy item without a transcript idle", () => {
+        expect(
+            planAdvance(
+                audioFacts({
+                    content: null,
+                    phases: { categorize: phase("done", "legacy", 0) },
+                }),
+            ).actions,
+        ).toEqual([]);
+    });
+
+    it.each([
+        ["use", ["markPhase", "markPhase", "queueTitleJob", "markPhase"]],
+        ["also_transcribe", ["queueTranscription", "markPhase"]],
+    ] as const)("handles a Plaud transcript with the %s policy", (plaudTranscript, expected) => {
+        const plaud = {
+            contentId: "plaud-transcript-1",
+            contentSourceId: "plaud" as const,
+            contentRevision: 1,
+            timed: true,
+        };
+        const facts = audioFacts({
+            content: plaudTranscript === "use" ? plaud : null,
+            phases: { transcribe: undefined, learn: undefined },
+            transcription: {
+                riffado: null,
+                plaud,
+                jobActive: false,
+            },
+            profile: {
+                ...DEFAULT_PROFILE,
+                automatic: {
+                    ...DEFAULT_PROFILE.automatic,
+                    summary: false,
+                    topics: false,
+                },
+                transcribe: {
+                    enabled: true,
+                    automatic: true,
+                    plaudTranscript,
+                },
+            },
+        } as Partial<PipelineFacts>);
+        expect(actionTypes(planAdvance(facts).actions)).toEqual(expected);
+    });
+
+    it("skips Learn and topics for an untimed browser transcript", () => {
+        const facts = audioFacts({
+            content: {
+                contentId: "browser-transcript-1",
+                contentSourceId: "riffado",
+                contentRevision: 1,
+                timed: false,
+            },
+            phases: { transcribe: undefined, learn: undefined },
+        });
+        const actions = planAdvance(facts).actions;
+        expect(actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "learn",
+                record: expect.objectContaining({
+                    state: "skipped",
+                    reason: "no_timings",
+                }),
+            }),
+        );
+        expect(actions).toContainEqual(
+            expect.objectContaining({
+                type: "markPhase",
+                phase: "summary",
+                record: expect.objectContaining({
+                    steps: expect.objectContaining({
+                        topics: expect.objectContaining({
+                            state: "skipped",
+                            reason: "no_timings",
+                        }),
+                    }),
+                }),
+            }),
+        );
+        expect(actionTypes(actions)).toContain("queueTitleJob");
+        expect(actionTypes(actions)).not.toContain("queueTopics");
+    });
+
     it("emits every queue action immediately before its durable mark", () => {
         const actions = planAdvance(
             audioFacts({ phases: { learn: releasedLearn() } }),
@@ -642,36 +927,40 @@ describe("planAdvance audio", () => {
     });
 
     it("carries transcript arguments and the requested revision in marks", () => {
-        expect(planAdvance(audioFacts()).actions).toEqual([
-            { type: "queueTopics", strict: false },
-            {
-                type: "markPhase",
+        const actions = planAdvance(audioFacts()).actions;
+        expect(actionTypes(actions)).toEqual([
+            "queueTitleJob",
+            "markPhase",
+            "queueTopics",
+            "markPhase",
+            "queueSummary",
+            "markPhase",
+        ]);
+        expect(actions[2]).toEqual({ type: "queueTopics", strict: false });
+        expect(actions[4]).toEqual({
+            type: "queueSummary",
+            presetId: null,
+            strict: false,
+        });
+        expect(actions[5]).toEqual(
+            expect.objectContaining({
                 phase: "summary",
                 record: expect.objectContaining({
+                    inputs: {
+                        contentId: "transcription-1",
+                        contentSourceId: "riffado",
+                        contentRevision: 7,
+                        timed: true,
+                    },
                     generation: 4,
                     profileRevisionId: "profile-revision-1",
                     steps: {
-                        topics: {
+                        title: {
                             contentId: "transcription-1",
                             contentRevision: 7,
                             generation: 4,
                             profileRevisionId: "profile-revision-1",
                         },
-                    },
-                }),
-            },
-            {
-                type: "queueSummary",
-                presetId: null,
-                strict: false,
-            },
-            {
-                type: "markPhase",
-                phase: "summary",
-                record: expect.objectContaining({
-                    generation: 4,
-                    profileRevisionId: "profile-revision-1",
-                    steps: {
                         topics: {
                             contentId: "transcription-1",
                             contentRevision: 7,
@@ -686,8 +975,8 @@ describe("planAdvance audio", () => {
                         },
                     },
                 }),
-            },
-        ]);
+            }),
+        );
     });
 
     it("does not repeat actions after their marks are applied", () => {
@@ -711,6 +1000,8 @@ describe("planAdvance audio", () => {
         expect(actionTypes(planAdvance(replaced).actions)).toEqual([
             "markPhase",
             "markPhase",
+            "queueTitleJob",
+            "markPhase",
             "queueTopics",
             "markPhase",
             "queueSummary",
@@ -725,6 +1016,8 @@ describe("planAdvance audio", () => {
             },
         });
         expect(actionTypes(planAdvance(facts).actions)).toEqual([
+            "markPhase",
+            "queueTitleJob",
             "markPhase",
             "queueTopics",
             "markPhase",
@@ -793,7 +1086,11 @@ describe("planAdvance mail", () => {
         {
             name: "mail auto-processing off",
             facts: mailFacts({
-                profile: profileAutomatic({ summary: false, learn: false }),
+                profile: profileAutomatic({
+                    summary: false,
+                    learn: false,
+                    title: false,
+                }),
             }),
             expected: [],
         },
@@ -819,7 +1116,12 @@ describe("planAdvance mail", () => {
         {
             name: "normal mail without Learn",
             facts: mailFacts(),
-            expected: ["queueSummary", "markPhase"],
+            expected: [
+                "queueTitleJob",
+                "markPhase",
+                "queueSummary",
+                "markPhase",
+            ],
         },
         {
             name: "normal mail with Learn",
@@ -827,6 +1129,8 @@ describe("planAdvance mail", () => {
                 profile: profileAutomatic({ learn: true }),
             }),
             expected: [
+                "queueTitleJob",
+                "markPhase",
                 "queueSummary",
                 "markPhase",
                 "startAutoLearnMail",
@@ -836,7 +1140,12 @@ describe("planAdvance mail", () => {
         {
             name: "the seeded mail profile",
             facts: mailFacts(),
-            expected: ["queueSummary", "markPhase"],
+            expected: [
+                "queueTitleJob",
+                "markPhase",
+                "queueSummary",
+                "markPhase",
+            ],
         },
         {
             name: "already shared mail",
@@ -845,6 +1154,8 @@ describe("planAdvance mail", () => {
                 mail: { autoGenerated: false, unreadable: false, shared: true },
             }),
             expected: [
+                "queueTitleJob",
+                "markPhase",
                 "queueSummary",
                 "markPhase",
                 "startAutoLearnMail",
@@ -866,7 +1177,7 @@ describe("planAdvance mail", () => {
     });
 
     it("queues mail summary with no preset and non-strict delivery", () => {
-        expect(planAdvance(mailFacts()).actions[0]).toEqual({
+        expect(planAdvance(mailFacts()).actions[2]).toEqual({
             type: "queueSummary",
             presetId: null,
             strict: false,
@@ -875,8 +1186,13 @@ describe("planAdvance mail", () => {
 
     it("plans mail content from the mail source", () => {
         const actions = planAdvance(mailFacts()).actions;
-        expect(actionTypes(actions)).toEqual(["queueSummary", "markPhase"]);
-        expect(actions[1]).toEqual(
+        expect(actionTypes(actions)).toEqual([
+            "queueTitleJob",
+            "markPhase",
+            "queueSummary",
+            "markPhase",
+        ]);
+        expect(actions[3]).toEqual(
             expect.objectContaining({
                 record: expect.objectContaining({
                     inputs: {

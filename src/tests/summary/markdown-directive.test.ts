@@ -89,6 +89,9 @@ vi.mock("@/lib/profiles/resolve", () => ({
         resolvedAudioProfile(profileLegacy.current),
     ),
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();

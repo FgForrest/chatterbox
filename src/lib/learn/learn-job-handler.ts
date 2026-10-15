@@ -85,6 +85,7 @@ import {
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
 import {
     loadItemProfileRevision,
@@ -158,10 +159,27 @@ async function setStatus(
     status: Outcome,
     extra: Partial<typeof learnRuns.$inferInsert> = {},
 ): Promise<void> {
-    await db
-        .update(learnRuns)
-        .set({ status, updatedAt: new Date(), ...extra })
-        .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")));
+    const advance = await db.transaction(async (tx) => {
+        const [updated] = await tx
+            .update(learnRuns)
+            .set({ status, updatedAt: new Date(), ...extra })
+            .where(
+                and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")),
+            )
+            .returning({
+                itemId: learnRuns.itemId,
+                userId: learnRuns.userId,
+                view: learnRuns.view,
+            });
+        if (!updated || status === "queued") return null;
+        return requestAdvanceInTx(tx, {
+            itemId: updated.itemId,
+            userId: updated.userId,
+            view: updated.view,
+            reason: "learn-settled",
+        });
+    });
+    if (advance) nudge();
 }
 
 /** The actor's chat provider, as the Learn pass talks to it. */
@@ -639,10 +657,19 @@ async function runLearnJob({
                 profile,
             );
         }
-        await db
-            .update(learnRuns)
-            .set({ status: "cancelled", updatedAt: new Date() })
-            .where(eq(learnRuns.id, run.id));
+        await db.transaction(async (tx) => {
+            await tx
+                .update(learnRuns)
+                .set({ status: "cancelled", updatedAt: new Date() })
+                .where(eq(learnRuns.id, run.id));
+            await requestAdvanceInTx(tx, {
+                itemId: run.itemId,
+                userId: run.userId,
+                view: run.view,
+                reason: "learn-settled",
+            });
+        });
+        nudge();
         return { skipped: "unsupported kind" };
     }
     const claimed = await db
@@ -900,10 +927,10 @@ async function runLearnJob({
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
-                const finish = (
+                const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
-                ) =>
-                    tx
+                ) => {
+                    await tx
                         .update(learnRuns)
                         .set({
                             status,
@@ -917,6 +944,13 @@ async function runLearnJob({
                             updatedAt: new Date(),
                         })
                         .where(eq(learnRuns.id, run.id));
+                    await requestAdvanceInTx(tx, {
+                        itemId: run.itemId,
+                        userId: run.userId,
+                        view: run.view,
+                        reason: "learn-settled",
+                    });
+                };
                 if (
                     validated.superseded ||
                     current.revision !== run.transcriptRevision
@@ -971,7 +1005,7 @@ async function runLearnJob({
                 return { status, items: items.length, correcting };
             });
             if (outcome.status === "stale") continue;
-            if ("correcting" in outcome && outcome.correcting) nudge();
+            nudge();
             return { status: outcome.status, items: outcome.items };
         }
     } catch (caught) {
@@ -1307,10 +1341,10 @@ async function runMailLearnJob(
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
-                const finish = (
+                const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
-                ) =>
-                    tx
+                ) => {
+                    await tx
                         .update(learnRuns)
                         .set({
                             status,
@@ -1322,6 +1356,13 @@ async function runMailLearnJob(
                             updatedAt: new Date(),
                         })
                         .where(eq(learnRuns.id, run.id));
+                    await requestAdvanceInTx(tx, {
+                        itemId: run.itemId,
+                        userId: run.userId,
+                        view: run.view,
+                        reason: "learn-settled",
+                    });
+                };
                 if (
                     validated.superseded ||
                     current.revision !== run.transcriptRevision
@@ -1378,6 +1419,7 @@ async function runMailLearnJob(
                 return { status, items: candidates.length };
             });
             if (outcome.status === "stale") continue;
+            nudge();
             return { status: outcome.status, items: outcome.items };
         }
     } catch (caught) {

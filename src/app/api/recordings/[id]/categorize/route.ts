@@ -323,6 +323,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 ownerUserId,
                 itemId,
                 folderId,
+                requestPipeline: false,
             });
         }
         if (orgUserId) {

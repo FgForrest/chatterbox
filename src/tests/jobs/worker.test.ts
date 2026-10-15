@@ -389,6 +389,35 @@ describe("job worker", () => {
         expect(captureServerException).toHaveBeenCalledTimes(1);
     });
 
+    it("notifies a handler only after its job reaches terminal failure", async () => {
+        const onTerminalFailure = vi.fn().mockResolvedValue(undefined);
+        registerJobHandler(
+            testHandler({
+                run: async () => {
+                    throw new Error("fetch failed");
+                },
+                onTerminalFailure,
+            }),
+        );
+        claimOnce(claimed({ payload: { value: "retrying" } }));
+        await runTick();
+        expect(onTerminalFailure).not.toHaveBeenCalled();
+
+        queries.failJobAttempt.mockResolvedValue({
+            status: "failed",
+            attempts: 3,
+        });
+        claimOnce(claimed({ attempts: 3, payload: { value: "terminal" } }));
+        await runTick();
+
+        expect(onTerminalFailure).toHaveBeenCalledWith({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: { value: "terminal" },
+            errorCode: "INTERNAL_ERROR",
+        });
+    });
+
     it("asks each kind only for the slots it has free", async () => {
         const gate = heldJobs();
         registerJobHandler(testHandler({ concurrency: 2, run: gate.run }));

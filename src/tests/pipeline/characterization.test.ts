@@ -431,14 +431,15 @@ function mountTranscription({
     timed?: boolean;
     transcriptText?: string;
 } = {}) {
-    mocks.resolveItemProfile.mockResolvedValue(
-        resolvedAudioProfile({
+    mocks.resolveItemProfile.mockResolvedValue({
+        ...resolvedAudioProfile({
             autoGenerateTitle,
             autoSummarize,
             autoSummarizePreset: "meeting-notes",
             autoDetectTopics: true,
         }),
-    );
+        assigned: true,
+    });
     mocks.dbSelect
         .mockReturnValueOnce(
             selectRecording([
@@ -741,19 +742,14 @@ describe("transcribeRecording post-write triggers", () => {
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("generates the title, then queues timed topics and the summary", async () => {
+    it("queues the title, then timed topics and the summary", async () => {
         mountTranscription();
 
         const result = await transcribeAndAdvance();
 
         expect(result.success).toBe(true);
-        expect(mocks.applyGeneratedTitle).toHaveBeenCalledWith({
-            userId: USER_ID,
-            recordingId: ITEM_ID,
-            text: "Transcript text",
-            plaudFileId: "plaud-1",
-            syncTitleToPlaud: false,
-        });
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.enqueueTitleJob).toHaveBeenCalledWith(USER_ID, ITEM_ID);
         expect(mocks.queueAutoTopics).toHaveBeenCalledWith(
             USER_ID,
             ITEM_ID,
@@ -764,17 +760,14 @@ describe("transcribeRecording post-write triggers", () => {
             ITEM_ID,
             null,
         );
-        expect(
-            mocks.applyGeneratedTitle.mock.invocationCallOrder[0],
-        ).toBeLessThan(mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0);
+        expect(mocks.enqueueTitleJob.mock.invocationCallOrder[0]).toBeLessThan(
+            mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0,
+        );
         expect(mocks.queueAutoTopics.mock.invocationCallOrder[0]).toBeLessThan(
             mocks.queueAutoSummary.mock.invocationCallOrder[0] ?? 0,
         );
-        expect(
-            mocks.applyGeneratedTitle.mock.invocationCallOrder[0],
-        ).toBeLessThan(mocks.emitEvent.mock.invocationCallOrder[0] ?? 0);
         expect(mocks.emitEvent.mock.invocationCallOrder[0]).toBeLessThan(
-            mocks.queueAutoTopics.mock.invocationCallOrder[0] ?? 0,
+            mocks.enqueueTitleJob.mock.invocationCallOrder[0] ?? 0,
         );
     });
 
@@ -811,7 +804,8 @@ describe("transcribeRecording post-write triggers", () => {
             recordingId: ITEM_ID,
             timed: false,
         });
-        expect(mocks.applyGeneratedTitle).toHaveBeenCalledOnce();
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
         expect(mocks.queueAutoTopics).not.toHaveBeenCalled();
         expect(mocks.queueAutoSummary).toHaveBeenCalledOnce();
     });
@@ -827,23 +821,22 @@ describe("transcribeRecording post-write triggers", () => {
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });
 
-    it("requests the private pipeline after transcription but not the Organization pipeline", async () => {
+    it("writes the private pipeline view but not the Organization pipeline", async () => {
         mountTranscription();
 
         await transcribeRecording(USER_ID, ITEM_ID);
 
-        expect(mocks.requestAdvance).toHaveBeenCalledWith({
-            itemId: ITEM_ID,
-            userId: USER_ID,
-            view: "private",
-            reason: "transcript",
-        });
+        expect(mocks.upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ view: "private" }),
+        );
 
         vi.clearAllMocks();
         mountTranscription();
         await transcribeRecording(USER_ID, ITEM_ID, { view: "org" });
 
-        expect(mocks.requestAdvance).not.toHaveBeenCalled();
+        expect(mocks.upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({ view: "org" }),
+        );
     });
 
     it("does not queue a summary when automatic summaries are off", async () => {
@@ -851,7 +844,8 @@ describe("transcribeRecording post-write triggers", () => {
 
         await transcribeAndAdvance();
 
-        expect(mocks.applyGeneratedTitle).toHaveBeenCalledOnce();
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
+        expect(mocks.enqueueTitleJob).toHaveBeenCalledOnce();
         expect(mocks.queueAutoTopics).toHaveBeenCalledOnce();
         expect(mocks.queueAutoSummary).not.toHaveBeenCalled();
     });

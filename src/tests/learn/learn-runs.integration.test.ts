@@ -641,11 +641,20 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         const jobs = await db()
             .select({ status: asyncJobs.status, payload: asyncJobs.payload })
             .from(asyncJobs);
-        expect(
-            jobs
-                .filter((job) => job.status === "pending")
-                .map((job) => job.payload),
-        ).toEqual([{ runId: again.runId }]);
+        const pending = jobs
+            .filter((job) => job.status === "pending")
+            .map((job) => job.payload);
+        expect(pending).toHaveLength(2);
+        expect(pending).toEqual(
+            expect.arrayContaining([
+                { runId: again.runId },
+                {
+                    itemId: REC,
+                    view: "private",
+                    reason: "transcript",
+                },
+            ]),
+        );
     });
 
     it("keeps an owner's unfinished run from sharing, and lets only the organization account run it while shared", async () => {

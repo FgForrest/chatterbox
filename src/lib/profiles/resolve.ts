@@ -38,6 +38,8 @@ export interface ResolvedItemProfile {
     profile: ProfileRecord;
     revisionId: string;
     settings: ProfileSettings;
+    /** True when this immutable revision is frozen on the item's pipeline. */
+    assigned?: boolean;
 }
 
 function present(
@@ -323,7 +325,7 @@ export async function resolveItemProfile(
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
             });
-            if (personal) return personal;
+            if (personal) return { ...personal, assigned: true };
             if (orgUserId) {
                 const organization = await readProfileRevision({
                     profileId: processing.profileId,
@@ -335,7 +337,7 @@ export async function resolveItemProfile(
                         ? { revisionId: processing.profileRevisionId }
                         : {}),
                 });
-                if (organization) return organization;
+                if (organization) return { ...organization, assigned: true };
             }
         } else if (orgUserId) {
             const organization = await readProfileRevision({
@@ -348,7 +350,7 @@ export async function resolveItemProfile(
                     ? { revisionId: processing.profileRevisionId }
                     : {}),
             });
-            if (organization) return organization;
+            if (organization) return { ...organization, assigned: true };
         }
         if (view === "private") {
             throw new AppError(

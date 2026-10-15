@@ -11,6 +11,7 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lockOrgTree, orgTreeChanged } from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
@@ -20,6 +21,7 @@ import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { deleteRawMail } from "@/lib/mail/raw-storage";
 import { shareMailInTx } from "@/lib/mail/share-gate";
 import { getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/view";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -198,7 +200,20 @@ export async function shareMail(input: {
             .limit(1);
         if (!pending) throw mailNotFound();
         await shareMailInTx(tx, { ...input, orgUserId });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "org",
+            reason: "placement",
+        });
     });
+    nudge();
     await orgTreeChanged();
 }
 
@@ -208,13 +223,22 @@ export async function dismissPendingShare(input: {
     itemId: string;
     folderId: string;
 }): Promise<void> {
-    await db
-        .delete(mailPendingShares)
-        .where(
-            and(
-                eq(mailPendingShares.itemId, input.itemId),
-                eq(mailPendingShares.userId, input.ownerUserId),
-                eq(mailPendingShares.folderId, input.folderId),
-            ),
-        );
+    await db.transaction(async (tx) => {
+        await tx
+            .delete(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.itemId, input.itemId),
+                    eq(mailPendingShares.userId, input.ownerUserId),
+                    eq(mailPendingShares.folderId, input.folderId),
+                ),
+            );
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+    });
+    nudge();
 }

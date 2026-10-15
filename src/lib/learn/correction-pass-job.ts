@@ -27,6 +27,7 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import {
     InvalidJobPayloadError,
@@ -58,6 +59,7 @@ import { mayStillRun } from "@/lib/learn/learn-job-handler";
 import { chooseLearnPath } from "@/lib/learn/provider";
 import { issueCorrectionPassToken } from "@/lib/learn/run-token";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     loadItemProfileRevision,
     resolveItemProfile,
@@ -82,15 +84,32 @@ async function setStatus(
     status: PassStatus,
     extra: Partial<typeof transcriptCorrectionPasses.$inferInsert> = {},
 ): Promise<void> {
-    await db
-        .update(transcriptCorrectionPasses)
-        .set({ status, updatedAt: new Date(), ...extra })
-        .where(
-            and(
-                eq(transcriptCorrectionPasses.id, passId),
-                eq(transcriptCorrectionPasses.status, "running"),
-            ),
-        );
+    const advance = await db.transaction(async (tx) => {
+        const [updated] = await tx
+            .update(transcriptCorrectionPasses)
+            .set({ status, updatedAt: new Date(), ...extra })
+            .where(
+                and(
+                    eq(transcriptCorrectionPasses.id, passId),
+                    eq(transcriptCorrectionPasses.status, "running"),
+                ),
+            )
+            .returning({
+                recordingId: transcriptCorrectionPasses.recordingId,
+                userId: transcriptCorrectionPasses.userId,
+                view: transcriptCorrectionPasses.view,
+            });
+        if (!updated || status === "queued" || status === "running") {
+            return null;
+        }
+        return requestAdvanceInTx(tx, {
+            itemId: updated.recordingId,
+            userId: updated.userId,
+            view: updated.view,
+            reason: "correction-finished",
+        });
+    });
+    if (advance) nudge();
 }
 
 /**
@@ -305,11 +324,11 @@ async function runPass({
                 : false;
         const outcome = await db.transaction(async (tx) => {
             await lockOrgPeopleShared(tx);
-            const finish = (
+            const finish = async (
                 status: "finished" | "superseded" | "cancelled",
                 stats: Record<string, number>,
-            ) =>
-                tx
+            ) => {
+                await tx
                     .update(transcriptCorrectionPasses)
                     .set({
                         status,
@@ -323,6 +342,13 @@ async function runPass({
                         updatedAt: new Date(),
                     })
                     .where(eq(transcriptCorrectionPasses.id, pass.id));
+                await requestAdvanceInTx(tx, {
+                    itemId: pass.recordingId,
+                    userId: pass.userId,
+                    view: pass.view,
+                    reason: "correction-finished",
+                });
+            };
             const baseStats = {
                 calls: result.calls,
                 windows: result.windows,
@@ -437,6 +463,7 @@ async function runPass({
             });
             return { status: "finished" as const, written: rows.length };
         });
+        nudge();
         return { ...outcome, pass };
     } catch (caught) {
         // Final as for Learn (no usable answer, lookups spent): no retry.

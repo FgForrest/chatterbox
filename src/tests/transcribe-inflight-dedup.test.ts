@@ -4,12 +4,7 @@
  * Two same-worker paths can race the provider for one recording:
  *   1. Manual `POST /api/recordings/[id]/transcribe` (`force: true`).
  *      Retry double-click fans out two concurrent provider calls.
- *   2. Post-sync auto-transcribe (`queueTranscriptions` in
- *      `sync-recordings.ts`) can land mid-Retry on the same worker.
- *
- * #282's `claimAutoTranscribeIds` only skips ids already in the
- * auto-transcribe set. It does not cover Retry double-click.
- * This map is complementary, not a substitute.
+ *   2. A pipeline transcription job can land mid-Retry on the same worker.
  *
  * Equivalent-option calls for the same (userId, recordingId, force)
  * share one in-flight promise. Force is partitioned from non-force so
@@ -22,6 +17,9 @@ import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/lib/profiles/resolve", () => ({
     resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/db", () => ({

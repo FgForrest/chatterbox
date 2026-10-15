@@ -2,6 +2,8 @@ import { and, eq, getTableColumns } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { db } from "@/db";
 import { chatterItems, recordings } from "@/db/schema";
+import { nudge } from "@/lib/jobs/nudge";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Executor = typeof db | Tx;
@@ -98,6 +100,7 @@ export interface NewAudioItem extends NewRecording {
 export async function insertAudioItem(
     executor: Executor,
     values: NewAudioItem,
+    options: { pipeline: "arrival" | "legacy" },
 ): Promise<{ id: string }> {
     const { title, occurredAt, titleEditedAt, ...recording } = values;
     const id = recording.id ?? nanoid();
@@ -118,9 +121,20 @@ export async function insertAudioItem(
         await tx
             .insert(recordings)
             .values({ ...recording, id, createdAt, updatedAt });
-        return { id };
+        const advance =
+            options.pipeline === "arrival"
+                ? await requestAdvanceInTx(tx, {
+                      itemId: id,
+                      userId: recording.userId,
+                      view: "private",
+                      reason: "arrival",
+                  })
+                : null;
+        return { id, advance };
     };
-    return (executor as typeof db).transaction(insert);
+    const result = await (executor as typeof db).transaction(insert);
+    if (result.advance) nudge();
+    return { id: result.id };
 }
 
 /**
