@@ -59,7 +59,9 @@ export async function completeGoogleConnect(input: {
     if (input.params.get("error")) return { outcome: "denied", returnTo };
     const code = input.params.get("code");
     const config =
-        sealed.purpose === "calendar" || sealed.purpose === "meet"
+        sealed.purpose === "calendar" ||
+        sealed.purpose === "meet" ||
+        sealed.purpose === "calendar-meet"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!code || !config) return { outcome: "failed", returnTo };
@@ -80,26 +82,29 @@ export async function completeGoogleConnect(input: {
         ) {
             return { outcome: "domain_not_allowed", returnTo };
         }
-        const requiredScope =
-            sealed.purpose === "meet"
-                ? GOOGLE_MEET_READ_SCOPE
-                : sealed.purpose === "calendar"
-                  ? GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE
-                  : GOOGLE_DRIVE_FILE_SCOPE;
-        if (!tokens.scopes.includes(requiredScope)) {
-            return {
-                outcome:
-                    sealed.purpose === "meet"
-                        ? "missing_meet_scope"
-                        : sealed.purpose === "calendar"
-                          ? "missing_calendar_scope"
-                          : "missing_scope",
-                returnTo,
-            };
+        const needsCalendar =
+            sealed.purpose === "calendar" || sealed.purpose === "calendar-meet";
+        const needsMeet =
+            sealed.purpose === "meet" || sealed.purpose === "calendar-meet";
+        const needsDrive =
+            sealed.purpose === "drive" || sealed.purpose === undefined;
+        if (
+            needsCalendar &&
+            !tokens.scopes.includes(GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE)
+        ) {
+            return { outcome: "missing_calendar_scope", returnTo };
+        }
+        if (needsMeet && !tokens.scopes.includes(GOOGLE_MEET_READ_SCOPE)) {
+            return { outcome: "missing_meet_scope", returnTo };
+        }
+        if (needsDrive && !tokens.scopes.includes(GOOGLE_DRIVE_FILE_SCOPE)) {
+            return { outcome: "missing_scope", returnTo };
         }
         const existing = await getGoogleConnectionStatus(input.userId);
         if (
-            (sealed.purpose === "calendar" || sealed.purpose === "meet") &&
+            (sealed.purpose === "calendar" ||
+                sealed.purpose === "meet" ||
+                sealed.purpose === "calendar-meet") &&
             existing &&
             existing.subject !== claims.subject
         ) {

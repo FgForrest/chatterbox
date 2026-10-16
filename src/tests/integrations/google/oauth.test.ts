@@ -201,6 +201,9 @@ describe("Google OAuth state cookie", () => {
 
     it("returns only to paths on the app itself", () => {
         const app = "https://riffado.example";
+        expect(safeReturnTo("/dashboard?onboarding=google", app)).toBe(
+            "/dashboard?onboarding=google",
+        );
         expect(safeReturnTo("/dashboard?folder=a#x", app)).toBe(
             "/dashboard?folder=a#x",
         );

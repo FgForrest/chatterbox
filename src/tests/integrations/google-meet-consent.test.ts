@@ -34,6 +34,7 @@ import {
     saveMeetGrant,
 } from "@/lib/integrations/google/connection";
 import {
+    calendarAndMeetConsentScopes,
     GOOGLE_MEET_READ_SCOPE,
     meetConsentScopes,
 } from "@/lib/integrations/google/meet-consent";
@@ -110,6 +111,21 @@ describe("Meet incremental Google consent", () => {
         ]);
     });
 
+    it("requests Calendar and Meet together while retaining existing scopes", () => {
+        expect(
+            calendarAndMeetConsentScopes(
+                ["https://www.googleapis.com/auth/drive.file"],
+                calendarScope,
+            ),
+        ).toEqual([
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/drive.file",
+            calendarScope,
+            GOOGLE_MEET_READ_SCOPE,
+        ]);
+    });
+
     it("binds Meet state to the expected Google subject", () => {
         expect(openGoogleOAuthState(sealGoogleOAuthState(state))).toEqual(
             state,
@@ -142,6 +158,43 @@ describe("Meet incremental Google consent", () => {
         expect(body.get("redirect_uri")).toBe(
             "https://riffado.example/api/integrations/google/callback",
         );
+    });
+
+    it("accepts and stores one combined Calendar and Meet grant", async () => {
+        const combinedState = {
+            ...state,
+            purpose: "calendar-meet" as const,
+            expectedSubject: undefined,
+            returnTo: "/dashboard?onboarding=google",
+        };
+        const scopes = calendarAndMeetConsentScopes(
+            existing.scopes,
+            calendarScope,
+        );
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(tokenResponse(existing.subject, scopes));
+
+        await expect(
+            completeGoogleConnect({
+                userId: combinedState.userId,
+                sealedState: sealGoogleOAuthState(combinedState),
+                params: new URLSearchParams({
+                    state: combinedState.state,
+                    code: "code",
+                }),
+                fetchImpl,
+            }),
+        ).resolves.toEqual({
+            outcome: "connected",
+            returnTo: "/dashboard?onboarding=google",
+        });
+        expect(saveGoogleConnection).toHaveBeenCalledWith(
+            combinedState.userId,
+            expect.objectContaining({ subject: existing.subject }),
+            expect.objectContaining({ scopes }),
+        );
+        expect(saveMeetGrant).not.toHaveBeenCalled();
     });
 
     it("rejects another Google subject without replacing the connection", async () => {
@@ -180,6 +233,24 @@ describe("Meet incremental Google consent", () => {
             ...existing,
             subject: "other",
         });
+        await expect(
+            finish(
+                vi
+                    .fn<typeof fetch>()
+                    .mockResolvedValue(
+                        tokenResponse(
+                            existing.subject,
+                            meetConsentScopes(existing.scopes),
+                        ),
+                    ),
+            ),
+        ).resolves.toMatchObject({ outcome: "account_mismatch" });
+        expect(saveGoogleConnection).not.toHaveBeenCalled();
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
+    it("still refuses Meet-only consent without an active connection", async () => {
+        vi.mocked(getGoogleConnectionStatus).mockResolvedValue(null);
         await expect(
             finish(
                 vi

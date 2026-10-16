@@ -22,7 +22,7 @@ export function GoogleAccountSection() {
             <SettingsSectionHeader
                 title={i18n("Google account")}
                 description={i18n(
-                    "Connect a Google account for Calendar meeting context or Google Drive exports. Each access is requested separately.",
+                    "Connect a Google account for Calendar meeting context or Google Drive exports.",
                 )}
             />
             <SettingsCard>
@@ -31,6 +31,21 @@ export function GoogleAccountSection() {
             {state?.calendarAvailable && (
                 <SettingsCard>
                     <div className="space-y-3">
+                        {state.meetAvailable &&
+                            (!calendarGranted || !meetGranted) && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() => {
+                                        const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                                        window.location.assign(
+                                            `/api/integrations/google/connect?purpose=calendar-meet&returnTo=${encodeURIComponent(returnTo)}`,
+                                        );
+                                    }}
+                                >
+                                    {i18n("Connect Calendar and Meet")}
+                                </Button>
+                            )}
                         <p className="text-sm font-medium">
                             {i18n("Google Calendar for Learn")}
                         </p>

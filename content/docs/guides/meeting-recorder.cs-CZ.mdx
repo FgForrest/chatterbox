@@ -16,27 +16,25 @@ Safari rozšířením zachytávání systémového zvuku neumožňují.
 
 ## Instalace
 
-Rozšíření není součástí Klepny; je to samostatná složka `extensions/recorder`
-v repozitáři, případně zabalený zip.
+V Chatterboxu otevřete **Nastavení → Nahrávání schůzek** a klikněte na
+**Nainstalovat z Internetového obchodu Chrome**. Rozšíření funguje v prohlížečích
+Chrome, Edge, Brave a Vivaldi.
 
-1. Otevřete `chrome://extensions` a zapněte **Režim pro vývojáře**.
-2. Zvolte **Načíst rozbalené** a vyberte složku `extensions/recorder` (nebo
-   rozbalený zip vydání).
-3. Otevřete **Možnosti** rozšíření a povolte přístup k mikrofonu.
+Pouze při vývoji rozšíření otevřete `chrome://extensions`, zapněte **Režim pro
+vývojáře**, zvolte **Načíst rozbalené** a vyberte složku `extensions/recorder`
+z repozitáře.
 
 ## Propojení s Klepnou
 
-V Klepně otevřete **Nastavení → Nahrávání schůzek**. Stránka rozšíření ve
-vašem prohlížeči sama najde a řekne vám, co dál:
+Nastavení má tři kroky:
 
-- **Nastavit nahrávání**: Klepna vytvoří klíč pouze pro zápis
-  (umí vytvářet nahrávky, ale nečte vaši knihovnu) a předá ho rozšíření. Nic
-  se nekopíruje. Propojení potom potvrďte v možnostech rozšíření; Chrome se
-  případně zeptá na povolení přístupu k serveru.
-- **Na vlastní instanci, pouze poprvé**: Chrome vyžaduje, abyste rozšíření
-  jednou povolili přístup k vašemu serveru. Klikněte na ikonu rozšíření,
-  zvolte **Propojit s váš-server** a stránka nastavení se sama aktualizuje.
-  Pak klikněte na Nastavit nahrávání.
+1. Nainstalujte rozšíření z Internetového obchodu Chrome.
+2. Vraťte se do **Nastavení → Nahrávání schůzek**. Jakmile Chatterbox rozšíření
+   rozpozná, klikněte na **Připojit**.
+3. Zkontrolujte, že stránka ukazuje **Připojeno k váš-server**.
+
+Pokud rozšíření nejde rozpoznat, rozbalte **Připojit ručně** a vložte adresu
+serveru a vygenerovaný klíč do možností rozšíření.
 - **Ruční nastavení** je vždy k dispozici dole na stránce, pokud chcete klíč
   vložit do Možností rozšíření sami.
 
