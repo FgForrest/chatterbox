@@ -18,8 +18,12 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
-import { ItemWorkflow, openWidget } from "@/components/pipeline/item-workflow";
+import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import {
+    openWidget,
+    WorkflowWidget,
+} from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes } from "@/lib/format-bytes";
@@ -27,6 +31,7 @@ import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+import { deriveWorkflowWidgets } from "@/lib/pipeline/workflow-widgets";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -127,6 +132,8 @@ export function MailDetailPane({
     const locale = useLocale();
     const confirm = useConfirm();
     const [detail, setDetail] = useState<MailDetailResponse | null>(null);
+    const [processing, setProcessing] =
+        useState<ItemProcessingPresentation | null>(null);
     const [failed, setFailed] = useState(false);
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
@@ -146,6 +153,7 @@ export function MailDetailPane({
     useEffect(() => {
         const controller = new AbortController();
         setDetail(null);
+        setProcessing(null);
         setFailed(false);
         setFormatted(null);
         setShowFormatted(false);
@@ -154,7 +162,9 @@ export function MailDetailPane({
         })
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
-                setDetail((await response.json()) as MailDetailResponse);
+                const body = (await response.json()) as MailDetailResponse;
+                setDetail(body);
+                setProcessing(body.processing);
             })
             .catch((error: unknown) => {
                 if (!controller.signal.aborted) {
@@ -274,11 +284,12 @@ export function MailDetailPane({
             participant,
         ]),
     );
+    const widgets = processing ? deriveWorkflowWidgets(processing) : null;
 
     return (
         <div
             className={cn(
-                "space-y-4 lg:col-span-2 lg:block lg:self-start",
+                "flex flex-col gap-4 lg:col-span-2 lg:flex lg:self-start",
                 hiddenOnMobile && "hidden",
             )}
         >
@@ -337,7 +348,8 @@ export function MailDetailPane({
                 <ItemWorkflow
                     itemId={mail.id}
                     kind="mail"
-                    initialData={detail.processing}
+                    initialData={processing}
+                    onProcessingChange={setProcessing}
                     folders={folders}
                     folderAssignments={folderAssignments}
                     onSelectFolder={onSelectFolder}
@@ -348,19 +360,8 @@ export function MailDetailPane({
                     canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
                     view={mail.view === "org" ? "org" : "private"}
                     onLearn={() => openWidget(`mail-learn-${mail.id}`)}
-                    onSummary={() =>
-                        document
-                            .getElementById(`mail-summary-${mail.id}`)
-                            ?.scrollIntoView({ behavior: "smooth" })
-                    }
-                    onReviewLearn={() =>
-                        document
-                            .getElementById(`mail-learn-${mail.id}`)
-                            ?.scrollIntoView({
-                                behavior: "smooth",
-                                block: "center",
-                            })
-                    }
+                    onSummary={() => openWidget(`mail-summary-${mail.id}`)}
+                    onReviewLearn={() => openWidget(`mail-learn-${mail.id}`)}
                     onReviewTasks={() =>
                         openWidget(`mail-task-review-${mail.id}`)
                     }
@@ -368,203 +369,175 @@ export function MailDetailPane({
                     onFolderCreated={onFolderCreated}
                 />
             )}
-            <Card>
-                <CardContent className="space-y-4 p-4 sm:p-6">
-                    {failed && (
-                        <p className="text-sm text-destructive">
-                            {i18n("The mail could not be loaded.")}
-                        </p>
-                    )}
-                    {!detail && !failed && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <Loader2 className="size-4 animate-spin" />
-                            {i18n("Loading…")}
-                        </div>
-                    )}
-                    {detail && (
-                        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                            <dt className="text-muted-foreground">
-                                {i18n("From")}
-                            </dt>
-                            <dd className="flex flex-wrap items-center gap-1.5 break-all">
-                                {from ? person(from) : "—"}
-                                {detail.senderVerified ? (
-                                    <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
-                                        <BadgeCheck className="size-3.5" />
-                                        {i18n("Verified")}
-                                    </span>
-                                ) : (
-                                    <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
-                                        <ShieldAlert className="size-3.5" />
-                                        {i18n("Sender not verified")}
-                                    </span>
-                                )}
-                            </dd>
-                            {sender && (
-                                <>
-                                    <dt className="text-muted-foreground">
-                                        {i18n("Sent by")}
-                                    </dt>
-                                    <dd className="break-all">
-                                        {person(sender)}
-                                    </dd>
-                                </>
+            <div className="space-y-3 border-y px-4 py-3 sm:px-6">
+                {failed && (
+                    <p className="text-sm text-destructive">
+                        {i18n("The mail could not be loaded.")}
+                    </p>
+                )}
+                {!detail && !failed && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        {i18n("Loading…")}
+                    </div>
+                )}
+                {detail && (
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                        <dt className="text-muted-foreground">
+                            {i18n("From")}
+                        </dt>
+                        <dd className="flex flex-wrap items-center gap-1.5 break-all">
+                            {from ? person(from) : "—"}
+                            {detail.senderVerified ? (
+                                <span className="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+                                    <BadgeCheck className="size-3.5" />
+                                    {i18n("Verified")}
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                                    <ShieldAlert className="size-3.5" />
+                                    {i18n("Sender not verified")}
+                                </span>
                             )}
-                            {to.length > 0 && (
-                                <>
-                                    <dt className="text-muted-foreground">
-                                        {i18n("To")}
-                                    </dt>
-                                    <dd className="break-all">
-                                        {to.map(person).join(", ")}
-                                    </dd>
-                                </>
+                        </dd>
+                        {sender && (
+                            <>
+                                <dt className="text-muted-foreground">
+                                    {i18n("Sent by")}
+                                </dt>
+                                <dd className="break-all">{person(sender)}</dd>
+                            </>
+                        )}
+                        {to.length > 0 && (
+                            <>
+                                <dt className="text-muted-foreground">
+                                    {i18n("To")}
+                                </dt>
+                                <dd className="break-all">
+                                    {to.map(person).join(", ")}
+                                </dd>
+                            </>
+                        )}
+                        {cc.length > 0 && (
+                            <>
+                                <dt className="text-muted-foreground">
+                                    {i18n("Cc")}
+                                </dt>
+                                <dd className="break-all">
+                                    {cc.map(person).join(", ")}
+                                </dd>
+                            </>
+                        )}
+                        <dt className="text-muted-foreground">
+                            {i18n("Date")}
+                        </dt>
+                        <dd>
+                            {formatDateTime(
+                                detail.sentAt ?? detail.receivedAt,
+                                dateTimeFormat,
+                                locale,
                             )}
-                            {cc.length > 0 && (
-                                <>
-                                    <dt className="text-muted-foreground">
-                                        {i18n("Cc")}
-                                    </dt>
-                                    <dd className="break-all">
-                                        {cc.map(person).join(", ")}
-                                    </dd>
-                                </>
+                        </dd>
+                    </dl>
+                )}
+                {detail?.pendingShares.map((pending) => (
+                    <div
+                        key={pending.folderId}
+                        className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm"
+                    >
+                        <Share2 className="size-4 text-primary" />
+                        <span className="flex-1">
+                            {i18n(
+                                "Sent to {folder}: waiting for your review before it joins the Organization folder.",
+                                { folder: pending.name },
                             )}
-                            <dt className="text-muted-foreground">
-                                {i18n("Date")}
-                            </dt>
-                            <dd>
-                                {formatDateTime(
-                                    detail.sentAt ?? detail.receivedAt,
-                                    dateTimeFormat,
-                                    locale,
-                                )}
-                            </dd>
-                        </dl>
-                    )}
-                    {detail?.pendingShares.map((pending) => (
-                        <div
-                            key={pending.folderId}
-                            className="flex flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-3 text-sm"
+                        </span>
+                        <Button
+                            size="sm"
+                            disabled={busy !== null}
+                            onClick={() =>
+                                void share(pending.folderId, "share")
+                            }
                         >
-                            <Share2 className="size-4 text-primary" />
-                            <span className="flex-1">
-                                {i18n(
-                                    "Sent to {folder}: waiting for your review before it joins the Organization folder.",
-                                    { folder: pending.name },
-                                )}
-                            </span>
-                            <Button
-                                size="sm"
-                                disabled={busy !== null}
-                                onClick={() =>
-                                    void share(pending.folderId, "share")
-                                }
-                            >
-                                {i18n("Share")}
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant="ghost"
-                                disabled={busy !== null}
-                                onClick={() =>
-                                    void share(pending.folderId, "dismiss")
-                                }
-                            >
-                                {i18n("Keep private")}
-                            </Button>
-                        </div>
-                    ))}
-                    {detail?.autoGenerated && (
-                        <p className="text-xs text-muted-foreground">
-                            {i18n(
-                                "Sent by a machine (an auto-reply, a list, a notice): kept, never summarized.",
-                            )}
-                        </p>
-                    )}
-                    {detail?.unreadable && !detail.rawReapedAt && (
-                        <p className="text-sm text-muted-foreground">
-                            {i18n(
-                                "This mail's content is not readable here (encrypted or packed). Download the message to open it.",
-                            )}
-                        </p>
-                    )}
-                    {detail &&
-                        [
-                            detail.rawReapedAt &&
-                                i18n(
-                                    "Retention removed the message as it arrived and its attachments on {date}.",
-                                    {
-                                        date: formatDateTime(
-                                            detail.rawReapedAt,
-                                            "absolute",
-                                            locale,
-                                        ),
-                                    },
-                                ),
-                            detail.contentReapedAt &&
-                                i18n("Retention removed its text on {date}.", {
+                            {i18n("Share")}
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy !== null}
+                            onClick={() =>
+                                void share(pending.folderId, "dismiss")
+                            }
+                        >
+                            {i18n("Keep private")}
+                        </Button>
+                    </div>
+                ))}
+                {detail?.autoGenerated && (
+                    <p className="text-xs text-muted-foreground">
+                        {i18n(
+                            "Sent by a machine (an auto-reply, a list, a notice): kept, never summarized.",
+                        )}
+                    </p>
+                )}
+                {detail?.unreadable && !detail.rawReapedAt && (
+                    <p className="text-sm text-muted-foreground">
+                        {i18n(
+                            "This mail's content is not readable here (encrypted or packed). Download the message to open it.",
+                        )}
+                    </p>
+                )}
+                {detail &&
+                    [
+                        detail.rawReapedAt &&
+                            i18n(
+                                "Retention removed the message as it arrived and its attachments on {date}.",
+                                {
                                     date: formatDateTime(
-                                        detail.contentReapedAt,
+                                        detail.rawReapedAt,
                                         "absolute",
                                         locale,
                                     ),
-                                }),
-                            detail.summaryReapedAt &&
-                                i18n(
-                                    "Retention removed its summary on {date}.",
-                                    {
-                                        date: formatDateTime(
-                                            detail.summaryReapedAt,
-                                            "absolute",
-                                            locale,
-                                        ),
-                                    },
+                                },
+                            ),
+                        detail.contentReapedAt &&
+                            i18n("Retention removed its text on {date}.", {
+                                date: formatDateTime(
+                                    detail.contentReapedAt,
+                                    "absolute",
+                                    locale,
                                 ),
-                        ]
-                            .filter(Boolean)
-                            .map((note) => (
-                                <p
-                                    key={note as string}
-                                    className="text-xs text-muted-foreground"
-                                >
-                                    {note}
-                                </p>
-                            ))}
-                </CardContent>
-            </Card>
+                            }),
+                        detail.summaryReapedAt &&
+                            i18n("Retention removed its summary on {date}.", {
+                                date: formatDateTime(
+                                    detail.summaryReapedAt,
+                                    "absolute",
+                                    locale,
+                                ),
+                            }),
+                    ]
+                        .filter(Boolean)
+                        .map((note) => (
+                            <p
+                                key={note as string}
+                                className="text-xs text-muted-foreground"
+                            >
+                                {note}
+                            </p>
+                        ))}
+            </div>
 
-            {detail && !detail.unreadable && (
-                <div id={`mail-summary-${mail.id}`}>
-                    <MailSummaryCard
-                        mail={mail}
-                        canChange={
-                            mail.view === "org"
-                                ? isOrgAccount || canCurate
-                                : isOwn
-                        }
-                    />
-                </div>
-            )}
-            {detail && (
-                <div id={`mail-learn-${mail.id}`}>
-                    <MailLearnCard
-                        mail={mail}
-                        detail={detail}
-                        canChange={
-                            mail.view === "org"
-                                ? isOrgAccount || canCurate
-                                : isOwn
-                        }
-                    />
-                </div>
-            )}
-
-            {detail && detail.segments.length > 0 && (
-                <Card>
-                    <CardContent className="space-y-3 p-4 sm:p-6">
-                        {!detail.rawReapedAt && (
-                            <div className="flex justify-end">
+            {detail &&
+                detail.segments.length > 0 &&
+                (!widgets || widgets.message.visible) && (
+                    <WorkflowWidget
+                        id={`mail-message-${mail.id}`}
+                        frame="inline"
+                        tone={widgets?.message.active ? "next" : "quiet"}
+                        title={i18n("Message")}
+                        headerAction={
+                            !detail.rawReapedAt ? (
                                 <Button
                                     variant="ghost"
                                     size="sm"
@@ -576,108 +549,146 @@ export function MailDetailPane({
                                         ? i18n("Show text")
                                         : i18n("Show formatted")}
                                 </Button>
-                            </div>
-                        )}
-                        {showFormatted && formatted ? (
-                            <iframe
-                                title={i18n("Formatted mail")}
-                                sandbox=""
-                                srcDoc={formatted}
-                                referrerPolicy="no-referrer"
-                                className="h-[70vh] w-full rounded border bg-white"
-                            />
-                        ) : (
-                            detail.segments.map((segment) => {
-                                const author = segment.participantRef
-                                    ? byRef.get(segment.participantRef)
-                                    : undefined;
-                                const range =
-                                    highlight?.segmentIndex === segment.index &&
-                                    highlight.charEnd <= segment.text.length
-                                        ? highlight
-                                        : null;
-                                const text = (
-                                    <p className="whitespace-pre-wrap break-words text-sm">
-                                        {range ? (
-                                            <>
-                                                {segment.text.slice(
-                                                    0,
-                                                    range.charStart,
-                                                )}
-                                                <mark
-                                                    id="mail-evidence-highlight"
-                                                    className="rounded bg-amber-200 px-0.5 text-inherit dark:bg-amber-700"
-                                                >
+                            ) : undefined
+                        }
+                    >
+                        <div className="space-y-3">
+                            {showFormatted && formatted ? (
+                                <iframe
+                                    title={i18n("Formatted mail")}
+                                    sandbox=""
+                                    srcDoc={formatted}
+                                    referrerPolicy="no-referrer"
+                                    className="h-[70vh] w-full rounded border bg-white"
+                                />
+                            ) : (
+                                detail.segments.map((segment) => {
+                                    const author = segment.participantRef
+                                        ? byRef.get(segment.participantRef)
+                                        : undefined;
+                                    const range =
+                                        highlight?.segmentIndex ===
+                                            segment.index &&
+                                        highlight.charEnd <= segment.text.length
+                                            ? highlight
+                                            : null;
+                                    const text = (
+                                        <p className="whitespace-pre-wrap break-words text-sm">
+                                            {range ? (
+                                                <>
                                                     {segment.text.slice(
+                                                        0,
                                                         range.charStart,
+                                                    )}
+                                                    <mark
+                                                        id="mail-evidence-highlight"
+                                                        className="rounded bg-amber-200 px-0.5 text-inherit dark:bg-amber-700"
+                                                    >
+                                                        {segment.text.slice(
+                                                            range.charStart,
+                                                            range.charEnd,
+                                                        )}
+                                                    </mark>
+                                                    {segment.text.slice(
                                                         range.charEnd,
                                                     )}
-                                                </mark>
-                                                {segment.text.slice(
-                                                    range.charEnd,
-                                                )}
-                                            </>
-                                        ) : (
-                                            segment.text
-                                        )}
-                                    </p>
-                                );
-                                if (segment.role === "body") {
-                                    return (
-                                        <div key={segment.index}>{text}</div>
+                                                </>
+                                            ) : (
+                                                segment.text
+                                            )}
+                                        </p>
                                     );
-                                }
-                                if (segment.role === "signature") {
+                                    if (segment.role === "body") {
+                                        return (
+                                            <div key={segment.index}>
+                                                {text}
+                                            </div>
+                                        );
+                                    }
+                                    if (segment.role === "signature") {
+                                        return (
+                                            <div
+                                                key={segment.index}
+                                                className="border-l-2 pl-3 text-muted-foreground [&_p]:text-xs"
+                                            >
+                                                {text}
+                                            </div>
+                                        );
+                                    }
+                                    const label =
+                                        segment.role === "disclaimer"
+                                            ? i18n("Disclaimer")
+                                            : segment.role ===
+                                                "quoted_signature"
+                                              ? i18n("Signature of {name}", {
+                                                    name: author
+                                                        ? person(author)
+                                                        : i18n(
+                                                              "the quoted sender",
+                                                          ),
+                                                })
+                                              : i18n("Quoted from {name}", {
+                                                    name: author
+                                                        ? person(author)
+                                                        : i18n(
+                                                              "an earlier message",
+                                                          ),
+                                                });
                                     return (
-                                        <div
+                                        <details
                                             key={segment.index}
-                                            className="border-l-2 pl-3 text-muted-foreground [&_p]:text-xs"
+                                            className="rounded border bg-muted/30 px-3 py-2"
+                                            style={{
+                                                marginLeft: `${Math.max(0, segment.depth - 1) * 12}px`,
+                                            }}
+                                            open={range ? true : undefined}
                                         >
-                                            {text}
-                                        </div>
+                                            <summary className="cursor-pointer text-xs text-muted-foreground">
+                                                {label}
+                                                {segment.at &&
+                                                    ` · ${formatDateTime(segment.at, dateTimeFormat, locale)}`}
+                                            </summary>
+                                            <div className="mt-2">{text}</div>
+                                        </details>
                                     );
-                                }
-                                const label =
-                                    segment.role === "disclaimer"
-                                        ? i18n("Disclaimer")
-                                        : segment.role === "quoted_signature"
-                                          ? i18n("Signature of {name}", {
-                                                name: author
-                                                    ? person(author)
-                                                    : i18n("the quoted sender"),
-                                            })
-                                          : i18n("Quoted from {name}", {
-                                                name: author
-                                                    ? person(author)
-                                                    : i18n(
-                                                          "an earlier message",
-                                                      ),
-                                            });
-                                return (
-                                    <details
-                                        key={segment.index}
-                                        className="rounded border bg-muted/30 px-3 py-2"
-                                        style={{
-                                            marginLeft: `${Math.max(0, segment.depth - 1) * 12}px`,
-                                        }}
-                                        open={range ? true : undefined}
-                                    >
-                                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                                            {label}
-                                            {segment.at &&
-                                                ` · ${formatDateTime(segment.at, dateTimeFormat, locale)}`}
-                                        </summary>
-                                        <div className="mt-2">{text}</div>
-                                    </details>
-                                );
-                            })
-                        )}
-                    </CardContent>
-                </Card>
+                                })
+                            )}
+                        </div>
+                    </WorkflowWidget>
+                )}
+
+            {detail && (!widgets || widgets.learn.visible) && (
+                <MailLearnCard
+                    mail={mail}
+                    detail={detail}
+                    canChange={
+                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
+                    }
+                    widget={widgets?.learn}
+                    widgetId={`mail-learn-${mail.id}`}
+                />
             )}
+            {detail &&
+                !detail.unreadable &&
+                (!widgets || widgets.summary.visible) && (
+                    <MailSummaryCard
+                        mail={mail}
+                        canChange={
+                            mail.view === "org"
+                                ? isOrgAccount || canCurate
+                                : isOwn
+                        }
+                        widget={widgets?.summary}
+                        taskWidget={widgets?.taskReview}
+                        workflowVisible={widgets?.workflowVisible ?? false}
+                        profileName={processing?.profile?.name}
+                        widgetId={`mail-summary-${mail.id}`}
+                        taskWidgetId={`mail-task-review-${mail.id}`}
+                    />
+                )}
 
             {detail && detail.attachments.length > 0 && (
-                <Card>
+                <Card className="py-0">
                     <CardContent className="space-y-2 p-4 sm:p-6">
                         <h3 className="flex items-center gap-1.5 text-sm font-medium">
                             <Paperclip className="size-4" />

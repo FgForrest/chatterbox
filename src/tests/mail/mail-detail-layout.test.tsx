@@ -67,7 +67,16 @@ beforeEach(() => {
                 contentReapedAt: null,
                 summaryReapedAt: null,
                 participants: [],
-                segments: [],
+                segments: [
+                    {
+                        index: 0,
+                        role: "body",
+                        depth: 0,
+                        text: "The message body",
+                        participantRef: null,
+                        at: null,
+                    },
+                ],
                 attachments: [],
                 auth: null,
                 pendingShares: [],
@@ -109,8 +118,9 @@ describe("mail detail layout", () => {
             screen.getByTestId("workflow-strip"),
             screen.getByTestId("folder-row"),
             screen.getByText("From"),
-            screen.getByTestId("mail-summary"),
+            screen.getByRole("heading", { name: "Message" }),
             screen.getByTestId("mail-learn"),
+            screen.getByTestId("mail-summary"),
         ];
         for (let index = 1; index < ordered.length; index += 1) {
             expect(
@@ -118,5 +128,12 @@ describe("mail detail layout", () => {
                     Node.DOCUMENT_POSITION_FOLLOWING,
             ).toBeTruthy();
         }
+        expect(
+            screen.getByText("From").closest('[data-slot="card"]'),
+        ).toBeNull();
+        expect(
+            screen.getByRole("heading", { name: "Message" }).closest("header")
+                ?.textContent,
+        ).toContain("Show formatted");
     });
 });

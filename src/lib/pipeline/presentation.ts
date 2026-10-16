@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
@@ -21,6 +21,10 @@ import {
     type OutdatedReason,
     processAgainPending,
 } from "@/lib/pipeline/outdated";
+import {
+    type ProcessingRequestOrigin,
+    processingStartedBy,
+} from "@/lib/pipeline/processing-origin";
 import type {
     PhaseName,
     PipelinePhases,
@@ -96,6 +100,7 @@ export interface ItemProcessingPresentation {
         transcription: ProcessingJobState | null;
         summary: ProcessingJobState | null;
     };
+    startedBy?: ProcessingRequestOrigin;
     failures: ProcessingPhaseFailure[];
 }
 
@@ -342,6 +347,9 @@ export async function loadPrivateItemProcessing(
         placementRows,
         intentRows,
         activeJobs,
+        recentTranscriptionJobs,
+        recentTopicsJobs,
+        recentSummaryJobs,
         [learnFindings],
         transcripts,
         mailContent,
@@ -405,6 +413,63 @@ export async function loadPrivateItemProcessing(
                     inArray(asyncJobs.status, ["pending", "processing"]),
                 ),
             ),
+        db
+            .select({
+                kind: asyncJobs.kind,
+                payload: asyncJobs.payload,
+                createdAt: asyncJobs.createdAt,
+            })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, ownerUserId),
+                    eq(
+                        asyncJobs.subjectId,
+                        recordingJobSubject(itemId, "private"),
+                    ),
+                    eq(asyncJobs.kind, TRANSCRIPTION_JOB_KIND),
+                ),
+            )
+            .orderBy(desc(asyncJobs.createdAt))
+            .limit(1),
+        db
+            .select({
+                kind: asyncJobs.kind,
+                payload: asyncJobs.payload,
+                createdAt: asyncJobs.createdAt,
+            })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, ownerUserId),
+                    eq(
+                        asyncJobs.subjectId,
+                        recordingJobSubject(itemId, "private"),
+                    ),
+                    eq(asyncJobs.kind, TOPICS_JOB_KIND),
+                ),
+            )
+            .orderBy(desc(asyncJobs.createdAt))
+            .limit(1),
+        db
+            .select({
+                kind: asyncJobs.kind,
+                payload: asyncJobs.payload,
+                createdAt: asyncJobs.createdAt,
+            })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, ownerUserId),
+                    eq(
+                        asyncJobs.subjectId,
+                        recordingJobSubject(itemId, "private"),
+                    ),
+                    eq(asyncJobs.kind, SUMMARY_JOB_KIND),
+                ),
+            )
+            .orderBy(desc(asyncJobs.createdAt))
+            .limit(1),
         db
             .select({ count: count() })
             .from(learnReviewItems)
@@ -659,6 +724,18 @@ export async function loadPrivateItemProcessing(
             transcription: processingJobState(transcriptionJobs),
             summary: processingJobState(summaryJobs),
         },
+        startedBy: processingStartedBy(
+            [
+                ...recentTranscriptionJobs,
+                ...recentSummaryJobs,
+                ...recentTopicsJobs,
+            ],
+            {
+                transcription: TRANSCRIPTION_JOB_KIND,
+                summary: SUMMARY_JOB_KIND,
+                topics: TOPICS_JOB_KIND,
+            },
+        ),
         failures: processingFailures(phases),
     };
 }

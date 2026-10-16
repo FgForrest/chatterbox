@@ -62,13 +62,6 @@ interface ProcessingFolderRowProps extends FolderActions {
 
 const MANUAL_ONLY = "__manual_only__";
 
-/** Scroll a panel into view and open its first button, used by workflow actions. */
-export function openWidget(id: string): void {
-    const target = document.getElementById(id);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    target?.querySelector<HTMLButtonElement>("button")?.click();
-}
-
 /** Folder placements, intended shares, and profile choice on one header row. */
 export function ProcessingFolderRow({
     itemId,
@@ -250,6 +243,7 @@ interface ItemWorkflowProps extends FolderActions {
     onSummary?: () => void;
     onReviewLearn?: () => void;
     onReviewTasks?: () => void;
+    onProcessingChange?: (data: ItemProcessingPresentation | null) => void;
 }
 
 /** Processing strip plus the filing card or its settled folder/profile row. */
@@ -273,6 +267,7 @@ export function ItemWorkflow({
     onSummary,
     onReviewLearn,
     onReviewTasks,
+    onProcessingChange,
 }: ItemWorkflowProps) {
     const i18n = useExtracted();
     const enabled = isOwn && view !== "org";
@@ -286,6 +281,10 @@ export function ItemWorkflow({
         useState<CategorizationPanelPresentation | null>(null);
     const panelRequest = useRef<{ itemId: string } | null>(null);
     const filingRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        onProcessingChange?.(data);
+    }, [data, onProcessingChange]);
 
     useEffect(() => {
         setPanelData((current) =>

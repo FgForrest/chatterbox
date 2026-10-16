@@ -323,7 +323,7 @@ describe("deriveWorkflowStatus", () => {
         expect(stateOf(result.steps, "learn")).toBe("review");
         expect(result.status).toMatchObject({
             actor: "yours",
-            message: "learnReview",
+            message: "manualLearnReview",
             params: { count: 0 },
             action: "reviewLearn",
         });

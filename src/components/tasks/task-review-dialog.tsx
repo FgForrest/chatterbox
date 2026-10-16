@@ -13,6 +13,10 @@ import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { HelpLink } from "@/components/help/help-button";
 import {
+    WorkflowWidget,
+    WorkflowWidgetLine,
+} from "@/components/pipeline/workflow-widget";
+import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
@@ -24,14 +28,7 @@ import type {
     TaskRowChange,
 } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type {
     TaskMatchView,
     TaskUpdateView,
@@ -60,8 +57,8 @@ function evidenceKey(value: {
 /**
  * The proposed tasks of a recording, the way Learn's findings are: a link
  * with how many wait, opening a review to tick, correct or merge them and
- * the follow-ups heard about earlier tasks, then accept. Unticking is the
- * one way to say no: it stays undoable until the review is accepted.
+ * the follow-ups heard about earlier tasks, then apply the selected changes.
+ * Unticking is the one way to say no: it stays undoable until the review is applied.
  */
 export function TaskReviewLink({
     state,
@@ -69,6 +66,9 @@ export function TaskReviewLink({
     organizationOnly,
     allowAdd = true,
     onPlay,
+    frame = "dialog",
+    widgetId,
+    showTrigger = true,
 }: {
     state: RecordingTasksState;
     /** People attributed to the recording's speakers, offered first. */
@@ -78,11 +78,15 @@ export function TaskReviewLink({
     /** Offer adding tasks by hand; not without a summary they would die with. */
     allowAdd?: boolean;
     onPlay?: (startMs: number) => void;
+    frame?: WorkflowWidgetFrame;
+    widgetId?: string;
+    showTrigger?: boolean;
 }) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
     const [merging, setMerging] = useState<string[] | null>(null);
     const { data, reviewing, waiting } = state;
+    const resolvedWidgetId = widgetId ?? `task-review-${state.itemId}`;
 
     // Nothing left to review: the dialog has done its job.
     useEffect(() => {
@@ -189,352 +193,350 @@ export function TaskReviewLink({
 
     return (
         <>
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
-                onClick={() => setOpen(true)}
-            >
-                <ListChecks className="size-4" />
-                {i18n("Review tasks ({count})", { count: String(waiting) })}
-            </Button>
-            <Dialog
+            {showTrigger && (
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary"
+                    onClick={() => setOpen(true)}
+                >
+                    <ListChecks className="size-4" />
+                    {i18n("Review tasks ({count})", {
+                        count: String(waiting),
+                    })}
+                </Button>
+            )}
+            <WorkflowWidget
+                id={resolvedWidgetId}
+                frame={frame}
+                tone="review"
                 open={open}
                 onOpenChange={(next) => {
                     setOpen(next);
                     if (!next) setMerging(null);
                 }}
+                title={
+                    <>
+                        <ListChecks className="size-4" />
+                        {i18n("Task review")}
+                    </>
+                }
+                helpLink={
+                    <HelpLink
+                        topic="tasks.review"
+                        label={i18n("reviewing proposed tasks")}
+                    />
+                }
+                description={
+                    merging
+                        ? i18n(
+                              "Select the tasks that are one. They become the first one selected.",
+                          )
+                        : i18n(
+                              "What the summary found to do. Untick what is not a task, correct who and when, then apply the selected changes. Unticked ones are not proposed again.",
+                          )
+                }
+                headerAction={
+                    allowAdd &&
+                    !merging && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void state.add("proposed")}
+                        >
+                            <Plus className="mr-1 size-3.5" />
+                            {i18n("Add task")}
+                        </Button>
+                    )
+                }
+                footer={{
+                    status: i18n("{ticked} of {count} will be applied", {
+                        ticked: String(ticked),
+                        count: String(waiting),
+                    }),
+                    actions: (
+                        <Button
+                            disabled={state.accepting || merging !== null}
+                            onClick={() => void state.accept()}
+                        >
+                            {state.accepting && (
+                                <Loader2 className="size-4 animate-spin" />
+                            )}
+                            {i18n("Apply selected changes")}
+                        </Button>
+                    ),
+                }}
+                closeLabel={i18n("Save and continue later")}
+                dialogWidth="xl"
+                dialogLine={
+                    showTrigger ? undefined : (
+                        <WorkflowWidgetLine
+                            title={i18n("Task review")}
+                            facts={i18n(
+                                "{count, plural, one {# change waits for your review} other {# changes wait for your review}}",
+                                { count: waiting },
+                            )}
+                            tone="review"
+                            action={
+                                <Button size="sm" onClick={() => setOpen(true)}>
+                                    {i18n("Review")}
+                                </Button>
+                            }
+                        />
+                    )
+                }
             >
-                <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl lg:max-w-3xl">
-                    <DialogHeader className="border-b px-6 pt-6 pb-4 pr-12">
-                        <DialogTitle className="flex items-center gap-2">
-                            {i18n("Proposed tasks")}
-                            <HelpLink
-                                topic="tasks.review"
-                                label={i18n("reviewing proposed tasks")}
+                <div className="space-y-8">
+                    {data.matches.length > 0 && (
+                        <section className="space-y-2">
+                            <SectionTitle
+                                title={i18n("Suggested matches")}
+                                count={data.matches.length}
                             />
-                        </DialogTitle>
-                        <DialogDescription>
-                            {merging
-                                ? i18n(
-                                      "Select the tasks that are one. They become the first one selected.",
-                                  )
-                                : i18n(
-                                      "What the summary found to do. Untick what is not a task, correct who and when, then accept. Unticked ones are not proposed again.",
-                                  )}
-                        </DialogDescription>
-                    </DialogHeader>
-
-                    <div className="min-h-0 flex-1 space-y-8 overflow-y-auto px-6 py-5">
-                        {data.matches.length > 0 && (
-                            <section className="space-y-2">
-                                <SectionTitle
-                                    title={i18n("Suggested matches")}
-                                    count={data.matches.length}
-                                />
-                                <ul className="space-y-2">
-                                    {data.matches
-                                        .filter(
-                                            (match) =>
-                                                !ambiguousMatchIds.has(
-                                                    match.id,
-                                                ),
-                                        )
-                                        .map((match) => (
-                                            <SuggestedMatchRow
-                                                key={match.id}
-                                                match={match}
-                                                updates={
-                                                    updatesByTaskId.get(
+                            <ul className="space-y-2">
+                                {data.matches
+                                    .filter(
+                                        (match) =>
+                                            !ambiguousMatchIds.has(match.id),
+                                    )
+                                    .map((match) => (
+                                        <SuggestedMatchRow
+                                            key={match.id}
+                                            match={match}
+                                            updates={
+                                                updatesByTaskId.get(
+                                                    match.candidate.id,
+                                                ) ?? []
+                                            }
+                                            itemId={state.itemId}
+                                            onPlay={onPlay}
+                                            onNavigate={() => setOpen(false)}
+                                            onToggle={(ticked) => {
+                                                state.tickMatch(match, ticked);
+                                                if (!ticked) {
+                                                    for (const update of updatesByTaskId.get(
                                                         match.candidate.id,
-                                                    ) ?? []
-                                                }
-                                                itemId={state.itemId}
-                                                onPlay={onPlay}
-                                                onNavigate={() =>
-                                                    setOpen(false)
-                                                }
-                                                onToggle={(ticked) => {
-                                                    state.tickMatch(
-                                                        match,
-                                                        ticked,
-                                                    );
-                                                    if (!ticked) {
-                                                        for (const update of updatesByTaskId.get(
-                                                            match.candidate.id,
-                                                        ) ?? []) {
-                                                            if (
-                                                                !update.earlierMention
-                                                            ) {
-                                                                state.tickUpdate(
-                                                                    update,
-                                                                    false,
-                                                                );
-                                                            }
+                                                    ) ?? []) {
+                                                        if (
+                                                            !update.earlierMention
+                                                        ) {
+                                                            state.tickUpdate(
+                                                                update,
+                                                                false,
+                                                            );
                                                         }
                                                     }
-                                                }}
-                                                onToggleUpdate={(
+                                                }
+                                            }}
+                                            onToggleUpdate={(
+                                                update,
+                                                ticked,
+                                            ) => {
+                                                if (ticked) {
+                                                    state.tickMatch(
+                                                        match,
+                                                        true,
+                                                    );
+                                                }
+                                                state.tickUpdate(
                                                     update,
                                                     ticked,
-                                                ) => {
-                                                    if (ticked) {
-                                                        state.tickMatch(
-                                                            match,
-                                                            true,
-                                                        );
-                                                    }
-                                                    state.tickUpdate(
-                                                        update,
-                                                        ticked,
+                                                );
+                                            }}
+                                        />
+                                    ))}
+                                {[...ambiguous.entries()].map(
+                                    ([key, group]) => (
+                                        <AmbiguousMatchRow
+                                            key={key}
+                                            matches={group.matches}
+                                            proposal={group.proposal}
+                                            itemId={state.itemId}
+                                            onPlay={onPlay}
+                                            onNavigate={() => setOpen(false)}
+                                            updatesByTaskId={updatesByTaskId}
+                                            onChoose={(selected) => {
+                                                for (const match of group.matches) {
+                                                    state.tickMatch(
+                                                        match,
+                                                        selected === match.id,
                                                     );
-                                                }}
-                                            />
-                                        ))}
-                                    {[...ambiguous.entries()].map(
-                                        ([key, group]) => (
-                                            <AmbiguousMatchRow
-                                                key={key}
-                                                matches={group.matches}
-                                                proposal={group.proposal}
-                                                itemId={state.itemId}
-                                                onPlay={onPlay}
-                                                onNavigate={() =>
-                                                    setOpen(false)
                                                 }
-                                                updatesByTaskId={
-                                                    updatesByTaskId
+                                                if (group.proposal) {
+                                                    const keep =
+                                                        selected === "new";
+                                                    state.update(
+                                                        group.proposal,
+                                                        { ticked: keep },
+                                                        { ticked: keep },
+                                                    );
                                                 }
-                                                onChoose={(selected) => {
-                                                    for (const match of group.matches) {
+                                            }}
+                                            onMerge={state.mergeInto}
+                                            onToggleUpdate={(
+                                                match,
+                                                update,
+                                                ticked,
+                                            ) => {
+                                                if (ticked) {
+                                                    for (const candidate of group.matches) {
                                                         state.tickMatch(
-                                                            match,
-                                                            selected ===
+                                                            candidate,
+                                                            candidate.id ===
                                                                 match.id,
                                                         );
                                                     }
                                                     if (group.proposal) {
-                                                        const keep =
-                                                            selected === "new";
                                                         state.update(
                                                             group.proposal,
-                                                            { ticked: keep },
-                                                            { ticked: keep },
+                                                            {
+                                                                ticked: false,
+                                                            },
+                                                            {
+                                                                ticked: false,
+                                                            },
                                                         );
                                                     }
-                                                }}
-                                                onMerge={state.mergeInto}
-                                                onToggleUpdate={(
-                                                    match,
+                                                }
+                                                state.tickUpdate(
                                                     update,
                                                     ticked,
-                                                ) => {
-                                                    if (ticked) {
-                                                        for (const candidate of group.matches) {
-                                                            state.tickMatch(
-                                                                candidate,
-                                                                candidate.id ===
-                                                                    match.id,
-                                                            );
-                                                        }
-                                                        if (group.proposal) {
-                                                            state.update(
-                                                                group.proposal,
-                                                                {
-                                                                    ticked: false,
-                                                                },
-                                                                {
-                                                                    ticked: false,
-                                                                },
-                                                            );
-                                                        }
-                                                    }
+                                                );
+                                            }}
+                                        />
+                                    ),
+                                )}
+                            </ul>
+                        </section>
+                    )}
+                    {(visibleProposals.length > 0 || allowAdd) && (
+                        <section className="space-y-2">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <SectionTitle
+                                    title={i18n("Tasks")}
+                                    count={visibleProposals.length}
+                                />
+                                <div className="flex items-center gap-2">
+                                    {merging ? (
+                                        <>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                disabled={merging.length < 2}
+                                                onClick={() => void merge()}
+                                            >
+                                                <Combine className="mr-1 size-3.5" />
+                                                {i18n(
+                                                    "Merge {count, plural, one {# task} other {# tasks}}",
+                                                    {
+                                                        count: merging.length,
+                                                    },
+                                                )}
+                                            </Button>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => setMerging(null)}
+                                            >
+                                                <X className="size-3.5" />
+                                                <span className="sr-only">
+                                                    {i18n("Cancel merging")}
+                                                </span>
+                                            </Button>
+                                        </>
+                                    ) : (
+                                        visibleProposals.length > 1 && (
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                onClick={() => setMerging([])}
+                                            >
+                                                <Combine className="mr-1 size-3.5" />
+                                                {i18n("Merge…")}
+                                            </Button>
+                                        )
+                                    )}
+                                </div>
+                            </div>
+                            <ul className="space-y-2">
+                                {visibleProposals.map((task) => (
+                                    <ProposalRow
+                                        key={task.id}
+                                        task={task}
+                                        speakers={speakers}
+                                        organizationOnly={organizationOnly}
+                                        onPlay={onPlay}
+                                        onNavigate={() => setOpen(false)}
+                                        onMerge={(targetTaskId) =>
+                                            state.mergeInto(
+                                                task.id,
+                                                targetTaskId,
+                                            )
+                                        }
+                                        selection={
+                                            merging
+                                                ? {
+                                                      selected:
+                                                          merging.includes(
+                                                              task.id,
+                                                          ),
+                                                      onToggle: () =>
+                                                          toggleMerging(
+                                                              task.id,
+                                                          ),
+                                                  }
+                                                : null
+                                        }
+                                        onChange={(change, optimistic) =>
+                                            state.update(
+                                                task,
+                                                change,
+                                                optimistic,
+                                            )
+                                        }
+                                    />
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                    {standaloneUpdates.length > 0 && (
+                        <section className="space-y-2">
+                            <SectionTitle
+                                title={i18n("Heard about earlier tasks")}
+                                count={standaloneUpdates.length}
+                            />
+                            <ul className="space-y-2">
+                                {standaloneUpdates.map(([taskId, updates]) => (
+                                    <li
+                                        key={taskId}
+                                        data-task-review-card={taskId}
+                                        className="-mx-2 space-y-2 rounded-md border px-3 py-2 text-sm"
+                                    >
+                                        {updates.map((update) => (
+                                            <UpdateRow
+                                                key={update.id}
+                                                update={update}
+                                                itemId={state.itemId}
+                                                onPlay={onPlay}
+                                                onNavigate={() =>
+                                                    setOpen(false)
+                                                }
+                                                onToggle={(next) =>
                                                     state.tickUpdate(
                                                         update,
-                                                        ticked,
-                                                    );
-                                                }}
+                                                        next,
+                                                    )
+                                                }
                                             />
-                                        ),
-                                    )}
-                                </ul>
-                            </section>
-                        )}
-                        {(visibleProposals.length > 0 || allowAdd) && (
-                            <section className="space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <SectionTitle
-                                        title={i18n("Tasks")}
-                                        count={visibleProposals.length}
-                                    />
-                                    <div className="flex items-center gap-2">
-                                        {merging ? (
-                                            <>
-                                                <Button
-                                                    size="sm"
-                                                    variant="outline"
-                                                    disabled={
-                                                        merging.length < 2
-                                                    }
-                                                    onClick={() => void merge()}
-                                                >
-                                                    <Combine className="mr-1 size-3.5" />
-                                                    {i18n(
-                                                        "Merge {count, plural, one {# task} other {# tasks}}",
-                                                        {
-                                                            count: merging.length,
-                                                        },
-                                                    )}
-                                                </Button>
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    onClick={() =>
-                                                        setMerging(null)
-                                                    }
-                                                >
-                                                    <X className="size-3.5" />
-                                                    <span className="sr-only">
-                                                        {i18n("Cancel merging")}
-                                                    </span>
-                                                </Button>
-                                            </>
-                                        ) : (
-                                            visibleProposals.length > 1 && (
-                                                <Button
-                                                    size="sm"
-                                                    variant="ghost"
-                                                    onClick={() =>
-                                                        setMerging([])
-                                                    }
-                                                >
-                                                    <Combine className="mr-1 size-3.5" />
-                                                    {i18n("Merge…")}
-                                                </Button>
-                                            )
-                                        )}
-                                    </div>
-                                </div>
-                                <ul className="space-y-2">
-                                    {visibleProposals.map((task) => (
-                                        <ProposalRow
-                                            key={task.id}
-                                            task={task}
-                                            speakers={speakers}
-                                            organizationOnly={organizationOnly}
-                                            onPlay={onPlay}
-                                            onNavigate={() => setOpen(false)}
-                                            onMerge={(targetTaskId) =>
-                                                state.mergeInto(
-                                                    task.id,
-                                                    targetTaskId,
-                                                )
-                                            }
-                                            selection={
-                                                merging
-                                                    ? {
-                                                          selected:
-                                                              merging.includes(
-                                                                  task.id,
-                                                              ),
-                                                          onToggle: () =>
-                                                              toggleMerging(
-                                                                  task.id,
-                                                              ),
-                                                      }
-                                                    : null
-                                            }
-                                            onChange={(change, optimistic) =>
-                                                state.update(
-                                                    task,
-                                                    change,
-                                                    optimistic,
-                                                )
-                                            }
-                                        />
-                                    ))}
-                                </ul>
-                                {allowAdd && !merging && (
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        onClick={() =>
-                                            void state.add("proposed")
-                                        }
-                                    >
-                                        <Plus className="mr-1 size-3.5" />
-                                        {i18n("Add task")}
-                                    </Button>
-                                )}
-                            </section>
-                        )}
-                        {standaloneUpdates.length > 0 && (
-                            <section className="space-y-2">
-                                <SectionTitle
-                                    title={i18n("Heard about earlier tasks")}
-                                    count={standaloneUpdates.length}
-                                />
-                                <ul className="space-y-2">
-                                    {standaloneUpdates.map(
-                                        ([taskId, updates]) => (
-                                            <li
-                                                key={taskId}
-                                                data-task-review-card={taskId}
-                                                className="-mx-2 space-y-2 rounded-md border px-3 py-2 text-sm"
-                                            >
-                                                {updates.map((update) => (
-                                                    <UpdateRow
-                                                        key={update.id}
-                                                        update={update}
-                                                        itemId={state.itemId}
-                                                        onPlay={onPlay}
-                                                        onNavigate={() =>
-                                                            setOpen(false)
-                                                        }
-                                                        onToggle={(next) =>
-                                                            state.tickUpdate(
-                                                                update,
-                                                                next,
-                                                            )
-                                                        }
-                                                    />
-                                                ))}
-                                            </li>
-                                        ),
-                                    )}
-                                </ul>
-                            </section>
-                        )}
-                    </div>
-
-                    <DialogFooter className="border-t px-6 py-4 sm:items-center sm:justify-between">
-                        <p className="text-sm text-muted-foreground">
-                            {i18n("{ticked} of {count} will be accepted", {
-                                ticked: String(ticked),
-                                count: String(waiting),
-                            })}
-                        </p>
-                        <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                            <Button
-                                variant="outline"
-                                onClick={() => setOpen(false)}
-                            >
-                                {i18n("Save and continue later")}
-                            </Button>
-                            <Button
-                                disabled={state.accepting || merging !== null}
-                                onClick={() => void state.accept()}
-                            >
-                                {state.accepting && (
-                                    <Loader2 className="size-4 animate-spin" />
-                                )}
-                                {i18n("Accept tasks")}
-                            </Button>
-                        </div>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                                        ))}
+                                    </li>
+                                ))}
+                            </ul>
+                        </section>
+                    )}
+                </div>
+            </WorkflowWidget>
         </>
     );
 }

@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
@@ -13,11 +13,13 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
-import { ItemWorkflow, openWidget } from "@/components/pipeline/item-workflow";
+import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 import type {
@@ -127,6 +129,22 @@ export function WorkstationDetailPane({
     const i18n = useExtracted();
     const playerRef = useRef<RecordingPlayerHandle>(null);
     const playedLink = useRef<string | null>(null);
+    const [processingState, setProcessingState] = useState<{
+        itemId: string;
+        data: ItemProcessingPresentation | null;
+    } | null>(null);
+    const currentRecordingId = currentRecording?.id;
+    const processing =
+        processingState && processingState.itemId === currentRecordingId
+            ? processingState.data
+            : null;
+    const handleProcessingChange = useCallback(
+        (data: ItemProcessingPresentation | null) => {
+            if (!currentRecordingId) return;
+            setProcessingState({ itemId: currentRecordingId, data });
+        },
+        [currentRecordingId],
+    );
     useEffect(() => {
         if (
             !currentRecording ||
@@ -230,11 +248,9 @@ export function WorkstationDetailPane({
                             )
                         }
                         onSummary={() =>
-                            document
-                                .getElementById(
-                                    `recording-summary-${currentRecording.id}`,
-                                )
-                                ?.scrollIntoView({ behavior: "smooth" })
+                            openWidget(
+                                `recording-summary-${currentRecording.id}`,
+                            )
                         }
                         onReviewLearn={() =>
                             openWidget(
@@ -246,6 +262,7 @@ export function WorkstationDetailPane({
                                 `recording-task-review-${currentRecording.id}`,
                             )
                         }
+                        onProcessingChange={handleProcessingChange}
                     />
                     {!currentRecording.audioReaped && (
                         <RecordingPlayer
@@ -282,6 +299,7 @@ export function WorkstationDetailPane({
                             onTranscribeComplete={onTranscribeComplete}
                             onTranscriptStale={onTranscriptStale}
                             readOnly={transcriptReadOnly}
+                            processing={processing}
                             onSeekToTurn={
                                 currentRecording.audioReaped
                                     ? undefined

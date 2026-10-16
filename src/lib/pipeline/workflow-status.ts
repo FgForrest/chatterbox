@@ -41,6 +41,7 @@ export type WorkflowMessageCode =
     | "learnQueued"
     | "learnRunning"
     | "learnReview"
+    | "manualLearnReview"
     | "learnTimedOut"
     | "summaryQueued"
     | "summaryRunning"
@@ -387,6 +388,35 @@ function failureStatus(
     };
 }
 
+function learnReviewMessage(reason: string | undefined): WorkflowMessageCode {
+    if (reason === "review_pending_timeout") return "learnTimedOut";
+    if (reason === "manual_review_pending") return "manualLearnReview";
+    return "learnReview";
+}
+
+function processAgainMessage(
+    reason: ItemProcessingPresentation["processAgainReason"],
+): WorkflowMessageCode {
+    if (reason === "learn_changed") return "learnChanged";
+    if (reason === "profile_changed") return "profileChanged";
+    return "transcriptChanged";
+}
+
+function queuedMessage(step: WorkflowStepId): WorkflowMessageCode {
+    switch (step) {
+        case "transcribe":
+            return "transcriptionQueued";
+        case "learn":
+            return "learnQueued";
+        case "summary":
+            return "summaryQueued";
+        case "taskReview":
+            return "taskReviewQueued";
+        default:
+            return "shareQueued";
+    }
+}
+
 function deriveStatus(
     data: ItemProcessingPresentation,
     steps: WorkflowStep[],
@@ -438,10 +468,7 @@ function deriveStatus(
     ) {
         return {
             actor: "yours",
-            message:
-                data.phases.learn.reason === "review_pending_timeout"
-                    ? "learnTimedOut"
-                    : "learnReview",
+            message: learnReviewMessage(data.phases.learn.reason),
             params: { count: data.learnFindingsWaiting },
             action: "reviewLearn",
         };
@@ -479,12 +506,7 @@ function deriveStatus(
     if (data.processAgain) {
         return {
             actor: "yours",
-            message:
-                data.processAgainReason === "learn_changed"
-                    ? "learnChanged"
-                    : data.processAgainReason === "profile_changed"
-                      ? "profileChanged"
-                      : "transcriptChanged",
+            message: processAgainMessage(data.processAgainReason),
             action: "processAgain",
         };
     }
@@ -497,16 +519,7 @@ function deriveStatus(
     }
     const inferredQueued = steps.find((step) => step.state === "queued");
     if (inferredQueued) {
-        const message =
-            inferredQueued.id === "transcribe"
-                ? "transcriptionQueued"
-                : inferredQueued.id === "learn"
-                  ? "learnQueued"
-                  : inferredQueued.id === "summary"
-                    ? "summaryQueued"
-                    : inferredQueued.id === "taskReview"
-                      ? "taskReviewQueued"
-                      : "shareQueued";
+        const message = queuedMessage(inferredQueued.id);
         return { actor: "queued", message };
     }
     return null;
@@ -531,6 +544,7 @@ function currentStepId(
         status.message === "learnQueued" ||
         status.message === "learnRunning" ||
         status.message === "learnReview" ||
+        status.message === "manualLearnReview" ||
         status.message === "learnTimedOut"
     ) {
         return "learn";

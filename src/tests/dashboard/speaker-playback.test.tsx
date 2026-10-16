@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { OPEN_WORKFLOW_WIDGET_EVENT } from "@/components/pipeline/workflow-widget";
 import type { Recording } from "@/types/recording";
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
@@ -199,9 +200,14 @@ describe("speaker playback navigation", () => {
                 onPlayFromTurn={onPlayFromTurn}
             />,
         );
-        fireEvent.click(
-            await screen.findByRole("button", { name: "Review (1)" }),
-        );
+        const review = await waitFor(() => {
+            const element = document.getElementById(
+                "recording-learn-review-rec-1",
+            );
+            expect(element).toBeTruthy();
+            return element as HTMLElement;
+        });
+        fireEvent(review, new Event(OPEN_WORKFLOW_WIDGET_EVENT));
         fireEvent.click(
             screen.getByRole("button", { name: "Play a turn of Speaker 1" }),
         );

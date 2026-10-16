@@ -89,6 +89,7 @@ function respond(routes: Record<string, unknown>) {
                 : route;
         if (body === undefined) return new Response("{}", { status: 404 });
         if (body instanceof Error) throw body;
+        if (body instanceof Response) return body;
         return Response.json(body);
     });
     vi.stubGlobal("fetch", fetch);
@@ -117,6 +118,107 @@ describe("LearnReview", () => {
         );
         await waitFor(() => expect(fetch).toHaveBeenCalled());
         expect(screen.queryByRole("button", { name: /Learn/ })).toBeNull();
+    });
+
+    describe.each([
+        "inline",
+        "dialog",
+    ] as const)("review behavior in the %s frame", (frame) => {
+        async function openReady() {
+            render(
+                <LearnReview
+                    recordingId="rec-1"
+                    source="riffado"
+                    turns={TURNS}
+                    frame={frame}
+                    showTrigger={false}
+                />,
+            );
+            if (frame === "dialog") {
+                fireEvent.click(
+                    await screen.findByRole("button", { name: "Review" }),
+                );
+            }
+            await screen.findByRole("heading", {
+                name: /Review what Learn found/,
+            });
+        }
+
+        it("ticks a shared fact row", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": READY,
+                "PATCH /api/recordings/rec-1/review/items/i-fact?source=riffado":
+                    { version: 1 },
+            });
+            await openReady();
+            expect(
+                document.querySelector('[data-shared-learn-row="fact"]'),
+            ).toBeTruthy();
+            const fact = screen.getByRole("checkbox", {
+                name: "Jan — leads — Orion",
+            }) as HTMLInputElement;
+            fireEvent.click(fact);
+            await waitFor(() => expect(fact.checked).toBe(true));
+        });
+
+        it("toggles a fact group", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": READY,
+                "PATCH /api/recordings/rec-1/review/items/i-fact?source=riffado":
+                    { version: 1 },
+            });
+            await openReady();
+            fireEvent.click(
+                screen.getByRole("checkbox", {
+                    name: "Tick all: New facts",
+                }),
+            );
+            await waitFor(() =>
+                expect(
+                    (
+                        screen.getByRole("checkbox", {
+                            name: "Jan — leads — Orion",
+                        }) as HTMLInputElement
+                    ).checked,
+                ).toBe(true),
+            );
+        });
+
+        it("finishes the review", async () => {
+            const fetch = respond({
+                "GET /api/recordings/rec-1/review?source=riffado": READY,
+                "POST /api/recordings/rec-1/review/finish?source=riffado": {
+                    status: "finished",
+                    applied: 1,
+                    dismissed: 1,
+                    skipped: [],
+                },
+            });
+            await openReady();
+            fireEvent.click(
+                screen.getByRole("button", { name: "Finish review" }),
+            );
+            await waitFor(() =>
+                expect(fetch).toHaveBeenCalledWith(
+                    "/api/recordings/rec-1/review/finish?source=riffado",
+                    expect.objectContaining({ method: "POST" }),
+                ),
+            );
+        });
+
+        it("rolls a tick back when saving fails", async () => {
+            respond({
+                "GET /api/recordings/rec-1/review?source=riffado": READY,
+                "PATCH /api/recordings/rec-1/review/items/i-fact?source=riffado":
+                    new Response("{}", { status: 409 }),
+            });
+            await openReady();
+            const fact = screen.getByRole("checkbox", {
+                name: "Jan — leads — Orion",
+            }) as HTMLInputElement;
+            fireEvent.click(fact);
+            await waitFor(() => expect(fact.checked).toBe(false));
+        });
     });
 
     it("opens the review with its two defaults, keeps a decision, and finishes with the versions shown", async () => {
@@ -1131,9 +1233,17 @@ describe("LearnReview", () => {
                 await screen.findByRole("button", { name: "Learn" }),
             );
             await waitFor(told);
-            expect(
-                await screen.findByRole("button", { name: button }),
-            ).toBeTruthy();
+            if (button === "Review (2)") {
+                expect(
+                    await screen.findByRole("heading", {
+                        name: /Review what Learn found/,
+                    }),
+                ).toBeTruthy();
+            } else {
+                expect(
+                    await screen.findByRole("button", { name: button }),
+                ).toBeTruthy();
+            }
         });
     });
 

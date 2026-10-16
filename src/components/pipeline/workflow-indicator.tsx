@@ -366,6 +366,11 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                     "Learn found {count, plural, one {# suggestion} other {# suggestions}}. The summary waits for your review, at most 3 days.",
                     { count: status.params?.count ?? 0 },
                 );
+            case "manualLearnReview":
+                return i18n(
+                    "Learn found {count, plural, one {# suggestion} other {# suggestions}}. Review them to apply what fits.",
+                    { count: status.params?.count ?? 0 },
+                );
             case "learnTimedOut":
                 return i18n(
                     "The summary was written without your Learn review, which waited 3 days. You can still review it.",
