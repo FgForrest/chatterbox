@@ -1,9 +1,11 @@
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    asyncJobs,
     chatterItems,
     itemProcessing,
+    learnReviewItems,
     learnRuns,
     mailContents,
     mailPendingShares,
@@ -15,11 +17,23 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
-import { processAgainPending } from "@/lib/pipeline/outdated";
-import type { PipelinePhases } from "@/lib/pipeline/types";
+import {
+    type OutdatedReason,
+    processAgainPending,
+} from "@/lib/pipeline/outdated";
+import type {
+    PhaseName,
+    PipelinePhases,
+    SummaryStepName,
+} from "@/lib/pipeline/types";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import { recordingJobSubject } from "@/lib/sharing/view";
+import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
+import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
+import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
 
 export interface ProcessingProfileSummary {
     id: string;
@@ -35,6 +49,15 @@ export interface ProcessingFolderSummary {
     scope: "personal" | "org";
 }
 
+export type ProcessingJobState = "queued" | "running";
+
+export interface ProcessingPhaseFailure {
+    phase: PhaseName;
+    step?: SummaryStepName;
+    reasonCode: string;
+    retryAvailable: boolean;
+}
+
 export interface ItemProcessingPresentation {
     itemId: string;
     kind: "audio" | "mail";
@@ -48,6 +71,7 @@ export interface ItemProcessingPresentation {
                   transcribe: boolean;
                   learn: boolean;
                   summary: boolean;
+                  taskReview?: boolean;
               };
           })
         | null;
@@ -55,6 +79,8 @@ export interface ItemProcessingPresentation {
     intents: Array<
         Pick<ProcessingFolderSummary, "name" | "path"> & {
             folderId: string;
+            confirmationRequired: boolean;
+            confirmed: boolean;
         }
     >;
     outputs: {
@@ -63,7 +89,14 @@ export interface ItemProcessingPresentation {
         learn: boolean;
     };
     processAgain: boolean;
-    taskReviewWaiting?: number;
+    processAgainReason: OutdatedReason | null;
+    learnFindingsWaiting: number;
+    taskReviewWaiting: number;
+    jobs: {
+        transcription: ProcessingJobState | null;
+        summary: ProcessingJobState | null;
+    };
+    failures: ProcessingPhaseFailure[];
 }
 
 interface StoredFolder {
@@ -71,6 +104,77 @@ interface StoredFolder {
     userId: string;
     parentId: string | null;
     name: string;
+}
+
+/** Reduce active database jobs to the state shown for one pipeline phase. */
+export function processingJobState(
+    jobs: Array<{
+        status: "pending" | "processing" | "completed" | "failed";
+    }>,
+): ProcessingJobState | null {
+    if (jobs.some((job) => job.status === "processing")) return "running";
+    return jobs.some((job) => job.status === "pending") ? "queued" : null;
+}
+
+/** Describe failed phase and Summary-step records for the status sentence. */
+export function processingFailures(
+    phases: PipelinePhases,
+): ProcessingPhaseFailure[] {
+    const failures: ProcessingPhaseFailure[] = [];
+    const retryable = new Set<PhaseName>(["transcribe", "learn", "summary"]);
+    for (const phase of [
+        "categorize",
+        "transcribe",
+        "learn",
+        "summary",
+        "taskReview",
+        "share",
+    ] as const) {
+        const record = phases[phase];
+        if (record?.state === "failed") {
+            failures.push({
+                phase,
+                reasonCode: record.reason ?? "UNKNOWN_FAILURE",
+                retryAvailable: retryable.has(phase),
+            });
+        }
+        if (phase !== "summary") continue;
+        for (const step of ["title", "topics", "summary"] as const) {
+            const recordStep = record?.steps?.[step];
+            if (recordStep?.state !== "failed") continue;
+            failures.push({
+                phase,
+                step,
+                reasonCode: recordStep.reason ?? "UNKNOWN_FAILURE",
+                retryAvailable: true,
+            });
+        }
+    }
+    return failures;
+}
+
+/** Identify the durable input change behind an explicit Process again state. */
+export function processingOutdatedReason(
+    phases: PipelinePhases,
+): OutdatedReason | null {
+    if (!processAgainPending(phases)) return null;
+    for (const phase of [
+        "transcribe",
+        "learn",
+        "summary",
+        "taskReview",
+    ] as const) {
+        const reason = phases[phase]?.reason;
+        if (
+            phases[phase]?.state === "outdated" &&
+            (reason === "content_changed" ||
+                reason === "learn_changed" ||
+                reason === "profile_changed")
+        ) {
+            return reason;
+        }
+    }
+    return null;
 }
 
 /** Count the task decisions shown by the review dialog for one item. */
@@ -237,6 +341,8 @@ export async function loadPrivateItemProcessing(
         orgUserId,
         placementRows,
         intentRows,
+        activeJobs,
+        [learnFindings],
         transcripts,
         mailContent,
         summaries,
@@ -267,6 +373,7 @@ export async function loadPrivateItemProcessing(
                 userId: recordingFolders.userId,
                 parentId: recordingFolders.parentId,
                 name: recordingFolders.name,
+                confirmedAt: mailPendingShares.confirmedAt,
             })
             .from(mailPendingShares)
             .innerJoin(
@@ -277,6 +384,44 @@ export async function loadPrivateItemProcessing(
                 and(
                     eq(mailPendingShares.itemId, itemId),
                     eq(mailPendingShares.userId, ownerUserId),
+                ),
+            ),
+        db
+            .select({ kind: asyncJobs.kind, status: asyncJobs.status })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, ownerUserId),
+                    eq(
+                        asyncJobs.subjectId,
+                        recordingJobSubject(itemId, "private"),
+                    ),
+                    inArray(asyncJobs.kind, [
+                        TRANSCRIPTION_JOB_KIND,
+                        SUMMARY_JOB_KIND,
+                        TITLE_JOB_KIND,
+                        TOPICS_JOB_KIND,
+                    ]),
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                ),
+            ),
+        db
+            .select({ count: count() })
+            .from(learnReviewItems)
+            .innerJoin(
+                learnRuns,
+                and(
+                    eq(learnRuns.id, learnReviewItems.runId),
+                    eq(learnRuns.userId, ownerUserId),
+                ),
+            )
+            .where(
+                and(
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, ownerUserId),
+                    eq(learnRuns.view, "private"),
+                    eq(learnRuns.status, "ready"),
+                    eq(learnReviewItems.userId, ownerUserId),
                 ),
             ),
         item.kind === "audio"
@@ -361,6 +506,10 @@ export async function loadPrivateItemProcessing(
                       folderId: summary.id,
                       name: summary.name,
                       path: summary.path,
+                      confirmationRequired:
+                          (item.manualOnly ?? false) &&
+                          folder.confirmedAt === null,
+                      confirmed: folder.confirmedAt !== null,
                   },
               ]
             : [];
@@ -374,6 +523,7 @@ export async function loadPrivateItemProcessing(
         summary: boolean;
         title: boolean;
         topics: boolean;
+        tasksEnabled: boolean;
     } | null = null;
     if (!legacy && item.profileSettings) {
         const storedSettings = JSON.parse(decryptText(item.profileSettings));
@@ -385,6 +535,7 @@ export async function loadPrivateItemProcessing(
                 summary: settings.steps.summary.automatic,
                 title: settings.steps.title.automatic,
                 topics: settings.steps.topics.automatic,
+                tasksEnabled: settings.steps.tasks.enabled,
             };
         } else {
             const settings = parseProfileSettings("mail", storedSettings);
@@ -394,6 +545,7 @@ export async function loadPrivateItemProcessing(
                 summary: settings.steps.summary.automatic,
                 title: settings.steps.title.automatic,
                 topics: false,
+                tasksEnabled: settings.steps.tasks.enabled,
             };
         }
     }
@@ -413,6 +565,7 @@ export async function loadPrivateItemProcessing(
                       transcribe: automatic.transcribe,
                       learn: automatic.learn,
                       summary: automatic.summary,
+                      taskReview: automatic.summary && automatic.tasksEnabled,
                   },
               }
             : null;
@@ -464,16 +617,30 @@ export async function loadPrivateItemProcessing(
         );
     });
 
+    const phases = settleTaskReviewPhase(
+        item.phases ?? {},
+        taskReviewWaiting,
+        summaryCurrent,
+    );
+    const processAgain =
+        !legacy &&
+        !(item.manualOnly ?? false) &&
+        automatic !== null &&
+        Object.values(automatic).some(Boolean) &&
+        processAgainPending(item.phases ?? {});
+    const transcriptionJobs = activeJobs.filter(
+        (job) => job.kind === TRANSCRIPTION_JOB_KIND,
+    );
+    const summaryJobs = activeJobs.filter((job) =>
+        [SUMMARY_JOB_KIND, TITLE_JOB_KIND, TOPICS_JOB_KIND].includes(job.kind),
+    );
+
     return {
         itemId,
         kind: item.kind,
         legacy,
         manualOnly: item.manualOnly ?? false,
-        phases: settleTaskReviewPhase(
-            item.phases ?? {},
-            taskReviewWaiting,
-            summaryCurrent,
-        ),
+        phases,
         profile,
         placements,
         intents,
@@ -482,12 +649,16 @@ export async function loadPrivateItemProcessing(
             summary: summaryCurrent,
             learn: learnDone,
         },
-        processAgain:
-            !legacy &&
-            !(item.manualOnly ?? false) &&
-            automatic !== null &&
-            Object.values(automatic).some(Boolean) &&
-            processAgainPending(item.phases ?? {}),
+        processAgain,
+        processAgainReason: processAgain
+            ? processingOutdatedReason(item.phases ?? {})
+            : null,
+        learnFindingsWaiting: learnFindings?.count ?? 0,
         taskReviewWaiting,
+        jobs: {
+            transcription: processingJobState(transcriptionJobs),
+            summary: processingJobState(summaryJobs),
+        },
+        failures: processingFailures(phases),
     };
 }

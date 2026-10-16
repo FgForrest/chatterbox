@@ -9,8 +9,11 @@ import {
     vi,
 } from "vitest";
 import {
+    asyncJobs,
     chatterItems,
     itemProcessing,
+    learnReviewItems,
+    learnRuns,
     mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
@@ -93,8 +96,11 @@ import {
 } from "@/lib/folders/folders";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { mailShareProblems } from "@/lib/mail/share-gate";
+import { gatherFacts } from "@/lib/pipeline/facts";
+import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 import {
     cancelIntendedPlacement,
+    confirmIntendedPlacements,
     executeIntendedShares,
     executeIntendedSharesWithOutcome,
     recordIntendedPlacementInTx,
@@ -113,6 +119,7 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
     let aliceRootId = "";
     let orgRootId = "";
     let orgFolderId = "";
+    let secondOrgFolderId = "";
     let bobFolderId = "";
 
     function db() {
@@ -204,6 +211,19 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         );
     }
 
+    async function makeManualOnly(itemId: string): Promise<void> {
+        await db()
+            .update(itemProcessing)
+            .set({ manualOnly: true })
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ALICE),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+    }
+
     async function assignments(itemId: string): Promise<string[]> {
         return (
             await db()
@@ -268,12 +288,19 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
         orgRootId = await rootId(ORG);
         const bobRootId = await rootId(BOB);
         orgFolderId = "share-intent-org-folder";
+        secondOrgFolderId = "share-intent-second-org-folder";
         bobFolderId = "share-intent-bob-folder";
         await insertFolder({
             id: orgFolderId,
             userId: ORG,
             parentId: orgRootId,
             name: "Sales",
+        });
+        await insertFolder({
+            id: secondOrgFolderId,
+            userId: ORG,
+            parentId: orgRootId,
+            name: "Support",
         });
         await insertFolder({
             id: bobFolderId,
@@ -301,6 +328,173 @@ describeWithDatabase("intended Organization placements (PostgreSQL)", () => {
 
         expect(await executeIntendedShares(ALICE, itemId)).toEqual([]);
         expect(await assignments(itemId)).toEqual([orgFolderId]);
+    });
+
+    it("holds manual-only audio and mail intents until confirmation", async () => {
+        for (const kind of ["audio", "mail"] as const) {
+            const itemId = `manual-${kind}-intent`;
+            if (kind === "audio") {
+                await insertAudio(itemId);
+                await insertTranscript(itemId);
+            } else {
+                await insertMail(itemId);
+            }
+            await recordIntent(itemId);
+            await makeManualOnly(itemId);
+
+            await expect(
+                executeIntendedSharesWithOutcome(ALICE, itemId),
+            ).resolves.toMatchObject({
+                shared: false,
+                remaining: true,
+                confirmationRequired: true,
+            });
+            expect(await assignments(itemId)).toEqual([]);
+
+            await expect(
+                confirmIntendedPlacements(ALICE, itemId),
+            ).resolves.toBe(1);
+            await expect(
+                executeIntendedSharesWithOutcome(ALICE, itemId),
+            ).resolves.toMatchObject({
+                shared: true,
+                remaining: false,
+                confirmationRequired: false,
+            });
+            expect(await assignments(itemId)).toEqual([orgFolderId]);
+        }
+    });
+
+    it("requires confirmation again when another intent is added", async () => {
+        const itemId = "manual-new-intent";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        await recordIntent(itemId);
+        await makeManualOnly(itemId);
+        await confirmIntendedPlacements(ALICE, itemId);
+        await appDb.transaction((tx) =>
+            recordIntendedPlacementInTx(tx, {
+                ownerUserId: ALICE,
+                itemId,
+                folderId: secondOrgFolderId,
+            }),
+        );
+
+        await expect(
+            executeIntendedSharesWithOutcome(ALICE, itemId),
+        ).resolves.toMatchObject({
+            shared: false,
+            remaining: true,
+            confirmationRequired: true,
+        });
+        expect(await assignments(itemId)).toEqual([]);
+
+        await expect(confirmIntendedPlacements(ALICE, itemId)).resolves.toBe(1);
+        await executeIntendedShares(ALICE, itemId);
+        expect(new Set(await assignments(itemId))).toEqual(
+            new Set([orgFolderId, secondOrgFolderId]),
+        );
+    });
+
+    it("presents review counts, job states, and intent confirmation", async () => {
+        const itemId = "presentation-details";
+        await insertAudio(itemId);
+        await insertTranscript(itemId);
+        await recordIntent(itemId);
+        await makeManualOnly(itemId);
+        const [transcript] = await db()
+            .select({ id: transcriptions.id })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, itemId),
+                    eq(transcriptions.userId, ALICE),
+                ),
+            );
+        const [run] = await db()
+            .insert(learnRuns)
+            .values({
+                userId: ALICE,
+                scopeUserId: ALICE,
+                itemId,
+                transcriptionId: transcript?.id,
+                view: "private",
+                trigger: "manual",
+                transcriptRevision: 0,
+                vocabularyVersion: 0,
+                status: "ready",
+            })
+            .returning({ id: learnRuns.id });
+        await db()
+            .insert(learnReviewItems)
+            .values(
+                ["one", "two"].map((fingerprintHmac) => ({
+                    runId: run?.id ?? "",
+                    userId: ALICE,
+                    kind: "known_fact" as const,
+                    fingerprintHmac,
+                    payload: {},
+                })),
+            );
+        await db()
+            .insert(recordingTasks)
+            .values({
+                itemId,
+                userId: ALICE,
+                status: "proposed",
+                source: "riffado",
+                text: encryptText("Review this task"),
+            });
+        await db()
+            .insert(asyncJobs)
+            .values([
+                {
+                    userId: ALICE,
+                    kind: "transcription",
+                    subjectId: itemId,
+                    status: "pending",
+                    payload: {},
+                },
+                {
+                    userId: ALICE,
+                    kind: "summary",
+                    subjectId: itemId,
+                    status: "processing",
+                    payload: {},
+                },
+            ]);
+
+        const waiting = await loadPrivateItemProcessing(ALICE, itemId);
+        expect(waiting).toMatchObject({
+            learnFindingsWaiting: 2,
+            taskReviewWaiting: 1,
+            jobs: { transcription: "queued", summary: "running" },
+            intents: [
+                {
+                    folderId: orgFolderId,
+                    confirmationRequired: true,
+                    confirmed: false,
+                },
+            ],
+        });
+        const facts = await gatherFacts(itemId, "private", ALICE, {
+            legacyIfEmpty: false,
+        });
+        expect(facts).toMatchObject({
+            learnRunOpen: true,
+            learnRunInFlight: false,
+            learnRunReadyForReview: true,
+        });
+
+        await confirmIntendedPlacements(ALICE, itemId);
+        const confirmed = await loadPrivateItemProcessing(ALICE, itemId);
+        expect(confirmed?.intents).toEqual([
+            expect.objectContaining({
+                folderId: orgFolderId,
+                confirmationRequired: false,
+                confirmed: true,
+            }),
+        ]);
     });
 
     it("routes an awaiting-share task proposal when an intended share executes", async () => {

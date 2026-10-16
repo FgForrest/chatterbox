@@ -384,6 +384,21 @@ function sameProblems(
 function planShare(facts: PipelineFacts, actions: PipelineAction[]): void {
     if (facts.categorization.intendedFolderIds.length === 0) return;
     if ((facts.phases.share?.generation ?? -1) >= facts.generation) return;
+    if (facts.manualOnly && facts.share?.confirmationRequired) {
+        if (
+            !phaseMatches(
+                facts.phases.share,
+                "waiting",
+                "confirmation_required",
+                facts.generation,
+            )
+        ) {
+            actions.push(
+                markPhase(facts, "share", "waiting", "confirmation_required"),
+            );
+        }
+        return;
+    }
     const problems = facts.share?.problems ?? [];
     if (problems.length > 0) {
         const current = facts.phases.share;
@@ -1114,7 +1129,34 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
         return { actions };
     }
 
-    if (facts.learnRunOpen) {
+    if (facts.learnRunReadyForReview) {
+        if (
+            !phaseMatches(
+                learn,
+                "waiting",
+                "manual_review_pending",
+                minimumGeneration,
+                input,
+            )
+        ) {
+            actions.push(
+                markPhase(
+                    facts,
+                    "learn",
+                    "waiting",
+                    "manual_review_pending",
+                    input,
+                ),
+            );
+        }
+        planSummary();
+        return { actions };
+    }
+
+    if (
+        facts.learnRunInFlight ??
+        (facts.learnRunOpen && !facts.learnRunReadyForReview)
+    ) {
         if (
             !phaseMatches(learn, "running", "manual", minimumGeneration, input)
         ) {
@@ -1125,8 +1167,9 @@ export function planAdvance(facts: PipelineFacts): PipelinePlan {
     }
 
     if (
-        learn?.state === "running" &&
-        learn.reason === "manual" &&
+        ((learn?.state === "running" && learn.reason === "manual") ||
+            (learn?.state === "waiting" &&
+                learn.reason === "manual_review_pending")) &&
         sameInput(learn, input) &&
         (minimumGeneration === undefined ||
             learn.generation >= minimumGeneration)

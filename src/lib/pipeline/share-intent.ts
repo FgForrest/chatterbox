@@ -1,6 +1,11 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, mailPendingShares, recordingFolders } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    mailPendingShares,
+    recordingFolders,
+} from "@/db/schema";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -89,6 +94,7 @@ export interface IntendedShareOutcome {
     problems: ShareGateProblem[];
     shared: boolean;
     remaining: boolean;
+    confirmationRequired: boolean;
 }
 
 /** Execute intended shares and report whether an intent was fulfilled or remains. */
@@ -112,10 +118,15 @@ export async function executeIntendedSharesWithOutcome(
             problems: [],
             shared: false,
             remaining: remaining !== undefined,
+            confirmationRequired: false,
         };
     }
     const intents = await db
-        .select({ folderId: mailPendingShares.folderId })
+        .select({
+            folderId: mailPendingShares.folderId,
+            confirmedAt: mailPendingShares.confirmedAt,
+            manualOnly: itemProcessing.manualOnly,
+        })
         .from(mailPendingShares)
         .innerJoin(
             chatterItems,
@@ -128,6 +139,14 @@ export async function executeIntendedSharesWithOutcome(
             recordingFolders,
             eq(recordingFolders.id, mailPendingShares.folderId),
         )
+        .leftJoin(
+            itemProcessing,
+            and(
+                eq(itemProcessing.itemId, mailPendingShares.itemId),
+                eq(itemProcessing.userId, ownerUserId),
+                eq(itemProcessing.view, "private"),
+            ),
+        )
         .where(
             and(
                 eq(mailPendingShares.userId, ownerUserId),
@@ -136,6 +155,19 @@ export async function executeIntendedSharesWithOutcome(
                 eq(recordingFolders.userId, orgUserId),
             ),
         );
+    if (
+        intents.some(
+            (intent) =>
+                intent.manualOnly === true && intent.confirmedAt === null,
+        )
+    ) {
+        return {
+            problems: [],
+            shared: false,
+            remaining: true,
+            confirmationRequired: true,
+        };
+    }
     let shared = false;
     for (const intent of intents) {
         const result = await retryOnDeadlock(() =>
@@ -144,7 +176,10 @@ export async function executeIntendedSharesWithOutcome(
                 await lockOrgPeople(tx);
                 await lockItemForFolderMutation(tx, itemId, ownerUserId);
                 const [current] = await tx
-                    .select({ folderId: mailPendingShares.folderId })
+                    .select({
+                        folderId: mailPendingShares.folderId,
+                        confirmedAt: mailPendingShares.confirmedAt,
+                    })
                     .from(mailPendingShares)
                     .where(
                         and(
@@ -155,7 +190,31 @@ export async function executeIntendedSharesWithOutcome(
                     )
                     .for("update")
                     .limit(1);
-                if (!current) return { problems: [], shared: false };
+                if (!current) {
+                    return {
+                        problems: [],
+                        shared: false,
+                        confirmationRequired: false,
+                    };
+                }
+                const [processing] = await tx
+                    .select({ manualOnly: itemProcessing.manualOnly })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, itemId),
+                            eq(itemProcessing.userId, ownerUserId),
+                            eq(itemProcessing.view, "private"),
+                        ),
+                    )
+                    .limit(1);
+                if (processing?.manualOnly && current.confirmedAt === null) {
+                    return {
+                        problems: [],
+                        shared: false,
+                        confirmationRequired: true,
+                    };
+                }
                 try {
                     const folder = await assertCategorizableFolder(
                         ownerUserId,
@@ -166,11 +225,19 @@ export async function executeIntendedSharesWithOutcome(
                         folder.scope !== "org" ||
                         folder.ownerId !== orgUserId
                     ) {
-                        return { problems: [], shared: false };
+                        return {
+                            problems: [],
+                            shared: false,
+                            confirmationRequired: false,
+                        };
                     }
                 } catch (error) {
                     if (error instanceof AppError) {
-                        return { problems: [], shared: false };
+                        return {
+                            problems: [],
+                            shared: false,
+                            confirmationRequired: false,
+                        };
                     }
                     throw error;
                 }
@@ -180,7 +247,13 @@ export async function executeIntendedSharesWithOutcome(
                     folderId: current.folderId,
                     orgUserId,
                 });
-                if (problems.length > 0) return { problems, shared: false };
+                if (problems.length > 0) {
+                    return {
+                        problems,
+                        shared: false,
+                        confirmationRequired: false,
+                    };
+                }
                 await tx
                     .delete(mailPendingShares)
                     .where(
@@ -190,7 +263,11 @@ export async function executeIntendedSharesWithOutcome(
                             eq(mailPendingShares.folderId, current.folderId),
                         ),
                     );
-                return { problems: [], shared: true };
+                return {
+                    problems: [],
+                    shared: true,
+                    confirmationRequired: false,
+                };
             }),
         );
         if (result.problems.length > 0) {
@@ -198,6 +275,15 @@ export async function executeIntendedSharesWithOutcome(
                 problems: result.problems,
                 shared,
                 remaining: true,
+                confirmationRequired: false,
+            };
+        }
+        if (result.confirmationRequired) {
+            return {
+                problems: [],
+                shared,
+                remaining: true,
+                confirmationRequired: true,
             };
         }
         shared ||= result.shared;
@@ -216,7 +302,67 @@ export async function executeIntendedSharesWithOutcome(
             ),
         )
         .limit(1);
-    return { problems: [], shared, remaining: remaining !== undefined };
+    return {
+        problems: [],
+        shared,
+        remaining: remaining !== undefined,
+        confirmationRequired: false,
+    };
+}
+
+/** Confirm every current intended Organization placement of a manual-only item. */
+export async function confirmIntendedPlacements(
+    ownerUserId: string,
+    itemId: string,
+): Promise<number> {
+    const confirmed = await db.transaction(async (tx) => {
+        await lockItemForFolderMutation(tx, itemId, ownerUserId);
+        const [processing] = await tx
+            .select({ manualOnly: itemProcessing.manualOnly })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, ownerUserId),
+                    eq(itemProcessing.view, "private"),
+                ),
+            )
+            .limit(1);
+        if (!processing?.manualOnly) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "Only a manual-only item needs share confirmation",
+                409,
+            );
+        }
+        const rows = await tx
+            .update(mailPendingShares)
+            .set({ confirmedAt: new Date() })
+            .where(
+                and(
+                    eq(mailPendingShares.userId, ownerUserId),
+                    eq(mailPendingShares.itemId, itemId),
+                    isNull(mailPendingShares.confirmedAt),
+                ),
+            )
+            .returning({ folderId: mailPendingShares.folderId });
+        if (rows.length === 0) {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "There are no intended placements to confirm",
+                409,
+            );
+        }
+        await requestAdvanceInTx(tx, {
+            itemId,
+            userId: ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+        return rows.length;
+    });
+    nudge();
+    return confirmed;
 }
 
 /** Withdraw an owner's intended placement without sharing the item. */
