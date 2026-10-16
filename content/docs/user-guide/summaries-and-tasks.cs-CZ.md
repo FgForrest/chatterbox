@@ -14,6 +14,8 @@ Jakmile má nahrávka přepis, karta **Shrnutí** pod ním jej může shrnout. S
 
 Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení vícekrokového zpracování. Viz [Zpracování a profily](processing-and-profiles.md).
 
+![Výběr profilu zpracování pro ruční shrnutí](images/summary-profile-picker.png)
+
 Během zpracování karta ukazuje, jak dlouho už operace trvá a u vícekrokového shrnutí, jak daleko je: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
 Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. Za textem následují **Klíčové body**. Dvě ikony umožňují shrnutí zkopírovat nebo stáhnout jako Markdown soubor.
@@ -49,6 +51,10 @@ Kliknutím na **Zkontrolovat úkoly** ve shrnutí zkontrolujete nové úkoly, sh
 
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní.
 
+![Změny úkolu a dřívější zmínka v kontrole](images/task-review-changes.png)
+
+![Výběr dřívějšího úkolu ke sloučení](images/task-merge-earlier.png)
+
 Po přijetí shody ji může vlastník položky v jejím seznamu úkolů zrušit; u sdílené položky to mohou provést také kurátoři. Zrušením se tato zmínka oddělí do vlastního úkolu. Změny polí již použité na dřívější úkol zůstanou použité.
 
 Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo použijte **Přidat úkol** pro ruční doplnění. Úkol žije, dokud existuje alespoň jedna zmínka, i když nahradíte shrnutí, které jej původně našlo.
@@ -58,6 +64,8 @@ Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo 
 ## Směrované návrhy
 
 Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Chatterbox ji předá někomu, kdo toto právo má. **Návrhy pro vás** na stránce Úkoly jsou schránkou těchto rozhodnutí a odznak v navigaci uvádí jejich počet. Při použití návrhu se oprávnění zkontroluje znovu.
+
+![Směrovaný návrh úkolu ve schránce na stránce Úkoly](images/tasks-routed.png)
 
 U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zrušit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
 

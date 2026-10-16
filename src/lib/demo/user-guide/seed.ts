@@ -1,16 +1,26 @@
 import { hashPassword } from "better-auth/crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { db } from "@/db";
 import { insertAudioItem } from "@/db/items";
 import {
     accounts,
     aiUsageEvents,
     apiCredentials,
+    asyncJobs,
+    chatterItems,
+    folderDefaultProfiles,
+    itemProcessing,
     learnReviewItems,
     learnRuns,
     mailAddresses,
+    mailContents,
+    mailMessages,
+    processingProfiles,
     recordingFolders,
     recordingTasks,
+    taskMentions,
+    taskUpdateProposals,
     transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
@@ -19,14 +29,17 @@ import {
 } from "@/db/schema";
 import {
     defaultTemplateConfig,
-    seedTemplate,
     type TemplateConfiguration,
 } from "@/lib/ai/prompt-templates";
 import { PRICE_SOURCE } from "@/lib/ai/published-rates";
 import { setDefaultTranscriptionProvider } from "@/lib/ai/set-default-transcription";
 import { SUMMARY_TEMPLATE_KIND } from "@/lib/ai/summary-presets";
 import { encrypt } from "@/lib/encryption";
-import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import {
+    decryptText,
+    encryptJsonField,
+    encryptText,
+} from "@/lib/encryption/fields";
 import {
     addRecordingToFolder,
     createFolder,
@@ -39,8 +52,23 @@ import { domainLookupHash } from "@/lib/knowledge/lookup-hash";
 import { createPerson } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
+import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
 import { ensureOrgAccount } from "@/lib/org/account";
+import type { PhaseState, PipelinePhases } from "@/lib/pipeline/types";
+import { ensureProfiles } from "@/lib/profiles/seed";
 import { buildRecordingStorageFilename } from "@/lib/recordings/filename";
+import { taskViewerById } from "@/lib/tasks/access";
+import { taskFingerprint } from "@/lib/tasks/proposals";
+import {
+    type ProposedTask,
+    type ProposedTaskUpdate,
+    writeTaskProposalsInTx,
+} from "@/lib/tasks/store";
+import {
+    acceptReview,
+    tickUpdateProposal,
+    updateTask,
+} from "@/lib/tasks/tasks";
 import {
     upsertEnhancement,
     upsertTranscription,
@@ -51,19 +79,22 @@ import {
 } from "@/lib/transcription/turns";
 import {
     DEMO_FACTS,
+    DEMO_MAIL,
     DEMO_ORG_FOLDERS,
     DEMO_PEOPLE,
     DEMO_PRIVATE_FOLDERS,
     DEMO_PROVIDERS,
     DEMO_RECORDINGS,
-    DEMO_SUMMARY_TEMPLATES,
     DEMO_THINGS,
     DEMO_USERS,
     type DemoCorrection,
     type DemoFactRef,
     type DemoLearnItem,
+    type DemoMail,
     type DemoPersonKey,
     type DemoRecording,
+    type DemoTask,
+    type DemoTaskUpdate,
     type DemoThingKey,
     type DemoTurn,
     type DemoUserKey,
@@ -142,6 +173,12 @@ export async function seedUserGuideDemo(
     await seedProviders(alex);
     await seedSettings(alex);
     await seedSettings(userIds.priya);
+    await ensureProfiles(alex);
+    await ensureProfiles(userIds.priya);
+    const profiles = {
+        alex: await defaultProfiles(alex),
+        priya: await defaultProfiles(userIds.priya),
+    };
 
     const privateFolders = new Map<string, Map<string, string>>();
     for (const userId of Object.values(userIds)) {
@@ -160,6 +197,14 @@ export async function seedUserGuideDemo(
         await rootFolderId(orgUserId, "public"),
         DEMO_ORG_FOLDERS,
     );
+    await db.insert(folderDefaultProfiles).values({
+        folderId: folderAt(
+            privateFolders.get(alex),
+            "Clients/Bluefin Logistics",
+        ),
+        channel: "audio",
+        profileId: profiles.alex.audio.id,
+    });
 
     const recordingIds: Record<string, string> = {};
     const audio: DemoAudioFile[] = [];
@@ -186,11 +231,56 @@ export async function seedUserGuideDemo(
         }
     }
 
+    const mail = await seedMail(
+        DEMO_MAIL,
+        scopes[DEMO_MAIL.owner],
+        now,
+        privateFolders.get(alex),
+        orgFolders,
+    );
+    recordingIds[DEMO_MAIL.key] = mail.itemId;
+
+    await seedTaskGraph(scopes, recordingIds, now);
+    await seedProcessingStates(scopes, recordingIds, profiles, now);
+    await db.delete(asyncJobs);
+
     await db.transaction(async (tx) => {
         await bumpScopeInTx(tx, [alex, userIds.priya, orgUserId]);
     });
 
     return { users: userIds, orgUserId, recordings: recordingIds, audio };
+}
+
+interface DemoProfileRef {
+    id: string;
+    revisionId: string;
+}
+
+interface DemoProfiles {
+    audio: DemoProfileRef;
+    mail: DemoProfileRef;
+}
+
+async function defaultProfiles(userId: string): Promise<DemoProfiles> {
+    const rows = await db
+        .select({
+            id: processingProfiles.id,
+            revisionId: processingProfiles.currentRevisionId,
+            channel: processingProfiles.channel,
+        })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, userId),
+                eq(processingProfiles.isDefault, true),
+            ),
+        );
+    const profile = (channel: "audio" | "mail"): DemoProfileRef => {
+        const row = rows.find((candidate) => candidate.channel === channel);
+        if (!row?.revisionId) throw new Error(`No default ${channel} profile`);
+        return { id: row.id, revisionId: row.revisionId };
+    };
+    return { audio: profile("audio"), mail: profile("mail") };
 }
 
 async function createUser(user: (typeof DEMO_USERS)[number]): Promise<string> {
@@ -299,16 +389,8 @@ async function seedProviders(userId: string): Promise<CredentialIds> {
 
 async function seedSettings(userId: string): Promise<void> {
     const summaryTemplates: TemplateConfiguration = {
+        ...defaultTemplateConfig(SUMMARY_TEMPLATE_KIND),
         selectedPrompt: "meeting-notes",
-        templates: [
-            ...defaultTemplateConfig(SUMMARY_TEMPLATE_KIND).templates,
-            ...DEMO_SUMMARY_TEMPLATES.map((template) => ({
-                ...seedTemplate(template.id),
-                name: template.name,
-                prompt: template.prompt,
-                createdAt: new Date().toISOString(),
-            })),
-        ],
     };
     const values = {
         onboardingCompleted: true,
@@ -316,10 +398,10 @@ async function seedSettings(userId: string): Promise<void> {
         syncOnMount: false,
         syncOnVisibilityChange: false,
         syncNotifications: false,
-        autoTranscribe: false,
-        autoSummarize: false,
-        autoLearn: false,
-        autoDetectTopics: false,
+        autoTranscribe: true,
+        autoSummarize: true,
+        autoLearn: true,
+        autoDetectTopics: true,
         summaryPrompt: encryptJsonField(summaryTemplates),
         summaryMultiPass: true,
         summaryMultiPassRounds: 3,
@@ -598,8 +680,6 @@ async function seedRecording(
             throw new Error(`Summary of ${fixture.key} refused`);
     }
 
-    await seedTasks(fixture, scope, recordingId, turns, now);
-
     if (fixture.learn) {
         await seedLearnRun(
             fixture.learn,
@@ -669,45 +749,510 @@ function isoDay(date: Date): string {
     return date.toISOString().slice(0, 10);
 }
 
-async function seedTasks(
-    fixture: DemoRecording,
+async function seedMail(
+    fixture: DemoMail,
     scope: Scope,
-    recordingId: string,
-    turns: readonly TranscriptTurn[],
     now: Date,
-): Promise<void> {
-    const userId = scope.userId;
-    for (const [position, task] of (fixture.tasks ?? []).entries()) {
-        const turn = task.atTurn === undefined ? undefined : turns[task.atTurn];
-        const settled = task.status !== "proposed";
-        const decidedAt = new Date(now.getTime() - DAY_MS);
-        await db.insert(recordingTasks).values({
-            itemId: recordingId,
-            userId,
-            status: task.status,
-            text: encryptText(task.text),
-            assigneePersonId: task.assignee
-                ? personId(scope, task.assignee)
-                : null,
-            assigneeHint: encryptText(task.assigneeHint ?? null),
-            dueDate:
-                task.dueInDays === undefined
-                    ? null
-                    : isoDay(new Date(now.getTime() + task.dueInDays * DAY_MS)),
-            duePhrase: encryptText(task.duePhrase ?? null),
-            quote: encryptText(quoteOf(turn)),
-            evidenceStartMs: turn?.startMs ?? null,
-            source: "riffado",
-            ticked: task.ticked ?? true,
-            position,
-            createdByUserId: userId,
-            acceptedAt: settled ? decidedAt : null,
-            acceptedByUserId: settled ? userId : null,
-            assignedAt: settled ? decidedAt : null,
-            statusChangedAt: settled ? decidedAt : null,
-            statusChangedByUserId: settled ? userId : null,
+    privateFolders: Map<string, string> | undefined,
+    orgFolders: Map<string, string>,
+): Promise<{ itemId: string; contentId: string }> {
+    const itemId = nanoid();
+    const occurredAt = new Date(now.getTime() - fixture.daysAgo * DAY_MS);
+    occurredAt.setHours(fixture.hour, 12, 0, 0);
+    const recipient = DEMO_USERS.find((user) => user.key === fixture.owner);
+    if (!recipient) throw new Error(`No demo user ${fixture.owner}`);
+    const raw = Buffer.from(
+        [
+            `From: ${fixture.fromName} <${fixture.fromAddress}>`,
+            `To: ${recipient.name} <${recipient.email}>`,
+            `Subject: ${fixture.title}`,
+            `Date: ${occurredAt.toUTCString()}`,
+            `Message-ID: <${fixture.key}@example.com>`,
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            fixture.text,
+        ].join("\r\n"),
+    );
+    const segments = segmentMail({
+        text: fixture.text,
+        html: null,
+        from: { name: fixture.fromName, address: fixture.fromAddress },
+        sender: null,
+        to: [{ name: recipient.name, address: recipient.email }],
+        cc: [],
+        replyTo: [],
+        sentAt: occurredAt,
+        fromAuthenticated: true,
+    });
+    const contentId = nanoid();
+    await db.transaction(async (tx) => {
+        await tx.insert(chatterItems).values({
+            id: itemId,
+            userId: scope.userId,
+            kind: "mail",
+            title: encryptText(fixture.title),
+            occurredAt,
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+        });
+        await tx.insert(mailMessages).values({
+            id: itemId,
+            userId: scope.userId,
+            rawHash: `user-guide-demo-${DEMO_MAIL.key}`,
+            sentAt: occurredAt,
+            receivedAt: occurredAt,
+            sizeBytes: raw.length,
+            rawStoragePath: null,
+            auth: encryptJsonField({ demo: true }),
+            senderVerified: true,
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+        });
+        await tx.insert(mailContents).values({
+            id: contentId,
+            itemId,
+            userId: scope.userId,
+            revision: 0,
+            parserVersion: MAIL_PARSER_VERSION,
+            segments: encryptJsonField(segments),
+            language: "en",
+            createdAt: occurredAt,
+            updatedAt: occurredAt,
+        });
+    });
+    for (const path of fixture.privateFolders ?? []) {
+        await addRecordingToFolder({
+            userId: scope.userId,
+            recordingId: itemId,
+            folderId: folderAt(privateFolders, path),
         });
     }
+    for (const path of fixture.orgFolders ?? []) {
+        await addRecordingToFolder({
+            userId: scope.userId,
+            recordingId: itemId,
+            folderId: folderAt(orgFolders, path),
+        });
+    }
+    return { itemId, contentId };
+}
+
+function proposedTask(
+    task: DemoTask,
+    scope: Scope,
+    turns: readonly TranscriptTurn[],
+    taskIds: ReadonlyMap<string, string>,
+    now: Date,
+): ProposedTask {
+    const turn = task.atTurn === undefined ? undefined : turns[task.atTurn];
+    return {
+        text: task.text,
+        fingerprint: taskFingerprint(task.text),
+        assigneePersonId: task.assignee ? personId(scope, task.assignee) : null,
+        assigneeHint: task.assigneeHint ?? null,
+        assigneeCheck: false,
+        dueDate:
+            task.dueInDays === undefined
+                ? null
+                : isoDay(new Date(now.getTime() + task.dueInDays * DAY_MS)),
+        duePhrase: task.duePhrase ?? null,
+        quote: quoteOf(turn),
+        evidenceStartMs: turn?.startMs ?? null,
+        candidateTaskIds: (task.candidateTaskKeys ?? []).map((key) =>
+            requiredTaskId(taskIds, key),
+        ),
+    };
+}
+
+function proposedUpdate(
+    update: DemoTaskUpdate,
+    scope: Scope,
+    turns: readonly TranscriptTurn[],
+    taskIds: ReadonlyMap<string, string>,
+    now: Date,
+): ProposedTaskUpdate {
+    const turn = turns[update.atTurn];
+    return {
+        taskId: requiredTaskId(taskIds, update.taskKey),
+        kind: update.kind,
+        dueDate:
+            update.dueInDays === undefined
+                ? null
+                : isoDay(new Date(now.getTime() + update.dueInDays * DAY_MS)),
+        duePhrase: update.duePhrase ?? null,
+        assigneePersonId: update.assignee
+            ? personId(scope, update.assignee)
+            : null,
+        assigneeHint: update.assigneeHint ?? null,
+        assigneeCheck: update.assigneeCheck ?? false,
+        quote: quoteOf(turn),
+        evidenceStartMs: turn?.startMs ?? null,
+    };
+}
+
+function requiredTaskId(taskIds: ReadonlyMap<string, string>, key: string) {
+    const id = taskIds.get(key);
+    if (!id) throw new Error(`No demo task ${key}`);
+    return id;
+}
+
+async function targetVersion(taskId: string): Promise<number> {
+    const [row] = await db
+        .select({ version: recordingTasks.version })
+        .from(recordingTasks)
+        .where(eq(recordingTasks.id, taskId))
+        .limit(1);
+    if (!row) throw new Error(`No task ${taskId}`);
+    return row.version;
+}
+
+async function seedTaskGraph(
+    scopes: Record<DemoUserKey, Scope>,
+    itemIds: Record<string, string>,
+    now: Date,
+): Promise<void> {
+    const viewers = {
+        alex: await taskViewerById(scopes.alex.userId),
+        priya: await taskViewerById(scopes.priya.userId),
+    };
+    const taskIds = new Map<string, string>();
+
+    for (const fixture of DEMO_RECORDINGS) {
+        const accepted = (fixture.tasks ?? []).filter(
+            (task) => task.status !== "proposed",
+        );
+        if (accepted.length === 0) continue;
+        const itemId = itemIds[fixture.key];
+        if (!itemId) throw new Error(`No demo item ${fixture.key}`);
+        const scope = scopes[fixture.owner];
+        const turns = fixture.transcript
+            ? timeTurns(
+                  fixture.transcript.turns,
+                  fixture.durationMinutes * 60_000,
+              )
+            : [];
+        await db.transaction((tx) =>
+            writeTaskProposalsInTx(tx, {
+                recordingId: itemId,
+                ownerUserId: scope.userId,
+                actorUserId: scope.userId,
+                view: fixture.orgFolders?.length ? "org" : "private",
+                proposals: {
+                    source: "riffado",
+                    tasks: accepted.map((task) =>
+                        proposedTask(task, scope, turns, taskIds, now),
+                    ),
+                    updates: [],
+                    reviewer: viewers[fixture.owner],
+                    fingerprintOf: taskFingerprint,
+                },
+            }),
+        );
+        const proposalRows = await db
+            .select({ id: recordingTasks.id })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.itemId, itemId),
+                    eq(recordingTasks.userId, scope.userId),
+                    eq(recordingTasks.status, "proposed"),
+                ),
+            );
+        await acceptReview(viewers[fixture.owner], itemId, {
+            proposals: proposalRows.map((row) => row.id),
+            updates: [],
+            matches: [],
+        });
+        const rows = await db
+            .select({
+                id: recordingTasks.id,
+                text: recordingTasks.text,
+                version: recordingTasks.version,
+            })
+            .from(recordingTasks)
+            .where(
+                and(
+                    eq(recordingTasks.itemId, itemId),
+                    eq(recordingTasks.userId, scope.userId),
+                ),
+            );
+        for (const task of accepted) {
+            const row = rows.find(
+                (candidate) => decryptText(candidate.text) === task.text,
+            );
+            if (!row) throw new Error(`Task ${task.text} was not accepted`);
+            if (task.key) taskIds.set(task.key, row.id);
+            if (task.status === "done" || task.status === "dropped") {
+                await updateTask(viewers[fixture.owner], row.id, {
+                    version: row.version,
+                    status: task.status,
+                });
+            }
+        }
+    }
+
+    const interviewTaskId = requiredTaskId(taskIds, "interview-notes");
+    await updateTask(viewers.alex, interviewTaskId, {
+        version: await targetVersion(interviewTaskId),
+        dueDate: isoDay(new Date(now.getTime() - DAY_MS)),
+    });
+
+    const reviewFixture = DEMO_RECORDINGS.find(
+        (fixture) => fixture.key === "product-sync",
+    );
+    if (!reviewFixture?.transcript) throw new Error("No task-review fixture");
+    const reviewItemId = itemIds[reviewFixture.key];
+    if (!reviewItemId) throw new Error("No task-review item");
+    const reviewTurns = timeTurns(
+        reviewFixture.transcript.turns,
+        reviewFixture.durationMinutes * 60_000,
+    );
+    await db.transaction((tx) =>
+        writeTaskProposalsInTx(tx, {
+            recordingId: reviewItemId,
+            ownerUserId: scopes.alex.userId,
+            actorUserId: scopes.alex.userId,
+            proposals: {
+                source: "riffado",
+                tasks: (reviewFixture.tasks ?? [])
+                    .filter((task) => task.status === "proposed")
+                    .map((task) =>
+                        proposedTask(
+                            task,
+                            scopes.alex,
+                            reviewTurns,
+                            taskIds,
+                            now,
+                        ),
+                    ),
+                updates: (reviewFixture.taskUpdates ?? []).map((update) =>
+                    proposedUpdate(
+                        update,
+                        scopes.alex,
+                        reviewTurns,
+                        taskIds,
+                        now,
+                    ),
+                ),
+                reviewer: viewers.alex,
+                fingerprintOf: taskFingerprint,
+            },
+        }),
+    );
+
+    const mailId = itemIds[DEMO_MAIL.key];
+    if (!mailId) throw new Error("No demo mail");
+    const harborTaskId = requiredTaskId(taskIds, "harbor-proposal");
+    const mailEvidence = {
+        quote: "The revised Harbor proposal is ready to send.",
+        evidenceStartMs: null,
+        evidenceText: { segmentIndex: 0, charStart: 0, charEnd: 45 },
+    };
+    await db.transaction((tx) =>
+        writeTaskProposalsInTx(tx, {
+            recordingId: mailId,
+            ownerUserId: scopes.alex.userId,
+            actorUserId: scopes.alex.userId,
+            view: "org",
+            contentSourceId: "mail",
+            contentRevision: 0,
+            proposals: {
+                source: "riffado",
+                tasks: [],
+                matches: [{ taskId: harborTaskId, ...mailEvidence }],
+                updates: [],
+                reviewer: viewers.alex,
+                fingerprintOf: taskFingerprint,
+            },
+        }),
+    );
+    const [mailMatch] = await db
+        .select({ id: taskMentions.id })
+        .from(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.taskId, harborTaskId),
+                eq(taskMentions.itemId, mailId),
+                eq(taskMentions.matchDecision, "suggested"),
+            ),
+        )
+        .limit(1);
+    if (!mailMatch) throw new Error("Mail task match was not created");
+    await tickUpdateProposal(
+        viewers.alex,
+        mailId,
+        mailMatch.id,
+        true,
+        await targetVersion(harborTaskId),
+    );
+    await acceptReview(viewers.alex, mailId, {
+        proposals: [],
+        updates: [],
+        matches: [mailMatch.id],
+    });
+
+    const priyaTaskId = requiredTaskId(taskIds, "next-prototype-test");
+    await db.transaction((tx) =>
+        writeTaskProposalsInTx(tx, {
+            recordingId: mailId,
+            ownerUserId: scopes.alex.userId,
+            actorUserId: scopes.alex.userId,
+            view: "org",
+            contentSourceId: "mail",
+            contentRevision: 0,
+            proposals: {
+                source: "riffado",
+                tasks: [],
+                updates: [
+                    {
+                        taskId: priyaTaskId,
+                        kind: "done",
+                        dueDate: null,
+                        duePhrase: null,
+                        quote: "The next tracking-page test can be marked complete.",
+                        evidenceStartMs: null,
+                        evidenceText: {
+                            segmentIndex: 0,
+                            charStart: 121,
+                            charEnd: 173,
+                        },
+                    },
+                ],
+                reviewer: viewers.alex,
+                fingerprintOf: taskFingerprint,
+            },
+        }),
+    );
+    const [routedUpdate] = await db
+        .select({ id: taskUpdateProposals.id })
+        .from(taskUpdateProposals)
+        .where(
+            and(
+                eq(taskUpdateProposals.itemId, mailId),
+                eq(taskUpdateProposals.taskId, priyaTaskId),
+                eq(taskUpdateProposals.state, "awaiting_source_review"),
+            ),
+        )
+        .limit(1);
+    const [routedMatch] = await db
+        .select({ id: taskMentions.id })
+        .from(taskMentions)
+        .where(
+            and(
+                eq(taskMentions.itemId, mailId),
+                eq(taskMentions.taskId, priyaTaskId),
+                eq(taskMentions.matchDecision, "suggested"),
+            ),
+        )
+        .limit(1);
+    if (!routedUpdate || !routedMatch) {
+        throw new Error("Routed task proposal was not created");
+    }
+    const priyaTaskVersion = await targetVersion(priyaTaskId);
+    await tickUpdateProposal(
+        viewers.alex,
+        mailId,
+        routedMatch.id,
+        true,
+        priyaTaskVersion,
+    );
+    await tickUpdateProposal(
+        viewers.alex,
+        mailId,
+        routedUpdate.id,
+        true,
+        priyaTaskVersion,
+    );
+    await acceptReview(viewers.alex, mailId, {
+        proposals: [],
+        updates: [routedUpdate.id],
+        matches: [routedMatch.id],
+    });
+}
+
+function phase(state: PhaseState, reason: string, at: string) {
+    return { state, reason, generation: 1, at };
+}
+
+async function seedProcessingStates(
+    scopes: Record<DemoUserKey, Scope>,
+    itemIds: Record<string, string>,
+    profiles: Record<DemoUserKey, DemoProfiles>,
+    now: Date,
+): Promise<void> {
+    const ids = Object.values(itemIds);
+    await db.delete(itemProcessing).where(inArray(itemProcessing.itemId, ids));
+    const at = now.toISOString();
+    for (const fixture of DEMO_RECORDINGS) {
+        const itemId = itemIds[fixture.key];
+        if (!itemId) throw new Error(`No demo item ${fixture.key}`);
+        const unfiled =
+            (fixture.privateFolders?.length ?? 0) === 0 &&
+            (fixture.orgFolders?.length ?? 0) === 0;
+        const profile = profiles[fixture.owner].audio;
+        const taskReview = fixture.key === "product-sync";
+        const phases: PipelinePhases = {
+            categorize: phase(
+                unfiled ? "waiting" : "done",
+                unfiled ? "needs_folders" : "categorized",
+                at,
+            ),
+            transcribe: phase(
+                fixture.transcript ? "done" : "pending",
+                fixture.transcript ? "generated" : "not_started",
+                at,
+            ),
+            learn: phase(
+                fixture.learn ? "waiting" : "done",
+                fixture.learn ? "review_pending_timeout" : "released",
+                at,
+            ),
+            summary: phase(
+                fixture.summary ? "done" : "skipped",
+                fixture.summary ? "completed" : "profile_off",
+                at,
+            ),
+            taskReview: phase(
+                taskReview ? "waiting" : "done",
+                taskReview ? "review_pending" : "reviewed",
+                at,
+            ),
+            share: phase(
+                fixture.orgFolders?.length ? "done" : "skipped",
+                fixture.orgFolders?.length ? "shared" : "no_intent",
+                at,
+            ),
+        };
+        await db.insert(itemProcessing).values({
+            itemId,
+            userId: scopes[fixture.owner].userId,
+            view: "private",
+            profileId: unfiled ? null : profile.id,
+            profileRevisionId: unfiled ? null : profile.revisionId,
+            phases,
+            requestedGeneration: 1,
+            processedGeneration: 1,
+        });
+    }
+    const mailId = itemIds[DEMO_MAIL.key];
+    if (!mailId) throw new Error("No demo mail");
+    const mailProfile = profiles.alex.mail;
+    await db.insert(itemProcessing).values({
+        itemId: mailId,
+        userId: scopes.alex.userId,
+        view: "private",
+        profileId: mailProfile.id,
+        profileRevisionId: mailProfile.revisionId,
+        phases: {
+            categorize: phase("done", "categorized", at),
+            learn: phase("done", "released", at),
+            summary: phase("done", "completed", at),
+            taskReview: phase("done", "reviewed", at),
+            share: phase("done", "shared", at),
+        },
+        requestedGeneration: 1,
+        processedGeneration: 1,
+    });
 }
 
 async function seedLearnRun(

@@ -287,6 +287,7 @@ export interface DemoTopic {
 }
 
 export interface DemoTask {
+    key?: string;
     text: string;
     assignee?: DemoPersonKey;
     assigneeHint?: string;
@@ -297,6 +298,19 @@ export interface DemoTask {
     /** Turn the task was heard in; its quote is that turn's first words. */
     atTurn?: number;
     ticked?: boolean;
+    /** Earlier open tasks this proposal could continue. */
+    candidateTaskKeys?: string[];
+}
+
+export interface DemoTaskUpdate {
+    taskKey: string;
+    kind: "done" | "drop" | "due" | "due_phrase" | "assignee";
+    dueInDays?: number;
+    duePhrase?: string;
+    assignee?: DemoPersonKey;
+    assigneeHint?: string;
+    assigneeCheck?: boolean;
+    atTurn: number;
 }
 
 export interface DemoCorrection {
@@ -381,6 +395,7 @@ export interface DemoRecording {
         multiPass?: { rounds: number; used: number; merged: boolean };
     };
     tasks?: DemoTask[];
+    taskUpdates?: DemoTaskUpdate[];
     /** A Learn run waiting for review. */
     learn?: DemoLearnItem[];
     privateFolders?: DemoFolderPath[];
@@ -388,6 +403,32 @@ export interface DemoRecording {
     orgFolders?: DemoFolderPath[];
     costs?: DemoCost[];
 }
+
+export interface DemoMail {
+    key: string;
+    owner: DemoUserKey;
+    title: string;
+    daysAgo: number;
+    hour: number;
+    fromName: string;
+    fromAddress: string;
+    text: string;
+    privateFolders?: DemoFolderPath[];
+    orgFolders?: DemoFolderPath[];
+}
+
+export const DEMO_MAIL: DemoMail = {
+    key: "harbor-follow-up-mail",
+    owner: "alex",
+    title: "Harbor proposal follow-up",
+    daysAgo: 1,
+    hour: 16,
+    fromName: "Lena Fischer",
+    fromAddress: "lena@example.com",
+    text: "The revised Harbor proposal is ready to send. Please move the final delivery to Friday so Priya can add the last prototype note. The next tracking-page test can be marked complete.",
+    privateFolders: ["Clients/Bluefin Logistics"],
+    orgFolders: ["Clients/Bluefin Logistics"],
+};
 
 const KICKOFF: DemoTurn[] = [
     {
@@ -519,7 +560,7 @@ const PRODUCT_SYNC: DemoTurn[] = [
     },
     {
         speaker: "speaker_0",
-        text: "Good. Priya, can you share the prototype link with Lena before Friday, so she can show it at their board meeting?",
+        text: "Good. Priya, can you send the revised Harbor proposal to Lena before Friday, after you add the last prototype note?",
     },
     {
         speaker: "speaker_1",
@@ -718,7 +759,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
             ],
             actionItems: [
                 "Marek: release notes by Wednesday",
-                "Priya: share the prototype link with Lena before Friday",
+                "Priya: send the revised Harbor proposal to Lena before Friday",
                 "Alex: book usability sessions for the week of the twelfth",
             ],
         },
@@ -732,12 +773,13 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 atTurn: 3,
             },
             {
-                text: "Share the Harbor prototype link with Lena before Friday",
+                text: "Send the revised Harbor proposal to Lena before Friday",
                 assignee: "priya",
                 dueInDays: 3,
                 duePhrase: "before Friday",
                 status: "proposed",
                 atTurn: 11,
+                candidateTaskKeys: ["harbor-proposal", "pilot-budget"],
             },
             {
                 text: "Book the usability sessions for the week of the twelfth",
@@ -746,6 +788,37 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 duePhrase: "the week of the twelfth",
                 status: "proposed",
                 atTurn: 13,
+            },
+        ],
+        taskUpdates: [
+            {
+                taskKey: "harbor-proposal",
+                kind: "due",
+                dueInDays: 3,
+                duePhrase: "before Friday",
+                atTurn: 11,
+            },
+            {
+                taskKey: "dispatch-api",
+                kind: "done",
+                atTurn: 7,
+            },
+            {
+                taskKey: "pilot-budget",
+                kind: "drop",
+                atTurn: 6,
+            },
+            {
+                taskKey: "recruit-customers",
+                kind: "assignee",
+                assignee: "priya",
+                atTurn: 13,
+            },
+            {
+                taskKey: "interview-notes",
+                kind: "due_phrase",
+                duePhrase: "after the next field visit",
+                atTurn: 0,
             },
         ],
         learn: [
@@ -788,7 +861,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 preTicked: false,
             },
         ],
-        privateFolders: ["Internal/Team syncs"],
+        privateFolders: ["Internal/Team syncs", "Clients/Bluefin Logistics"],
         costs: [
             {
                 operation: "transcription",
@@ -889,6 +962,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
         },
         tasks: [
             {
+                key: "harbor-proposal",
                 text: "Send the written Harbor proposal with scope, timeline and pilot plan",
                 assignee: "alex",
                 dueInDays: 1,
@@ -897,6 +971,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 atTurn: 17,
             },
             {
+                key: "dispatch-api",
                 text: "Request read and write access to the Bluefin dispatch API",
                 assignee: "marek",
                 dueInDays: -1,
@@ -905,6 +980,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 atTurn: 11,
             },
             {
+                key: "recruit-customers",
                 text: "Recruit five or six business customers for the tracking page sessions",
                 assignee: "lena",
                 dueInDays: 6,
@@ -913,6 +989,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
                 atTurn: 14,
             },
             {
+                key: "driver-brief",
                 text: "Brief the Rotterdam drivers before customers hear about the pilot",
                 assignee: "alex",
                 status: "done",
@@ -975,6 +1052,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
         },
         tasks: [
             {
+                key: "interview-notes",
                 text: "Share the dispatcher interview notes with Priya",
                 assignee: "alex",
                 dueInDays: -2,
@@ -1082,9 +1160,10 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
         },
         tasks: [
             {
+                key: "pilot-budget",
                 text: "Put the pilot and rollout prices in separate sections of the proposal",
                 assignee: "alex",
-                status: "done",
+                status: "open",
                 atTurn: 2,
             },
         ],
@@ -1152,6 +1231,7 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
         },
         tasks: [
             {
+                key: "field-observation",
                 text: "Plan a one-hour observation for next week's seminar",
                 assignee: "alex",
                 dueInDays: 5,
@@ -1225,6 +1305,17 @@ export const DEMO_RECORDINGS: readonly DemoRecording[] = [
             ],
             actionItems: [],
         },
+        tasks: [
+            {
+                key: "next-prototype-test",
+                text: "Prepare the next tracking-page test",
+                assignee: "priya",
+                dueInDays: 7,
+                duePhrase: "next week",
+                status: "open",
+                atTurn: 3,
+            },
+        ],
         orgFolders: ["Usability studies"],
     },
 ];

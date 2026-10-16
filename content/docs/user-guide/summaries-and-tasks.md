@@ -14,6 +14,8 @@ Once a recording has a transcript, the **Summary** card below it can summarize i
 
 The manual picker can use any available profile for that kind of item. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
 
+![Choosing the processing profile for a manual summary](images/summary-profile-picker.png)
+
 While it runs, the card shows how long it has taken and, for a multi-pass summary, how far it is: `Summarizing — 1/3 passes`, then `Merging 3 passes…`. You can leave the page; the summary keeps going and is there when you come back.
 
 Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** follow the text. The two icons copy the summary or download it as a Markdown file.
@@ -49,6 +51,10 @@ Click **Review tasks** on the summary to review new tasks, matches, and changes:
 
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it.
 
+![Task changes and an earlier mention in the review](images/task-review-changes.png)
+
+![Choosing an earlier task to merge into](images/task-merge-earlier.png)
+
 After accepting a match, the item's task list lets the item owner undo it, or lets curators do so on a shared item. Undoing separates this mention into its own task. Field changes already applied to the earlier task stay applied.
 
 Accepted tasks are listed on the item. Tick one off when it is done, or use **Add task** to add one by hand. A task lives while at least one mention exists, even if the summary that first found it is replaced.
@@ -58,6 +64,8 @@ Accepted tasks are listed on the item. Tick one off when it is done, or use **Ad
 ## Routed proposals
 
 If you review a proposed change but do not have permission to apply it, Chatterbox routes it to someone who does. **Proposals for you** on the Tasks page is the inbox for those decisions, and its navigation badge shows how many wait. Permission is checked again when a proposal is applied.
+
+![A routed task proposal in the Tasks inbox](images/tasks-routed.png)
 
 On a shared task, its home item's owner and Organization curators may edit, change its deadline or assignee, drop it, merge it, and close it. The assignee may also close or reopen it. On a private task, only its owner may do those things. These task rights are an exception to the other editing rules for shared items.
 

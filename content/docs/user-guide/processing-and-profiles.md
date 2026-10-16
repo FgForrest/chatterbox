@@ -9,6 +9,8 @@ New recordings and mail wait for you to file them before Chatterbox starts any p
 
 Open the item and click **File it** in its header. The filing panel shows your **Private** and **Organization** folder trees. Select one or more folders, or click **New folder** to create one without leaving the panel. Then choose the suggested profile, another profile, or **Nothing automatic** and click **File it**.
 
+![Filing an item and choosing its processing profile](images/filing-panel.png)
+
 You can also drag an item onto a folder in the folder tree. Items addressed or uploaded directly to a folder skip this wait. This includes mail sent to a folder address and Meeting Recorder sessions or uploads created with a folder selected.
 
 For a recording you need immediately, you can click **Transcribe** before filing. The rest of its automatic processing still waits for a folder and profile.
@@ -21,9 +23,13 @@ Choosing an Organization folder records an intended placement. The item remains 
 
 A processing profile is a recipe for one kind of item. Open **Settings → Profiles** to see and edit them. A new account starts with two profiles: **Recordings** for audio and **Mail** for mail. An upgraded account can have extra profiles copied from its earlier templates so its existing choices are preserved.
 
+![The processing profiles list](images/profiles.png)
+
 Each profile contains the steps that apply to that kind of item. Recording profiles can transcribe, Learn, generate a title, write a summary, find topics, and find tasks. Mail profiles start with Learn and the summary steps. Every paid step has its own **Run automatically** switch. A step that is off can still be run by hand.
 
 A profile also holds the choices for that work: provider and model, transcription language, summary instructions, output language and output format, and multi-pass settings. **Auto (match content)** keeps the output in the item's language. Editing a profile creates a new revision; items already in progress keep the revision they started with.
+
+![Editing the Recordings processing profile](images/profile-editor.png)
 
 You can create, duplicate, archive, restore, and set default profiles. A manual summary can use any available profile for the same kind of item. Its profile picker starts with the item's profile and remembers your last manual choice for that profile in this browser.
 
@@ -34,6 +40,8 @@ You can create, duplicate, archive, restore, and set default profiles. A manual 
 ## Folder default profiles
 
 Open a folder's settings and choose **Default profiles**. Recordings and mail have separate defaults:
+
+![Choosing a folder's default profiles](images/folder-default-profiles.png)
 
 - **Inherit** uses the nearest ancestor with a choice. If none has one, Chatterbox uses your default profile for that item type.
 - Choosing a profile assigns that recipe to items filed there.
@@ -46,6 +54,8 @@ When an item is filed in folders whose defaults disagree, the filing panel asks 
 ## The workflow indicator
 
 The indicator in an item's header shows where processing is and what needs attention:
+
+![The workflow indicator on an item waiting for review](images/workflow-indicator.png)
 
 | Phase | What it does |
 | --- | --- |

@@ -9,6 +9,8 @@ Nové nahrávky a pošta čekají na zařazení, než Chatterbox spustí placen�
 
 Otevřete položku a v záhlaví klikněte na **Zařadit**. Panel zařazení zobrazí stromy složek **Soukromé** a **Organizace**. Vyberte jednu či více složek, nebo klikněte na **Nová složka** a vytvořte ji bez opuštění panelu. Potom zvolte navržený profil, jiný profil, nebo **Bez automatického zpracování**, a klikněte na **Zařadit**.
 
+![Zařazení položky a výběr profilu zpracování](images/filing-panel.png)
+
 Položku můžete také přetáhnout na složku ve stromu. Položky adresované nebo nahrané přímo do složky toto čekání přeskočí. Patří sem pošta poslaná na adresu složky a relace Meeting Recorderu nebo nahrávání, u kterých jste vybrali složku.
 
 Pokud nahrávku potřebujete ihned, můžete ještě před zařazením kliknout na **Přepsat**. Ostatní automatické zpracování stále čeká na složku a profil.
@@ -21,9 +23,13 @@ Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůs
 
 Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upravíte v **Nastavení → Profily**. Nový účet začíná se dvěma profily: **Nahrávky** pro zvuk a **Pošta** pro poštu. Aktualizovaný účet může mít další profily zkopírované z dřívějších šablon, aby se zachovala jeho stávající nastavení.
 
+![Seznam profilů zpracování](images/profiles.png)
+
 Každý profil obsahuje kroky pro daný druh položky. Profily nahrávek mohou přepisovat, spouštět Učení, vytvářet název, psát shrnutí, hledat témata a úkoly. Profily pošty začínají Učením a kroky shrnutí. Každý placený krok má vlastní přepínač **Spouštět automaticky**. Vypnutý krok lze stále spustit ručně.
 
 Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přepisu, instrukce shrnutí, jazyk a formát výstupu a nastavení vícekrokového zpracování. **Automaticky (podle obsahu)** zachová jazyk položky. Úprava profilu vytvoří novou revizi; rozpracované položky si ponechají revizi, se kterou začaly.
+
+![Úprava profilu Nahrávky](images/profile-editor.png)
 
 Profily můžete vytvářet, duplikovat, archivovat, obnovovat a nastavovat jako výchozí. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
 
@@ -34,6 +40,8 @@ Profily můžete vytvářet, duplikovat, archivovat, obnovovat a nastavovat jako
 ## Výchozí profily složky
 
 Otevřete nastavení složky a zvolte **Výchozí profily**. Nahrávky a pošta mají samostatné výchozí hodnoty:
+
+![Výběr výchozích profilů složky](images/folder-default-profiles.png)
 
 - **Dědit** použije nejbližšího předka s nastavenou volbou. Pokud ji nemá žádný, Chatterbox použije Váš výchozí profil pro daný druh položky.
 - Výběrem profilu přiřadíte položkám zařazeným do složky tento recept.
@@ -46,6 +54,8 @@ Pokud položku zařadíte do složek s rozdílnými výchozími profily, panel z
 ## Ukazatel pracovního postupu
 
 Ukazatel v záhlaví položky zobrazuje stav zpracování a potřebné zásahy:
+
+![Ukazatel pracovního postupu u položky čekající na kontrolu](images/workflow-indicator.png)
 
 | Fáze | Co dělá |
 | --- | --- |

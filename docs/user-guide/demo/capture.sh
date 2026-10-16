@@ -109,6 +109,16 @@ open() {
 
 click_text() { ab find text "$1" click >/dev/null; ab wait "${2:-900}" >/dev/null; }
 click_button() { ab find role button click --name "$1" >/dev/null; ab wait "${2:-900}" >/dev/null; }
+click_button_prefix() {
+    js "(() => {
+        const button = [...document.querySelectorAll('button')]
+            .find((candidate) => candidate.textContent.trim().startsWith('$1'));
+        if (!button) throw new Error('No button starts with $1');
+        button.click();
+        return 'ok';
+    })()" >/dev/null
+    ab wait "${2:-900}" >/dev/null
+}
 # Click the element holding the text `$1` from script, which no overlay
 # can intercept.
 click_js() {
@@ -167,13 +177,25 @@ section_recording() {
     click_button "Erase recording artifacts"
     crop erase-menu "css:[role=menu]" "css:button[aria-label='Erase recording artifacts']"
     escape
-    click_button "Add to folder"
-    crop add-to-folder "css:[role=menu]" "css:button[aria-label='Add to folder']"
+    click_button "Change folders"
+    dialog add-to-folder
     escape
     click_text "Estimated AI spend"
     tag title "Weekly product sync" "h1"
     crop ai-spend title "css:details[open] *"
     click_text "Estimated AI spend"
+}
+
+section_filing() {
+    select_recording "Ideas for the Q1 roadmap"
+    click_button "File it" 1500
+    dialog filing-panel
+    escape
+}
+
+section_workflow() {
+    select_recording "Weekly product sync"
+    shot "css:section[aria-label='Workflow']" workflow-indicator
 }
 
 section_transcript() {
@@ -214,10 +236,16 @@ section_summary() {
     select_recording "Weekly product sync"
     tag summary "Summary" ".bg-card"
     scroll_to summary
+    tag summary-title "Summary"
+    js "(() => {
+        const trigger = document.querySelector('[aria-label=\"Processing profile\"]');
+        const actions = trigger?.parentElement;
+        if (!actions) throw new Error('No summary profile actions');
+        actions.setAttribute('data-shot', 'summary-actions');
+        return 'ok';
+    })()" >/dev/null
+    crop summary-profile-picker summary-title summary-actions
     crop summary summary
-    click_button "Review tasks (3)" 1500
-    dialog task-review
-    escape
     select_recording "Design review: driver onboarding"
     tag summary "Summary" ".bg-card"
     scroll_to summary
@@ -227,6 +255,33 @@ section_summary() {
         return 'ok';
     })()" >/dev/null
     crop summary-multi-pass summary
+}
+
+section_task_review() {
+    select_recording "Weekly product sync"
+    click_button_prefix "Review tasks (" 1500
+    dialog task-review
+    tag candidate "Keep as new"
+    scroll_to candidate
+    dialog task-review-changes
+    js "(() => {
+        const button = [...document.querySelectorAll('button')]
+            .find((candidate) => candidate.textContent.trim() === 'Merge into an earlier task');
+        if (!button) throw new Error('No merge-into-earlier button');
+        button.click();
+        return 'ok';
+    })()" >/dev/null
+    ab wait 1000 >/dev/null
+    js "(() => {
+        const dialogs = [...document.querySelectorAll('[role=dialog]')];
+        const dialog = dialogs.at(-1);
+        if (!dialog) throw new Error('No merge dialog');
+        dialog.setAttribute('data-shot', 'merge-earlier');
+        return 'ok';
+    })()" >/dev/null
+    crop task-merge-earlier merge-earlier
+    escape
+    escape
 }
 
 section_tasks() {
@@ -242,11 +297,24 @@ section_folders() {
     page folders
     click_text "Bluefin Logistics" 1500
     top folder-pane 640
+    click_button "Default profiles" 1200
+    crop folder-default-profiles "css:[role=menu]" "css:button[aria-label='Default profiles']"
+    escape
     click_button "Settings" 1500
     dialog folder-export
     click_button "Add filesystem export" 1200
     dialog folder-export-filesystem
     escape
+}
+
+section_profiles() {
+    ab set viewport 1440 1200 >/dev/null
+    setting profiles "" profiles
+    click_button "Edit Recordings" 1200
+    blur
+    crop profile-editor "css:[role=dialog]:last-of-type"
+    escape
+    ab set viewport 1440 900 >/dev/null
 }
 
 section_organization() {
@@ -308,6 +376,12 @@ section_settings() {
     ab set viewport 1440 900 >/dev/null
 }
 
+section_routed_inbox() {
+    sign_in priya@example.com demo-password-123
+    open "/tasks"
+    top tasks-routed 700
+}
+
 section_help() {
     select_recording "Weekly product sync"
     click_button "Help" 3500
@@ -361,8 +435,9 @@ section_learn_finish() {
     escape
 }
 
-sections=(onboarding dashboard recording transcript learn summary tasks folders
-    organization almanac settings help palette learn_finish)
+sections=(onboarding dashboard recording filing workflow transcript learn summary
+    task_review tasks folders organization almanac profiles settings help palette
+    learn_finish routed_inbox)
 if [[ $# -gt 0 ]]; then sections=("$@"); fi
 
 sign_in alex@example.com demo-password-123
