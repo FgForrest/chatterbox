@@ -66,6 +66,6 @@ Kliknutím na **Náhled** se zobrazí, co bude přidáno, než cokoliv uložíte
 
 ![What waits for review](images/almanac-review.png)
 
-**Revize** shromažďuje vše, co čeká na Vaše posouzení: [Naučit se](learn.md) běžící k revizi a [navržené úkoly](summaries-and-tasks.md#tasks-from-a-summary) k potvrzení. Odznak na **Almanachu** je počítá.
+**Revize** shromažďuje kontroly položek čekající na Vaše posouzení: běhy [Učení](learn.md) a navržené úkoly z nahrávky nebo pošty. Odznak na **Almanachu** tyto kontroly položek počítá. Změny úkolů předané Vám proto, že je můžete použít pouze Vy, čekají pod **Úkoly → Návrhy pro vás** a mají vlastní odznak v navigaci. Viz [Směrované návrhy](summaries-and-tasks.md#routed-proposals).
 
 Dále: [Naučit se](learn.md)

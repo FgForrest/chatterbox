@@ -12,16 +12,18 @@ Every screenshot shows the same invented team: **Alex Morgan**, a product lead a
 ## Chapters
 
 1. [Getting started](getting-started.md): signing in, the first-run wizard, finding your way around.
-2. [Recordings](recordings.md): the recording list, the player, uploads, folders, erasing, and what the AI cost.
-3. [Transcripts](transcripts.md): speakers, topics, playing a sentence, corrected words, copying and downloading.
-4. [Summaries and tasks](summaries-and-tasks.md): summaries, templates, multi-pass, and the tasks a summary finds.
-5. [The Almanac](almanac.md): the people and things Chatterbox knows, their nicknames and facts.
-6. [Learn](learn.md): let Chatterbox propose speaker names, corrections and facts, and review them.
-7. [The Organization](organization.md): sharing recordings with your colleagues.
-8. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
-9. [Settings](settings.md): AI providers and prices, transcription, topics, Learn, summaries, language and more.
-10. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, people and tasks.
-11. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
+2. [Processing and profiles](processing-and-profiles.md): filing new items, choosing a processing recipe, and reading the workflow.
+3. [Recordings](recordings.md): the recording list, the player, uploads, folders, erasing, and what the AI cost.
+4. [Transcripts](transcripts.md): speakers, topics, playing a sentence, corrected words, copying and downloading.
+5. [Summaries and tasks](summaries-and-tasks.md): summaries, profiles, multi-pass, and tasks across recordings and mail.
+6. [The Almanac](almanac.md): the people and things Chatterbox knows, their nicknames and facts.
+7. [Learn](learn.md): let Chatterbox propose speaker names, corrections and facts, and review them.
+8. [The Organization](organization.md): sharing recordings with your colleagues.
+9. [Mail](mail.md): sending mail into Chatterbox and filing it for processing.
+10. [Exports, backups and retention](exports-backups-retention.md): folder exports to disk or Google Drive, backups, and deleting old data automatically.
+11. [Settings](settings.md): profiles, AI providers and prices, language and other account defaults.
+12. [Chatterbox in Claude](claude.md): asking Claude or Claude Code about your recordings, people and tasks.
+13. [For administrators](administrators.md): what to switch on for each feature on a self-hosted instance.
 
 ## Where a feature comes from
 

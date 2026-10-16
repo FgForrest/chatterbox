@@ -19,6 +19,7 @@ import {
     effectivePlatformModes,
     getSettings,
     isPaired,
+    saveSettings,
 } from "../lib/settings.js";
 
 const views = {
@@ -42,6 +43,8 @@ let currentSessionId = null;
 let currentRecoverablePrefix = null;
 let currentTab = null;
 let currentPlatform = null;
+let folderListLoaded = false;
+let pendingFolderId = null;
 
 function show(name) {
     for (const [key, node] of Object.entries(views)) {
@@ -75,6 +78,16 @@ function formatElapsed(startedAt) {
 function dbToWidth(db) {
     const clamped = Math.max(-60, Math.min(0, db));
     return `${Math.round(((clamped + 60) / 60) * 100)}%`;
+}
+
+function selectedFolderLabel(folderPicker) {
+    const folderId = folderPicker.value || null;
+    if (!folderId) return null;
+    return (
+        Array.from(folderPicker.children).find(
+            (option) => option.value === folderId,
+        )?.textContent ?? null
+    );
 }
 
 // ---- Unpaired: connect to the current site ------------------------------
@@ -124,14 +137,34 @@ el("connect-options").addEventListener("click", () => {
 
 // ---- Idle / manual start ------------------------------------------------
 
-async function renderIdle() {
+async function renderIdle(version = renderVersion) {
     const settings = await getSettings();
+    if (version !== renderVersion) return;
     const hint = el("idle-hint");
     const autoHint = el("auto-hint");
+    const folderPicker = el("folder-picker");
+    folderListLoaded = false;
+    pendingFolderId = settings.folderId;
     autoHint.hidden = true;
     el("start").textContent = t("recordWithConsent");
     el("notice-text").textContent = effectiveNoticeText(settings);
     el("picker-hint").hidden = Boolean(currentPlatform);
+    const pendingOptions = [{ id: "", label: t("fileLater") }];
+    if (settings.folderId) {
+        pendingOptions.push({
+            id: settings.folderId,
+            label: settings.folderLabel || t("savedFolder"),
+        });
+    }
+    folderPicker.replaceChildren(
+        ...pendingOptions.map((option) => {
+            const node = document.createElement("option");
+            node.value = option.id;
+            node.textContent = option.label;
+            return node;
+        }),
+    );
+    folderPicker.value = settings.folderId || "";
 
     if (currentPlatform) {
         hint.textContent = t("recordThis", currentPlatform.name);
@@ -144,6 +177,35 @@ async function renderIdle() {
         hint.textContent = t("noMeeting");
     }
     show("idle");
+
+    void sendMessage({ type: "get-folders" })
+        .then((folderResponse) => {
+            if (version !== renderVersion || views.idle.hidden) return;
+            if (!folderResponse?.ok) return;
+            folderListLoaded = true;
+            const folders = folderResponse.folders ?? [];
+            const options = [
+                { id: "", label: t("fileLater") },
+                ...folders.map((folder) => ({
+                    id: folder.id,
+                    label: folder.label,
+                })),
+            ];
+            folderPicker.replaceChildren(
+                ...options.map((option) => {
+                    const node = document.createElement("option");
+                    node.value = option.id;
+                    node.textContent = option.label;
+                    return node;
+                }),
+            );
+            folderPicker.value = folders.some(
+                (folder) => folder.id === pendingFolderId,
+            )
+                ? pendingFolderId
+                : "";
+        })
+        .catch(() => {});
 }
 
 el("start").addEventListener("click", async () => {
@@ -151,6 +213,14 @@ el("start").addEventListener("click", async () => {
     button.disabled = true;
     button.textContent = t(currentPlatform ? "startingCapture" : "openingPicker");
     try {
+        if (folderListLoaded) {
+            const folderPicker = el("folder-picker");
+            const folderId = folderPicker.value || null;
+            await saveSettings({
+                folderId,
+                folderLabel: folderId ? selectedFolderLabel(folderPicker) : null,
+            });
+        }
         const response = await sendMessage({
             type: "start-recording",
             payload: {
@@ -170,6 +240,14 @@ el("start").addEventListener("click", async () => {
         button.disabled = false;
         button.textContent = t("recordWithConsent");
     }
+});
+
+el("folder-picker").addEventListener("change", async (event) => {
+    pendingFolderId = event.target.value || null;
+    await saveSettings({
+        folderId: pendingFolderId,
+        folderLabel: pendingFolderId ? selectedFolderLabel(event.target) : null,
+    });
 });
 
 // ---- Recording / finalizing / error --------------------------------------
@@ -283,7 +361,7 @@ async function render(state) {
             }
             break;
         default:
-            await renderIdle();
+            await renderIdle(version);
             break;
     }
 }

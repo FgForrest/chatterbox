@@ -11,12 +11,15 @@ import {
     ShieldAlert,
     Trash2,
 } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +27,7 @@ import { formatBytes } from "@/lib/format-bytes";
 import { formatDateTime } from "@/lib/format-date";
 import type { MailDetail, MailParticipantView } from "@/lib/mail/detail";
 import { mailHtmlDocument } from "@/lib/mail/mail-html-document";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import { cn } from "@/lib/utils";
 import type { DateTimeFormat } from "@/types/common";
 import type {
@@ -39,6 +43,7 @@ interface Props {
     hiddenOnMobile: boolean;
     /** The mail was deleted or shared: reload the pile. */
     onChanged: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     folders: RecordingFolder[];
     folderAssignments: RecordingFolderAssignment[];
     onSelectFolder: (folder: RecordingFolder) => void;
@@ -59,6 +64,10 @@ interface Props {
     canCurate?: boolean;
 }
 
+type MailDetailResponse = MailDetail & {
+    processing: ItemProcessingPresentation | null;
+};
+
 function person(participant: MailParticipantView): string {
     if (participant.name && participant.address) {
         return `${participant.name} <${participant.address}>`;
@@ -75,6 +84,22 @@ function withRole(
     );
 }
 
+function evidenceRange(params: URLSearchParams) {
+    const segmentIndex = Number(params.get("evidenceSegment"));
+    const charStart = Number(params.get("evidenceStart"));
+    const charEnd = Number(params.get("evidenceEnd"));
+    if (
+        !Number.isInteger(segmentIndex) ||
+        !Number.isInteger(charStart) ||
+        !Number.isInteger(charEnd) ||
+        charStart < 0 ||
+        charEnd <= charStart
+    ) {
+        return null;
+    }
+    return { segmentIndex, charStart, charEnd };
+}
+
 /**
  * A mail in the Chatter pile: who it is from and to, its own text, its
  * signature, the quoted and forwarded messages (folded), attachments as
@@ -88,6 +113,7 @@ export function MailDetailPane({
     onBackToList,
     hiddenOnMobile,
     onChanged,
+    onFolderCreated,
     folders,
     folderAssignments,
     onSelectFolder,
@@ -98,13 +124,25 @@ export function MailDetailPane({
     canCurate = false,
 }: Props) {
     const i18n = useExtracted();
+    const searchParams = useSearchParams();
     const locale = useLocale();
     const confirm = useConfirm();
-    const [detail, setDetail] = useState<MailDetail | null>(null);
+    const [detail, setDetail] = useState<MailDetailResponse | null>(null);
     const [failed, setFailed] = useState(false);
     const [formatted, setFormatted] = useState<string | null>(null);
     const [showFormatted, setShowFormatted] = useState(false);
     const [busy, setBusy] = useState<string | null>(null);
+    const highlight = useMemo(
+        () => evidenceRange(searchParams),
+        [searchParams],
+    );
+
+    useEffect(() => {
+        if (!detail || !highlight) return;
+        document
+            .getElementById("mail-evidence-highlight")
+            ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [detail, highlight]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -117,7 +155,7 @@ export function MailDetailPane({
         })
             .then(async (response) => {
                 if (!response.ok) throw new Error(String(response.status));
-                setDetail((await response.json()) as MailDetail);
+                setDetail((await response.json()) as MailDetailResponse);
             })
             .catch((error: unknown) => {
                 if (!controller.signal.aborted) {
@@ -312,6 +350,33 @@ export function MailDetailPane({
                         organizationOnly={mail.view === "org"}
                         onMove={onMoveBetweenFolders}
                     />
+                    {isOwn && mail.view !== "org" && detail?.processing && (
+                        <WorkflowIndicator
+                            initialData={detail.processing}
+                            onLearn={() =>
+                                document
+                                    .getElementById(`mail-learn-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onSummary={() =>
+                                document
+                                    .getElementById(`mail-summary-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onReviewLearn={() =>
+                                document
+                                    .getElementById(`mail-learn-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onReviewTasks={() =>
+                                document
+                                    .getElementById(`mail-summary-${mail.id}`)
+                                    ?.scrollIntoView({ behavior: "smooth" })
+                            }
+                            onChanged={onChanged}
+                            onFolderCreated={onFolderCreated}
+                        />
+                    )}
                     {failed && (
                         <p className="text-sm text-destructive">
                             {i18n("The mail could not be loaded.")}
@@ -477,21 +542,29 @@ export function MailDetailPane({
             </Card>
 
             {detail && !detail.unreadable && (
-                <MailSummaryCard
-                    mail={mail}
-                    canChange={
-                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
-                    }
-                />
+                <div id={`mail-summary-${mail.id}`}>
+                    <MailSummaryCard
+                        mail={mail}
+                        canChange={
+                            mail.view === "org"
+                                ? isOrgAccount || canCurate
+                                : isOwn
+                        }
+                    />
+                </div>
             )}
             {detail && (
-                <MailLearnCard
-                    mail={mail}
-                    detail={detail}
-                    canChange={
-                        mail.view === "org" ? isOrgAccount || canCurate : isOwn
-                    }
-                />
+                <div id={`mail-learn-${mail.id}`}>
+                    <MailLearnCard
+                        mail={mail}
+                        detail={detail}
+                        canChange={
+                            mail.view === "org"
+                                ? isOrgAccount || canCurate
+                                : isOwn
+                        }
+                    />
+                </div>
             )}
 
             {detail && detail.segments.length > 0 && (
@@ -525,9 +598,35 @@ export function MailDetailPane({
                                 const author = segment.participantRef
                                     ? byRef.get(segment.participantRef)
                                     : undefined;
+                                const range =
+                                    highlight?.segmentIndex === segment.index &&
+                                    highlight.charEnd <= segment.text.length
+                                        ? highlight
+                                        : null;
                                 const text = (
                                     <p className="whitespace-pre-wrap break-words text-sm">
-                                        {segment.text}
+                                        {range ? (
+                                            <>
+                                                {segment.text.slice(
+                                                    0,
+                                                    range.charStart,
+                                                )}
+                                                <mark
+                                                    id="mail-evidence-highlight"
+                                                    className="rounded bg-amber-200 px-0.5 text-inherit dark:bg-amber-700"
+                                                >
+                                                    {segment.text.slice(
+                                                        range.charStart,
+                                                        range.charEnd,
+                                                    )}
+                                                </mark>
+                                                {segment.text.slice(
+                                                    range.charEnd,
+                                                )}
+                                            </>
+                                        ) : (
+                                            segment.text
+                                        )}
                                     </p>
                                 );
                                 if (segment.role === "body") {
@@ -568,6 +667,7 @@ export function MailDetailPane({
                                         style={{
                                             marginLeft: `${Math.max(0, segment.depth - 1) * 12}px`,
                                         }}
+                                        open={range ? true : undefined}
                                     >
                                         <summary className="cursor-pointer text-xs text-muted-foreground">
                                             {label}

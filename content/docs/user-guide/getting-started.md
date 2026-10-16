@@ -30,7 +30,7 @@ The bar at the top has three sections:
 
 - **Recordings**: your library. The list on the left, the selected recording on the right.
 - **Almanac**: the people and things Chatterbox knows about. A badge counts reviews waiting for you. See [The Almanac](almanac.md).
-- **Tasks**: the action items found in your recordings. A badge counts new tasks assigned to you. See [Summaries and tasks](summaries-and-tasks.md#the-tasks-page).
+- **Tasks**: action items followed across your recordings and mail. A badge counts new tasks and proposals for you. See [Summaries and tasks](summaries-and-tasks.md#the-tasks-page).
 
 On the right of the bar:
 
@@ -77,4 +77,4 @@ The palette searches titles and transcripts as you type. Press `Enter` to open a
 
 Chatterbox speaks English and Czech. It follows your browser's language until you choose one in **Settings → Display → Language**. Emails Chatterbox sends you follow the same choice.
 
-Next: [Recordings](recordings.md)
+Next: [Processing and profiles](processing-and-profiles.md)

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     select: vi.fn(),
     transcribeRecording: vi.fn(),
     allowManualArtifactGeneration: vi.fn(),
+    requestAdvance: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({
@@ -28,14 +29,15 @@ vi.mock("@/lib/transcription/transcribe-recording", () => ({
 vi.mock("@/lib/recordings/erase", () => ({
     allowManualArtifactGeneration: mocks.allowManualArtifactGeneration,
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvance: mocks.requestAdvance,
+}));
 
 import { ErrorCode } from "@/lib/errors";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
-import { autoTranscribeNewRecording } from "@/lib/transcription/auto-transcribe-new-recording";
 import {
     enqueueTranscriptionJob,
     parseTranscriptionJobPayload,
-    TRANSCRIPTION_JOB_KIND,
     TRANSCRIPTION_MAX_ATTEMPTS,
 } from "@/lib/transcription/transcription-job";
 import { transcriptionJobHandler } from "@/lib/transcription/transcription-job-handler";
@@ -69,36 +71,10 @@ describe("automatic upload transcription", () => {
             created: true,
         });
         mocks.allowManualArtifactGeneration.mockResolvedValue(true);
-    });
-
-    it("does not queue when the recording owner's setting is disabled", async () => {
-        mocks.limit.mockResolvedValue([{ autoTranscribe: false }]);
-
-        await expect(
-            autoTranscribeNewRecording("user-1", "recording-1"),
-        ).resolves.toBe(false);
-        expect(mocks.enqueueJob).not.toHaveBeenCalled();
-    });
-
-    it("queues when the recording owner's setting is enabled", async () => {
-        mocks.limit.mockResolvedValue([{ autoTranscribe: true }]);
-
-        await expect(
-            autoTranscribeNewRecording("user-1", "recording-1"),
-        ).resolves.toBe(true);
-        expect(mocks.enqueueJob).toHaveBeenCalledWith(
-            expect.objectContaining({
-                userId: "user-1",
-                kind: TRANSCRIPTION_JOB_KIND,
-                subjectId: "recording-1",
-                maxAttempts: TRANSCRIPTION_MAX_ATTEMPTS,
-                payload: {
-                    recordingId: "recording-1",
-                    trigger: "upload",
-                    force: false,
-                },
-            }),
-        );
+        mocks.requestAdvance.mockResolvedValue({
+            requestedGeneration: 2,
+            enqueued: true,
+        });
     });
 
     it("deduplicates by recording and wakes the worker", async () => {
@@ -193,6 +169,26 @@ describe("automatic upload transcription", () => {
             message: "No transcription provider is configured",
         });
         expect(transcriptionJobHandler.isRetryable?.(failure)).toBe(false);
+    });
+
+    it("requests the private pipeline after a pipeline transcription fails", async () => {
+        await transcriptionJobHandler.onTerminalFailure?.({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: {
+                recordingId: "recording-1",
+                trigger: "pipeline",
+                force: false,
+            },
+            errorCode: ErrorCode.TRANSCRIPTION_FAILED,
+        });
+
+        expect(mocks.requestAdvance).toHaveBeenCalledWith({
+            itemId: "recording-1",
+            userId: "user-1",
+            view: "private",
+            reason: "transcription-failed",
+        });
     });
 
     it("does not recreate an erased transcript from an upload job", async () => {

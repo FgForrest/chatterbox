@@ -1,12 +1,13 @@
 "use client";
 
-import { Play, RotateCcw, Trash2 } from "lucide-react";
+import { Play, RotateCcw, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
 import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
+import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type { TaskRowChange } from "@/components/tasks/use-recording-tasks";
 import type { TaskListItem, TaskView } from "@/lib/tasks/tasks";
@@ -20,21 +21,30 @@ import { cn } from "@/lib/utils";
 export function TaskRow({
     task,
     recording,
+    evidence,
     showAssignee = true,
     speakers = [],
     organizationOnly,
     onPlay,
     onChange,
+    onMerge,
+    onUndoMatch,
 }: {
     task: TaskView;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
+    /** The latest visible item that evidences the task. */
+    evidence?: TaskListItem["evidence"];
     showAssignee?: boolean;
     speakers?: readonly SpeakerChoice[];
     organizationOnly: boolean;
     /** Play the recording where the task was said. */
     onPlay?: (startMs: number) => void;
     onChange: TaskRowChange;
+    onMerge?: (
+        targetTaskId: string,
+    ) => Promise<{ ownerNotified?: boolean } | boolean>;
+    onUndoMatch?: () => void;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -106,23 +116,20 @@ export function TaskRow({
                             onChange({ dueDate }, { dueDate })
                         }
                     />
-                    {recording && (
+                    {evidence && (
                         <>
                             <Link
-                                href={`/dashboard?recording=${encodeURIComponent(recording.id)}${recording.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && recording.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                 className="truncate hover:text-primary hover:underline"
                             >
-                                {recording.title}
+                                {evidence.title}
                             </Link>
                             <span>
-                                {format.dateTime(
-                                    new Date(recording.startTime),
-                                    {
-                                        day: "numeric",
-                                        month: "short",
-                                        year: "numeric",
-                                    },
-                                )}
+                                {format.dateTime(new Date(evidence.startTime), {
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                })}
                             </span>
                         </>
                     )}
@@ -143,6 +150,26 @@ export function TaskRow({
                         <span className="rounded bg-muted px-1.5">
                             {i18n("Dropped")}
                         </span>
+                    )}
+                    {recording &&
+                        task.status === "open" &&
+                        task.canEdit &&
+                        onMerge && (
+                            <MergeTaskPicker
+                                itemId={recording.id}
+                                sourceTaskId={task.id}
+                                onMerge={onMerge}
+                            />
+                        )}
+                    {task.canUndoMatch && onUndoMatch && (
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:text-foreground"
+                            onClick={onUndoMatch}
+                        >
+                            <Unlink className="size-3" />
+                            {i18n("Undo match")}
+                        </button>
                     )}
                     {task.canEdit && (
                         <button

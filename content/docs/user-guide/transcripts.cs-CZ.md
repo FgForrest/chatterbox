@@ -9,12 +9,12 @@ description: Mluvčí, témata, přehrávání věty, opravená slova, kopírov�
 
 Nahrávka bez přepisu nabízí dvě tlačítka:
 
-- **Přepsat** odešle zvuk k vašemu poskytovateli přepisů (Nastavení → Přepis → **Poskytovatel přepisu**).
+- **Přepsat** odešle zvuk k poskytovateli přepisů Vašeho účtu (Nastavení → Přepis). Funguje i tehdy, když nahrávka ještě čeká na zařazení.
 - **Přepsat v prohlížeči** spustí Whisper ve vašem prohlížeči. Je to zdarma a nic neopustí váš počítač, ale je to pomalejší.
 
 **Znovu přepsat** u nahrávky, která už má přepis, spustí přepis s vaším aktuálním poskytovatelem. Jména mluvčích, která jste zadali, jsou předána do nového přepisu jako návrhy, které potvrdíte jedním kliknutím.
 
-S nastavením **Automaticky přepisovat nové nahrávky** (Nastavení → Přepis) je každá nová nahrávka přepsána hned po nahrání.
+Nahrávka se přepíše automaticky až po zařazení a pouze tehdy, když má její [profil zpracování](processing-and-profiles.md) u přepisu zapnuté **Spouštět automaticky**. Profil může zvolit jiného poskytovatele a jazyk než výchozí hodnoty účtu používané tlačítkem **Přepsat**.
 
 <span id="which-provider-to-choose" />
 
@@ -63,7 +63,7 @@ Zadaná jména se zobrazují všude tam, kde vystupuje přepis: ve shrnutí, exp
 
 ![Menu témat](images/topics-menu.png)
 
-**Témata** rozdělí dlouhý přepis do kapitol s názvem. Kliknutím na **Detekovat témata** se témata vytvoří; výběrem tématu v nabídce **Témata** tam přepíš přeskočí: přepis se posune na nadpis a přehrávač na jeho začátek. Zapnutím **Automaticky detekovat témata** v Nastavení → Témata se budou témata rozpoznávat automaticky u každého nového přepisu.
+**Témata** rozdělí dlouhý přepis do kapitol s názvem. Kliknutím na **Detekovat témata** se témata vytvoří; výběrem tématu v nabídce **Témata** tam přepis přeskočí: přepis se posune na nadpis a přehrávač na jeho začátek. Profil zpracování se zapnutou volbou **Spouštět automaticky** u témat je rozpozná po každém novém přepisu.
 
 <span id="long-talks" />
 

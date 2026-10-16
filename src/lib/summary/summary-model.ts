@@ -1,18 +1,16 @@
-import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
-import {
-    enhancementChatModel,
-    pickEnhancementCredential,
-} from "@/lib/ai/enhancement-provider";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
+import {
+    type DecryptedCredential,
+    resolveStepProvider,
+} from "@/lib/profiles/providers";
+import type { ProviderPin } from "@/lib/profiles/settings";
 import {
     clampRounds,
     formatPassOutcomes,
@@ -25,13 +23,14 @@ import {
     type SummaryPayload,
 } from "./payload";
 
-type CredentialRow = typeof apiCredentials.$inferSelect;
-
 /** The provider a summary runs on: the actor's, who pays for it. */
 export interface SummaryModel {
     openai: OpenAI;
     model: string;
-    credentials: CredentialRow;
+    credentials: DecryptedCredential;
+    payerUserId: string;
+    reserveCall: () => Promise<void>;
+    organizationCredential: boolean;
 }
 
 /** How a run went when it used multi-pass. Counts and outcomes only. */
@@ -59,38 +58,47 @@ const PASS_RETRY_MAX_MS = 15_000;
  */
 export async function summaryModelFor(
     actorUserId: string,
+    pin: ProviderPin | null = null,
 ): Promise<SummaryModel> {
-    const configuredCredentials = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, actorUserId));
-
-    const credentials = pickEnhancementCredential(configuredCredentials);
-
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "summary",
+        pin,
+        actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
-            configuredCredentials.length > 0
-                ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to generate summaries."
-                : "No AI provider configured",
+            "No AI provider configured",
             400,
         );
     }
-
-    const apiKey = decrypt(credentials.apiKey);
+    const credentials = resolved.credential;
 
     const openai = new OpenAI({
-        apiKey,
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
 
-    return { openai, model: enhancementChatModel(credentials), credentials };
+    return {
+        openai,
+        model: enhancementChatModel(credentials),
+        credentials,
+        payerUserId: resolved.payerUserId,
+        reserveCall: resolved.reserveCall,
+        organizationCredential: resolved.organizationCredential,
+    };
 }
 
 export interface RunSummaryInput {
     model: SummaryModel;
     /** Whose item the run is on, and who pays: recorded with its usage. */
-    usage: { itemId: string; ownerUserId: string; payerUserId: string };
+    usage: {
+        itemId: string;
+        ownerUserId: string;
+        actorUserId: string;
+        payerUserId: string;
+    };
     systemContent: string;
     prompt: string;
     /** The merge's system message, around the user's merge prompt. */
@@ -98,6 +106,7 @@ export interface RunSummaryInput {
     /** Multi-pass settings, or null for one pass. */
     multiPass: { rounds: number | null; mergePrompt: string | null } | null;
     onProgress?: (progress: MultiPassProgress) => void;
+    tasksEnabled?: boolean;
 }
 
 /**
@@ -109,7 +118,20 @@ export async function runSummary(input: RunSummaryInput): Promise<{
     payload: SummaryPayload;
     multiPass?: MultiPassSummaryOutcome;
 }> {
-    const { openai, model, credentials } = input.model;
+    const {
+        openai,
+        model,
+        credentials,
+        payerUserId,
+        reserveCall,
+        organizationCredential,
+    } = input.model;
+    const multiPassRounds = input.multiPass
+        ? clampRounds(input.multiPass.rounds)
+        : null;
+    const preReservedMultiPass =
+        organizationCredential && multiPassRounds !== null;
+    let reservationError: AppError | null = null;
 
     /**
      * Retry one provider call, not the whole job.
@@ -154,8 +176,23 @@ export async function runSummary(input: RunSummaryInput): Promise<{
             requestLabel: string,
             requestMessages: ChatCompletionMessageParam[],
             requestMaxTokens: number,
-        ): Promise<string> =>
-            withPassRetry(requestLabel, async () => {
+        ): Promise<string> => {
+            let firstAttempt = true;
+            return withPassRetry(requestLabel, async () => {
+                if (!preReservedMultiPass || !firstAttempt) {
+                    try {
+                        await reserveCall();
+                    } catch (error) {
+                        if (
+                            error instanceof AppError &&
+                            error.code === ErrorCode.AI_RATE_LIMITED
+                        ) {
+                            reservationError = error;
+                        }
+                        throw error;
+                    }
+                }
+                firstAttempt = false;
                 const response = await openai.chat.completions.create(
                     buildChatCompletionParams({
                         model,
@@ -168,7 +205,8 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                     {
                         recordingId: input.usage.itemId,
                         ownerUserId: input.usage.ownerUserId,
-                        payerUserId: input.usage.payerUserId,
+                        actorUserId: input.usage.actorUserId,
+                        payerUserId,
                         operation: "summary",
                         provider: credentials.provider,
                         model,
@@ -179,18 +217,27 @@ export async function runSummary(input: RunSummaryInput): Promise<{
                 );
                 return response.choices[0]?.message?.content?.trim() || "";
             });
+        };
 
         const raw = await complete(label, messages, maxTokens);
-        const firstParse = parseSummaryPayloadResult(raw);
+        const firstParse = parseSummaryPayloadResult(raw, {
+            tasksEnabled: input.tasksEnabled,
+        });
         if (!firstParse.failure) return raw;
+
+        if (preReservedMultiPass) return raw;
 
         console.warn(
             `[summary] ${label} returned invalid structured output (${firstParse.failure}); requesting repair`,
         );
 
+        const shape =
+            input.tasksEnabled === false
+                ? '{"summary": string, "keyPoints": string[]}'
+                : '{"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}';
         const repairPrompt = `Your previous response was rejected by the application's JSON parser: ${firstParse.failure}
 
-Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: {"summary": string, "keyPoints": string[], "actionItems": object[], "taskUpdates": object[]}, keeping each action item and task update object as it was. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
+Correct the serialization without dropping or inventing information. Return exactly one raw JSON object with this shape: ${shape}. Escape newlines and quotation marks inside strings. Do not use code fences or add explanatory text. Before replying, verify that JSON.parse accepts the exact response.`;
 
         try {
             const repaired = await complete(
@@ -206,7 +253,9 @@ Correct the serialization without dropping or inventing information. Return exac
                 ],
                 Math.min(Math.ceil(maxTokens * 1.5), 4000),
             );
-            const repairedParse = parseSummaryPayloadResult(repaired);
+            const repairedParse = parseSummaryPayloadResult(repaired, {
+                tasksEnabled: input.tasksEnabled,
+            });
             if (!repairedParse.failure) return repaired;
             console.warn(
                 `[summary] ${label} repair still returned invalid structured output (${repairedParse.failure})`,
@@ -246,16 +295,34 @@ Correct the serialization without dropping or inventing information. Return exac
         );
 
     if (!input.multiPass) {
-        return { payload: parseSummaryPayload(await runPass()) };
+        return {
+            payload: parseSummaryPayload(await runPass(), {
+                tasksEnabled: input.tasksEnabled,
+            }),
+        };
     }
 
-    const result = await runMultiPassSummary({
-        rounds: clampRounds(input.multiPass.rounds),
-        runPass,
-        runMerge,
-        mergePrompt: input.multiPass.mergePrompt,
-        onProgress: input.onProgress,
-    });
+    if (preReservedMultiPass) {
+        for (let index = 0; index < (multiPassRounds ?? 0) + 1; index += 1) {
+            await reserveCall();
+        }
+    }
+
+    let result: Awaited<ReturnType<typeof runMultiPassSummary>>;
+    try {
+        result = await runMultiPassSummary({
+            rounds: multiPassRounds ?? clampRounds(input.multiPass.rounds),
+            runPass,
+            runMerge,
+            mergePrompt: input.multiPass.mergePrompt,
+            onProgress: input.onProgress,
+            tasksEnabled: input.tasksEnabled,
+        });
+    } catch (error) {
+        if (reservationError) throw reservationError;
+        throw error;
+    }
+    if (reservationError) throw reservationError;
     // A degraded run is otherwise silent: dropping an unusable pass is the
     // correct behaviour, and `onRetry` logs nothing for a pass that failed
     // without retrying or that returned text which simply would not parse.

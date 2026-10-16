@@ -3,6 +3,7 @@ import { isTranscriptionOnlyProvider } from "@/lib/ai/provider-presets";
 export interface EnhancementCandidate {
     provider: string;
     isDefaultEnhancement: boolean;
+    disabledAt?: Date | null;
 }
 
 /**
@@ -18,7 +19,9 @@ export function pickEnhancementCredential<T extends EnhancementCandidate>(
     credentials: readonly T[],
 ): T | undefined {
     const usable = credentials.filter(
-        (candidate) => !isTranscriptionOnlyProvider(candidate.provider),
+        (candidate) =>
+            !candidate.disabledAt &&
+            !isTranscriptionOnlyProvider(candidate.provider),
     );
     return (
         usable.find((candidate) => candidate.isDefaultEnhancement) ?? usable[0]
@@ -35,6 +38,7 @@ export function pickLearnCredential<
     return (
         credentials.find(
             (candidate) =>
+                !candidate.disabledAt &&
                 candidate.isDefaultLearn === true &&
                 !isTranscriptionOnlyProvider(candidate.provider),
         ) ?? pickEnhancementCredential(credentials)
@@ -48,6 +52,7 @@ export function pickTopicsCredential<
     const selected = credentials.find(
         (candidate) =>
             candidate.id === providerId &&
+            !candidate.disabledAt &&
             !isTranscriptionOnlyProvider(candidate.provider),
     );
     return selected ?? pickEnhancementCredential(credentials);

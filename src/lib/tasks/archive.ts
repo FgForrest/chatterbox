@@ -1,10 +1,14 @@
 import { and, eq, inArray, ne, or, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
     chatterItems,
     type EvidenceProvenance,
     people,
     recordingTasks,
+    type TaskUpdateProposalKind,
+    taskHomeMoves,
+    taskMentions,
     taskUpdateProposals,
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
@@ -12,6 +16,10 @@ import {
     type ArchiveScope,
     archivedItemCondition,
 } from "@/lib/export/archive-scope";
+import {
+    archivedTaskMentionVisible,
+    loadArchivedTaskMentions,
+} from "@/lib/tasks/mentions";
 
 /** One task as a backup archive carries it. */
 export interface ArchivedTask {
@@ -39,14 +47,18 @@ export interface ArchivedTask {
     review?: { ticked: boolean; assigneeCheck: boolean };
 }
 
-/** A change to an earlier task heard on a recording, waiting for review. */
+/** A proposed or settled change to an earlier task heard on an item. */
 export interface ArchivedTaskUpdate {
     id: string;
     /** The task it changes: in the same archive. */
     taskId: string;
-    kind: "done" | "due";
+    itemId: string;
+    kind: TaskUpdateProposalKind;
     dueDate: string | null;
     duePhrase: string | null;
+    proposedAssignee: { personId: string; name: string } | null;
+    proposedAssigneeHint: string | null;
+    proposedAssigneeCheck: boolean;
     quote: string | null;
     evidenceStartMs: number | null;
     /** As on a task of a mail. */
@@ -56,7 +68,88 @@ export interface ArchivedTaskUpdate {
         charEnd: number;
     };
     evidenceProvenance?: EvidenceProvenance;
+    statementAt: string;
+    state:
+        | "awaiting_source_review"
+        | "awaiting_share"
+        | "awaiting_target_review"
+        | "applied"
+        | "rejected"
+        | "obsolete";
+    routedTo: string[] | { role: "curators" } | null;
+    decidedByUserId: string | null;
+    decidedAt: string | null;
+    obsoleteReason: string | null;
     ticked: boolean;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
+/** A task mention with contained evidence, or a redacted external reference. */
+export type ArchivedTaskMention =
+    | {
+          taskId: string;
+          itemId: string;
+          external: true;
+          taskExternal: boolean;
+          statementAt: string;
+          matchDecision:
+              | "home"
+              | "suggested"
+              | "accepted"
+              | "rejected"
+              | "undone"
+              | "kept_new";
+          decidedAt: string | null;
+          createdAt: string;
+          updatedAt: string;
+      }
+    | {
+          id: string;
+          taskId: string;
+          itemId: string;
+          userId: string;
+          view: "private" | "org";
+          external: false;
+          taskExternal: boolean;
+          evidenceStartMs: number | null;
+          evidenceText?: {
+              segmentIndex: number;
+              charStart: number;
+              charEnd: number;
+          };
+          quote: string | null;
+          provenance: EvidenceProvenance | null;
+          contentSourceId: string | null;
+          contentRevision: number | null;
+          statementAt: string;
+          matchDecision:
+              | "home"
+              | "suggested"
+              | "accepted"
+              | "rejected"
+              | "undone"
+              | "kept_new";
+          ticked: boolean;
+          decidedByUserId: string | null;
+          decidedAt: string | null;
+          createdAt: string;
+          updatedAt: string;
+      };
+
+/** One audited change of an archived task's home item. */
+export interface ArchivedTaskHomeMove {
+    id: string;
+    taskId: string;
+    fromItemId: string | null;
+    fromItemExternal: boolean;
+    toItemId: string | null;
+    toItemExternal: boolean;
+    fromUserId: string | null;
+    toUserId: string | null;
+    reason: "deleted" | "erased" | "withdrawn";
+    actorUserId: string | null;
     createdAt: string;
 }
 
@@ -141,7 +234,23 @@ export async function tasksForArchive(
             ),
         )
         .orderBy(recordingTasks.position, recordingTasks.createdAt);
+    const mentions = await loadArchivedTaskMentions(
+        scope,
+        rows.map((row) => row.id),
+    );
     for (const row of rows) {
+        const mention = mentions.latest.get(row.id);
+        const legacy = !mentions.taskIdsWithMentions.has(row.id);
+        const segmentIndex =
+            mention?.evidenceSegmentIndex ??
+            (legacy ? row.evidenceSegmentIndex : null);
+        const charStart =
+            mention?.evidenceCharStart ??
+            (legacy ? row.evidenceCharStart : null);
+        const charEnd =
+            mention?.evidenceCharEnd ?? (legacy ? row.evidenceCharEnd : null);
+        const provenance =
+            mention?.provenance ?? (legacy ? row.evidenceProvenance : null);
         const list = byRecording.get(row.recordingId) ?? [];
         const status = row.status as ArchivedTask["status"];
         list.push({
@@ -158,22 +267,20 @@ export async function tasksForArchive(
             assigneeHint: optional(row.assigneeHint),
             dueDate: row.dueDate,
             duePhrase: optional(row.duePhrase),
-            quote: optional(row.quote),
-            evidenceStartMs: row.evidenceStartMs,
-            ...(row.evidenceSegmentIndex !== null &&
-            row.evidenceCharStart !== null &&
-            row.evidenceCharEnd !== null
+            quote: mention?.quote ?? (legacy ? optional(row.quote) : null),
+            evidenceStartMs:
+                mention?.evidenceStartMs ??
+                (legacy ? row.evidenceStartMs : null),
+            ...(segmentIndex !== null && charStart !== null && charEnd !== null
                 ? {
                       evidenceText: {
-                          segmentIndex: row.evidenceSegmentIndex,
-                          charStart: row.evidenceCharStart,
-                          charEnd: row.evidenceCharEnd,
+                          segmentIndex,
+                          charStart,
+                          charEnd,
                       },
                   }
                 : {}),
-            ...(row.evidenceProvenance
-                ? { evidenceProvenance: row.evidenceProvenance }
-                : {}),
+            ...(provenance ? { evidenceProvenance: provenance } : {}),
             source: row.source,
             createdAt: row.createdAt.toISOString(),
             acceptedAt: row.acceptedAt?.toISOString() ?? null,
@@ -206,22 +313,37 @@ export async function taskUpdatesForArchive(
     if (recordingIds.length === 0 || archivedTaskIds.size === 0) {
         return byRecording;
     }
+    const proposedAssignee = alias(people, "archived_proposed_assignee");
     const rows = await db
         .select({
             id: taskUpdateProposals.id,
             recordingId: taskUpdateProposals.itemId,
+            itemId: taskUpdateProposals.itemId,
             taskId: taskUpdateProposals.taskId,
             kind: taskUpdateProposals.kind,
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
+            proposedAssigneePersonId:
+                taskUpdateProposals.proposedAssigneePersonId,
+            proposedAssigneeName: proposedAssignee.displayName,
+            proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
+            proposedAssigneeCheck: taskUpdateProposals.proposedAssigneeCheck,
             quote: taskUpdateProposals.quote,
             evidenceStartMs: taskUpdateProposals.evidenceStartMs,
             evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
             evidenceCharStart: taskUpdateProposals.evidenceCharStart,
             evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
             evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+            statementAt: taskUpdateProposals.statementAt,
+            state: taskUpdateProposals.state,
+            routedTo: taskUpdateProposals.routedTo,
+            decidedByUserId: taskUpdateProposals.decidedByUserId,
+            decidedAt: taskUpdateProposals.decidedAt,
+            obsoleteReason: taskUpdateProposals.obsoleteReason,
             ticked: taskUpdateProposals.ticked,
+            version: taskUpdateProposals.version,
             createdAt: taskUpdateProposals.createdAt,
+            updatedAt: taskUpdateProposals.updatedAt,
         })
         .from(taskUpdateProposals)
         .innerJoin(
@@ -229,6 +351,13 @@ export async function taskUpdatesForArchive(
             and(
                 eq(chatterItems.id, taskUpdateProposals.itemId),
                 eq(chatterItems.userId, taskUpdateProposals.userId),
+            ),
+        )
+        .leftJoin(
+            proposedAssignee,
+            eq(
+                proposedAssignee.id,
+                taskUpdateProposals.proposedAssigneePersonId,
             ),
         )
         .where(
@@ -246,9 +375,19 @@ export async function taskUpdatesForArchive(
         list.push({
             id: row.id,
             taskId: row.taskId,
+            itemId: row.itemId,
             kind: row.kind,
             dueDate: row.dueDate,
             duePhrase: optional(row.duePhrase),
+            proposedAssignee:
+                row.proposedAssigneePersonId && row.proposedAssigneeName
+                    ? {
+                          personId: row.proposedAssigneePersonId,
+                          name: decryptText(row.proposedAssigneeName),
+                      }
+                    : null,
+            proposedAssigneeHint: optional(row.proposedAssigneeHint),
+            proposedAssigneeCheck: row.proposedAssigneeCheck,
             quote: optional(row.quote),
             evidenceStartMs: row.evidenceStartMs,
             ...(row.evidenceSegmentIndex !== null &&
@@ -265,12 +404,193 @@ export async function taskUpdatesForArchive(
             ...(row.evidenceProvenance
                 ? { evidenceProvenance: row.evidenceProvenance }
                 : {}),
+            statementAt: row.statementAt.toISOString(),
+            state: row.state,
+            routedTo: row.routedTo ?? null,
+            decidedByUserId: row.decidedByUserId,
+            decidedAt: row.decidedAt?.toISOString() ?? null,
+            obsoleteReason: row.obsoleteReason,
             ticked: row.ticked,
+            version: row.version,
             createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
         });
         byRecording.set(row.recordingId, list);
     }
     return byRecording;
+}
+
+/** Every decision about an archived task, with evidence only for contained items. */
+export async function taskMentionsForArchive(
+    scope: ArchiveScope,
+    archivedTaskIds: ReadonlySet<string>,
+    containedItemIds: ReadonlySet<string>,
+): Promise<ArchivedTaskMention[]> {
+    if (
+        archivedTaskIds.size === 0 &&
+        (scope.kind !== "personal" || containedItemIds.size === 0)
+    ) {
+        return [];
+    }
+    const rows = await db
+        .select({
+            id: taskMentions.id,
+            taskId: taskMentions.taskId,
+            itemId: taskMentions.itemId,
+            userId: taskMentions.userId,
+            view: taskMentions.view,
+            evidenceStartMs: taskMentions.evidenceStartMs,
+            evidenceSegmentIndex: taskMentions.evidenceSegmentIndex,
+            evidenceCharStart: taskMentions.evidenceCharStart,
+            evidenceCharEnd: taskMentions.evidenceCharEnd,
+            quote: taskMentions.quote,
+            provenance: taskMentions.provenance,
+            contentSourceId: taskMentions.contentSourceId,
+            contentRevision: taskMentions.contentRevision,
+            statementAt: taskMentions.statementAt,
+            matchDecision: taskMentions.matchDecision,
+            ticked: taskMentions.ticked,
+            decidedByUserId: taskMentions.decidedByUserId,
+            decidedAt: taskMentions.decidedAt,
+            createdAt: taskMentions.createdAt,
+            updatedAt: taskMentions.updatedAt,
+        })
+        .from(taskMentions)
+        .innerJoin(recordingTasks, eq(recordingTasks.id, taskMentions.taskId))
+        .innerJoin(
+            chatterItems,
+            and(
+                eq(chatterItems.id, taskMentions.itemId),
+                eq(chatterItems.userId, taskMentions.userId),
+            ),
+        )
+        .where(
+            and(
+                scope.kind === "personal"
+                    ? or(
+                          archivedTaskIds.size > 0
+                              ? and(
+                                    eq(recordingTasks.userId, scope.userId),
+                                    inArray(taskMentions.taskId, [
+                                        ...archivedTaskIds,
+                                    ]),
+                                )
+                              : undefined,
+                          containedItemIds.size > 0
+                              ? and(
+                                    eq(taskMentions.userId, scope.userId),
+                                    inArray(taskMentions.itemId, [
+                                        ...containedItemIds,
+                                    ]),
+                                )
+                              : undefined,
+                      )
+                    : and(
+                          inArray(taskMentions.taskId, [...archivedTaskIds]),
+                          archivedTaskMentionVisible(scope),
+                      ),
+            ),
+        )
+        .orderBy(
+            taskMentions.statementAt,
+            taskMentions.createdAt,
+            taskMentions.id,
+        );
+
+    return rows.map((row) => {
+        const dates = {
+            statementAt: row.statementAt.toISOString(),
+            decidedAt: row.decidedAt?.toISOString() ?? null,
+            createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+        };
+        if (!containedItemIds.has(row.itemId)) {
+            return {
+                taskId: row.taskId,
+                itemId: row.itemId,
+                external: true as const,
+                taskExternal: !archivedTaskIds.has(row.taskId),
+                ...dates,
+                matchDecision: row.matchDecision,
+            };
+        }
+        return {
+            id: row.id,
+            taskId: row.taskId,
+            itemId: row.itemId,
+            userId: row.userId,
+            view: row.view,
+            external: false as const,
+            taskExternal: !archivedTaskIds.has(row.taskId),
+            evidenceStartMs: row.evidenceStartMs,
+            ...(row.evidenceSegmentIndex !== null &&
+            row.evidenceCharStart !== null &&
+            row.evidenceCharEnd !== null
+                ? {
+                      evidenceText: {
+                          segmentIndex: row.evidenceSegmentIndex,
+                          charStart: row.evidenceCharStart,
+                          charEnd: row.evidenceCharEnd,
+                      },
+                  }
+                : {}),
+            quote: optional(row.quote),
+            provenance: row.provenance,
+            contentSourceId: row.contentSourceId,
+            contentRevision: row.contentRevision,
+            ...dates,
+            matchDecision: row.matchDecision,
+            ticked: row.ticked,
+            decidedByUserId: row.decidedByUserId,
+        };
+    });
+}
+
+/** Home-move history for archived tasks, marking item references outside the archive. */
+export async function taskHomeMovesForArchive(
+    scope: ArchiveScope,
+    archivedTaskIds: ReadonlySet<string>,
+    containedItemIds: ReadonlySet<string>,
+): Promise<ArchivedTaskHomeMove[]> {
+    if (archivedTaskIds.size === 0) return [];
+    const rows = await db
+        .select({
+            id: taskHomeMoves.id,
+            taskId: taskHomeMoves.taskId,
+            fromItemId: taskHomeMoves.fromItemId,
+            toItemId: taskHomeMoves.toItemId,
+            fromUserId: taskHomeMoves.fromUserId,
+            toUserId: taskHomeMoves.toUserId,
+            reason: taskHomeMoves.reason,
+            actorUserId: taskHomeMoves.actorUserId,
+            createdAt: taskHomeMoves.createdAt,
+        })
+        .from(taskHomeMoves)
+        .innerJoin(recordingTasks, eq(recordingTasks.id, taskHomeMoves.taskId))
+        .innerJoin(
+            chatterItems,
+            and(
+                eq(chatterItems.id, recordingTasks.itemId),
+                eq(chatterItems.userId, recordingTasks.userId),
+            ),
+        )
+        .where(
+            and(
+                inArray(taskHomeMoves.taskId, [...archivedTaskIds]),
+                scope.kind === "personal"
+                    ? eq(recordingTasks.userId, scope.userId)
+                    : archivedItemCondition(scope),
+            ),
+        )
+        .orderBy(taskHomeMoves.createdAt, taskHomeMoves.id);
+    return rows.map((row) => ({
+        ...row,
+        fromItemExternal:
+            row.fromItemId !== null && !containedItemIds.has(row.fromItemId),
+        toItemExternal:
+            row.toItemId !== null && !containedItemIds.has(row.toItemId),
+        createdAt: row.createdAt.toISOString(),
+    }));
 }
 
 /** The people the archived tasks are assigned to. */

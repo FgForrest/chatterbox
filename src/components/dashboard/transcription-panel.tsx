@@ -28,6 +28,8 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -42,7 +44,6 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useLearnFollowUps } from "@/hooks/use-learn-follow-ups";
-import { useSummaryPresetCopy } from "@/hooks/use-preset-copy";
 import type { TranscriptPlayback } from "@/hooks/use-transcript-follow";
 import { useTranscriptTopics } from "@/hooks/use-transcript-topics";
 import {
@@ -115,6 +116,7 @@ interface TranscriptionPanelProps {
      * re-transcribed in another tab.
      */
     onTranscriptStale?: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
     /** Seek and start playback for speaker navigation, up to `endMs` if given. */
@@ -240,6 +242,7 @@ export function TranscriptionPanel({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
+    onFolderCreated,
     onSeekToTurn,
     onPlayFromTurn,
     getPlaybackMs,
@@ -247,7 +250,6 @@ export function TranscriptionPanel({
     readOnly = false,
 }: TranscriptionPanelProps) {
     const i18n = useExtracted();
-    const summaryPresetCopy = useSummaryPresetCopy();
     const transcriptList = toTranscriptList(transcripts, transcription);
     // The Organization view of a shared recording: the one recording, its
     // summaries made with the Organization's templates.
@@ -570,9 +572,10 @@ export function TranscriptionPanel({
         summaryElapsedMs,
         summaryExpanded,
         setSummaryExpanded,
-        summaryPreset,
-        setSummaryPreset,
-        summaryPromptOptions,
+        summaryProfileId = "",
+        setSummaryProfileId,
+        summaryProfileOptions = [],
+        summaryProfilesLoading = false,
         handleSummarize,
         recheckSummary,
     } = useTranscriptionSummary({
@@ -580,6 +583,7 @@ export function TranscriptionPanel({
         summarySource,
         transcriptionText: summaryTranscript?.text,
         view,
+        profileChannel: recording.kind ?? "audio",
     });
 
     // The title, summary and topics automatic Learn held back are made by
@@ -712,6 +716,30 @@ export function TranscriptionPanel({
 
     return (
         <div className="space-y-4">
+            {!orgView && (
+                <WorkflowIndicator
+                    itemId={recording.id}
+                    onTranscribe={() => onTranscribe()}
+                    onLearn={() =>
+                        transcriptSectionRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                        })
+                    }
+                    onSummary={handleSummarize}
+                    onReviewLearn={() =>
+                        transcriptSectionRef.current?.scrollIntoView({
+                            behavior: "smooth",
+                        })
+                    }
+                    onReviewTasks={() =>
+                        document
+                            .getElementById(`recording-summary-${recording.id}`)
+                            ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    onChanged={onTranscriptStale}
+                    onFolderCreated={onFolderCreated}
+                />
+            )}
             {correcting && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
@@ -1095,28 +1123,29 @@ export function TranscriptionPanel({
                                     />
                                 )}
                                 {summarySource === "riffado" &&
-                                    !orgView &&
                                     !readOnly &&
-                                    !isSummarizing && (
+                                    !isSummarizing &&
+                                    summaryProfileOptions.length > 0 && (
                                         <Select
-                                            value={summaryPreset}
-                                            onValueChange={setSummaryPreset}
+                                            value={summaryProfileId}
+                                            onValueChange={setSummaryProfileId}
                                         >
-                                            <SelectTrigger className="w-[160px] h-8 text-xs">
+                                            <SelectTrigger
+                                                className="h-8 w-[180px] text-xs"
+                                                aria-label={i18n(
+                                                    "Processing profile",
+                                                )}
+                                            >
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                {summaryPromptOptions.map(
-                                                    (preset) => (
+                                                {summaryProfileOptions.map(
+                                                    (profile) => (
                                                         <SelectItem
-                                                            key={preset.id}
-                                                            value={preset.id}
+                                                            key={profile.id}
+                                                            value={profile.id}
                                                         >
-                                                            {preset.name ??
-                                                                summaryPresetCopy[
-                                                                    preset.id as keyof typeof summaryPresetCopy
-                                                                ]?.name ??
-                                                                preset.id}
+                                                            {profile.name}
                                                         </SelectItem>
                                                     ),
                                                 )}
@@ -1132,6 +1161,8 @@ export function TranscriptionPanel({
                                         }
                                         disabled={
                                             isSummarizing ||
+                                            summaryProfilesLoading ||
+                                            !summaryProfileId ||
                                             (!summaryTranscript &&
                                                 !(
                                                     orgView &&
@@ -1198,6 +1229,7 @@ export function TranscriptionPanel({
 
                                 {summaryExpanded && (
                                     <section
+                                        id={`recording-summary-${recording.id}`}
                                         aria-label={i18n("Summary content")}
                                         className="max-h-96 space-y-4 overflow-y-auto pr-2"
                                     >
@@ -1294,6 +1326,31 @@ export function TranscriptionPanel({
                                                                 >
                                                                     {i18n(
                                                                         "Regenerate",
+                                                                    )}
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    )}
+                                                {summaryData.scopeChanged &&
+                                                    summarySource ===
+                                                        "riffado" && (
+                                                        <span className="flex items-center gap-1 rounded bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                                                            {i18n(
+                                                                "Folders changed since this summary:",
+                                                            )}
+                                                            {!readOnly && (
+                                                                <button
+                                                                    type="button"
+                                                                    className="font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                                                                    disabled={
+                                                                        isSummarizing
+                                                                    }
+                                                                    onClick={
+                                                                        handleSummarize
+                                                                    }
+                                                                >
+                                                                    {i18n(
+                                                                        "Match tasks again",
                                                                     )}
                                                                 </button>
                                                             )}

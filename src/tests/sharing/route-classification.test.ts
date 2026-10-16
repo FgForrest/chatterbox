@@ -45,8 +45,11 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     },
     "recordings/[id]/audio/route.ts": { GET: "access" },
     "recordings/[id]/calendar-events/route.ts": { GET: "owner" },
+    "recordings/[id]/categorize/route.ts": { GET: "owner", POST: "owner" },
+    "recordings/[id]/categorize/preview/route.ts": { POST: "owner" },
     "recordings/[id]/ai-cost/route.ts": { GET: "view" },
     "recordings/[id]/peaks/route.ts": { POST: "access", PUT: "access" },
+    "recordings/[id]/process-again/route.ts": { POST: "owner" },
     "recordings/[id]/erase/route.ts": { POST: "owner" },
     "recordings/[id]/folders/route.ts": {
         POST: "folders",
@@ -56,6 +59,10 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // What automatic Learn held back: the hold and its jobs are the
     // owner's, on the private view.
     "recordings/[id]/follow-ups/route.ts": { GET: "owner" },
+    // Cancelling an intended placement is confined to the owner's private view.
+    "recordings/[id]/intended-placements/[folderId]/route.ts": {
+        DELETE: "view",
+    },
     // Learn: whoever may change the recording in the view (the owner on
     // the private view, the organization account on the Organization's).
     "recordings/[id]/learn/route.ts": { GET: "view", POST: "view" },
@@ -80,8 +87,12 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // Tasks: seen by whoever sees the recording, reviewed and changed by
     // whoever may change it, closed also by the owner and the assignee.
     "recordings/[id]/tasks/route.ts": { GET: "tasks", POST: "tasks" },
+    "recordings/[id]/tasks/[taskId]/match/route.ts": { DELETE: "tasks" },
     "recordings/[id]/tasks/accept/route.ts": { POST: "tasks" },
-    "recordings/[id]/tasks/merge/route.ts": { POST: "tasks" },
+    "recordings/[id]/tasks/merge/route.ts": {
+        GET: "tasks",
+        POST: "tasks",
+    },
     "recordings/[id]/tasks/updates/[updateId]/route.ts": { PATCH: "tasks" },
     "recordings/[id]/topics/route.ts": { GET: "view", POST: "view" },
     "recordings/[id]/transcribe/route.ts": { GET: "view", POST: "view" },
@@ -91,6 +102,10 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     "jobs/[id]/route.ts": { GET: "job" },
     "folders/route.ts": { GET: "folders", POST: "folders" },
     "folders/[id]/route.ts": { PATCH: "folders", DELETE: "folders" },
+    "folders/[id]/default-profiles/route.ts": {
+        GET: "folders",
+        PUT: "folders",
+    },
     "folders/[id]/exports/route.ts": { GET: "owner", POST: "owner" },
     "folders/[id]/exports/[exportId]/route.ts": {
         PATCH: "owner",

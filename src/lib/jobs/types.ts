@@ -98,6 +98,13 @@ export interface JobHandler<P = unknown> {
      * something about its own failures that the generic mapping cannot.
      */
     isRetryable?: (error: unknown) => boolean;
+    /** Called after the terminal failure is durable, never for retried attempts. */
+    onTerminalFailure?: (input: {
+        jobId: string;
+        userId: string;
+        payload: P;
+        errorCode: string;
+    }) => Promise<void>;
 }
 
 /** Thrown by `parsePayload` implementations; always permanent. */

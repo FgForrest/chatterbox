@@ -7,8 +7,8 @@ Chatterbox zpřístupňuje malou, stabilní automatizační plochu pro externí
 nástroje – integrace ve stylu Zapieru, n8n toky, vlastní skripty. Dva
 hlavní prvky:
 
-- **Osobní API klíče** ověřují přístup pro čtení k `/api/v1/*`
-  rozhraní.
+- **Osobní API klíče** ověřují přístup pro čtení k rozhraní `/api/v1/*`.
+  Klíče rekordéru s oprávněním `recordings:write` vytvářejí streamované relace.
 - **Webhook endpointy** posílají události na Váš vlastní server, kdykoliv se
   stane něco zajímavého (nová nahrávka, dokončený přepis).
 
@@ -24,8 +24,10 @@ případně nastavte dobu platnosti, a zkopírujte jednorázově zobrazený klí
 je zobrazen pouze jednou – uložte jej do svého správce hesel nebo bezpečnostního úložiště
 nástroje, který jej bude používat.
 
-Formát: `op_<24 url-safe chars>` (např. `op_K7vR8x...`). Klíče mají v tuto chvíli
-pouze práva pro čtení; zápis není součástí veřejné plochy.
+Formát: `op_<24 url-safe chars>` (např. `op_K7vR8x...`). Klíče mají ve výchozím
+stavu oprávnění `read`. Rozšíření Meeting Recorder používá klíče s oprávněním
+`recordings:write`, které vydává stránka Nastavení → Meeting Recorder; mohou
+vytvářet nahrávky, ale nemohou číst Vaši knihovnu.
 
 Ověření probíhá zasláním klíče jako Bearer tokenu:
 
@@ -70,6 +72,26 @@ příchozích požadavků.
 | `transcription.failed`      | Přepis selhal (konečné, po opakovaných pokusech)     |
 | `summary.completed`         | Automatické shrnutí bylo úspěšně dokončeno              |
 | `summary.failed`            | Automatické shrnutí selhalo (přepis stále uchován)    |
+
+<span id="processing-timing" />
+
+### Časování zpracování
+
+Shrnutí a témata se spouštějí ze zpracovatelského postupu jeden běh workeru po
+události, která je připravila. Nepředpokládejte, že začnou ve stejném požadavku.
+
+`transcription.completed` obsahuje nahrávku ve stavu při uložení přepisu. Nově
+vygenerovaný název již neobsahuje. Když fáze Shrnutí název vytvoří, přinese jej
+pozdější událost `recording.updated`.
+
+Nové nahrávky a pošta v hlavní schránce čekají na zařazení před automatickými
+placenými kroky. Události `transcription.completed` a `summary.completed` proto
+přijdou až poté, co vlastník položku zařadí a její profil dosáhne příslušné fáze.
+Relace nebo nahrávání s `folderId` a pošta poslaná na adresu složky toto čekání
+přeskočí.
+
+Je-li hodinový limit automatických shrnutí vyčerpán, automatické shrnutí se
+odloží do dalšího okna. Toto zpoždění neodešle `summary.failed`.
 
 <span id="delivery-shape" />
 
@@ -155,6 +177,8 @@ které se zobrazí v **Nastavení → Vývojář → Webhooky → Poslední doru
 
 ## Jak vypadá zápis
 
-Zatím neexistují žádné veřejné endpointy pro zápis. Aktuální rozhraní `/api/v1/*`
-je záměrně pouze pro čtení: seznam nahrávek, detail nahrávky, její přepis, stream jejího audia. Pokud potřebujete data zasílat *dovnitř*,
-spusťte uživatelské rozhraní Chatterbox nebo synchronizujte zdrojový účet Plaud.
+Osobní klíče vytvořené v sekci **API klíče** mají oprávnění `read`. Párování
+Meeting Recorderu vydává samostatný klíč s oprávněním `recordings:write`. Ten
+může vypsat složky rekordéru a vytvořit, nahrávat, dokončit, kontrolovat nebo
+zrušit streamované relace nahrávání, ale nemůže číst knihovnu nahrávek. Jiné
+veřejné endpointy pro zápis neexistují. Viz [Relace rekordéru](../reference/public-api#recording-sessions).

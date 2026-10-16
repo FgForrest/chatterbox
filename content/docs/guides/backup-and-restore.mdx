@@ -21,10 +21,10 @@ up any other binary blob.
 
 **Settings → Export/Backup → Create Backup** (or `POST /api/backup`)
 queues a job that builds a **zip containing everything**: the audio for
-every recording, its transcripts and summary, and a `manifest.json`
-describing what went in. It is built in the background — the request
-returns immediately rather than blocking while audio streams out of
-storage — and the panel reports progress.
+every recording, its transcripts and summary, mail, tasks, processing
+choices, and a `manifest.json` describing what went in. It is built in
+the background — the request returns immediately rather than blocking
+while audio streams out of storage — and the panel reports progress.
 
 A recording whose audio cannot be read does not fail the archive; it is
 noted in the manifest and skipped, so you still get everything else.
@@ -32,12 +32,65 @@ noted in the manifest and skipped, so you still get everything else.
 **Tasks** come along per recording: `tasks.json` holds the accepted
 tasks and the proposals still waiting for review (with whether each is
 ticked), and `task-updates.json` the follow-ups heard on that recording
-("mark done", "move the due date") for tasks in the same archive. People
+("mark done", "no longer needed", "move the due date", "handed to someone
+else") for tasks in the same archive. People
 the tasks are assigned to are listed in `knowledge/people.json`. A task
 follows its recording, not its assignee: a task a colleague assigned to
 you on their shared recording is in the Organization's backup, not yours.
 On a recording you shared, your backup leaves out the tasks the
 Organization added by hand.
+
+Archive format **2.3** also preserves the task's evidence and decisions:
+
+- `tasks/mentions.json` records every match decision carried by the archive.
+  When the source item is in the archive, the row includes its decrypted
+  quote, audio or mail-text anchor, provenance, content revision, decision,
+  reviewer and dates. `taskExternal: false` means the task is archived too.
+  A personal owner's decision on their own archived item can point at a task
+  outside the archive; that row has `taskExternal: true`, retains the item's
+  evidence and quote, and carries only the task id, never the task text. A
+  mention on an item outside a personal archive is an `external: true`
+  reference containing only the task id, item id, decision and dates. It never
+  contains that other owner's quote.
+- `tasks/home-moves.json` is the task-home audit trail. `fromItemExternal`
+  and `toItemExternal` mark item ids that do not resolve inside this archive.
+- `task-updates.json` includes the proposal's routing and settlement fields:
+  `state`, `routedTo`, `decidedByUserId`, `decidedAt`, `obsoleteReason`,
+  `version` and `updatedAt`. Mail keeps the same rows in `mail.json` under
+  `taskUpdates`. System-settled earlier statements have `state: "obsolete"`,
+  `obsoleteReason: "earlier_statement"` and no deciding user.
+  Reassignment rows also carry `proposedAssignee`,
+  `proposedAssigneeHint` and `proposedAssigneeCheck`.
+
+A personal backup contains the owner's home tasks and mentions on the
+owner's own items. Mentions on another owner's item are reference-only. The
+Organization backup contains task evidence visible on currently shared
+items; private and withdrawn mentions are omitted.
+
+`profiles/profiles.json` contains the profiles owned by the archive's scope.
+Its `profiles` array holds profile metadata, and `revisions` holds each
+current revision plus every revision referenced by an archived run or item
+choice. Names, descriptions and revision `settings` are decrypted; `settings`
+is JSON, not an encrypted database envelope. `transcripts.json`,
+`summaries.json`, mail summaries and `knowledge/learn.json` carry
+`profileRevisionId` together with the run provenance fields such as
+`builtinPromptsVersion`, `inputs`, payer, provider and model. References to a
+profile or revision owned by another scope appear in `externalProfileIds` or
+`externalRevisionIds`; the external profile's metadata and settings are not
+copied. Organization profiles are in the Organization backup; personal
+profiles are in their owner's backup.
+
+`processing/choices.json` preserves user-authored workflow choices without
+copying derived queue state. `folderDefaults` records each folder's explicit
+audio or mail profile, including **Nothing automatic**; a missing row still
+means inherit. `itemChoices` records the selected `profileId`, immutable
+`profileRevisionId`, `manualOnly` flag and view for each item. A personal
+archive carries the owner's private-view choices, while the Organization
+archive carries org-view choices for currently shared items. Finally,
+`pendingOrganizationPlacements` records the item, target Organization folder
+and request time while sharing is waiting at the gate. Those pending intents
+belong only to the item's owner and therefore appear only in the personal
+archive until sharing succeeds.
 
 Finished archives stay downloadable for **7 days**, then a cleanup pass
 deletes them.

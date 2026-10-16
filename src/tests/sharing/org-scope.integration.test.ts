@@ -761,7 +761,15 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     decryptText(row.text),
                 ]),
             ).toEqual([[ALICE, org, "shared transcript"]]);
-            const [job] = await db().select().from(asyncJobs);
+            const [job] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.kind, "summary"),
+                        eq(asyncJobs.subjectId, "org:rec-a"),
+                    ),
+                );
             expect(job?.status).toBe("failed");
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
         });

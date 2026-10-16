@@ -6,15 +6,27 @@ import {
     readVersion,
     requireTaskViewer,
 } from "@/lib/tasks/route-helpers";
+import {
+    applyRoutedTaskProposal,
+    rejectRoutedTaskProposal,
+} from "@/lib/tasks/routing";
 import { tickUpdateProposal } from "@/lib/tasks/tasks";
 
 type UpdateContext = { params: Promise<{ id: string; updateId: string }> };
 
-/** Tick or untick a follow-up of the review: `{ticked, version}`. */
+/** Tick a source proposal, or apply/reject one routed to the viewer. */
 export const PATCH = apiHandler<UpdateContext>(async (request, context) => {
     const { id, updateId } = await (context as UpdateContext).params;
     const viewer = await requireTaskViewer(request);
     const body = await readTaskBody(request);
+    if (body.decision === "apply") {
+        const result = await applyRoutedTaskProposal(viewer, id, updateId);
+        return NextResponse.json(result);
+    }
+    if (body.decision === "reject") {
+        const result = await rejectRoutedTaskProposal(viewer, id, updateId);
+        return NextResponse.json(result);
+    }
     if (typeof body.ticked !== "boolean") {
         throw invalid("ticked is required", "ticked");
     }

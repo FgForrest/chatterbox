@@ -67,6 +67,12 @@ vi.mock("@/lib/summary/read-summary", () => ({
     readStoredSummaries: vi.fn(),
 }));
 vi.mock("@/db/queries/async-jobs", () => ({ getActiveJob: vi.fn() }));
+vi.mock("@/lib/pipeline/pending", () => ({
+    pipelineMayQueue: vi.fn(),
+}));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveSelectedProfile: vi.fn(),
+}));
 
 const { recordingAccess } = vi.hoisted(() => ({
     recordingAccess: { exists: true },
@@ -84,24 +90,27 @@ vi.mock("@/lib/sharing/access", async () => {
                 : "private",
         recordingJobSubject: (id: string, view: string) =>
             view === "org" ? `org:${id}` : id,
-        requireRecordingView: vi.fn(async (userId: string, id: string) => {
-            if (!recordingAccess.exists) {
-                throw new AppError(
-                    ErrorCode.RECORDING_NOT_FOUND,
-                    "Recording not found",
-                    404,
-                );
-            }
-            return {
-                recordingId: id,
-                ownerUserId: userId,
-                contentUserId: userId,
-                role: "owner",
-                shared: false,
-                orgUserId: null,
-                view: "private",
-            };
-        }),
+        requireRecordingView: vi.fn(
+            async (userId: string, id: string, view: "private" | "org") => {
+                if (!recordingAccess.exists) {
+                    throw new AppError(
+                        ErrorCode.RECORDING_NOT_FOUND,
+                        "Recording not found",
+                        404,
+                    );
+                }
+                return {
+                    recordingId: id,
+                    ownerUserId: userId,
+                    contentUserId: userId,
+                    role: "owner",
+                    kind: "audio",
+                    shared: false,
+                    orgUserId: null,
+                    view,
+                };
+            },
+        ),
     };
 });
 vi.mock("@/lib/sharing/jobs", () => ({ getJobVisibleTo: vi.fn() }));
@@ -128,7 +137,10 @@ vi.mock("@/lib/demo/fixtures", () => ({
 
 import { GET, POST } from "@/app/api/recordings/[id]/summary/route";
 import { getActiveJob } from "@/db/queries/async-jobs";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { watchJob } from "@/lib/jobs/watch";
+import { pipelineMayQueue } from "@/lib/pipeline/pending";
+import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     readStoredSummaries,
     readStoredSummary,
@@ -150,6 +162,7 @@ function stubRecordingExists(exists = true) {
 describe("POST /api/recordings/[id]/summary (manual)", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(actsForOrganization).mockResolvedValue(false);
         stubRecordingExists();
         (enqueueSummaryJob as Mock).mockResolvedValue({
             job: { id: "job-1", status: "pending" },
@@ -174,6 +187,7 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             multiPass: undefined,
             createdAt: new Date(0),
         });
+        (resolveSelectedProfile as Mock).mockResolvedValue(null);
     });
 
     function makeRequest(body: unknown): Request {
@@ -224,6 +238,93 @@ describe("POST /api/recordings/[id]/summary (manual)", () => {
             trigger: "manual",
             view: "private",
         });
+    });
+
+    it("queues a manual summary when the selected profile's automatic summary is off", async () => {
+        (resolveSelectedProfile as Mock).mockResolvedValue({
+            revisionId: "profile-revision-1",
+            profile: { id: "profile-1", channel: "audio" },
+            settings: { steps: { summary: { automatic: false } } },
+        });
+
+        const response = await POST(
+            makeRequest({ profileId: "profile-1" }),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(200);
+        expect(resolveSelectedProfile).toHaveBeenCalledWith({
+            profileId: "profile-1",
+            actorUserId: "user-1",
+            view: "private",
+        });
+        expect(enqueueSummaryJob).toHaveBeenCalledWith({
+            userId: "user-1",
+            recordingId: "rec-1",
+            presetId: undefined,
+            profileRevisionId: "profile-revision-1",
+            trigger: "manual",
+            view: "private",
+        });
+    });
+
+    it("rejects a personal profile on the Organization view", async () => {
+        vi.mocked(actsForOrganization).mockResolvedValue(true);
+        (resolveSelectedProfile as Mock).mockResolvedValue(null);
+        const response = await POST(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?view=org",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ profileId: "personal-profile" }),
+                },
+            ),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(400);
+        expect(resolveSelectedProfile).toHaveBeenCalledWith({
+            profileId: "personal-profile",
+            actorUserId: "user-1",
+            view: "org",
+        });
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+    });
+
+    it("rejects preset and profileId together", async () => {
+        const response = await POST(
+            makeRequest({ preset: "general", profileId: "profile-1" }),
+            makeContext(),
+        );
+
+        expect(response.status).toBe(400);
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
+    });
+
+    it("rejects an unavailable profile or one for the other channel", async () => {
+        expect(
+            (
+                await POST(
+                    makeRequest({ profileId: "hidden-profile" }),
+                    makeContext(),
+                )
+            ).status,
+        ).toBe(400);
+
+        (resolveSelectedProfile as Mock).mockResolvedValue({
+            revisionId: "mail-revision",
+            profile: { id: "mail-profile", channel: "mail" },
+        });
+        expect(
+            (
+                await POST(
+                    makeRequest({ profileId: "mail-profile" }),
+                    makeContext(),
+                )
+            ).status,
+        ).toBe(400);
+        expect(enqueueSummaryJob).not.toHaveBeenCalled();
     });
 
     it("tolerates a non-JSON body (parses to empty object)", async () => {
@@ -302,6 +403,7 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
         vi.clearAllMocks();
         stubRecordingExists();
         (getActiveJob as Mock).mockResolvedValue(null);
+        (pipelineMayQueue as Mock).mockResolvedValue(true);
         (readStoredSummaries as Mock).mockResolvedValue([
             {
                 summary: "Plaud summary",
@@ -343,5 +445,109 @@ describe("GET /api/recordings/[id]/summary (source variants)", () => {
             model: "plaud-native",
             availableSources: ["plaud", "riffado"],
         });
+        expect(pipelineMayQueue).not.toHaveBeenCalled();
+    });
+
+    it("reports the private pipeline driver while automatic summary work is pending", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect(await response.json()).toMatchObject({
+            summary: null,
+            activeJob: {
+                jobId: "pipeline-job-1",
+                status: "pending",
+                progress: null,
+                kind: "pipeline.advance",
+            },
+        });
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
+        expect(
+            vi.mocked(getActiveJob).mock.invocationCallOrder[0],
+        ).toBeLessThan(vi.mocked(pipelineMayQueue).mock.invocationCallOrder[0]);
+    });
+
+    it("does not report the pipeline driver when automatic summaries are off", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (pipelineMayQueue as Mock).mockResolvedValue(false);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect((await response.json()).activeJob).toBeUndefined();
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
+    });
+
+    it("does not report the pipeline driver while Learn holds the item", async () => {
+        (readStoredSummaries as Mock).mockResolvedValue([]);
+        (pipelineMayQueue as Mock).mockResolvedValue(false);
+        (getActiveJob as Mock).mockImplementation(
+            async (kind: string, subjectId: string) =>
+                kind === "pipeline.advance" && subjectId === "rec-1"
+                    ? {
+                          id: "pipeline-job-1",
+                          kind: "pipeline.advance",
+                          userId: "user-1",
+                          status: "pending",
+                          progress: null,
+                      }
+                    : null,
+        );
+
+        const response = await GET(
+            new Request(
+                "http://localhost/api/recordings/rec-1/summary?source=riffado",
+            ),
+            { params: Promise.resolve({ id: "rec-1" }) },
+        );
+
+        expect((await response.json()).activeJob).toBeUndefined();
+        expect(pipelineMayQueue).toHaveBeenCalledWith(
+            "user-1",
+            "rec-1",
+            "summary",
+        );
     });
 });

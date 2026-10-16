@@ -1,0 +1,1 @@
+ALTER TABLE "task_update_proposals" ADD COLUMN "statement_at" timestamp DEFAULT now() NOT NULL;

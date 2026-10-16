@@ -1,13 +1,21 @@
 ---
 title: Settings
-description: AI providers and prices, transcription, topics, Learn, summaries and display.
+description: Processing profiles, AI providers and prices, account defaults, and display.
 ---
 
 Open Settings from the account menu (the round button with your initial), or press `,`. The sections are grouped on the left.
 
 **Help** at the top of Settings opens this guide at the section you have open.
 
-![Help for the Summaries section](images/help-drawer-settings.png)
+![Help for the Summary section](images/help-drawer-settings.png)
+
+## Profiles
+
+**Settings → Profiles** is where you choose how recordings and mail are transcribed, learned from, titled, summarized, and turned into tasks. Profiles replace the old per-account automation switches and the template picker beside **Summarize**.
+
+Use **New profile for recordings** or **New profile for mail**, or duplicate an existing profile. Each step has one **Run automatically** switch. The editor also holds its provider, model, language, instructions, output format, and multi-pass choices. You can set one default for recordings and one for mail, archive profiles you no longer use, and restore them later.
+
+If the Organization is enabled, members see Organization profiles and can duplicate them into personal ones. Curators can edit the shared versions. See [Processing and profiles](processing-and-profiles.md).
 
 ## AI providers
 
@@ -15,53 +23,48 @@ Open Settings from the account menu (the round button with your initial), or pre
 
 **Settings → Providers** lists the services that do the AI work. Click **Add Provider**, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
 
-Each provider shows its model, its price, and which jobs use it: **Transcription**, **Summaries**, **Learn** or **Topics**. You choose those jobs in the sections below, each of which lists only the providers able to do that job.
-
 ![Editing a provider](images/settings-provider-edit.png)
 
-- **Price.** Chatterbox knows the published prices of common models. For any other model, or if you pay a different price, enter it here: dollars per million input and output tokens, or per audio hour. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
-- **Duplicate** (the copy icon) makes a second provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
+- **Price.** Chatterbox knows the published prices of common models. For any other model, or if you pay a different price, enter it here. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
+- **Duplicate** makes a second provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
 - **Claude Code** and **Codex** run on a Claude or ChatGPT subscription instead of an API key, through a bridge your administrator sets up. See [For administrators](administrators.md#claude-code-and-codex-subscriptions).
 
-Some providers only transcribe (ElevenLabs, Speechmatics). Summaries then need a second provider.
+Some providers only transcribe (ElevenLabs, Speechmatics). Summary steps then need a second provider.
+
+When configured, **Organization providers** appears below the personal list. Members can inspect them as **Read-only**; people with `access.manage` manage them and see usage. See [Organization providers](organization.md#organization-providers).
 
 ## Transcription
 
-![Transcription settings](images/settings-transcription.png)
+**Transcription** now holds account defaults for **Transcribe**, generated titles when a profile does not pin a provider, and imported recorder content. It includes:
 
-- **Transcription provider**: who transcribes. See [Which provider to choose](transcripts.md#which-provider-to-choose).
-- **Auto-transcribe new recordings**: transcribe every new recording as it arrives.
-- **Import Plaud transcripts and summaries**: use the transcript your recorder's service already made, instead of, or as well as, your own provider's.
-- **Default transcription language** and **Transcription quality**.
-- **Auto-generate titles**, with **Title templates** you can edit like summary templates.
+- the default transcription and title providers,
+- **Import Plaud transcripts and summaries** and **Sync titles to Plaud**,
+- **Primary transcript** when both Plaud and your provider have made one,
+- **Default transcription language**, used when you transcribe now.
+
+Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Old title templates remain under **Templates from before profiles** and can be copied into a profile.
 
 ## Topics
 
-![Topics settings](images/settings-topics.png)
-
-**Auto-detect topics** detects topics for every new transcript. **Topics provider** defaults to the summaries provider. **Topic templates** holds the instruction used.
+This section keeps the account-level topics provider default. A profile that
+does not pin a topics provider uses it. Automatic topic detection is set under
+**Profiles**. Older topic templates remain read-only under **Templates from
+before profiles**; use **Copy into a profile** to keep editing one.
 
 ## Learning
 
-![Learning settings](images/settings-learning.png)
-
-Shown where [Learn](learn.md) is available.
-
-- **Learning provider**: defaults to the summaries provider. A stronger model pays off here.
-- **Learn automatically**: run Learn on every new transcript. The title, summary and topics wait for your review, 72 hours at most.
-- **Correct the transcript after Learn**: after a review, Learn reads the whole transcript again and fixes misheard words.
+This section keeps the account-level Learn provider default. A profile that
+does not pin a Learn provider uses it. Automatic Learn and transcript
+correction are set under **Profiles**.
 
 ## Summary
 
-![Summary settings](images/settings-summary.png)
-
-- **Summary provider** and **AI output language**. **Auto (match transcript)** writes in the recording's language.
-- **Auto-generate summary after transcription**.
-- **Summary templates**: the built-in templates and your own. Edit any of them; the **⋯** menu makes one the **Default** or the one used for automatic summaries. **New template** writes your own; put `{transcription}` where the transcript goes. A built-in template you have not edited keeps improving with new versions of Chatterbox; **Add built-in templates back** restores ones you deleted.
-
-![Multi-pass summarization](images/settings-multi-pass.png)
-
-- **Multi-pass summarization** runs each summary 2 to 5 times and merges the results (see [Multi-pass summaries](summaries-and-tasks.md#multi-pass-summaries)). **Also use for auto-summary** is a separate switch, because automatic summaries can be many. **Change merge prompt** edits how the passes are merged, starting from the built-in text.
+This section keeps the account-level summary provider and multi-pass defaults.
+A profile without a pinned summary provider uses them. Automatic titles and
+summaries, output language and format, and profile-specific multi-pass behavior
+are set under **Profiles**. Older summary templates remain read-only under
+**Templates from before profiles**; use **Copy into a profile** to keep editing
+one.
 
 ## Display
 

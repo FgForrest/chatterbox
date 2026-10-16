@@ -17,6 +17,12 @@ vi.mock("@/lib/summary/read-summary", () => ({
     readStoredSummary: mocks.readStoredSummary,
 }));
 vi.mock("@/lib/learn/llm-input", () => ({ modelInput: mocks.modelInput }));
+vi.mock("@/lib/content/read-item-content", () => ({
+    readItemContent: vi.fn(),
+}));
+vi.mock("@/lib/content/render-mail", () => ({ renderMailForModel: vi.fn() }));
+vi.mock("@/lib/encryption/fields", () => ({ decryptText: vi.fn() }));
+vi.mock("@/lib/mail/redact", () => ({ maskedContentForModel: vi.fn() }));
 
 import { readTitleInput } from "@/lib/recordings/title-input";
 

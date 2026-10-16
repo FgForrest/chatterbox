@@ -91,6 +91,7 @@ export function toStringList(value: unknown): string[] {
  */
 export function parseSummaryPayloadResult(
     rawContent: string,
+    options: { tasksEnabled?: boolean } = {},
 ): SummaryParseResult {
     const raw = rawContent.trim();
     try {
@@ -113,7 +114,8 @@ export function parseSummaryPayloadResult(
         // structured: some models return only `{keyPoints, actionItems}`,
         // and those lists are worth keeping. The raw text stands in for the
         // prose so the recording is never left with a blank summary.
-        const taskItems = readTaskItems(parsed.actionItems);
+        const tasksEnabled = options.tasksEnabled !== false;
+        const taskItems = tasksEnabled ? readTaskItems(parsed.actionItems) : [];
         return {
             payload: {
                 summary:
@@ -123,7 +125,9 @@ export function parseSummaryPayloadResult(
                 keyPoints: toStringList(parsed.keyPoints),
                 actionItems: taskItems.map(taskItemLine),
                 taskItems,
-                taskUpdates: readTaskUpdates(parsed.taskUpdates),
+                taskUpdates: tasksEnabled
+                    ? readTaskUpdates(parsed.taskUpdates)
+                    : [],
                 structured: true,
             },
             failure: null,
@@ -145,6 +149,9 @@ function unstructured(raw: string): SummaryPayload {
 }
 
 /** Parse a model reply while preserving the existing payload-only API. */
-export function parseSummaryPayload(rawContent: string): SummaryPayload {
-    return parseSummaryPayloadResult(rawContent).payload;
+export function parseSummaryPayload(
+    rawContent: string,
+    options: { tasksEnabled?: boolean } = {},
+): SummaryPayload {
+    return parseSummaryPayloadResult(rawContent, options).payload;
 }

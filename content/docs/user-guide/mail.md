@@ -11,26 +11,26 @@ Mail needs single sign-on: you get addresses once you sign in with your organiza
 
 **Settings → Mail** lists them.
 
-- Your **mailbox** (`jan@…`) files mail into your pile, unfiled.
-- Every folder has an address (`jan+weekly@…`) that files mail straight into it.
+- Your **mailbox** (`jan@…`) puts mail in your pile, unfiled. It waits for you to click **File it** before any paid AI step runs.
+- Every folder has an address (`jan+weekly@…`) that files mail straight into it. The mail skips the wait and uses the folder's default mail profile.
 
 Only mail you send yourself, from the account you sign in with, is accepted on these addresses: forward a mail to one, or put it in **To**, **Cc** or **Bcc** when you write. Chatterbox checks the mail's signature, so nobody can send in your name.
 
 ## Folder addresses
 
-A folder's header shows its address. Copy it, or give the folder an address of your own: the old one keeps working as a secondary address until you remove it. An address that was ever given out is never given to anyone else.
+A folder's header shows its address. Copy it, or give the folder an address of your own: the old one keeps working as a secondary address until you remove it. An address that was ever given out is never given to anyone else. Mail to any of these addresses is filed and can start the profile automatically.
 
 Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox shows when each last received mail before you confirm.
 
 ## Organization folders
 
-Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays yours: it waits in your pile until you share it, as a recording would, and the Organization reads it once shared.
+Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn and task reviews pass.
 
 You can also share any of your mail by filing it into an Organization folder. Colleagues read a shared mail, its attachments and its formatted version; only you delete it or download the original message.
 
 ## Secret addresses
 
-For mail you do not send yourself, create a **secret address** in **Settings → Mail**. It extends your mailbox or a folder address with a random part (`jan.k3x9…@…`) and files mail the same way, from any sender. Anyone who knows it can send to it, so give it a name you recognize, and **replace** or **stop** it when it leaks.
+For mail you do not send yourself, create a **secret address** in **Settings → Mail**. It extends your mailbox or a folder address with a random part (`jan.k3x9…@…`) and files mail the same way, from any sender. A secret address extending the mailbox leaves mail waiting for filing; one extending a folder skips the wait. Anyone who knows it can send to it, so give it a name you recognize, and **replace** or **stop** it when it leaks.
 
 ### Gmail filters and automatic forwarding
 
@@ -45,7 +45,7 @@ Automatic forwarding keeps the original sender, so it needs a secret address.
 
 A mail shows who sent it, with **Verified** when the sender's domain signed it, the recipients and the date. Quoted and forwarded messages are folded under their author. **Show formatted** shows the mail as it was designed, with nothing loaded from the internet. Attachments download only.
 
-Mail sent by machines (auto-replies, mailing lists, notices) is kept but never summarized.
+Mail sent by machines (auto-replies, mailing lists, notices) is kept but marked **Not processed**. No AI step runs for it.
 
 ## The delivery log
 

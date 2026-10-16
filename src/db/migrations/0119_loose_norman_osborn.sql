@@ -1,0 +1,2 @@
+ALTER TABLE "folder_default_profiles" ADD COLUMN "manual_only" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "item_processing" ADD COLUMN "manual_only" boolean DEFAULT false NOT NULL;

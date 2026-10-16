@@ -13,6 +13,10 @@ import { requireApiSession } from "@/lib/auth-server";
 import { encrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import {
+    organizationAccountProviderAuditContext,
+    writeOrganizationProviderAudit,
+} from "@/lib/profiles/organization-providers";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -82,9 +86,27 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             field: "baseUrl",
         });
     }
+    const auditContext = await organizationAccountProviderAuditContext({
+        userId: session.user.id,
+        email: session.user.email,
+    });
 
     // Use a transaction to ensure atomic update of default providers
     await db.transaction(async (tx) => {
+        const [before] = await tx
+            .select()
+            .from(apiCredentials)
+            .where(
+                and(
+                    eq(apiCredentials.id, id),
+                    eq(apiCredentials.userId, session.user.id),
+                ),
+            )
+            .for("update")
+            .limit(1);
+        if (!before) {
+            throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
+        }
         // If setting as default, remove default flag from other providers
         if (isDefaultTranscription) {
             await tx
@@ -126,7 +148,7 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         }
 
         // Update provider — re-scope by userId on UPDATE for defense-in-depth.
-        await tx
+        const [after] = await tx
             .update(apiCredentials)
             .set(updateData)
             .where(
@@ -134,7 +156,20 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
                     eq(apiCredentials.id, id),
                     eq(apiCredentials.userId, session.user.id),
                 ),
-            );
+            )
+            .returning();
+        if (!after) {
+            throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
+        }
+        if (auditContext) {
+            await writeOrganizationProviderAudit(tx, {
+                context: auditContext,
+                action: "org_provider.update",
+                credentialId: id,
+                before,
+                after,
+            });
+        }
     });
 
     if (isDefaultTranscription) {
@@ -159,6 +194,10 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
 
     const { id } = await (context as IdContext).params;
+    const auditContext = await organizationAccountProviderAuditContext({
+        userId: session.user.id,
+        email: session.user.email,
+    });
 
     const [settings] = await db
         .select({ pointer: userSettings.defaultTranscriptionProviderId })
@@ -166,15 +205,47 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         .where(eq(userSettings.userId, session.user.id))
         .limit(1);
 
-    // Verify ownership and delete
-    await db
-        .delete(apiCredentials)
-        .where(
-            and(
-                eq(apiCredentials.id, id),
-                eq(apiCredentials.userId, session.user.id),
-            ),
-        );
+    if (auditContext) {
+        await db.transaction(async (tx) => {
+            const [before] = await tx
+                .select()
+                .from(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.id, id),
+                        eq(apiCredentials.userId, session.user.id),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            await tx
+                .delete(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.id, id),
+                        eq(apiCredentials.userId, session.user.id),
+                    ),
+                );
+            if (before) {
+                await writeOrganizationProviderAudit(tx, {
+                    context: auditContext,
+                    action: "org_provider.delete",
+                    credentialId: id,
+                    before,
+                    after: null,
+                });
+            }
+        });
+    } else {
+        await db
+            .delete(apiCredentials)
+            .where(
+                and(
+                    eq(apiCredentials.id, id),
+                    eq(apiCredentials.userId, session.user.id),
+                ),
+            );
+    }
 
     if (settings?.pointer === id) {
         await setDefaultTranscriptionProvider(session.user.id, null);

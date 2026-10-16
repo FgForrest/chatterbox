@@ -1,4 +1,12 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 const openAiMocks = vi.hoisted(() => ({
     audioCreate: vi.fn(),
@@ -235,6 +243,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ]),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {
@@ -321,6 +330,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {
@@ -392,6 +402,7 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                 ]),
             )
             .mockReturnValueOnce(selectRows([]))
+            .mockReturnValueOnce(selectRows([{ uiLocale: "en" }]))
             .mockReturnValueOnce(
                 selectRows([
                     {

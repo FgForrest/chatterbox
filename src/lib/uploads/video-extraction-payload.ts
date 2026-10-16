@@ -9,6 +9,7 @@ export interface VideoExtractionJobPayload {
     sourceStorageKey: string;
     encryptedFilename: string;
     sourceSize: number;
+    folderId: string | null;
 }
 
 export function parseVideoExtractionJobPayload(
@@ -18,6 +19,7 @@ export function parseVideoExtractionJobPayload(
     const sourceStorageKey = raw.sourceStorageKey;
     const encryptedFilename = raw.encryptedFilename;
     const sourceSize = raw.sourceSize;
+    const folderId = raw.folderId;
 
     if (typeof uploadId !== "string" || uploadId.length === 0) {
         throw new InvalidJobPayloadError(
@@ -51,5 +53,18 @@ export function parseVideoExtractionJobPayload(
         );
     }
 
-    return { uploadId, sourceStorageKey, encryptedFilename, sourceSize };
+    if (folderId != null && (typeof folderId !== "string" || !folderId)) {
+        throw new InvalidJobPayloadError(
+            VIDEO_EXTRACTION_JOB_KIND,
+            "folderId must be a non-empty string or null",
+        );
+    }
+
+    return {
+        uploadId,
+        sourceStorageKey,
+        encryptedFilename,
+        sourceSize,
+        folderId: folderId ?? null,
+    };
 }

@@ -1,6 +1,14 @@
 "use client";
 
-import { Combine, ListChecks, Loader2, Play, Plus, X } from "lucide-react";
+import {
+    Ban,
+    Combine,
+    ListChecks,
+    Loader2,
+    Plus,
+    UserRoundPen,
+    X,
+} from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { HelpLink } from "@/components/help/help-button";
@@ -8,6 +16,8 @@ import {
     AssigneePicker,
     type SpeakerChoice,
 } from "@/components/tasks/assignee-picker";
+import { MergeTaskPicker } from "@/components/tasks/merge-task-picker";
+import { TaskEvidenceLink } from "@/components/tasks/task-evidence-link";
 import { DueDateField, TaskTextInput } from "@/components/tasks/task-fields";
 import type {
     RecordingTasksState,
@@ -22,8 +32,30 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import type { TaskUpdateView, TaskView } from "@/lib/tasks/tasks";
+import type {
+    TaskMatchView,
+    TaskUpdateView,
+    TaskView,
+} from "@/lib/tasks/tasks";
 import { cn } from "@/lib/utils";
+
+function evidenceKey(value: {
+    quote: string | null;
+    evidenceStartMs: number | null;
+    evidenceText: {
+        segmentIndex: number;
+        charStart: number;
+        charEnd: number;
+    } | null;
+}) {
+    return JSON.stringify([
+        value.quote,
+        value.evidenceStartMs,
+        value.evidenceText?.segmentIndex ?? null,
+        value.evidenceText?.charStart ?? null,
+        value.evidenceText?.charEnd ?? null,
+    ]);
+}
 
 /**
  * The proposed tasks of a recording, the way Learn's findings are: a link
@@ -75,9 +107,85 @@ export function TaskReviewLink({
         if (merging && (await state.merge(merging))) setMerging(null);
     };
 
+    const actionableUpdateTaskIds = new Set(
+        data.updates
+            .filter((update) => !update.earlierMention)
+            .map((update) => update.task.id),
+    );
+    const earlierMentionTaskIds = new Set(
+        data.updates
+            .filter((update) => update.earlierMention)
+            .map((update) => update.task.id),
+    );
+    const matchOnlyTaskIds = new Set(
+        data.matches
+            .filter(
+                (match) =>
+                    !actionableUpdateTaskIds.has(match.candidate.id) &&
+                    !earlierMentionTaskIds.has(match.candidate.id),
+            )
+            .map((match) => match.candidate.id),
+    );
+    const tickedFollowUps = [...actionableUpdateTaskIds].filter(
+        (taskId) =>
+            data.updates.some(
+                (update) => update.task.id === taskId && update.ticked,
+            ) ||
+            data.matches.some(
+                (match) => match.candidate.id === taskId && match.ticked,
+            ),
+    ).length;
     const ticked =
-        data.proposals.filter((task) => task.ticked).length +
-        data.updates.filter((update) => update.ticked).length;
+        new Set(
+            data.proposals.filter((task) => task.ticked).map((task) => task.id),
+        ).size +
+        [...matchOnlyTaskIds].filter((taskId) =>
+            data.matches.some(
+                (match) => match.candidate.id === taskId && match.ticked,
+            ),
+        ).length +
+        tickedFollowUps;
+    const updatesByTaskId = new Map<string, TaskUpdateView[]>();
+    for (const update of data.updates) {
+        const updates = updatesByTaskId.get(update.task.id) ?? [];
+        updates.push(update);
+        updatesByTaskId.set(update.task.id, updates);
+    }
+    const ambiguous = new Map<
+        string,
+        { matches: TaskMatchView[]; proposal: TaskView | null }
+    >();
+    for (const match of data.matches.filter((row) => row.ambiguous)) {
+        const key = evidenceKey(match);
+        const group = ambiguous.get(key) ?? {
+            matches: [],
+            proposal:
+                data.proposals.find(
+                    (proposal) => evidenceKey(proposal) === key,
+                ) ?? null,
+        };
+        group.matches.push(match);
+        ambiguous.set(key, group);
+    }
+    const ambiguousMatchIds = new Set(
+        [...ambiguous.values()].flatMap((group) =>
+            group.matches.map((match) => match.id),
+        ),
+    );
+    const pairedProposalIds = new Set(
+        [...ambiguous.values()].flatMap((group) =>
+            group.proposal ? [group.proposal.id] : [],
+        ),
+    );
+    const visibleProposals = data.proposals.filter(
+        (proposal) => !pairedProposalIds.has(proposal.id),
+    );
+    const matchedTaskIds = new Set(
+        data.matches.map((match) => match.candidate.id),
+    );
+    const standaloneUpdates = [...updatesByTaskId.entries()].filter(
+        ([taskId]) => !matchedTaskIds.has(taskId),
+    );
 
     return (
         <>
@@ -119,12 +227,146 @@ export function TaskReviewLink({
                     </DialogHeader>
 
                     <div className="min-h-0 flex-1 space-y-8 overflow-y-auto px-6 py-5">
-                        {(data.proposals.length > 0 || allowAdd) && (
+                        {data.matches.length > 0 && (
+                            <section className="space-y-2">
+                                <SectionTitle
+                                    title={i18n("Suggested matches")}
+                                    count={data.matches.length}
+                                />
+                                <ul className="space-y-2">
+                                    {data.matches
+                                        .filter(
+                                            (match) =>
+                                                !ambiguousMatchIds.has(
+                                                    match.id,
+                                                ),
+                                        )
+                                        .map((match) => (
+                                            <SuggestedMatchRow
+                                                key={match.id}
+                                                match={match}
+                                                updates={
+                                                    updatesByTaskId.get(
+                                                        match.candidate.id,
+                                                    ) ?? []
+                                                }
+                                                itemId={state.itemId}
+                                                onPlay={onPlay}
+                                                onNavigate={() =>
+                                                    setOpen(false)
+                                                }
+                                                onToggle={(ticked) => {
+                                                    state.tickMatch(
+                                                        match,
+                                                        ticked,
+                                                    );
+                                                    if (!ticked) {
+                                                        for (const update of updatesByTaskId.get(
+                                                            match.candidate.id,
+                                                        ) ?? []) {
+                                                            if (
+                                                                !update.earlierMention
+                                                            ) {
+                                                                state.tickUpdate(
+                                                                    update,
+                                                                    false,
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                                onToggleUpdate={(
+                                                    update,
+                                                    ticked,
+                                                ) => {
+                                                    if (ticked) {
+                                                        state.tickMatch(
+                                                            match,
+                                                            true,
+                                                        );
+                                                    }
+                                                    state.tickUpdate(
+                                                        update,
+                                                        ticked,
+                                                    );
+                                                }}
+                                            />
+                                        ))}
+                                    {[...ambiguous.entries()].map(
+                                        ([key, group]) => (
+                                            <AmbiguousMatchRow
+                                                key={key}
+                                                matches={group.matches}
+                                                proposal={group.proposal}
+                                                itemId={state.itemId}
+                                                onPlay={onPlay}
+                                                onNavigate={() =>
+                                                    setOpen(false)
+                                                }
+                                                updatesByTaskId={
+                                                    updatesByTaskId
+                                                }
+                                                onChoose={(selected) => {
+                                                    for (const match of group.matches) {
+                                                        state.tickMatch(
+                                                            match,
+                                                            selected ===
+                                                                match.id,
+                                                        );
+                                                    }
+                                                    if (group.proposal) {
+                                                        const keep =
+                                                            selected === "new";
+                                                        state.update(
+                                                            group.proposal,
+                                                            { ticked: keep },
+                                                            { ticked: keep },
+                                                        );
+                                                    }
+                                                }}
+                                                onMerge={state.mergeInto}
+                                                onToggleUpdate={(
+                                                    match,
+                                                    update,
+                                                    ticked,
+                                                ) => {
+                                                    if (ticked) {
+                                                        for (const candidate of group.matches) {
+                                                            state.tickMatch(
+                                                                candidate,
+                                                                candidate.id ===
+                                                                    match.id,
+                                                            );
+                                                        }
+                                                        if (group.proposal) {
+                                                            state.update(
+                                                                group.proposal,
+                                                                {
+                                                                    ticked: false,
+                                                                },
+                                                                {
+                                                                    ticked: false,
+                                                                },
+                                                            );
+                                                        }
+                                                    }
+                                                    state.tickUpdate(
+                                                        update,
+                                                        ticked,
+                                                    );
+                                                }}
+                                            />
+                                        ),
+                                    )}
+                                </ul>
+                            </section>
+                        )}
+                        {(visibleProposals.length > 0 || allowAdd) && (
                             <section className="space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                     <SectionTitle
                                         title={i18n("Tasks")}
-                                        count={data.proposals.length}
+                                        count={visibleProposals.length}
                                     />
                                     <div className="flex items-center gap-2">
                                         {merging ? (
@@ -159,7 +401,7 @@ export function TaskReviewLink({
                                                 </Button>
                                             </>
                                         ) : (
-                                            data.proposals.length > 1 && (
+                                            visibleProposals.length > 1 && (
                                                 <Button
                                                     size="sm"
                                                     variant="ghost"
@@ -175,13 +417,20 @@ export function TaskReviewLink({
                                     </div>
                                 </div>
                                 <ul className="space-y-2">
-                                    {data.proposals.map((task) => (
+                                    {visibleProposals.map((task) => (
                                         <ProposalRow
                                             key={task.id}
                                             task={task}
                                             speakers={speakers}
                                             organizationOnly={organizationOnly}
                                             onPlay={onPlay}
+                                            onNavigate={() => setOpen(false)}
+                                            onMerge={(targetTaskId) =>
+                                                state.mergeInto(
+                                                    task.id,
+                                                    targetTaskId,
+                                                )
+                                            }
                                             selection={
                                                 merging
                                                     ? {
@@ -220,23 +469,40 @@ export function TaskReviewLink({
                                 )}
                             </section>
                         )}
-                        {data.updates.length > 0 && (
+                        {standaloneUpdates.length > 0 && (
                             <section className="space-y-2">
                                 <SectionTitle
                                     title={i18n("Heard about earlier tasks")}
-                                    count={data.updates.length}
+                                    count={standaloneUpdates.length}
                                 />
                                 <ul className="space-y-2">
-                                    {data.updates.map((update) => (
-                                        <UpdateRow
-                                            key={update.id}
-                                            update={update}
-                                            onPlay={onPlay}
-                                            onToggle={(next) =>
-                                                state.tickUpdate(update, next)
-                                            }
-                                        />
-                                    ))}
+                                    {standaloneUpdates.map(
+                                        ([taskId, updates]) => (
+                                            <li
+                                                key={taskId}
+                                                data-task-review-card={taskId}
+                                                className="-mx-2 space-y-2 rounded-md border px-3 py-2 text-sm"
+                                            >
+                                                {updates.map((update) => (
+                                                    <UpdateRow
+                                                        key={update.id}
+                                                        update={update}
+                                                        itemId={state.itemId}
+                                                        onPlay={onPlay}
+                                                        onNavigate={() =>
+                                                            setOpen(false)
+                                                        }
+                                                        onToggle={(next) =>
+                                                            state.tickUpdate(
+                                                                update,
+                                                                next,
+                                                            )
+                                                        }
+                                                    />
+                                                ))}
+                                            </li>
+                                        ),
+                                    )}
                                 </ul>
                             </section>
                         )}
@@ -290,15 +556,19 @@ function ProposalRow({
     speakers,
     organizationOnly,
     onPlay,
+    onNavigate,
     selection,
     onChange,
+    onMerge,
 }: {
     task: TaskView;
     speakers: readonly SpeakerChoice[];
     organizationOnly: boolean;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
     selection: { selected: boolean; onToggle: () => void } | null;
     onChange: TaskRowChange;
+    onMerge: (targetTaskId: string) => Promise<boolean>;
 }) {
     const i18n = useExtracted();
 
@@ -323,6 +593,7 @@ function ProposalRow({
                     type="checkbox"
                     className="mt-1.5 size-4 shrink-0"
                     checked={task.ticked}
+                    disabled={!task.canEdit}
                     onChange={(event) =>
                         onChange(
                             { ticked: event.target.checked },
@@ -333,11 +604,20 @@ function ProposalRow({
                 />
             )}
             <div className="min-w-0 flex-1 space-y-1.5">
-                <TaskTextInput
-                    text={task.text}
-                    onSave={(text) => onChange({ text }, { text })}
-                    className="w-full py-0.5"
-                />
+                {task.canEdit ? (
+                    <TaskTextInput
+                        text={task.text}
+                        onSave={(text) => onChange({ text }, { text })}
+                        className="w-full py-0.5"
+                    />
+                ) : (
+                    <p className="px-1 py-0.5">{task.text}</p>
+                )}
+                {task.source === "plaud" && (
+                    <p className="px-1 text-xs font-medium text-muted-foreground">
+                        {i18n("Not matched against earlier tasks")}
+                    </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2 px-1">
                     <AssigneePicker
                         value={task.assignee}
@@ -345,6 +625,7 @@ function ProposalRow({
                         check={task.assigneeCheck}
                         speakers={speakers}
                         organizationOnly={organizationOnly}
+                        disabled={!task.canEdit}
                         onChange={(person) =>
                             onChange(
                                 { assigneePersonId: person?.personId ?? null },
@@ -360,30 +641,37 @@ function ProposalRow({
                         value={task.dueDate}
                         phrase={task.duePhrase}
                         overdue={false}
-                        disabled={false}
+                        disabled={!task.canEdit}
                         onChange={(dueDate) =>
                             onChange({ dueDate }, { dueDate })
                         }
                     />
-                    {task.evidenceStartMs !== null && onPlay && (
-                        <button
-                            type="button"
-                            className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
-                            title={task.quote ?? undefined}
-                            onClick={() =>
-                                onPlay(task.evidenceStartMs as number)
-                            }
-                        >
-                            <Play className="size-3" />
-                            {i18n("Where it was said")}
-                        </button>
-                    )}
+                    <TaskEvidenceLink
+                        evidence={{
+                            itemId: task.evidenceItemId,
+                            itemKind: task.evidenceItemKind,
+                            startMs: task.evidenceStartMs,
+                            text: task.evidenceText,
+                        }}
+                        quote={task.quote}
+                        onPlay={onPlay}
+                        onNavigate={onNavigate}
+                    />
                     {task.quote && (
                         <span className="min-w-0 truncate text-xs italic text-muted-foreground">
                             “{task.quote}”
                         </span>
                     )}
                     <ProvenanceNote provenance={task.evidenceProvenance} />
+                    {!selection && task.canEdit && (
+                        <MergeTaskPicker
+                            itemId={task.recordingId}
+                            sourceTaskId={task.id}
+                            label={i18n("Merge into an earlier task")}
+                            searchLabel={i18n("Search earlier tasks")}
+                            onMerge={onMerge}
+                        />
+                    )}
                 </div>
             </div>
         </li>
@@ -409,42 +697,394 @@ function ProvenanceNote({
     );
 }
 
+function CandidateDetails({ match }: { match: TaskMatchView }) {
+    const i18n = useExtracted();
+    return (
+        <div>
+            <p className="font-medium">{match.candidate.text}</p>
+            <p className="text-xs text-muted-foreground">
+                {match.candidate.assignee?.name ?? i18n("Unassigned")} ·{" "}
+                {match.candidate.dueDate ??
+                    match.candidate.duePhrase ??
+                    i18n("No due date")}{" "}
+                · {match.candidate.homeItem.title}
+            </p>
+        </div>
+    );
+}
+
+function MatchEvidence({
+    match,
+    itemId,
+    onPlay,
+    onNavigate,
+}: {
+    match: TaskMatchView;
+    itemId: string;
+    onPlay?: (startMs: number) => void;
+    onNavigate?: () => void;
+}) {
+    return (
+        <TaskEvidenceLink
+            evidence={{
+                itemId,
+                itemKind: match.evidenceText ? "mail" : "audio",
+                startMs: match.evidenceStartMs,
+                text: match.evidenceText,
+            }}
+            quote={match.quote}
+            onPlay={onPlay}
+            onNavigate={onNavigate}
+        />
+    );
+}
+
+function SuggestedMatchRow({
+    match,
+    updates,
+    itemId,
+    onPlay,
+    onNavigate,
+    onToggle,
+    onToggleUpdate,
+}: {
+    match: TaskMatchView;
+    updates: readonly TaskUpdateView[];
+    itemId: string;
+    onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
+    onToggle: (ticked: boolean) => void;
+    onToggleUpdate: (update: TaskUpdateView, ticked: boolean) => void;
+}) {
+    const i18n = useExtracted();
+    const actionable =
+        updates.length === 0 ||
+        updates.some((update) => !update.earlierMention);
+    return (
+        <li
+            data-task-review-card={match.candidate.id}
+            className="-mx-2 flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+        >
+            {actionable && (
+                <input
+                    type="checkbox"
+                    className="mt-1 size-4 shrink-0"
+                    checked={match.ticked}
+                    onChange={(event) => onToggle(event.target.checked)}
+                    aria-label={i18n("Apply suggested match to {task}", {
+                        task: match.candidate.text,
+                    })}
+                />
+            )}
+            <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-xs font-semibold text-primary">
+                    {i18n("Suggested match")}
+                </p>
+                <CandidateDetails match={match} />
+                <MatchEvidence
+                    match={match}
+                    itemId={itemId}
+                    onPlay={onPlay}
+                    onNavigate={onNavigate}
+                />
+                {updates.length > 0 && (
+                    <div className="mt-2 space-y-2 border-t pt-2">
+                        {updates.map((update) => (
+                            <UpdateRow
+                                key={update.id}
+                                update={update}
+                                itemId={itemId}
+                                onPlay={onPlay}
+                                onNavigate={onNavigate}
+                                onToggle={(ticked) =>
+                                    onToggleUpdate(update, ticked)
+                                }
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
+        </li>
+    );
+}
+
+function AmbiguousMatchRow({
+    matches,
+    proposal,
+    itemId,
+    onPlay,
+    onNavigate,
+    updatesByTaskId,
+    onChoose,
+    onMerge,
+    onToggleUpdate,
+}: {
+    matches: readonly TaskMatchView[];
+    proposal: TaskView | null;
+    itemId: string;
+    onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
+    updatesByTaskId: ReadonlyMap<string, readonly TaskUpdateView[]>;
+    onChoose: (selected: string | "new") => void;
+    onMerge: (sourceTaskId: string, targetTaskId: string) => Promise<boolean>;
+    onToggleUpdate: (
+        match: TaskMatchView,
+        update: TaskUpdateView,
+        ticked: boolean,
+    ) => void;
+}) {
+    const i18n = useExtracted();
+    const selected =
+        matches.find((match) => match.ticked)?.id ??
+        (proposal?.ticked ? "new" : "");
+    return (
+        <li className="-mx-2 rounded-md border px-3 py-2 text-sm">
+            <fieldset className="space-y-2">
+                <legend className="text-xs font-semibold text-primary">
+                    {i18n("Choose a task match")}
+                </legend>
+                <div role="radiogroup" aria-label={i18n("Choose a task match")}>
+                    {matches.map((match) => (
+                        <div
+                            key={match.id}
+                            data-task-review-card={match.candidate.id}
+                            className="space-y-2 py-1"
+                        >
+                            <label className="flex items-start gap-2">
+                                <input
+                                    type="radio"
+                                    name={`match-${matches[0]?.id}`}
+                                    checked={selected === match.id}
+                                    onChange={() => onChoose(match.id)}
+                                    aria-label={match.candidate.text}
+                                />
+                                <CandidateDetails match={match} />
+                            </label>
+                            {(updatesByTaskId.get(match.candidate.id) ?? [])
+                                .length > 0 && (
+                                <div className="ml-5 space-y-2 border-l pl-3">
+                                    {(
+                                        updatesByTaskId.get(
+                                            match.candidate.id,
+                                        ) ?? []
+                                    ).map((update) => (
+                                        <UpdateRow
+                                            key={update.id}
+                                            update={update}
+                                            itemId={itemId}
+                                            onPlay={onPlay}
+                                            onNavigate={onNavigate}
+                                            onToggle={(ticked) =>
+                                                onToggleUpdate(
+                                                    match,
+                                                    update,
+                                                    ticked,
+                                                )
+                                            }
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                    {proposal && (
+                        <label className="flex items-center gap-2 py-1">
+                            <input
+                                type="radio"
+                                name={`match-${matches[0]?.id}`}
+                                checked={selected === "new"}
+                                readOnly
+                                onClick={() => onChoose("new")}
+                                aria-label={i18n("Keep as new")}
+                            />
+                            {i18n("Keep as new")}
+                        </label>
+                    )}
+                </div>
+                {matches[0] && (
+                    <MatchEvidence
+                        match={matches[0]}
+                        itemId={itemId}
+                        onPlay={onPlay}
+                        onNavigate={onNavigate}
+                    />
+                )}
+                {proposal?.canEdit && (
+                    <MergeTaskPicker
+                        itemId={proposal.recordingId}
+                        sourceTaskId={proposal.id}
+                        label={i18n("Merge into an earlier task")}
+                        searchLabel={i18n("Search earlier tasks")}
+                        onMerge={(targetTaskId) =>
+                            onMerge(proposal.id, targetTaskId)
+                        }
+                    />
+                )}
+            </fieldset>
+        </li>
+    );
+}
+
 function UpdateRow({
     update,
+    itemId,
     onPlay,
+    onNavigate,
     onToggle,
 }: {
     update: TaskUpdateView;
+    itemId: string;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
 }) {
     const i18n = useExtracted();
-    return (
-        <li
-            className={cn(
-                "-mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50",
-                !update.ticked && "opacity-60",
-            )}
-        >
-            <input
-                type="checkbox"
-                className="mt-1 size-4 shrink-0"
-                checked={update.ticked}
-                onChange={(event) => onToggle(event.target.checked)}
-                aria-label={i18n("Apply this")}
-            />
-            <div className="min-w-0 flex-1">
-                <p>
-                    <span className="font-medium">
-                        {update.kind === "done"
-                            ? i18n("Mark done:")
-                            : i18n("Move due date to {date}:", {
-                                  date: update.dueDate ?? "",
-                              })}
-                    </span>{" "}
-                    {update.task.text}
-                </p>
+    const evidence = (
+        <TaskEvidenceLink
+            evidence={{
+                itemId,
+                itemKind: update.evidenceText ? "mail" : "audio",
+                startMs: update.evidenceStartMs,
+                text: update.evidenceText,
+            }}
+            quote={update.quote}
+            onPlay={onPlay}
+            onNavigate={onNavigate}
+        />
+    );
+    if (update.earlierMention) {
+        return (
+            <div className="space-y-1 text-sm">
+                <p className="font-medium">{i18n("Earlier mention")}</p>
+                <p>{update.task.text}</p>
                 <p className="text-xs text-muted-foreground">
+                    {i18n(
+                        "No action is offered because newer information already set this field.",
+                    )}
+                </p>
+                {evidence}
+            </div>
+        );
+    }
+    return (
+        <div className="text-sm">
+            {update.kind === "done" ? (
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={update.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Confirm task completion")}
+                    />
+                    <span>
+                        <span className="block font-medium">
+                            {i18n("Needs confirmation")}
+                        </span>
+                        {update.task.text}
+                    </span>
+                </label>
+            ) : update.kind === "drop" ? (
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={update.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Confirm task is no longer needed")}
+                    />
+                    <span>
+                        <span className="flex items-center gap-1 font-medium">
+                            <Ban className="size-3.5" />
+                            {i18n("No longer needed")}
+                        </span>
+                        {update.task.text}
+                    </span>
+                </label>
+            ) : update.kind === "assignee" ? (
+                <label className="flex items-start gap-2">
+                    <input
+                        type="checkbox"
+                        className="mt-1 size-4 shrink-0"
+                        checked={update.ticked}
+                        onChange={(event) => onToggle(event.target.checked)}
+                        aria-label={i18n("Confirm new assignee")}
+                    />
+                    <span>
+                        <span className="flex items-center gap-1 font-medium">
+                            <UserRoundPen className="size-3.5" />
+                            {i18n("Handed to someone else")}
+                        </span>
+                        <span>{update.task.text}</span>
+                        <span
+                            className={cn(
+                                "block text-xs text-muted-foreground",
+                                (update.proposedAssigneeCheck ||
+                                    update.proposedAssigneeHint) &&
+                                    "text-amber-700 dark:text-amber-400",
+                            )}
+                            title={
+                                update.proposedAssigneeHint
+                                    ? i18n(
+                                          "Heard {name}, who is not in Almanac.",
+                                          {
+                                              name: update.proposedAssigneeHint,
+                                          },
+                                      )
+                                    : update.proposedAssigneeCheck
+                                      ? i18n("Check this assignment")
+                                      : undefined
+                            }
+                        >
+                            {update.task.assigneeName ?? i18n("Unassigned")} →{" "}
+                            {update.proposedAssignee?.name ??
+                                (update.proposedAssigneeHint
+                                    ? `${update.proposedAssigneeHint}?`
+                                    : i18n("Unassigned"))}
+                        </span>
+                    </span>
+                </label>
+            ) : (
+                <fieldset className="space-y-1">
+                    <legend className="font-medium">{update.task.text}</legend>
+                    <label className="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name={`deadline-${update.id}`}
+                            checked={!update.ticked}
+                            onChange={() => onToggle(false)}
+                            aria-label={i18n("Keep the current deadline")}
+                        />
+                        <span>
+                            <span className="block text-xs text-muted-foreground">
+                                {i18n("Current deadline")}
+                            </span>
+                            {update.task.dueDate ??
+                                update.task.duePhrase ??
+                                i18n("No due date")}
+                        </span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name={`deadline-${update.id}`}
+                            checked={update.ticked}
+                            onChange={() => onToggle(true)}
+                            aria-label={i18n("Use the proposed deadline")}
+                        />
+                        <span>
+                            <span className="block text-xs text-muted-foreground">
+                                {i18n("Proposed deadline")}
+                            </span>
+                            {update.dueDate ??
+                                update.duePhrase ??
+                                i18n("No due date")}
+                        </span>
+                    </label>
+                </fieldset>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>
                     {update.task.assigneeName
                         ? i18n("{name}, from {recording}", {
                               name: update.task.assigneeName,
@@ -453,20 +1093,10 @@ function UpdateRow({
                         : i18n("From {recording}", {
                               recording: update.task.recordingTitle,
                           })}
-                    {update.quote && <> · “{update.quote}”</>}
-                </p>
+                </span>
+                {evidence}
                 <ProvenanceNote provenance={update.evidenceProvenance} />
             </div>
-            {update.evidenceStartMs !== null && onPlay && (
-                <button
-                    type="button"
-                    className="mt-1 text-muted-foreground hover:text-primary"
-                    onClick={() => onPlay(update.evidenceStartMs as number)}
-                    aria-label={i18n("Where it was said")}
-                >
-                    <Play className="size-3.5" />
-                </button>
-            )}
-        </li>
+        </div>
     );
 }

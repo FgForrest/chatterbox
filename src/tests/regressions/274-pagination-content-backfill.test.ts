@@ -29,6 +29,20 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveDefaultProfile: vi.fn().mockResolvedValue({
+        settings: {
+            steps: {
+                transcribe: {
+                    enabled: true,
+                    automatic: false,
+                    plaudTranscript: "use",
+                },
+            },
+        },
+    }),
+}));
+
 vi.mock("@/lib/storage/factory", () => ({
     createUserStorageProvider: vi.fn().mockResolvedValue({
         uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -67,7 +81,6 @@ import {
     users,
 } from "@/db/schema";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
-import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import {
     upsertEnhancement,
@@ -321,7 +334,6 @@ function mockPlaudPages(
 
 describe("Issue #274 — pagination content backfill", () => {
     beforeEach(() => {
-        resetAutoTranscribeStateForTests();
         vi.clearAllMocks();
         (db.update as Mock).mockReturnValue({
             set: vi.fn().mockReturnValue({

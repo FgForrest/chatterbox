@@ -1,5 +1,8 @@
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import { type ChatterItemKind, chatterItems, recordings } from "@/db/schema";
+import { holderAccess } from "@/lib/authz/access-state";
+import { type ActorContext, LOCAL_MODE_CAPABILITIES } from "@/lib/authz/model";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import type { ReadContext } from "@/lib/knowledge/scope";
 import type { McpCaller } from "@/lib/mcp/caller";
 import {
@@ -95,8 +98,23 @@ export function knowledgeContextFor(caller: McpCaller): ReadContext {
  * The task viewer a caller acts as: the user, or the Organization account
  * for a service caller.
  */
-export function taskViewerFor(caller: McpCaller): Promise<TaskViewer> {
-    return caller.kind === "user"
-        ? taskViewer({ id: caller.userId, email: caller.email })
-        : taskViewerById(caller.orgUserId);
+export async function taskViewerFor(caller: McpCaller): Promise<TaskViewer> {
+    if (caller.kind === "service") return taskViewerById(caller.orgUserId);
+    const idpAuthorization = isIdpAuthorization();
+    const access = idpAuthorization ? await holderAccess(caller.userId) : null;
+    const actor: ActorContext = {
+        kind: "user",
+        actorId: caller.userId,
+        issuer: null,
+        subject: caller.subject,
+        capabilities: idpAuthorization
+            ? access?.ok === true
+                ? access.capabilities
+                : new Set()
+            : LOCAL_MODE_CAPABILITIES,
+        clientId: caller.clientId,
+        clientPermissions: caller.roles,
+        verifiedAt: access?.ok === true ? access.verifiedAt : null,
+    };
+    return taskViewer({ id: caller.userId, email: caller.email }, actor);
 }

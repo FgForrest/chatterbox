@@ -26,6 +26,7 @@ import {
     folderExportMaterializations,
     mailMessages,
     recordingFolders,
+    taskContentVectors,
     users,
 } from "@/db/schema";
 import {
@@ -425,7 +426,27 @@ describeWithDatabase("mail in folder exports (PostgreSQL)", () => {
             .from(folderExportMaterializations)
             .where(eq(folderExportMaterializations.itemId, firstMail))
             .limit(1);
+        await db()
+            .insert(taskContentVectors)
+            .values({
+                id: "deleted-mail-content-vector",
+                userId: "u-jan",
+                itemId: firstMail,
+                contentSourceId: "mail",
+                contentRevision: 0,
+                vectorGeneration: "mail-delete-model",
+                chunkIndex: 0,
+                dim: 2,
+                vector: "encrypted-vector",
+                inputHmac: "0".repeat(64),
+            });
         await deleteMail("u-jan", firstMail);
+        expect(
+            await db()
+                .select()
+                .from(taskContentVectors)
+                .where(eq(taskContentVectors.itemId, firstMail)),
+        ).toEqual([]);
         await exportNow("u-jan", configuration?.id ?? "");
         expect(
             filesUnder(

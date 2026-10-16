@@ -16,6 +16,7 @@ import {
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
+import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
 import {
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -280,6 +281,12 @@ export function FolderRecordingPane({
                     )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
+                    {folder.kind === "custom" && (
+                        <FolderDefaultProfiles
+                            key={folder.id}
+                            folderId={folder.id}
+                        />
+                    )}
                     <FolderExportActions
                         folder={folder}
                         providers={exportProviders}

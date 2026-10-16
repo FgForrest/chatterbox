@@ -17,7 +17,14 @@ import {
     it,
     vi,
 } from "vitest";
-import { chatterItems, users } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    mailContents,
+    mailMessages,
+    transcriptions,
+    users,
+} from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -60,15 +67,18 @@ vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import {
+    storeGeneratedMailTitle,
     storeGeneratedTitle,
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
+import { titleStepDoneForFence } from "@/lib/recordings/title-fence";
 import { insertRecordings } from "@/tests/integration/items";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 
 const ALICE = "user-alice";
+const MAIL = "mail-1";
 const REC = "rec-1";
 
 describeWithDatabase("storing a generated title (PostgreSQL)", () => {
@@ -120,6 +130,51 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         return decryptText(row?.filename ?? "");
     }
 
+    async function seedPendingTitleStep(
+        itemId: string,
+        fence: {
+            contentId: string;
+            contentSourceId: string;
+            contentRevision: number;
+            profileRevisionId: null;
+        },
+    ) {
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: ALICE,
+                view: "private",
+                phases: {
+                    summary: {
+                        state: "pending",
+                        reason: "transcript",
+                        generation: 1,
+                        inputs: fence,
+                        at: "2026-10-15T00:00:00.000Z",
+                        steps: {
+                            title: {
+                                ...fence,
+                                profileRevisionId: undefined,
+                                generation: 1,
+                            },
+                        },
+                    },
+                },
+            });
+    }
+
+    async function processingState(itemId: string) {
+        const [processing] = await db()
+            .select({
+                phases: itemProcessing.phases,
+                profileRevisionId: itemProcessing.profileRevisionId,
+            })
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, itemId));
+        return processing;
+    }
+
     /** What renaming does (`PATCH /api/recordings/[id]`). */
     const renamed = {
         title: encryptText("Budget review"),
@@ -130,6 +185,237 @@ describeWithDatabase("storing a generated title (PostgreSQL)", () => {
         expect(await storeGeneratedTitle(ALICE, REC, "Weekly sync")).toBe(true);
         expect(await title()).toBe("Weekly sync");
         expect(await titleStillGenerated(ALICE, REC)).toBe(true);
+    });
+
+    it("marks the queued title step and Summary phase done atomically", async () => {
+        const [transcript] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: ALICE,
+                text: encryptText("Weekly planning"),
+                detectedLanguage: "en",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+                revision: 2,
+            })
+            .returning({ id: transcriptions.id });
+        const fence = {
+            contentId: transcript?.id ?? "",
+            contentSourceId: "riffado",
+            contentRevision: 2,
+            profileRevisionId: null,
+        };
+        await seedPendingTitleStep(REC, fence);
+
+        await expect(
+            storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Weekly sync",
+                undefined,
+                ALICE,
+                fence,
+            ),
+        ).resolves.toBe(true);
+
+        const [processing] = await db()
+            .select({ phases: itemProcessing.phases })
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, REC));
+        expect(processing?.phases.summary).toMatchObject({
+            state: "done",
+            reason: "completed",
+            inputs: fence,
+            steps: {
+                title: {
+                    contentId: fence.contentId,
+                    contentSourceId: fence.contentSourceId,
+                    contentRevision: fence.contentRevision,
+                    state: "done",
+                },
+            },
+        });
+    });
+
+    it("keeps the summary title when an automatic recording job reaches its write later", async () => {
+        const [transcript] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: ALICE,
+                text: encryptText("Weekly planning"),
+                detectedLanguage: "en",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+                revision: 2,
+            })
+            .returning({ id: transcriptions.id });
+        const fence = {
+            contentId: transcript?.id ?? "",
+            contentSourceId: "riffado",
+            contentRevision: 2,
+            profileRevisionId: null,
+        };
+        await seedPendingTitleStep(REC, fence);
+        expect(titleStepDoneForFence(await processingState(REC), fence)).toBe(
+            false,
+        );
+
+        const events: string[] = [];
+        if (
+            await storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Summary title",
+                undefined,
+                ALICE,
+                fence,
+            )
+        ) {
+            events.push("recording.updated");
+        }
+        expect(titleStepDoneForFence(await processingState(REC), fence)).toBe(
+            true,
+        );
+        if (
+            await storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Transcript title",
+                undefined,
+                ALICE,
+                fence,
+                { skipIfTitleStepDoneForFence: true },
+            )
+        ) {
+            events.push("recording.updated");
+        }
+
+        expect(await title()).toBe("Summary title");
+        expect(events).toEqual(["recording.updated"]);
+    });
+
+    it("keeps the summary title when an automatic mail job reaches its write later", async () => {
+        await db()
+            .insert(chatterItems)
+            .values({
+                id: MAIL,
+                userId: ALICE,
+                kind: "mail",
+                title: encryptText("Original subject"),
+                occurredAt: new Date("2026-09-01T10:00:00Z"),
+            });
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: MAIL,
+                userId: ALICE,
+                rawHash: "1".repeat(64),
+                receivedAt: new Date("2026-09-01T10:00:00Z"),
+                sizeBytes: 100,
+                auth: {},
+                senderVerified: true,
+            });
+        const [content] = await db()
+            .insert(mailContents)
+            .values({
+                itemId: MAIL,
+                userId: ALICE,
+                revision: 3,
+                parserVersion: 1,
+                segments: [],
+            })
+            .returning({ id: mailContents.id });
+        const fence = {
+            contentId: content?.id ?? "",
+            contentSourceId: "mail",
+            contentRevision: 3,
+            profileRevisionId: null,
+        };
+        await seedPendingTitleStep(MAIL, fence);
+        expect(titleStepDoneForFence(await processingState(MAIL), fence)).toBe(
+            false,
+        );
+
+        const events: string[] = [];
+        if (
+            await storeGeneratedMailTitle(
+                ALICE,
+                MAIL,
+                "Summary subject",
+                undefined,
+                ALICE,
+                fence,
+            )
+        ) {
+            events.push("recording.updated");
+        }
+        if (
+            await storeGeneratedMailTitle(
+                ALICE,
+                MAIL,
+                "Mail body subject",
+                undefined,
+                ALICE,
+                fence,
+                { skipIfTitleStepDoneForFence: true },
+            )
+        ) {
+            events.push("recording.updated");
+        }
+        const [mail] = await db()
+            .select({ title: chatterItems.title })
+            .from(chatterItems)
+            .where(eq(chatterItems.id, MAIL));
+
+        expect(decryptText(mail?.title ?? "")).toBe("Summary subject");
+        expect(events).toEqual(["recording.updated"]);
+    });
+
+    it("allows explicit regeneration after the title step is done", async () => {
+        const [transcript] = await db()
+            .insert(transcriptions)
+            .values({
+                recordingId: REC,
+                userId: ALICE,
+                text: encryptText("Weekly planning"),
+                detectedLanguage: "en",
+                provider: "test",
+                model: "test",
+                source: "riffado",
+                revision: 2,
+            })
+            .returning({ id: transcriptions.id });
+        const fence = {
+            contentId: transcript?.id ?? "",
+            contentSourceId: "riffado",
+            contentRevision: 2,
+            profileRevisionId: null,
+        };
+        await seedPendingTitleStep(REC, fence);
+        await storeGeneratedTitle(
+            ALICE,
+            REC,
+            "Summary title",
+            undefined,
+            ALICE,
+            fence,
+        );
+
+        await expect(
+            storeGeneratedTitle(
+                ALICE,
+                REC,
+                "Explicit title",
+                undefined,
+                ALICE,
+                fence,
+            ),
+        ).resolves.toBe(true);
+        expect(await title()).toBe("Explicit title");
     });
 
     it("keeps a title a person set", async () => {

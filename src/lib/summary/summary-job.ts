@@ -54,6 +54,7 @@ export const SUMMARY_TIMEOUT_MS = 30 * 60 * 1000;
 export interface SummaryJobPayload {
     recordingId: string;
     presetId?: string;
+    profileRevisionId?: string;
     trigger: "manual" | "auto";
     /** Absent on the private view, which is every job queued before views existed. */
     view?: RecordingView;
@@ -84,6 +85,16 @@ export function parseSummaryJobPayload(
             "presetId must be a string when present",
         );
     }
+    const profileRevisionId = raw.profileRevisionId;
+    if (
+        profileRevisionId !== undefined &&
+        typeof profileRevisionId !== "string"
+    ) {
+        throw new InvalidJobPayloadError(
+            SUMMARY_JOB_KIND,
+            "profileRevisionId must be a string when present",
+        );
+    }
     // An unrecognised trigger is treated as automatic rather than rejected:
     // the field only selects analytics labelling and the multi-pass auto
     // opt-in, and the conservative reading of an unknown value is the one
@@ -101,7 +112,8 @@ export function parseSummaryJobPayload(
     }
     return {
         recordingId,
-        presetId: presetId ?? undefined,
+        ...(presetId ? { presetId } : {}),
+        ...(profileRevisionId ? { profileRevisionId } : {}),
         trigger,
         ...(raw.view === "org" ? { view: "org" as const } : {}),
         ...(raw.rateLimited === true ? { rateLimited: true as const } : {}),
@@ -113,6 +125,7 @@ export interface EnqueueSummaryInput {
     userId: string;
     recordingId: string;
     presetId?: string;
+    profileRevisionId?: string;
     trigger: "manual" | "auto";
     view?: RecordingView;
     /** Not before this many ms from now (a rate limit's window). */
@@ -149,6 +162,9 @@ export async function enqueueSummaryJob(
         payload: {
             recordingId: input.recordingId,
             ...(input.presetId ? { presetId: input.presetId } : {}),
+            ...(input.profileRevisionId
+                ? { profileRevisionId: input.profileRevisionId }
+                : {}),
             trigger: input.trigger,
             ...(input.view === "org" ? { view: "org" } : {}),
             ...(input.rateLimited ? { rateLimited: true } : {}),

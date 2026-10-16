@@ -8,7 +8,8 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { transcriptSpeakers } from "@/db/schema";
+import { transcriptions, transcriptSpeakers } from "@/db/schema";
+import { nudge } from "@/lib/jobs/nudge";
 import { resolveTargetInTx } from "@/lib/knowledge/aliases";
 import {
     deleteSpeakerInTx,
@@ -21,6 +22,7 @@ import { markSpeakerDependentEvidenceInTx } from "@/lib/knowledge/fact-evidence"
 import { lockOrgPeopleShared } from "@/lib/knowledge/org-people";
 import { createPersonInTx } from "@/lib/knowledge/people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { contentWriterScope, writerRefusalError } from "@/lib/sharing/writer";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -74,10 +76,33 @@ export interface SpeakerChangeArgs extends TranscriptVersion {
 export async function changeTranscriptSpeaker(
     args: SpeakerChangeArgs,
 ): Promise<string | null> {
-    return db.transaction(async (tx) => {
+    const named = await db.transaction(async (tx) => {
         await lockOrgPeopleShared(tx);
-        return changeTranscriptSpeakerInTx(tx, args);
+        const result = await changeTranscriptSpeakerInTx(tx, args);
+        const [transcript] = await tx
+            .select({ recordingId: transcriptions.recordingId })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.id, args.transcriptionId),
+                    eq(transcriptions.userId, args.userId),
+                ),
+            )
+            .limit(1);
+        if (!transcript) return result;
+        await requestAdvanceInTx(tx, {
+            itemId: transcript.recordingId,
+            userId: args.userId,
+            view:
+                args.actsForOrganization || args.actorUserId === args.orgUserId
+                    ? "org"
+                    : "private",
+            reason: "share-gate",
+        });
+        return result;
     });
+    nudge();
+    return named;
 }
 
 /**

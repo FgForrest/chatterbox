@@ -1,0 +1,2 @@
+ALTER TABLE "recording_sessions" ADD COLUMN "folder_id" text;--> statement-breakpoint
+ALTER TABLE "recording_sessions" ADD CONSTRAINT "recording_sessions_folder_id_recording_folders_id_fk" FOREIGN KEY ("folder_id") REFERENCES "public"."recording_folders"("id") ON DELETE set null ON UPDATE no action;

@@ -25,10 +25,19 @@ import {
 } from "vitest";
 import {
     exportJobs,
+    folderDefaultProfiles,
+    itemProcessing,
+    learnRuns,
+    mailPendingShares,
     people,
     personNotes,
+    processingProfileRevisions,
+    processingProfiles,
+    recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskHomeMoves,
+    taskMentions,
     taskUpdateProposals,
     transcriptions,
     transcriptSpeakerRejections,
@@ -324,7 +333,49 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
             files.set(entry.path, (await entry.buffer()).toString("utf-8"));
         }
         const json = (path: string) => JSON.parse(files.get(path) ?? "{}");
-        return { text: [...files.values()].join("\n"), json };
+        return { text: [...files.values()].join("\n"), json, files };
+    }
+
+    function profileRevisionReferences(archive: {
+        files: Map<string, string>;
+        json: (path: string) => unknown;
+    }) {
+        const profileData = archive.json("profiles/profiles.json") as {
+            profiles?: { id: string }[];
+            revisions?: { id: string }[];
+            externalProfileIds?: string[];
+            externalRevisionIds?: string[];
+        };
+        const resolvedProfiles = new Set([
+            ...(profileData.profiles ?? []).map((profile) => profile.id),
+            ...(profileData.externalProfileIds ?? []),
+        ]);
+        const resolved = new Set([
+            ...(profileData.revisions ?? []).map((revision) => revision.id),
+            ...(profileData.externalRevisionIds ?? []),
+        ]);
+        const profileReferences = new Set<string>();
+        const references = new Set<string>();
+        const visit = (value: unknown): void => {
+            if (Array.isArray(value)) {
+                for (const child of value) visit(child);
+                return;
+            }
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+                if (key === "profileId" && typeof child === "string") {
+                    profileReferences.add(child);
+                }
+                if (key === "profileRevisionId" && typeof child === "string") {
+                    references.add(child);
+                }
+                visit(child);
+            }
+        };
+        for (const [path, contents] of archive.files) {
+            if (path.endsWith(".json")) visit(JSON.parse(contents));
+        }
+        return { profileReferences, resolvedProfiles, references, resolved };
     }
 
     it("resolves the scope from the account", async () => {
@@ -568,6 +619,720 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         ]);
         expect(organization.text).not.toContain("BRAVO-PRIVATE-TASK");
         expect(organization.text).not.toContain("I called Petra");
+    });
+
+    it("archives scoped task evidence, home moves, profiles, and referenced revisions", async () => {
+        const [task] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId: SHARED,
+                userId: ALICE,
+                status: "open",
+                text: encryptText("Prepare the launch"),
+                source: "riffado",
+                createdByUserId: ALICE,
+                originItemId: PRIVATE_ALICE,
+            })
+            .returning({ id: recordingTasks.id });
+        const taskId = task?.id ?? "";
+        const [organizationTask] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId: PRIVATE_ALICE,
+                userId: ALICE,
+                status: "open",
+                text: encryptText("Organization-only private match task"),
+                source: "manual",
+                createdByUserId: orgUserId,
+            })
+            .returning({ id: recordingTasks.id });
+        const organizationTaskId = organizationTask?.id ?? "";
+        const orgRoot = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, orgUserId))
+            .then((rows) => rows[0]?.id ?? "");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: PRIVATE_BRAVO,
+            userId: BRAVO,
+            folderId: orgRoot,
+        });
+
+        const statementAt = new Date("2026-09-02T10:00:00Z");
+        await db()
+            .insert(taskMentions)
+            .values([
+                {
+                    taskId,
+                    itemId: SHARED,
+                    userId: ALICE,
+                    view: "org",
+                    quote: encryptText("We should prepare the launch"),
+                    evidenceStartMs: 1_000,
+                    contentSourceId: "source-shared",
+                    contentRevision: 0,
+                    statementAt,
+                    matchDecision: "accepted",
+                    decidedByUserId: ALICE,
+                    decidedAt: new Date("2026-09-02T10:05:00Z"),
+                },
+                {
+                    taskId,
+                    itemId: SHARED,
+                    userId: ALICE,
+                    view: "private",
+                    quote: encryptText("ALICE-PRIVATE-MENTION"),
+                    evidenceStartMs: 2_000,
+                    statementAt,
+                    matchDecision: "rejected",
+                    decidedByUserId: ALICE,
+                    decidedAt: new Date("2026-09-02T10:06:00Z"),
+                },
+                {
+                    taskId,
+                    itemId: PRIVATE_ALICE,
+                    userId: ALICE,
+                    view: "org",
+                    quote: encryptText("ALICE-WITHDRAWN-MENTION"),
+                    evidenceStartMs: 3_000,
+                    statementAt,
+                    matchDecision: "rejected",
+                    decidedByUserId: ALICE,
+                    decidedAt: new Date("2026-09-02T10:07:00Z"),
+                },
+                {
+                    taskId,
+                    itemId: PRIVATE_BRAVO,
+                    userId: BRAVO,
+                    view: "org",
+                    quote: encryptText("BRAVO-OTHER-OWNER-QUOTE"),
+                    evidenceStartMs: 4_000,
+                    statementAt,
+                    matchDecision: "accepted",
+                    decidedByUserId: BRAVO,
+                    decidedAt: new Date("2026-09-02T10:08:00Z"),
+                },
+                {
+                    taskId: organizationTaskId,
+                    itemId: PRIVATE_ALICE,
+                    userId: ALICE,
+                    view: "private",
+                    quote: encryptText("ALICE-ORGANIZATION-TASK-QUOTE"),
+                    evidenceStartMs: 3_500,
+                    statementAt,
+                    matchDecision: "accepted",
+                    decidedByUserId: ALICE,
+                    decidedAt: new Date("2026-09-02T10:08:30Z"),
+                },
+            ]);
+        await db()
+            .insert(taskHomeMoves)
+            .values({
+                taskId,
+                fromItemId: PRIVATE_ALICE,
+                toItemId: SHARED,
+                fromUserId: ALICE,
+                toUserId: ALICE,
+                reason: "withdrawn",
+                actorUserId: ALICE,
+                createdAt: new Date("2026-09-02T10:09:00Z"),
+            });
+        await db()
+            .insert(taskUpdateProposals)
+            .values([
+                {
+                    taskId,
+                    itemId: SHARED,
+                    userId: ALICE,
+                    kind: "done",
+                    quote: encryptText("This was already completed"),
+                    evidenceStartMs: 5_000,
+                    state: "obsolete",
+                    obsoleteReason: "earlier_statement",
+                    ticked: false,
+                },
+                {
+                    taskId,
+                    itemId: PRIVATE_ALICE,
+                    userId: ALICE,
+                    kind: "due_phrase",
+                    duePhrase: encryptText("after the launch"),
+                    quote: encryptText("Move it until after the launch"),
+                    evidenceStartMs: 6_000,
+                    state: "awaiting_share",
+                    ticked: false,
+                },
+            ]);
+
+        await db()
+            .insert(processingProfiles)
+            .values({
+                id: "profile-alice",
+                ownerUserId: ALICE,
+                scope: "personal",
+                channel: "audio",
+                name: encryptText("Alice audio"),
+                description: encryptText("Alice profile description"),
+                currentRevisionId: "revision-alice-current",
+                createdBy: ALICE,
+                updatedBy: ALICE,
+            });
+        await db()
+            .insert(processingProfileRevisions)
+            .values([
+                {
+                    id: "revision-alice-old",
+                    profileId: "profile-alice",
+                    settings: encryptText(JSON.stringify({ version: "old" })),
+                    createdBy: ALICE,
+                },
+                {
+                    id: "revision-alice-current",
+                    profileId: "profile-alice",
+                    settings: encryptText(
+                        JSON.stringify({ version: "current" }),
+                    ),
+                    createdBy: ALICE,
+                },
+            ]);
+        await db()
+            .update(transcriptions)
+            .set({
+                profileRevisionId: "revision-alice-old",
+                builtinPromptsVersion: "2026-10",
+                inputs: { contentRevision: 0 },
+                payerUserId: ALICE,
+            })
+            .where(eq(transcriptions.id, sharedTranscript));
+
+        await db()
+            .insert(processingProfiles)
+            .values({
+                id: "profile-org",
+                ownerUserId: orgUserId,
+                scope: "organization",
+                channel: "audio",
+                name: encryptText("Organization audio"),
+                currentRevisionId: "revision-org-current",
+                createdBy: orgUserId,
+                updatedBy: orgUserId,
+            });
+        await db()
+            .insert(processingProfileRevisions)
+            .values({
+                id: "revision-org-current",
+                profileId: "profile-org",
+                settings: encryptText(JSON.stringify({ version: "org" })),
+                createdBy: orgUserId,
+            });
+        await db()
+            .insert(learnRuns)
+            .values({
+                id: "learn-org",
+                userId: ALICE,
+                scopeUserId: orgUserId,
+                itemId: SHARED,
+                transcriptionId: sharedTranscript,
+                view: "org",
+                actorUserId: orgUserId,
+                payerUserId: orgUserId,
+                trigger: "auto",
+                transcriptRevision: 0,
+                vocabularyVersion: 1,
+                profileRevisionId: "revision-org-current",
+                builtinPromptsVersion: "2026-10",
+                inputs: { contentRevision: 0 },
+                status: "finished",
+            });
+        await db()
+            .insert(learnRuns)
+            .values({
+                id: "learn-personal-org-profile",
+                userId: ALICE,
+                scopeUserId: ALICE,
+                itemId: PRIVATE_ALICE,
+                transcriptionId: sharedTranscript,
+                view: "private",
+                actorUserId: ALICE,
+                payerUserId: ALICE,
+                trigger: "manual",
+                transcriptRevision: 0,
+                vocabularyVersion: 1,
+                profileRevisionId: "revision-org-current",
+                builtinPromptsVersion: "2026-10",
+                inputs: { contentRevision: 0 },
+                status: "finished",
+            });
+
+        const personal = await archive({ kind: "personal", userId: ALICE });
+        const personalMentions = personal.json("tasks/mentions.json");
+        expect(personalMentions).toContainEqual(
+            expect.objectContaining({
+                taskId,
+                itemId: SHARED,
+                external: false,
+                taskExternal: false,
+                quote: "We should prepare the launch",
+                matchDecision: "accepted",
+            }),
+        );
+        expect(personalMentions).toContainEqual(
+            expect.objectContaining({
+                taskId: organizationTaskId,
+                itemId: PRIVATE_ALICE,
+                external: false,
+                taskExternal: true,
+                evidenceStartMs: 3_500,
+                quote: "ALICE-ORGANIZATION-TASK-QUOTE",
+                matchDecision: "accepted",
+            }),
+        );
+        expect(personal.text).not.toContain(
+            "Organization-only private match task",
+        );
+        expect(personalMentions).toContainEqual({
+            taskId,
+            itemId: PRIVATE_BRAVO,
+            external: true,
+            taskExternal: false,
+            statementAt: statementAt.toISOString(),
+            matchDecision: "accepted",
+            decidedAt: "2026-09-02T10:08:00.000Z",
+            createdAt: expect.any(String),
+            updatedAt: expect.any(String),
+        });
+        expect(personal.text).not.toContain("BRAVO-OTHER-OWNER-QUOTE");
+        expect(personal.json("tasks/home-moves.json")).toContainEqual(
+            expect.objectContaining({
+                taskId,
+                fromItemId: PRIVATE_ALICE,
+                fromItemExternal: false,
+                toItemId: SHARED,
+                toItemExternal: false,
+                reason: "withdrawn",
+            }),
+        );
+        const personalProfiles = personal.json("profiles/profiles.json");
+        expect(personalProfiles.profiles).toContainEqual(
+            expect.objectContaining({
+                id: "profile-alice",
+                name: "Alice audio",
+                description: "Alice profile description",
+            }),
+        );
+        expect(personalProfiles.revisions).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    id: "revision-alice-old",
+                    settings: { version: "old" },
+                }),
+                expect.objectContaining({
+                    id: "revision-alice-current",
+                    settings: { version: "current" },
+                }),
+            ]),
+        );
+        expect(personalProfiles.profiles).not.toContainEqual(
+            expect.objectContaining({ id: "profile-org" }),
+        );
+        expect(personalProfiles.externalRevisionIds).toContain(
+            "revision-org-current",
+        );
+        expect(personalProfiles.revisions).not.toContainEqual(
+            expect.objectContaining({ id: "revision-org-current" }),
+        );
+        const personalManifest = personal.json("manifest.json");
+        const sharedEntry = personalManifest.recordings.find(
+            (row: { id: string }) => row.id === SHARED,
+        );
+        expect(personal.json(sharedEntry.transcripts.path)).toContainEqual(
+            expect.objectContaining({
+                id: sharedTranscript,
+                profileRevisionId: "revision-alice-old",
+                builtinPromptsVersion: "2026-10",
+                inputs: { contentRevision: 0 },
+                payerUserId: ALICE,
+            }),
+        );
+        expect(personal.json(sharedEntry.taskUpdates.path)).toContainEqual(
+            expect.objectContaining({
+                taskId,
+                state: "obsolete",
+                obsoleteReason: "earlier_statement",
+                decidedByUserId: null,
+                quote: "This was already completed",
+            }),
+        );
+        const privateEntry = personalManifest.recordings.find(
+            (row: { id: string }) => row.id === PRIVATE_ALICE,
+        );
+        expect(personal.json(privateEntry.taskUpdates.path)).toContainEqual(
+            expect.objectContaining({
+                taskId,
+                state: "awaiting_share",
+                quote: "Move it until after the launch",
+            }),
+        );
+
+        const organization = await archive({
+            kind: "organization",
+            orgUserId,
+        });
+        const organizationMentions = organization.json("tasks/mentions.json");
+        expect(organizationMentions).toContainEqual(
+            expect.objectContaining({
+                taskId,
+                itemId: PRIVATE_BRAVO,
+                external: false,
+                quote: "BRAVO-OTHER-OWNER-QUOTE",
+            }),
+        );
+        expect(organization.text).not.toContain("ALICE-PRIVATE-MENTION");
+        expect(organization.text).not.toContain("ALICE-WITHDRAWN-MENTION");
+        expect(organizationMentions).not.toContainEqual(
+            expect.objectContaining({ itemId: PRIVATE_ALICE }),
+        );
+        const organizationProfiles = organization.json(
+            "profiles/profiles.json",
+        );
+        expect(organizationProfiles.profiles).toContainEqual(
+            expect.objectContaining({ id: "profile-org" }),
+        );
+        expect(organizationProfiles.revisions).toContainEqual(
+            expect.objectContaining({
+                id: "revision-org-current",
+                settings: { version: "org" },
+            }),
+        );
+        expect(organizationProfiles.profiles).not.toContainEqual(
+            expect.objectContaining({ id: "profile-alice" }),
+        );
+        expect(organization.json("knowledge/learn.json").runs).toContainEqual(
+            expect.objectContaining({
+                id: "learn-org",
+                profileRevisionId: "revision-org-current",
+                builtinPromptsVersion: "2026-10",
+                inputs: { contentRevision: 0 },
+                payerUserId: orgUserId,
+            }),
+        );
+        const personalProfileReferences = profileRevisionReferences(personal);
+        expect(
+            [...personalProfileReferences.references].every((id) =>
+                personalProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        const organizationProfileReferences =
+            profileRevisionReferences(organization);
+        expect(
+            [...organizationProfileReferences.references].every((id) =>
+                organizationProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        expect(organizationProfiles.externalRevisionIds).toContain(
+            "revision-alice-old",
+        );
+        expect(organizationProfiles.revisions).not.toContainEqual(
+            expect.objectContaining({ id: "revision-alice-old" }),
+        );
+        expect(organizationMentions).not.toContainEqual(
+            expect.objectContaining({ taskId: organizationTaskId }),
+        );
+    });
+
+    it("archives processing choices in the scope that owns each folder, item view, or pending placement", async () => {
+        await db()
+            .insert(processingProfiles)
+            .values([
+                {
+                    id: "profile-alice-choice",
+                    ownerUserId: ALICE,
+                    scope: "personal",
+                    channel: "audio",
+                    name: encryptText("Alice choice"),
+                    currentRevisionId: "revision-alice-choice",
+                    createdBy: ALICE,
+                    updatedBy: ALICE,
+                },
+                {
+                    id: "profile-org-choice",
+                    ownerUserId: orgUserId,
+                    scope: "organization",
+                    channel: "audio",
+                    name: encryptText("Organization choice"),
+                    currentRevisionId: "revision-org-choice",
+                    createdBy: orgUserId,
+                    updatedBy: orgUserId,
+                },
+            ]);
+        await db()
+            .insert(processingProfileRevisions)
+            .values([
+                {
+                    id: "revision-alice-choice",
+                    profileId: "profile-alice-choice",
+                    settings: encryptText(JSON.stringify({ choice: "alice" })),
+                    createdBy: ALICE,
+                },
+                {
+                    id: "revision-org-choice",
+                    profileId: "profile-org-choice",
+                    settings: encryptText(JSON.stringify({ choice: "org" })),
+                    createdBy: orgUserId,
+                },
+            ]);
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "folder-alice-choice",
+                    userId: ALICE,
+                    name: encryptText("Alice processing"),
+                    nameHash: "alice-processing",
+                    kind: "custom",
+                },
+                {
+                    id: "folder-org-choice",
+                    userId: orgUserId,
+                    name: encryptText("Organization processing"),
+                    nameHash: "organization-processing",
+                    kind: "custom",
+                },
+                {
+                    id: "folder-bravo-choice",
+                    userId: BRAVO,
+                    name: encryptText("BRAVO-PROCESSING-FOLDER"),
+                    nameHash: "bravo-processing",
+                    kind: "custom",
+                },
+            ]);
+        await db()
+            .insert(folderDefaultProfiles)
+            .values([
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "audio",
+                    profileId: "profile-alice-choice",
+                },
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "mail",
+                    profileId: null,
+                    manualOnly: true,
+                },
+                {
+                    folderId: "folder-org-choice",
+                    channel: "audio",
+                    profileId: "profile-org-choice",
+                },
+                {
+                    folderId: "folder-bravo-choice",
+                    channel: "audio",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ]);
+        const itemChoices = [
+            {
+                itemId: PRIVATE_ALICE,
+                userId: ALICE,
+                view: "private" as const,
+                profileId: "profile-alice-choice",
+                profileRevisionId: "revision-alice-choice",
+                manualOnly: false,
+            },
+            {
+                itemId: SHARED,
+                userId: ALICE,
+                view: "private" as const,
+                profileId: null,
+                profileRevisionId: null,
+                manualOnly: true,
+            },
+            {
+                itemId: SHARED,
+                userId: ALICE,
+                view: "org" as const,
+                profileId: "profile-org-choice",
+                profileRevisionId: "revision-org-choice",
+                manualOnly: false,
+            },
+            {
+                itemId: PRIVATE_BRAVO,
+                userId: BRAVO,
+                view: "private" as const,
+                profileId: null,
+                profileRevisionId: null,
+                manualOnly: true,
+            },
+        ];
+        for (const choice of itemChoices) {
+            await db()
+                .insert(itemProcessing)
+                .values(choice)
+                .onConflictDoUpdate({
+                    target: [itemProcessing.itemId, itemProcessing.view],
+                    set: {
+                        profileId: choice.profileId,
+                        profileRevisionId: choice.profileRevisionId,
+                        manualOnly: choice.manualOnly,
+                    },
+                });
+        }
+        const requestedAt = new Date("2026-09-03T10:00:00Z");
+        await db().insert(mailPendingShares).values({
+            itemId: PRIVATE_ALICE,
+            userId: ALICE,
+            folderId: "folder-org-choice",
+            createdAt: requestedAt,
+        });
+
+        const personal = await archive({ kind: "personal", userId: ALICE });
+        expect(personal.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "audio",
+                    profileId: "profile-alice-choice",
+                    manualOnly: false,
+                },
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "mail",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ],
+            itemChoices: expect.arrayContaining([
+                {
+                    itemId: PRIVATE_ALICE,
+                    view: "private",
+                    profileId: "profile-alice-choice",
+                    profileRevisionId: "revision-alice-choice",
+                    manualOnly: false,
+                },
+                {
+                    itemId: SHARED,
+                    view: "private",
+                    profileId: null,
+                    profileRevisionId: null,
+                    manualOnly: true,
+                },
+            ]),
+            pendingOrganizationPlacements: [
+                {
+                    itemId: PRIVATE_ALICE,
+                    folderId: "folder-org-choice",
+                    requestedAt: requestedAt.toISOString(),
+                },
+            ],
+        });
+        expect(
+            personal.json("processing/choices.json").itemChoices,
+        ).toHaveLength(2);
+        expect(personal.json("manifest.json").processing).toEqual({
+            folderDefaults: 2,
+            itemChoices: 2,
+            pendingOrganizationPlacements: 1,
+            path: "processing/choices.json",
+        });
+        const personalProfileReferences = profileRevisionReferences(personal);
+        expect(
+            [...personalProfileReferences.profileReferences].every((id) =>
+                personalProfileReferences.resolvedProfiles.has(id),
+            ),
+        ).toBe(true);
+        expect(
+            [...personalProfileReferences.references].every((id) =>
+                personalProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        expect(personal.text).not.toContain("BRAVO-PROCESSING-FOLDER");
+        expect(personal.json("profiles/profiles.json").profiles).toContainEqual(
+            expect.objectContaining({ id: "profile-alice-choice" }),
+        );
+        expect(
+            personal.json("profiles/profiles.json").revisions,
+        ).toContainEqual(
+            expect.objectContaining({ id: "revision-alice-choice" }),
+        );
+
+        const organization = await archive({
+            kind: "organization",
+            orgUserId,
+        });
+        expect(organization.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-org-choice",
+                    channel: "audio",
+                    profileId: "profile-org-choice",
+                    manualOnly: false,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: SHARED,
+                    view: "org",
+                    profileId: "profile-org-choice",
+                    profileRevisionId: "revision-org-choice",
+                    manualOnly: false,
+                },
+            ],
+            pendingOrganizationPlacements: [],
+        });
+        expect(organization.json("manifest.json").processing).toEqual({
+            folderDefaults: 1,
+            itemChoices: 1,
+            pendingOrganizationPlacements: 0,
+            path: "processing/choices.json",
+        });
+        const organizationProfileReferences =
+            profileRevisionReferences(organization);
+        expect(
+            [...organizationProfileReferences.profileReferences].every((id) =>
+                organizationProfileReferences.resolvedProfiles.has(id),
+            ),
+        ).toBe(true);
+        expect(
+            [...organizationProfileReferences.references].every((id) =>
+                organizationProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        expect(organization.text).not.toContain("folder-alice-choice");
+        expect(organization.text).not.toContain(PRIVATE_ALICE);
+        expect(
+            organization.json("profiles/profiles.json").profiles,
+        ).toContainEqual(expect.objectContaining({ id: "profile-org-choice" }));
+        expect(
+            organization.json("profiles/profiles.json").revisions,
+        ).toContainEqual(
+            expect.objectContaining({ id: "revision-org-choice" }),
+        );
+
+        const bravo = await archive({ kind: "personal", userId: BRAVO });
+        expect(bravo.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-bravo-choice",
+                    channel: "audio",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: PRIVATE_BRAVO,
+                    view: "private",
+                    profileId: null,
+                    profileRevisionId: null,
+                    manualOnly: true,
+                },
+            ],
+            pendingOrganizationPlacements: [],
+        });
+        expect(bravo.text).not.toContain("folder-alice-choice");
+        expect(bravo.text).not.toContain("profile-alice-choice");
     });
 
     it("renders a person's exports without the Organization's corrections", async () => {

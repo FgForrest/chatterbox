@@ -1,0 +1,1 @@
+CREATE INDEX "item_processing_auto_transcription_retry_idx" ON "item_processing" USING btree (("phases" -> 'transcribe' ->> 'at')) WHERE "item_processing"."view" = 'private' and "item_processing"."phases" -> 'transcribe' ->> 'state' = 'failed' and coalesce(("item_processing"."phases" -> 'transcribe' ->> 'automatic')::boolean, false);

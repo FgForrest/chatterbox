@@ -2,7 +2,12 @@ import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { getActiveJob } from "@/db/queries/async-jobs";
-import { aiEnhancements, chatterItems, recordings } from "@/db/schema";
+import {
+    aiEnhancements,
+    chatterItems,
+    itemProcessing,
+    recordings,
+} from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { ALL_ITEM_KINDS } from "@/lib/content/item-kinds";
@@ -12,6 +17,9 @@ import { removeRecordingSidecar } from "@/lib/export/document-sidecars";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
 import { llmRendering } from "@/lib/learn/llm-input";
+import { pipelineMayQueue } from "@/lib/pipeline/pending";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
+import { resolveSelectedProfile } from "@/lib/profiles/resolve";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -94,8 +102,37 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     const userId = session.user.id;
 
     const { id } = await (context as IdContext).params;
-    const body = await request.json().catch(() => ({}));
-    const presetId = (body.preset as string) || undefined;
+    const rawBody: unknown = await request.json().catch(() => ({}));
+    const body =
+        rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+            ? (rawBody as Record<string, unknown>)
+            : {};
+    if (body.preset !== undefined && typeof body.preset !== "string") {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "preset must be a string",
+            400,
+            { field: "preset" },
+        );
+    }
+    if (body.profileId !== undefined && typeof body.profileId !== "string") {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "profileId must be a string",
+            400,
+            { field: "profileId" },
+        );
+    }
+    const presetId = body.preset || undefined;
+    const profileId = body.profileId || undefined;
+    if (presetId && profileId) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Choose either a preset or a profile, not both",
+            400,
+            { fields: ["preset", "profileId"] },
+        );
+    }
     const view = requestedRecordingView(request);
 
     // Checked here rather than left to the handler: a recording that does not
@@ -106,10 +143,37 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     });
     assertMayChange(access, userId, await actsForOrganization(actor));
 
+    const selectedProfile = profileId
+        ? await resolveSelectedProfile({
+              profileId,
+              actorUserId: userId,
+              view,
+          })
+        : null;
+    if (profileId && !selectedProfile) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "The selected profile is unavailable",
+            400,
+            { field: "profileId" },
+        );
+    }
+    if (selectedProfile && selectedProfile.profile.channel !== access.kind) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "The selected profile is for the other channel",
+            400,
+            { field: "profileId" },
+        );
+    }
+
     const { job } = await enqueueSummaryJob({
         userId,
         recordingId: id,
         presetId,
+        ...(selectedProfile
+            ? { profileRevisionId: selectedProfile.revisionId }
+            : {}),
         trigger: "manual",
         view,
     });
@@ -135,10 +199,19 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
         if (row.status === "failed") {
             throw appErrorFromJobFailure(row.errorCode, row.lastError);
         }
+        const result = (row.result ?? {}) as Record<string, unknown>;
+        if (result.skipped === "outdated") {
+            throw new AppError(
+                ErrorCode.CONFLICT,
+                "The summary inputs changed while it was being made",
+                409,
+            );
+        }
         const stored = await readStoredSummary(
             access.contentUserId,
             id,
             "riffado",
+            view,
         );
         if (!stored) {
             throw new AppError(
@@ -147,7 +220,6 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 500,
             );
         }
-        const result = (row.result ?? {}) as Record<string, unknown>;
         return NextResponse.json({
             summary: stored.summary,
             keyPoints: stored.keyPoints,
@@ -159,6 +231,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
             promptId: result.promptId,
             promptFallback: result.promptFallback === true,
             multiPass: stored.multiPass,
+            scopeChanged: stored.scopeChanged,
         });
     }
 
@@ -222,15 +295,24 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                         code: mapped.code,
                     });
                 } else {
-                    const stored = await readStoredSummary(
-                        access.contentUserId,
-                        id,
-                        "riffado",
-                    );
                     const result = (row.result ?? {}) as Record<
                         string,
                         unknown
                     >;
+                    if (result.skipped === "outdated") {
+                        send({
+                            type: "error",
+                            error: "The summary inputs changed while it was being made",
+                            code: ErrorCode.CONFLICT,
+                        });
+                        return;
+                    }
+                    const stored = await readStoredSummary(
+                        access.contentUserId,
+                        id,
+                        "riffado",
+                        view,
+                    );
                     if (stored) {
                         send({
                             type: "result",
@@ -249,6 +331,7 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                                 promptId: result.promptId as string | undefined,
                                 promptFallback: result.promptFallback === true,
                                 multiPass: stored.multiPass,
+                                scopeChanged: stored.scopeChanged,
                             },
                         });
                     } else {
@@ -314,6 +397,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
                 summary: null,
                 source,
                 availableSources: [],
+                itemProfileId: null,
             });
         }
         return NextResponse.json({
@@ -325,6 +409,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             source: "riffado",
             transcriptionId: null,
             availableSources: ["riffado"],
+            itemProfileId: null,
         });
     }
 
@@ -332,26 +417,52 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, view, {
         kinds: ALL_ITEM_KINDS,
     });
+    const [processing] = await db
+        .select({ profileId: itemProcessing.profileId })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, id),
+                eq(itemProcessing.userId, access.ownerUserId),
+                eq(itemProcessing.view, view),
+            ),
+        )
+        .limit(1);
+    const itemProfileId = processing?.profileId ?? null;
 
     // Reported alongside the summary so a page opened while a summary is
     // being generated -- in another tab, by an automatic run, or by a worker
     // that picked the job back up after a restart -- can show that and
     // reattach, instead of an empty panel that gives no sign anything is
     // happening.
-    const active = await getActiveJob(
+    const activeSummary = await getActiveJob(
         SUMMARY_JOB_KIND,
         recordingJobSubject(id, view),
     );
+    const pipelineDriver =
+        !activeSummary && view === "private" && source === "riffado"
+            ? await getActiveJob(
+                  PIPELINE_ADVANCE_JOB_KIND,
+                  recordingJobSubject(id, "private"),
+              )
+            : null;
+    const activePipeline =
+        pipelineDriver &&
+        (await pipelineMayQueue(access.ownerUserId, id, "summary"))
+            ? pipelineDriver
+            : null;
+    const active = activeSummary ?? activePipeline;
     const activeJob =
-        active && (view === "org" || active.userId === session.user.id)
+        active && (view === "org" || active.userId === access.contentUserId)
             ? {
                   jobId: active.id,
                   status: active.status,
                   progress: active.progress ?? null,
+                  kind: active.kind,
               }
             : undefined;
 
-    const summaries = await readStoredSummaries(access.contentUserId, id);
+    const summaries = await readStoredSummaries(access.contentUserId, id, view);
     const availableSources = summaries.map((summary) => summary.source);
     const stored = summaries.find((summary) => summary.source === source);
 
@@ -361,6 +472,7 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
             source,
             availableSources,
             activeJob: source === "riffado" ? activeJob : undefined,
+            itemProfileId,
         });
     }
 
@@ -377,8 +489,10 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
         // Made from the transcript before its corrections changed: names
         // or terms in it may be stale. Only when both fingerprints exist.
         stale: await summaryIsStale(stored),
+        scopeChanged: stored.scopeChanged,
         availableSources,
         activeJob: source === "riffado" ? activeJob : undefined,
+        itemProfileId,
     });
 });
 

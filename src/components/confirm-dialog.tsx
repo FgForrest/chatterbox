@@ -84,6 +84,11 @@ export function useConfirm(): ConfirmFn {
     return fn;
 }
 
+/** The app confirm function when a provider is mounted. */
+export function useOptionalConfirm(): ConfirmFn | null {
+    return use(ConfirmContext);
+}
+
 interface ActiveConfirm extends ConfirmOptions {
     resolve: (value: boolean) => void;
 }

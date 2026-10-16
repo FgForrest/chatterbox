@@ -23,6 +23,47 @@ ohlásí stav healthy pomocí `/api/health`. Neexistuje žádný samostatný „
 kontejner“ — pokud migrace selže, selže i start kontejneru, což je
 žádané chování.
 
+<span id="processing-pipeline-release" />
+
+## Vydání se zpracovatelským postupem
+
+Není nutná žádná změna konfigurace. Stáhněte nový image a restartujte jej podle
+postupu výše. Při startu kontejner použije migrace `0112` až `0128`. Všechny
+jsou aditivní s výjimkou uvolnění jedinečnosti v migraci `0128`. Migrace `0116`
+označí existující položky jako **Zpracováno před
+zavedením profilů**, takže aktualizace nespustí placené zpracování starých
+nahrávek ani pošty. Migrace `0122` vytvoří pro každý existující úkol domovskou
+zmínku a zaznamená okamžik platnosti jeho současných polí.
+Migrace `0124` přidá pole pro navrženého řešitele a rozšíří kontrolu druhů
+návrhů o nové typy. Migrace `0125` až `0127` uloží čas důkazu každého návrhu,
+doplní jej u stávajících návrhů a opraví efektivní časy existujících otevřených
+úkolů. Migrace `0128` přidá šifrovanou mezipaměť vektorů obsahu pro hledání při
+slučování a uvolní jedinečnost návrhů tak, aby platila jen pro čekající návrhy;
+vyřešená historie už neblokuje nový návrh.
+
+Po aktualizaci čekají nové nahrávky a pošta poslaná do hlavní schránky na
+zařazení vlastníkem do složky, než se spustí placený krok. Pošta poslaná na
+adresu složky, nahrání přes přehled se zvolenou složkou a relace Meeting
+Recorderu se složkou toto čekání přeskočí.
+
+Rozšíření Meeting Recorder potřebuje odpovídající vydání v obchodě kvůli novému
+výběru složky. Staré rozšíření zůstává kompatibilní s novým serverem, ale jeho
+nahrávky přijdou bez `folderId` a čekají na zařazení. Proti staršímu serveru
+nabízí nové rozšíření pouze **Zařadit později**; pokud server vybranou složku
+odmítne, rozšíření volbu složky zahodí a pokračuje v nahrávání.
+
+Proměnná `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` je volitelná a má výchozí
+hodnotu 60. Chcete-li ji změnit, upravte předání prostředí do služby aplikace v
+Compose podle [Proměnných prostředí](./environment-variables#optional-knobs).
+
+Aktualizace je podle ověření bezpečná. Před aktualizací vytvořte `pg_dump`
+databáze Riffado. Podporovaný rollback spočívá v obnovení tohoto výpisu a
+spuštění předchozího image. Spuštění předchozího image nad aktualizovanou
+databází podporované není: proběhne bez chyby, ale vyřešené návrhy znovu zobrazí
+jako čekající. Přijetí takového návrhu v kontrole úkolů použije zastaralou změnu
+a smaže řádky návrhů. Během rollbacku kontroly úkolů neotvírejte. Nahrávky
+nahrané během rollbacku je po návratu vpřed nutné spustit ručně.
+
 <span id="picking-a-tag" />
 
 ## Výběr tagu
@@ -57,8 +98,8 @@ instance nemá nikdy „volat domů“, nastavte `DISABLE_UPDATE_CHECK=true` ve 
 
 ## Vracení zpět (rollback)
 
-Pro vrácení se zpět nastavte `RIFFADO_VERSION` na předchozí tag a znovu spusťte
-příkaz pro aktualizaci:
+Pro bezpečný rollback obnovte `pg_dump` vytvořený před aktualizací, nastavte
+`RIFFADO_VERSION` na předchozí tag a spusťte stack:
 
 ```bash
 # In .env
@@ -69,17 +110,15 @@ RIFFADO_VERSION=0.4.1
 docker compose pull && docker compose up -d
 ```
 
-Toto funguje, protože databázové migrace Chatterbox jsou
-**ve výchozím nastavení aditivní** — odstranění sloupců je považováno za záměrnou
-narušující změnu s poznámkou v migraci v CHANGELOG. Pokud se vracíte zpět přes
-verzi, ve které bylo explicitně odstraněno nějaké uložené stavové nastavení (vzácné,
-výrazně zmíněné v CHANGELOG), nejdříve si pozorně prostudujte poznámky k vydání.
+Předchozí image nespouštějte nad databází po aktualizaci. Může v ní zobrazit
+vyřešené návrhy jako čekající a jejich přijetí může použít zastaralou změnu.
 
 <span id="backing-up-before-an-upgrade" />
 
 ## Zálohování před aktualizací
 
-Před aktualizací na hlavní (major) verzi nezapomeňte zálohovat dvě věci:
+Před aktualizací nejprve vytvořte logický výpis `pg_dump` databáze Riffado.
+Před aktualizací na hlavní (major) verzi také nezapomeňte zálohovat dvě věci:
 
 1. Svazek Postgresu (cesta, na kterou váš compose soubor mapuje
    `postgres:/var/lib/postgresql/data`).
@@ -87,8 +126,8 @@ Před aktualizací na hlavní (major) verzi nezapomeňte zálohovat dvě věci:
    bucket, pokud jste přešli na vzdálené úložiště.
 
 Můžete také vytvořit logický export přes **Nastavení → Export/Záloha
-→ Vytvořit zálohu**, což vytvoří JSON archiv nahrávek +
-přepisů.
+→ Vytvořit zálohu**, což vytvoří zip archiv nahrávek, audia, přepisů,
+shrnutí, pošty, úkolů, profilů a voleb zpracování.
 Tento export je záměrně v **prostém textu** (jsou to vaše data), proto jej
 ukládejte se stejnou pečlivostí jako nezašifrovanou databázi. Více viz
 [Záloha a obnovení](../guides/backup-and-restore).

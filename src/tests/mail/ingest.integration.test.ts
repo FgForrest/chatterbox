@@ -19,11 +19,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     accounts,
     chatterItems,
+    folderDefaultProfiles,
+    itemProcessing,
     mailContents,
     mailDeliveryLog,
     mailMessages,
     mailParticipants,
     mailPendingShares,
+    processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
@@ -124,6 +127,8 @@ import { loadMailListRows, loadSharedMailRows } from "@/lib/mail/list";
 import { deleteMail, shareMail } from "@/lib/mail/manage";
 import { loadDeliveryLog } from "@/lib/mail/views";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { ensureProfiles } from "@/lib/profiles/seed";
 import { LocalStorage } from "@/lib/storage/local-storage";
 import type { StorageProvider } from "@/lib/storage/types";
 import {
@@ -241,6 +246,47 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             name: "Weekly",
         });
         orgWeeklyFolderId = orgWeekly.id;
+        await ensureProfiles("u-jan");
+        await ensureProfiles(orgUserId);
+        const [personalMailProfile] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, "u-jan"),
+                    eq(processingProfiles.channel, "mail"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        const [organizationMailProfile] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, orgUserId),
+                    eq(processingProfiles.channel, "mail"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!personalMailProfile || !organizationMailProfile) {
+            throw new Error("missing seeded mail profiles");
+        }
+        await db()
+            .insert(folderDefaultProfiles)
+            .values([
+                {
+                    folderId: weekly.id,
+                    channel: "mail",
+                    profileId: personalMailProfile.id,
+                },
+                {
+                    folderId: orgWeekly.id,
+                    channel: "mail",
+                    profileId: organizationMailProfile.id,
+                },
+            ]);
         expect((await findFolderAddress(weekly.id))?.localPart).toBe(
             "jan+weekly",
         );
@@ -289,6 +335,20 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
         expect(item?.kind).toBe("mail");
         expect(item?.title).not.toContain("Conditions");
         expect(decryptText(item?.title ?? "")).toBe("Conditions for November");
+        const [processing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, message.id));
+        expect(processing).toMatchObject({
+            profileId: expect.any(String),
+            profileRevisionId: expect.any(String),
+            phases: {
+                categorize: expect.objectContaining({
+                    state: "done",
+                    reason: "categorized",
+                }),
+            },
+        });
 
         const assignments = await db()
             .select({ folderId: recordingFolderAssignments.folderId })
@@ -345,6 +405,31 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             company,
         );
         await deliver(raw, ["jan@klepna.example"]);
+        const [mailboxMessage] = await db()
+            .select({ id: mailMessages.id })
+            .from(mailMessages)
+            .where(eq(mailMessages.sizeBytes, raw.length));
+        await pipelineAdvanceJobHandler.run({
+            jobId: "mailbox-arrival",
+            userId: "u-jan",
+            payload: {
+                itemId: mailboxMessage?.id ?? "",
+                view: "private",
+                reason: "arrival",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        const [mailboxProcessing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, mailboxMessage?.id ?? ""));
+        expect(mailboxProcessing?.phases.categorize).toMatchObject({
+            state: "waiting",
+            reason: "needs_folder",
+        });
         const again = await deliver(raw, ["jan+weekly@klepna.example"]);
         expect(again.ingest?.outcomes[0]?.outcome).toBe("duplicate");
         const rows = await db()
@@ -357,6 +442,33 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             .from(recordingFolderAssignments)
             .where(eq(recordingFolderAssignments.itemId, rows[0]?.id ?? ""));
         expect(assignments).toEqual([{ folderId: weeklyFolderId }]);
+        await pipelineAdvanceJobHandler.run({
+            jobId: "mail-folder-merge",
+            userId: "u-jan",
+            payload: {
+                itemId: rows[0]?.id ?? "",
+                view: "private",
+                reason: "placement",
+            },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: vi.fn(),
+        });
+        const [filedProcessing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, rows[0]?.id ?? ""));
+        expect(filedProcessing).toMatchObject({
+            profileId: expect.any(String),
+            profileRevisionId: expect.any(String),
+            phases: {
+                categorize: expect.objectContaining({
+                    state: "done",
+                    reason: "categorized",
+                }),
+            },
+        });
     });
 
     it("refuses mail from someone else to a personal address, and logs it for the owner", async () => {
@@ -427,6 +539,17 @@ describeWithDatabase("inbound mail (PostgreSQL)", () => {
             .from(mailPendingShares)
             .where(eq(mailPendingShares.itemId, message?.id ?? ""));
         expect(pending).toEqual([{ folderId: orgWeeklyFolderId }]);
+        const [processing] = await db()
+            .select()
+            .from(itemProcessing)
+            .where(eq(itemProcessing.itemId, message?.id ?? ""));
+        expect(processing).toMatchObject({
+            profileId: expect.any(String),
+            profileRevisionId: expect.any(String),
+            phases: {
+                categorize: expect.objectContaining({ state: "done" }),
+            },
+        });
         const assigned = await db()
             .select()
             .from(recordingFolderAssignments)

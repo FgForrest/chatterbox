@@ -8,6 +8,7 @@
 import { AppError, ErrorCode } from "@/lib/errors";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
+import { markSummaryStepFailed } from "@/lib/pipeline/state";
 import { generateTopicsForTranscript } from "./generate-topics";
 import {
     admitRateLimitedAutoTopics,
@@ -26,6 +27,17 @@ export const topicsJobHandler: JobHandler<TopicsJobPayload> = {
     timeoutMs: TOPICS_TIMEOUT_MS,
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseTopicsJobPayload,
+
+    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
+        if (payload.trigger === "manual") return;
+        await markSummaryStepFailed({
+            itemId: payload.recordingId,
+            userId,
+            view: payload.view ?? "private",
+            step: "topics",
+            errorCode,
+        });
+    },
 
     async run({ payload, userId, reportProgress }): Promise<JobResult> {
         // As for automatic summaries: the hold's release detects them. It

@@ -1,8 +1,8 @@
 /**
  * What a recording's page still waits for on its private view: automatic
  * Learn's hold (`summaryDueAt`), the correction pass a finished review
- * queued, and the jobs that make what it held back (the release, the
- * title, topics, the summary). The page follows them
+ * queued, and the jobs that make what it held back (the pipeline driver,
+ * the legacy release delegate, title, topics and summary). The page follows them
  * after a review is finished, since none of them is queued by anything it
  * started.
  */
@@ -12,6 +12,7 @@ import { db } from "@/db";
 import { asyncJobs, chatterItems } from "@/db/schema";
 import { LEARN_RELEASE_JOB_KIND } from "@/lib/learn/auto-learn";
 import { LEARN_CORRECT_JOB_KIND } from "@/lib/learn/correction-pass-queue";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { recordingJobSubject } from "@/lib/sharing/view";
 import { SUMMARY_JOB_KIND } from "@/lib/summary/summary-job";
@@ -20,6 +21,7 @@ import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 export const FOLLOW_UP_JOB_KINDS = [
     LEARN_CORRECT_JOB_KIND,
     LEARN_RELEASE_JOB_KIND,
+    PIPELINE_ADVANCE_JOB_KIND,
     TITLE_JOB_KIND,
     TOPICS_JOB_KIND,
     SUMMARY_JOB_KIND,

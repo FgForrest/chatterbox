@@ -26,6 +26,7 @@ export interface CreateRecordingSessionInput {
     metadata: RecordingSessionMetadata;
     startedAt: Date;
     noticeAcknowledgedAt: Date | null;
+    folderId: string | null;
 }
 
 export interface CompleteRecordingSessionInput {
@@ -91,6 +92,13 @@ export function parseCreateRecordingSessionBody(
     body: unknown,
 ): CreateRecordingSessionInput {
     const raw = (body ?? {}) as Record<string, unknown>;
+
+    if (
+        raw.folderId === "" ||
+        (typeof raw.folderId === "string" && raw.folderId.trim() === "")
+    ) {
+        throw invalid("folderId must be a non-empty string", "folderId");
+    }
 
     if (
         typeof raw.clientRecordingId !== "string" ||
@@ -186,6 +194,7 @@ export function parseCreateRecordingSessionBody(
             "noticeAcknowledgedAt",
             false,
         ),
+        folderId: parseOptionalString(raw.folderId, "folderId", 255) ?? null,
     };
 }
 

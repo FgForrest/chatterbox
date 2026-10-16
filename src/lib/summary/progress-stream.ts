@@ -21,6 +21,7 @@ export interface SummaryStreamResult {
     promptId?: string;
     promptFallback?: boolean;
     multiPass?: MultiPassProvenance;
+    scopeChanged?: boolean;
 }
 
 export type SummaryStreamEvent =

@@ -19,6 +19,11 @@ import {
     type MultiPassProgress,
     runMultiPassSummary,
 } from "@/lib/summary/multi-pass";
+import {
+    buildTasksContext,
+    SUMMARY_TASKS_DIRECTIVE,
+    SUMMARY_TASKS_MERGE_DIRECTIVE,
+} from "@/lib/tasks/directive";
 
 /** A well-formed pass reply. */
 function passJson(
@@ -128,6 +133,7 @@ describe("buildMergeInput", () => {
                         assignee: null,
                         due: { phrase: "by Friday", date: "2026-10-09" },
                         quote: null,
+                        candidates: null,
                     },
                 ],
                 taskUpdates: [
@@ -147,9 +153,100 @@ describe("buildMergeInput", () => {
         // The internal `structured` flag is bookkeeping, not model input.
         expect(input).not.toContain("structured");
     });
+
+    it("keeps identity matches and field changes as separate merge inputs", () => {
+        const input = buildMergeInput([
+            {
+                summary: "a",
+                keyPoints: [],
+                actionItems: [],
+                taskItems: [],
+                taskUpdates: [
+                    { ref: "T1", kind: "match", due: null, quote: "same" },
+                    {
+                        ref: "T1",
+                        kind: "due",
+                        due: { phrase: "Friday", date: "2026-10-16" },
+                        quote: "by Friday",
+                    },
+                ],
+                structured: true,
+            },
+            {
+                summary: "b",
+                keyPoints: [],
+                actionItems: [],
+                taskItems: [],
+                taskUpdates: [
+                    { ref: "T1", kind: "match", due: null, quote: "same" },
+                ],
+                structured: true,
+            },
+        ]);
+
+        expect(input.match(/"kind": "match"/g)).toHaveLength(2);
+        expect(input.match(/"kind": "due"/g)).toHaveLength(1);
+        expect(SUMMARY_TASKS_MERGE_DIRECTIVE).toContain(
+            "A match never carries a field change",
+        );
+        expect(SUMMARY_TASKS_MERGE_DIRECTIVE).toContain(
+            "same match from several versions only once",
+        );
+        expect(SUMMARY_TASKS_DIRECTIVE).toContain(
+            "new occurrence of recurring work is a new commitment",
+        );
+        expect(
+            buildTasksContext({
+                recordedAt: new Date("2026-10-08T09:00:00.000Z"),
+                offsetMinutes: 0,
+                decided: [],
+                open: [
+                    {
+                        ref: "T1",
+                        text: "Send the contract",
+                        speaker: null,
+                        dueDate: null,
+                    },
+                ],
+            }),
+        ).toContain('Partial progress adds only that "match" entry');
+    });
 });
 
 describe("runMultiPassSummary", () => {
+    it("collapses the same merged match without absorbing its field change", async () => {
+        const pass = JSON.stringify({
+            summary: "pass",
+            keyPoints: [],
+            actionItems: [],
+            taskUpdates: [{ ref: "T1", kind: "match", quote: "same" }],
+        });
+        const merged = JSON.stringify({
+            summary: "merged",
+            keyPoints: [],
+            actionItems: [],
+            taskUpdates: [
+                { ref: "T1", kind: "match", quote: "same" },
+                { ref: "T1", kind: "match", quote: "same again" },
+                {
+                    ref: "T1",
+                    kind: "due",
+                    due: { phrase: "Friday", date: "2026-10-16" },
+                },
+            ],
+        });
+
+        const result = await runMultiPassSummary({
+            rounds: 2,
+            runPass: vi.fn().mockResolvedValue(pass),
+            runMerge: vi.fn().mockResolvedValue(merged),
+        });
+
+        expect(result.payload.taskUpdates.map((update) => update.kind)).toEqual(
+            ["match", "due"],
+        );
+    });
+
     it("runs every pass, then merges", async () => {
         const runPass = vi
             .fn()

@@ -7,6 +7,7 @@ import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { assertCategorizableFolderInput } from "@/lib/folders/folders";
 import { enforceStorageCap } from "@/lib/hosted/billing/storage-cap";
 import { deniedOnAdminHost } from "@/lib/hosted/hostname-gate";
 import { assertNotOrgAccount } from "@/lib/org/config";
@@ -111,6 +112,11 @@ export const POST = apiHandler(async (request: Request) => {
         );
     }
 
+    const folderId = request.headers.get("x-upload-folder-id")?.trim() || null;
+    if (folderId) {
+        await assertCategorizableFolderInput(session.user.id, folderId);
+    }
+
     const upload = readUploadMetadata(request);
     const ext = uploadExtension(upload.filename);
 
@@ -182,6 +188,7 @@ export const POST = apiHandler(async (request: Request) => {
                 encryptedFilename: encryptText(upload.filename),
                 sourceSize: source.bytes,
                 userId: session.user.id,
+                folderId,
             });
             if (!enqueued.created) throw anotherVideoConverting();
             return NextResponse.json(
@@ -211,6 +218,7 @@ export const POST = apiHandler(async (request: Request) => {
         storage,
         sourceExtension: ext,
         convertedFromVideo: false,
+        folderId,
     });
 
     return NextResponse.json({ success: true, filename: basename });

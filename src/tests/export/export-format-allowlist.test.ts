@@ -13,6 +13,10 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/profiles/legacy-settings", () => ({
+    readLegacySettingsFromProfiles: vi.fn(async () => ({})),
+    writeLegacySettingsToProfiles: vi.fn(async () => {}),
+}));
 
 // Every caller here is an ordinary account: its own content.
 vi.mock("@/lib/export/resolve-archive-scope", () => ({
@@ -30,6 +34,20 @@ vi.mock("@/lib/tasks/archive", () => ({
 
 vi.mock("@/lib/auth-server", () => ({
     requireApiSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    requireApiSessionActor: vi.fn().mockResolvedValue({
+        session: { user: { id: "user-1" } },
+        actor: {
+            kind: "user",
+            actorId: "user-1",
+            issuer: null,
+            subject: null,
+            capabilities: new Set(["use"]),
+            clientId: null,
+            clientPermissions: new Set(),
+            verifiedAt: null,
+        },
+        authTime: null,
+    }),
 }));
 
 vi.mock("@/lib/encryption/fields", () => ({

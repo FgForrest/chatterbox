@@ -14,6 +14,7 @@ const SETTINGS_TOPICS: Record<SettingsSection, HelpTarget> = {
     topics: { page: "settings", anchor: "topics" },
     learning: { page: "settings", anchor: "learning" },
     summary: { page: "settings", anchor: "summary" },
+    profiles: { page: "settings", anchor: "summary" },
     display: { page: "settings", anchor: "display" },
     storage: {
         page: "exports-backups-retention",

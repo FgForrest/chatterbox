@@ -30,6 +30,7 @@ interface Options {
 export function useUploadQueue({ onUploadComplete }: Options) {
     const [isUploading, setIsUploading] = useState(false);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const uploadInputRef = useRef<HTMLInputElement>(null);
     const followers = useRef<Map<string, AbortController>>(new Map());
     // Known once the active-uploads request answers; until then the server
@@ -139,7 +140,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
     }, [watchConversion]);
 
     const handleUpload = useCallback(
-        async (e: React.ChangeEvent<HTMLInputElement>) => {
+        (e: React.ChangeEvent<HTMLInputElement>) => {
             const file = e.target.files?.[0];
             if (!file) return;
             // Reset so picking the same file twice still fires change.
@@ -163,6 +164,17 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                 return;
             }
 
+            setSelectedFile(file);
+        },
+        [],
+    );
+
+    const confirmUpload = useCallback(
+        async (folderId: string | null) => {
+            const file = selectedFile;
+            if (!file) return;
+            setSelectedFile(null);
+
             // Optimistic placeholder in the list. Uses a `pending:`
             // prefixed id namespace so the row can't collide with a
             // server-issued recording id.
@@ -183,7 +195,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             setIsUploading(true);
             let conversionStarted = false;
             try {
-                const data = await sendUpload(file, (progress) => {
+                const data = await sendUpload(file, folderId, (progress) => {
                     updatePending(placeholderId, { progress });
                 });
 
@@ -216,8 +228,10 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                 }
             }
         },
-        [onUploadComplete, updatePending, watchConversion],
+        [onUploadComplete, selectedFile, updatePending, watchConversion],
     );
+
+    const cancelUpload = useCallback(() => setSelectedFile(null), []);
 
     const triggerUpload = useCallback(() => {
         uploadInputRef.current?.click();
@@ -228,6 +242,9 @@ export function useUploadQueue({ onUploadComplete }: Options) {
         pendingUploads,
         uploadInputRef,
         handleUpload,
+        selectedFile,
+        confirmUpload,
+        cancelUpload,
         triggerUpload,
     };
 }
@@ -294,6 +311,7 @@ function pendingFromProgress(
  */
 function sendUpload(
     file: File,
+    folderId: string | null,
     onProgress: (progress: number) => void,
 ): Promise<UploadResponse> {
     return new Promise((resolve, reject) => {
@@ -304,6 +322,7 @@ function sendUpload(
             encodeURIComponent(file.name),
         );
         request.setRequestHeader("X-Upload-Size", String(file.size));
+        if (folderId) request.setRequestHeader("X-Upload-Folder-Id", folderId);
         request.upload.addEventListener("progress", (event) => {
             if (!event.lengthComputable || event.total <= 0) return;
             onProgress(

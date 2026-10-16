@@ -22,10 +22,10 @@ Samotné audio soubory jsou uloženy ve Vámi nastaveném úložišti
 
 Pomocí **Nastavení → Export/Záloha → Vytvořit zálohu** (nebo `POST /api/backup`)
 zadáte úlohu, která sestaví **zip obsahující vše**: audio pro každou
-nahrávku, její přepisy a shrnutí, a `manifest.json`
-popisující, co bylo zahrnuto. Archiv vzniká na pozadí — požadavek
-je vyřízen okamžitě, místo aby čekal na vyčerpání audio dat ze
-úložiště — a panel průběžně hlásí stav.
+nahrávku, její přepisy a shrnutí, poštu, úkoly, volby zpracování a
+`manifest.json` popisující, co bylo zahrnuto. Archiv vzniká na pozadí —
+požadavek je vyřízen okamžitě, místo aby čekal na vyčerpání audio dat
+ze úložiště — a panel průběžně hlásí stav.
 
 Nahrávka, u které nelze přečíst audio, nezpůsobí chybu celého archivu;
 je uvedena v manifestu a vynechána, takže všechny ostatní údaje
@@ -34,12 +34,66 @@ zůstávají zachovány.
 **Úkoly** jsou zahrnuty zvlášť pro každou nahrávku: `tasks.json` obsahuje akceptované
 úkoly a návrhy čekající na posouzení (včetně jejich stavu),
 zatímco `task-updates.json` mapuje následné akce u dané nahrávky
-("označit jako splněné", "posunout termín splnění") pro úkoly
+("označit jako splněné", "už není potřeba", "posunout termín splnění",
+"předat někomu jinému") pro úkoly
 ve stejném archivu. Osoby, kterým jsou úkoly přiřazeny, jsou uvedeny v `knowledge/people.json`. Úkol
 následuje svou nahrávku, nikoliv osobu: úkol, který Vám kolega přiřadil
 na své sdílené nahrávce, je v záloze organizace, ne ve Vaší.
 U nahrávky, kterou jste sdíleli, Vaše záloha neobsahuje úkoly,
 které organizace přidala ručně.
+
+Formát archivu **2.3** uchovává také důkazy a rozhodnutí k úkolům:
+
+- `tasks/mentions.json` zaznamenává každé rozhodnutí o přiřazení zahrnuté
+  v archivu. Pokud je zdrojová položka v archivu, řádek obsahuje
+  dešifrovanou citaci, pozici v audiu nebo textu e-mailu, původ, revizi
+  obsahu, rozhodnutí, posuzujícího uživatele a data. `taskExternal: false`
+  znamená, že je v archivu i úkol. Rozhodnutí vlastníka o jeho vlastní
+  položce v osobním archivu může odkazovat na úkol mimo archiv; takový řádek
+  má `taskExternal: true`, zachovává důkaz a citaci položky, ale obsahuje jen
+  id úkolu, nikoli jeho text. Zmínka na položce mimo osobní archiv je reference
+  s `external: true`, která obsahuje pouze id úkolu, id položky, rozhodnutí a
+  data. Citaci jiného vlastníka nikdy neobsahuje.
+- `tasks/home-moves.json` je auditní historie přesunů domovské položky úkolu.
+  `fromItemExternal` a `toItemExternal` označují id položek, která v tomto
+  archivu nelze dohledat.
+- `task-updates.json` obsahuje také pole směrování a vypořádání návrhu:
+  `state`, `routedTo`, `decidedByUserId`, `decidedAt`, `obsoleteReason`,
+  `version` a `updatedAt`. U e-mailu jsou stejné řádky v `mail.json` pod
+  `taskUpdates`. Systémem vypořádaná dřívější tvrzení mají
+  `state: "obsolete"`, `obsoleteReason: "earlier_statement"` a nemají
+  rozhodujícího uživatele.
+  Řádky se změnou řešitele obsahují také `proposedAssignee`,
+  `proposedAssigneeHint` a `proposedAssigneeCheck`.
+
+Osobní záloha obsahuje domovské úkoly vlastníka a zmínky na jeho vlastních
+položkách. Zmínky na položce jiného vlastníka jsou pouze referencemi. Záloha
+Organizace obsahuje důkazy k úkolům viditelné na aktuálně sdílených položkách;
+soukromé a stažené zmínky vynechává.
+
+`profiles/profiles.json` obsahuje profily vlastněné rozsahem archivu. Pole
+`profiles` obsahuje metadata profilů a `revisions` každou aktuální revizi i
+každou revizi odkazovanou archivovaným během nebo volbou položky. Názvy,
+popisy a `settings` revizí jsou dešifrované; `settings` je JSON, nikoli
+šifrovaná databázová obálka. `transcripts.json`, `summaries.json`, souhrny
+e-mailů a `knowledge/learn.json` obsahují `profileRevisionId` spolu s poli
+původu běhu, například `builtinPromptsVersion`, `inputs`, plátce,
+poskytovatele a model. Odkazy na profil nebo revizi vlastněné jiným rozsahem
+jsou v `externalProfileIds` nebo `externalRevisionIds`; metadata ani nastavení
+externího profilu se nekopírují. Profily Organizace jsou v záloze Organizace,
+osobní profily v záloze jejich vlastníka.
+
+`processing/choices.json` uchovává volby pracovního postupu provedené
+uživatelem, nikoli odvozený stav fronty. `folderDefaults` zaznamenává výslovný
+profil složky pro audio nebo poštu, včetně volby **Nic automaticky**; chybějící
+řádek nadále znamená dědit. `itemChoices` u každé položky zaznamenává zvolené
+`profileId`, neměnné `profileRevisionId`, příznak `manualOnly` a pohled. Osobní
+záloha obsahuje soukromé volby vlastníka, zatímco záloha Organizace obsahuje
+volby pohledu Organizace u aktuálně sdílených položek. Nakonec
+`pendingOrganizationPlacements` zaznamenává položku, cílovou složku Organizace
+a čas požadavku, dokud sdílení čeká na schválení. Tyto čekající záměry patří
+jen vlastníkovi položky, a proto se do úspěšného sdílení objevují pouze v jeho
+osobní záloze.
 
 Hotové archivy zůstávají ke stažení po **7 dní**, poté jsou při úklidu
 odstraněny.

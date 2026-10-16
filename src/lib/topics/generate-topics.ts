@@ -12,31 +12,27 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import {
-    apiCredentials,
-    recordings,
-    transcriptions,
-    userSettings,
-} from "@/db/schema";
+import { recordings, transcriptions, users } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import {
-    enhancementChatModel,
-    pickTopicsCredential,
-} from "@/lib/ai/enhancement-provider";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import { getAiOutputLanguageDirective } from "@/lib/ai/summary-presets";
-import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { recordChatCompletionUsage } from "@/lib/ai/usage-cost";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
-import { decrypt } from "@/lib/encryption";
 import { decryptJsonField, encryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
+import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { JobProgress } from "@/lib/jobs/types";
 import { modelInput } from "@/lib/learn/llm-input";
+import { markSummaryStepDoneInTx } from "@/lib/pipeline/state";
 import { captureServerEvent } from "@/lib/posthog-server";
+import { resolveTopicPrompt } from "@/lib/profiles/prompts";
+import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import { resolveRunContext } from "@/lib/sharing/run-context";
 import type { RecordingView } from "@/lib/sharing/view";
 import {
@@ -49,6 +45,7 @@ import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 import {
     anchorTopics,
     finishTopics,
+    isTopicList,
     joinWindowTopics,
     parseTopicsReply,
 } from "./anchor";
@@ -59,11 +56,7 @@ import {
     splitIntoWindows,
     type TranscriptTopic,
 } from "./timeline";
-import {
-    normalizeTopicPromptConfig,
-    TOPIC_SYSTEM_PROMPT,
-    TOPIC_TEMPLATE_KIND,
-} from "./topic-presets";
+import { TOPIC_SYSTEM_PROMPT } from "./topic-presets";
 
 /** Transcript sources topics can be detected on. */
 export type TopicSource = "plaud" | "riffado";
@@ -79,6 +72,39 @@ const WINDOW_OVERLAP_CHARS = 4_000;
 const CALL_RETRY_ATTEMPTS = 3;
 const CALL_RETRY_BASE_MS = 1_500;
 const CALL_RETRY_MAX_MS = 15_000;
+
+type TopicsRecipe = Pick<
+    StoredTopics,
+    | "provider"
+    | "model"
+    | "profileRevisionId"
+    | "templateId"
+    | "promptTemplate"
+    | "outputLanguage"
+>;
+
+function matchingStoredTopics(
+    row: { topics: unknown; topicsInputFingerprint: string | null },
+    inputFingerprint: string | null,
+    recipe: TopicsRecipe,
+): StoredTopics | null {
+    if (row.topicsInputFingerprint !== inputFingerprint) return null;
+    const stored = decryptJsonField<Partial<StoredTopics>>(row.topics);
+    if (
+        !stored ||
+        !isTopicList(stored.topics) ||
+        stored.topics.length === 0 ||
+        stored.provider !== recipe.provider ||
+        stored.model !== recipe.model ||
+        stored.profileRevisionId !== recipe.profileRevisionId ||
+        stored.templateId !== recipe.templateId ||
+        stored.promptTemplate !== recipe.promptTemplate ||
+        stored.outputLanguage !== recipe.outputLanguage
+    ) {
+        return null;
+    }
+    return stored as StoredTopics;
+}
 
 export interface GenerateTopicsOptions {
     trigger: "manual" | "auto";
@@ -169,57 +195,56 @@ export async function generateTopicsForTranscript(
         );
     }
 
-    // The prompt and language follow the view.
-    const [settings] = await db
-        .select()
-        .from(userSettings)
-        .where(eq(userSettings.userId, ctx.settingsUserId))
+    const profile = await (opts.trigger === "manual"
+        ? resolveManualItemProfile
+        : resolveItemProfile)(
+        recordingId,
+        ctx.view,
+        ctx.ownerUserId,
+        ctx.actorUserId,
+    );
+    const settings = profile.settings as AudioProfileSettings;
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
         .limit(1);
-    const promptConfig = normalizeTopicPromptConfig(
-        settings?.topicPrompt ? decryptJsonField(settings.topicPrompt) : null,
-    );
-    const { id: templateId, prompt: promptTemplate } = resolveTemplate(
-        promptConfig,
-        promptConfig.selectedPrompt,
-        TOPIC_TEMPLATE_KIND,
-    );
+    const resolvedPrompt = resolveTopicPrompt({
+        settings: settings.steps.topics,
+        outputLanguage: settings.steps.summary.outputLanguage,
+        contentLanguage: transcript.detectedLanguage,
+        uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
+    });
+    const templateId = settings.steps.topics.preset;
+    const promptTemplate = resolvedPrompt.text;
 
     // The provider is the actor's, who pays.
-    const configured = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, ctx.actorUserId));
-    const [providerSettings] =
-        ctx.actorUserId === ctx.settingsUserId
-            ? [settings]
-            : await db
-                  .select({ defaultProviders: userSettings.defaultProviders })
-                  .from(userSettings)
-                  .where(eq(userSettings.userId, ctx.actorUserId))
-                  .limit(1);
-    const credentials = pickTopicsCredential(
-        configured,
-        topicsProviderId(providerSettings?.defaultProviders),
-    );
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "topics",
+        pin: settings.steps.topics.provider,
+        actorUserId: ctx.actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
-            configured.length > 0
-                ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to detect topics."
-                : "No AI provider configured",
+            "No AI provider configured",
             400,
         );
     }
-    const openai = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
-        baseURL: credentials.baseUrl || undefined,
-    });
+    const credentials = resolved.credential;
     const model = enhancementChatModel(credentials);
-
+    const recipe: TopicsRecipe = {
+        provider: credentials.provider,
+        model,
+        profileRevisionId: profile.revisionId || null,
+        templateId,
+        promptTemplate,
+        outputLanguage: settings.steps.summary.outputLanguage,
+    };
     const systemContent = [
         TOPIC_SYSTEM_PROMPT,
         CONTENT_IS_DATA_DIRECTIVE,
-        getAiOutputLanguageDirective(settings?.aiOutputLanguage ?? null),
+        getAiOutputLanguageDirective(recipe.outputLanguage),
     ].join("\n\n");
 
     // Read with its corrections applied (same turns, same times), and the
@@ -230,7 +255,85 @@ export async function generateTopicsForTranscript(
     const marks = buildTimeMarks(readTurns, { toHeard: input.toHeard });
     const endMs = Math.max(...readTurns.map((turn) => turn.endMs));
     const windows = splitIntoWindows(marks, WINDOW_CHARS, WINDOW_OVERLAP_CHARS);
+    const stepContent = {
+        contentId: transcript.id,
+        contentSourceId: source,
+        contentRevision: transcript.revision,
+    };
 
+    const cached =
+        opts.trigger === "auto"
+            ? matchingStoredTopics(transcript, input.fingerprint, recipe)
+            : null;
+    if (cached) {
+        const orgUserId = await sharingOrgUserId();
+        const actsForOrganization =
+            ctx.actsForOrganization &&
+            (await userCuratesOrganizationNow(ctx.actorUserId));
+        const outcome = await db.transaction(async (tx) => {
+            await tx
+                .select({ id: recordings.id })
+                .from(recordings)
+                .where(
+                    and(
+                        eq(recordings.id, recordingId),
+                        eq(recordings.userId, userId),
+                    ),
+                )
+                .for("update");
+            const shared = await contentWriterRefusal(tx, {
+                recordingId,
+                ownerUserId: userId,
+                actorUserId: ctx.actorUserId,
+                orgUserId,
+                actsForOrganization,
+            });
+            if (shared) throw writerRefusalError(shared);
+            const [current] = await tx
+                .select({
+                    topics: transcriptions.topics,
+                    topicsInputFingerprint:
+                        transcriptions.topicsInputFingerprint,
+                })
+                .from(transcriptions)
+                .where(
+                    and(
+                        eq(transcriptions.id, transcript.id),
+                        eq(transcriptions.userId, userId),
+                        eq(transcriptions.text, transcript.text),
+                    ),
+                )
+                .limit(1);
+            const stored = current
+                ? matchingStoredTopics(current, input.fingerprint, recipe)
+                : null;
+            if (!stored) return { stored: null, advance: false };
+            const advance = await markSummaryStepDoneInTx(tx, {
+                itemId: recordingId,
+                userId,
+                view: ctx.view,
+                step: "topics",
+                content: stepContent,
+            });
+            return { stored, advance };
+        });
+        if (outcome.stored) {
+            if (outcome.advance) nudge();
+            return {
+                topics: outcome.stored.topics,
+                provider: outcome.stored.provider,
+                model: outcome.stored.model,
+                templateId: outcome.stored.templateId,
+                windows: windows.length,
+            };
+        }
+    }
+
+    const openai = new OpenAI({
+        apiKey: credentials.apiKey,
+        baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
+    });
     const topicsPerWindow: TranscriptTopic[][] = [];
     for (const [index, window] of windows.entries()) {
         opts.onProgress?.({
@@ -253,6 +356,7 @@ export async function generateTopicsForTranscript(
             jitter: 0.5,
             isRetryable: isRetryableError,
             run: async () => {
+                await resolved.reserveCall();
                 const response = await openai.chat.completions.create(
                     buildChatCompletionParams({
                         model,
@@ -268,7 +372,8 @@ export async function generateTopicsForTranscript(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        actorUserId: ctx.actorUserId,
+                        payerUserId: resolved.payerUserId,
                         operation: "topics",
                         provider: credentials.provider,
                         model,
@@ -311,9 +416,7 @@ export async function generateTopicsForTranscript(
 
     const stored: StoredTopics = {
         topics,
-        provider: credentials.provider,
-        model,
-        templateId,
+        ...recipe,
         generatedAt: new Date().toISOString(),
     };
     // Written only if the transcript is still the one the topics were read
@@ -327,7 +430,7 @@ export async function generateTopicsForTranscript(
     const actsForOrganization =
         ctx.actsForOrganization &&
         (await userCuratesOrganizationNow(ctx.actorUserId));
-    const written = await db.transaction(async (tx) => {
+    const outcome = await db.transaction(async (tx) => {
         await tx
             .select({ id: recordings.id })
             .from(recordings)
@@ -346,7 +449,7 @@ export async function generateTopicsForTranscript(
             actsForOrganization,
         });
         if (shared) throw writerRefusalError(shared);
-        return tx
+        const written = await tx
             .update(transcriptions)
             .set({
                 topics: encryptJsonField(stored),
@@ -355,18 +458,31 @@ export async function generateTopicsForTranscript(
             .where(
                 and(
                     eq(transcriptions.id, transcript.id),
+                    eq(transcriptions.userId, userId),
                     eq(transcriptions.text, transcript.text),
                 ),
             )
             .returning({ id: transcriptions.id });
+        const advance =
+            written.length > 0 && opts.trigger === "auto"
+                ? await markSummaryStepDoneInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: ctx.view,
+                      step: "topics",
+                      content: stepContent,
+                  })
+                : false;
+        return { written, advance };
     });
-    if (written.length === 0) {
+    if (outcome.written.length === 0) {
         throw new AppError(
             ErrorCode.CONFLICT,
             "The transcript changed while its topics were being detected. Detect them again.",
             409,
         );
     }
+    if (outcome.advance) nudge();
 
     await captureServerEvent({
         distinctId: ctx.actorUserId,

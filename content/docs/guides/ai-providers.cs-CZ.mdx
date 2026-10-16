@@ -12,8 +12,9 @@ Tři přepisová backendy jsou integrovány nativně, protože jejich API
 nejsou kompatibilní s OpenAI: Google Gemini, ElevenLabs Scribe a
 Speechmatics.
 
-Lze nakonfigurovat více poskytovatelů a pro každou nahrávku zvolit,
-který bude zpracovávat přepis a který sumarizaci.
+Lze nakonfigurovat více poskytovatelů. Profil zpracování volí poskytovatele
+a model pro každý krok. Ruční přepis používá výchozí nastavení účtu, zatímco
+ruční shrnutí lze spustit s libovolným dostupným profilem.
 
 <span id="adding-a-provider" />
 
@@ -158,14 +159,12 @@ a text přepisu v otevřeném formátu (pro sumarizaci). ElevenLabs Scribe v2
 a Speechmatics obdrží s audiem až 500 jmen z vašeho Almanachu (viz
 [Jména z Almanachu](./almanac#names-from-the-almanac)).
 
-Požadavek na souhrn rovněž zahrnuje údaje, které vyžadují jeho akční
-položky: datum pořízení nahrávky (pro převod „do pátku“ na konkrétní
-datum), již přijaté úkoly na dané nahrávce (aby nebyly navrženy znovu)
-a až 30 otevřených úkolů jednotlivých mluvčích z jiných nahrávek, aby model
-zjistil návaznosti. Předávají se pouze úkoly, které může recenzent dané
-nahrávky uzavřít: u soukromé nahrávky vlastní úkoly majitele a sdílené,
-které mu byly přiřazeny; u sdílené nahrávky úkoly organizace. Jsou zasílány
-poskytovateli uživatele, který o souhrn požádal.
+Požadavek na shrnutí obsahuje také údaje potřebné pro krok úkolů: efektivní
+čas položky (pro převod „do pátku“ na konkrétní datum), přijaté zmínky úkolů
+u této položky a možné dřívější úkoly ze stejného rozsahu složek. Model tak
+může navrhnout shodu, dokončení, změnu termínu, zrušení nebo předání. Posílají
+se pouze úkoly viditelné v daném rozsahu zpracování, a to poskytovateli
+zvolenému profilem použitým pro shrnutí.
 
 Hraniční bod důvěry je právě vámi zvolený poskytovatel.
 Šifrování uložených dat u aplikace Chatterbox chrání databázi, nikoliv síťový přenos
@@ -179,11 +178,13 @@ Přepis i sumarizace pak zůstávají kompletně na vašem hardwaru.
 
 <span id="switching-the-active-provider" />
 
-## Přepínání aktivního poskytovatele
+## Volba poskytovatele pro spuštění
 
-U každé nahrávky pracovní stanice zobrazuje volbu poskytovatele přepisu
-i volbu poskytovatele souhrnu. Změny platí ihned; přepis lze spustit znovu
-s jiným poskytovatelem, pokud výsledek prvního nebyl dobrý.
+V **Nastavení → Profily** zvolte poskytovatele a model pro každý krok profilu
+zpracování. Výchozí nastavení složky určuje profil nové položky. U ručního
+shrnutí vyberte vedle tlačítka **Shrnout** libovolný dostupný profil. Chcete-li
+přepis zopakovat s jiným poskytovatelem, změňte nejprve výchozí nastavení účtu
+nebo profil položky a potom spusťte **Přepsat** či **Přepsat znovu**.
 
 <span id="how-transcripts-and-summaries-are-displayed" />
 
@@ -225,77 +226,52 @@ v souhrnu skutečně odkazuje na entitu v přepisu.
 
 <span id="auto-summarize-after-transcription" />
 
-## Automatická sumarizace po přepisu
+## Automatická shrnutí v profilu
 
-**Nastavení → Souhrn → Automaticky generovat souhrn po přepisu**
-promění sumarizační proces na jednorázový tok. Při aktivaci této volby
-je po **každém úspěšném přepisu** ihned následně vygenerován souhrn —
-včetně ručního přepisu, automatizovaných přepisů po synchronizaci i
-opakovaných přepisů. Přepínač je nezávislý na „Auto-transcribe“; každá volba
-spouští svůj vlastní mechanismus.
+Otevřete **Nastavení → Profily**, upravte profil a u kroku shrnutí zapněte
+**Spouštět automaticky**. Zařazená položka dosáhne tohoto kroku po přepisu
+a případném čekání na kontrolu Učení. Profil určuje instrukce shrnutí, jazyk
+a formát výstupu, poskytovatele, rozpoznání úkolů a funkci **Vícenásobné shrnování**.
 
-Automatika je výchozí vypnutá (opt-in) — přináší dodatečné volání AI
-poskytovatele na jednu nahrávku. Můžete zvolit samostatnou předvolbu pro
-automatický režim ("Předvolba pro auto-souhrn"), takže pracovní schůzky mohou
-výchozně používat "Meeting Notes", zatímco ruční tlačítko zachováte
-například pro "General".
+Tato cesta je volitelná a stojí nejméně jedno volání poskytovatele AI na
+položku. **Vícenásobné shrnování** stojí více. Ruční přepis neobchází pořadí profilu:
+další automatické kroky pokračují podle profilu přiřazeného položce.
 
-Automatický souhrn vyžaduje váš vlastní enhancement nebo přepisovací
-poskytovatel nakonfigurovaný v Nastavení → AI poskytovatelé. Hostované účty,
-které používají pouze vestavěný přepis Mynah (bez vlastního poskytovatele),
-automatické souhrny nevytvoří — Mynah podporuje pouze přepis. Pro možnost
-automatické sumarizace si přidejte vlastního poskytovatele.
+Automatické shrnutí vyžaduje poskytovatele pro rozšíření vybraného v profilu.
+Mynah slouží pouze k přepisu, takže hostovaný účet používající jen Mynah
+potřebuje pro krok shrnutí dalšího poskytovatele.
 
 <span id="cost-guardrails" />
 
 ### Cenové limity
 
-Automatický souhrn znamená jedno LLM volání na přepis. U chatovacích modelů
-na `$0.15-$5 / 1M input tokens` a typických přepisech o 1–2 tisíci tokenech, stojí
-jediný souhrn zlomek centu — ale hromadná synchronizace N nahrávek
-nebo přechod na dražší modely může vyústit ve vyšší náklady. Dva mantinely:
+Automatické shrnutí obvykle znamená jedno volání LLM. U chatovacích modelů
+za `$0.15-$5 / 1M input tokens` a typických přepisech o 1–2 tisících tokenech
+stojí jediné shrnutí zlomek centu, ale velký import nebo dražší model mohou
+náklady zvýšit. Dva mantinely:
 
 - **Hodinový limit na uživatele.** Požadavky auto-souhrnu jsou omezeny
-  pomocí `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` (výchozí `60`). Po vyčerpání limitu je přepis
-  normálně uložen, nahrávka pokračuje bez souhrnu a je vyvolána `summary.failed`
-  událost s chybou `rate limit`, takže monitoring
-  událost zachytí. Ruční tlačítko „Vygenerovat souhrn“ **není** omezeno —
-  zůstáváte zcela pod kontrolou.
-- **Použijte levný model.** Endpoint znovu využívá enhancement
-  poskytovatele uživatele (nebo přepisovacího poskytovatele jako zálohu).
-  Pokud zadaný výchozí model obsahuje `whisper` (tj. uživatel nastavil
-  pouze přepisovacího poskytovatele), souhrnové volání použije
-  levný chat model odpovídající poskytovateli, takže se požadavek
-  nevzdá na audio endpoint:
-
-  | Zákl. URL poskytovatele obsahuje | Náhradní chat model                              |
-  | ------------------------------- | -----------------------------------------------   |
-  | `groq`                          | `llama-3.1-8b-instant`                         |
-  | `together`                      | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo`    |
-  | `openrouter`                    | `openai/gpt-4o-mini`                            |
-  | cokoli ostatní                   | `gpt-4o-mini`                                   |
-
-  Pokud chcete jiné parametry, přepište výchozí model v Nastavení → AI poskytovatelé.
+  pomocí `AUTO_SUMMARY_RATE_LIMIT_PER_HOUR` (výchozí `60`). Po vyčerpání
+  limitu čeká práce pipeline za odloženými úlohami. Přepis zůstane uložen
+  a odložení kvůli limitu nevyvolá `summary.failed`. Ruční shrnutí tento
+  limit neomezuje.
+- **Zvolte model v profilu.** Každý krok shrnutí výslovně určuje
+  poskytovatele a model. Chatterbox tiše nenahrazuje jiný chatovací model.
 
 <span id="stale-summaries-on-re-transcribe" />
 
 ### Neaktuální souhrny po opakovaném přepisu
 
-Pokud je nahrávka **znovu přepsána**, je předchozí souhrn navázán na starý text
-přepisu. Aby se zabránilo zobrazení nového přepisu společně se zastaralým
-souhrnem, Chatterbox v rámci téže transakce, která přepis přepisuje (pro přepis
-uživatele typu „riffado“), smaže i existující souhrn. Pokud je automatické
-souhrnování zapnuté, je souhrn vytvořen automaticky. Je-li vypnuté,
-nahrávka zobrazuje souhrn až po ručním kliknutí na „Vygenerovat souhrn“.
+Po **opakovaném přepisu** se staré shrnutí a pozdější výsledky pracovního
+postupu označí jako **Zastaralé**. Pipeline znovu vytvoří automatické kroky
+zapnuté v přiřazeném profilu. Pouze ručně vytvořený výsledek zůstane viditelný
+jako zastaralý, dokud jej znovu nespustíte.
 
 <span id="failure-semantics" />
 
 ### Selhání a jejich projevy
 
-Selhání je izolováno: pokud volání souhrnu selže, přepis je i tak uložen,
-událost `transcription.completed` je vyvolána, a událost `summary.failed` předá chybu
-vašemu webhook přijímači. Ruční tlačítko „Vygenerovat souhrn“ funguje stále.
-
-Vlastní prompty uložené v nastavení pro souhrny nejsou zatím v automatickém
-režimu dostupné; pro automatiku zvolte vestavěnou předvolbu (General,
-Meeting Notes, Key Points, Action Items).
+Selhání je izolované: pokud volání shrnutí selže, přepis zůstane uložen,
+`transcription.completed` se stále odešle a `summary.failed` oznámí skutečnou
+chybu shrnutí. Ruční akce **Shrnout** zůstává dostupná. Odložení kvůli limitu
+není selhání a `summary.failed` nevyvolá.

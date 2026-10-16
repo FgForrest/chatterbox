@@ -101,6 +101,7 @@ async function runJob(
     const controller = new AbortController();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let parsedPayload: unknown;
 
     const stop = () => {
         if (heartbeat) clearInterval(heartbeat);
@@ -109,6 +110,7 @@ async function runJob(
 
     try {
         const payload = handler.parsePayload(job.payload ?? {});
+        parsedPayload = payload;
 
         // The heartbeat doubles as an ownership check. If the row says the
         // claim is no longer ours -- reclaimed while this process was
@@ -226,6 +228,21 @@ async function runJob(
                 `[job-worker] job ${job.id} (${job.kind}) failed but its claim was superseded; not recording`,
             );
         } else if (outcome.status === "failed") {
+            if (handler.onTerminalFailure && parsedPayload !== undefined) {
+                await handler
+                    .onTerminalFailure({
+                        jobId: job.id,
+                        userId: job.userId,
+                        payload: parsedPayload,
+                        errorCode: code ?? "INTERNAL_ERROR",
+                    })
+                    .catch((notificationError) => {
+                        console.error(
+                            `[job-worker] terminal failure notification failed for job ${job.id}:`,
+                            notificationError,
+                        );
+                    });
+            }
             console.error(
                 `[job-worker] job ${job.id} (${job.kind}) failed permanently after ${outcome.attempts} attempt(s):`,
                 error,

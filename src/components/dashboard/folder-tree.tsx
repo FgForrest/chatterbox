@@ -564,8 +564,10 @@ export function FolderTree({
                         </div>
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>
-                                {customFolderCount} {i18n("folder")}{" "}
-                                {customFolderCount === 1 ? "" : i18n("s")}
+                                {i18n(
+                                    "{count, plural, one {# folder} other {# folders}}",
+                                    { count: customFolderCount },
+                                )}
                             </span>
                             <Button
                                 type="button"

@@ -9,6 +9,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError, ErrorCode } from "@/lib/errors";
 
 const { mockEnv, storageDir } = vi.hoisted(() => ({
     mockEnv: {
@@ -44,6 +45,27 @@ vi.mock("@/db/queries/async-jobs", () => ({
     enqueueJob: vi.fn(),
 }));
 vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
+vi.mock("@/lib/folders/folders", () => ({
+    assertCategorizableFolderInput: vi.fn(
+        async (_userId: string, folderId: string) => {
+            if (folderId === "root") {
+                throw new AppError(
+                    ErrorCode.INVALID_INPUT,
+                    "Root folders cannot be used",
+                    400,
+                );
+            }
+            if (folderId === "unknown" || folderId === "foreign") {
+                throw new AppError(
+                    ErrorCode.INVALID_INPUT,
+                    "Folder cannot be used",
+                    400,
+                );
+            }
+            return { folderId, ownerId: "user-1", scope: "personal" as const };
+        },
+    ),
+}));
 vi.mock("@/lib/uploads/video-extraction-job", async (importOriginal) => {
     const actual =
         await importOriginal<
@@ -74,6 +96,7 @@ interface UploadOptions {
     /** What the client claims; defaults to the real body length. */
     declaredSize?: number;
     host?: string;
+    folderId?: string;
 }
 
 /** A body that records whether the route ever pulled from it. */
@@ -104,6 +127,7 @@ function uploadRequest(bytes: Uint8Array, options: UploadOptions) {
         "x-upload-size": String(options.declaredSize ?? bytes.length),
     };
     if (options.type) headers["content-type"] = options.type;
+    if (options.folderId) headers["x-upload-folder-id"] = options.folderId;
     const request = new Request(
         "http://app.example.test/api/recordings/upload",
         {
@@ -228,6 +252,39 @@ describe("POST /api/recordings/upload", () => {
         expect(new Uint8Array(input.buffer)).toEqual(video);
         expect(input.basename).toBe("voice");
         expect(input.extension).toBe(".m4a");
+    });
+
+    it.each([
+        "personal-folder",
+        "org-folder",
+    ])("validates and forwards selected folder %s", async (folderId) => {
+        const { request } = uploadRequest(video, {
+            filename: "voice.m4a",
+            type: "audio/mp4",
+            folderId,
+        });
+
+        expect((await POST(request)).status).toBe(200);
+        expect(saveUploadedAudio).toHaveBeenCalledWith(
+            expect.objectContaining({ folderId }),
+        );
+    });
+
+    it.each([
+        "root",
+        "unknown",
+        "foreign",
+    ])("returns 400 for unusable folder %s before reading the body", async (folderId) => {
+        const { request, tracker } = uploadRequest(video, {
+            filename: "voice.m4a",
+            type: "audio/mp4",
+            folderId,
+        });
+
+        const response = await POST(request);
+
+        expect(response.status).toBe(400);
+        expect(tracker.read).toBe(false);
     });
 
     it("drops the stored part of a video that outgrows its declared size", async () => {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 beforeEach(() => vi.resetModules());
 afterEach(() => vi.unstubAllGlobals());
 
-function setupPopup(tabUrl) {
+function setupPopup(tabUrl, folderId = null, folderLabel = null) {
     const nodes = new Map();
     let onMessage;
     const node = (id) => {
@@ -13,6 +13,8 @@ function setupPopup(tabUrl) {
                 hidden: true,
                 disabled: false,
                 textContent: "",
+                value: "",
+                children: [],
                 style: {},
                 attributes: new Map(),
                 setAttribute(name, value) {
@@ -21,6 +23,9 @@ function setupPopup(tabUrl) {
                 addEventListener: (type, listener) =>
                     listeners.set(type, listener),
                 click: () => listeners.get("click")?.(),
+                replaceChildren(...children) {
+                    this.children = children;
+                },
             });
         }
         return nodes.get(id);
@@ -37,8 +42,10 @@ function setupPopup(tabUrl) {
         title: "",
         getElementById: node,
         querySelectorAll: () => [],
+        createElement: () => ({ value: "", textContent: "" }),
     });
     vi.stubGlobal("window", { close });
+    const storageSet = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("chrome", {
         i18n: {
             getUILanguage: () => "en",
@@ -50,7 +57,10 @@ function setupPopup(tabUrl) {
                     serverUrl: "https://example.com",
                     encryptedApiKey: { ciphertext: "test" },
                     dataUseAcknowledgedAt: "2026-10-13T00:00:00.000Z",
+                    folderId,
+                    folderLabel,
                 }),
+                set: storageSet,
             },
         },
         tabs: { query: async () => [{ id: 42, url: tabUrl }] },
@@ -67,6 +77,7 @@ function setupPopup(tabUrl) {
     return {
         node,
         sendMessage,
+        storageSet,
         close,
         dispatchState: (state) => onMessage({ type: "state", state }),
     };
@@ -112,9 +123,11 @@ describe("manual recorder start", () => {
         sendMessage.mockImplementation((message) =>
             message.type === "get-state"
                 ? Promise.resolve({ state: { state: "idle" } })
-                : new Promise((resolve) => {
-                      finishStart = resolve;
-                  }),
+                : message.type === "start-recording"
+                  ? new Promise((resolve) => {
+                        finishStart = resolve;
+                    })
+                  : Promise.resolve({ ok: true, folders: [] }),
         );
         await import("../../../extensions/recorder/popup/popup.js");
         await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
@@ -124,9 +137,105 @@ describe("manual recorder start", () => {
         expect(node("start").textContent).toBe("openingPicker");
         expect(close).not.toHaveBeenCalled();
 
+        await vi.waitFor(() => expect(finishStart).toBeTypeOf("function"));
         finishStart({ ok: true });
         await start;
         expect(close).toHaveBeenCalledOnce();
+    });
+
+    it("renders the idle view before the folder list responds", async () => {
+        const { node, sendMessage, storageSet, close } = setupPopup(
+            "https://example.com",
+        );
+        let finishFolders;
+        sendMessage.mockImplementation((message) =>
+            message.type === "get-state"
+                ? Promise.resolve({ state: { state: "idle" } })
+                : message.type === "get-folders"
+                  ? new Promise((resolve) => {
+                        finishFolders = resolve;
+                    })
+                  : Promise.resolve({ ok: true }),
+        );
+
+        await import("../../../extensions/recorder/popup/popup.js");
+        await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
+        expect(node("start").textContent).toBe("recordWithConsent");
+        expect(finishFolders).toBeTypeOf("function");
+
+        finishFolders({
+            ok: true,
+            folders: [
+                {
+                    id: "folder-1",
+                    label: "Private / Calls",
+                },
+            ],
+        });
+        await vi.waitFor(() =>
+            expect(node("folder-picker").children).toHaveLength(2),
+        );
+        node("folder-picker").value = "folder-1";
+        await node("start").click();
+        expect(storageSet).toHaveBeenCalledWith({
+            folderId: "folder-1",
+            folderLabel: "Private / Calls",
+        });
+        expect(close).toHaveBeenCalledOnce();
+    });
+
+    it("shows the remembered folder label before the folder list responds", async () => {
+        const { node, sendMessage, storageSet, close } = setupPopup(
+            "https://example.com",
+            "folder-1",
+            "Private / Calls",
+        );
+        let finishFolders;
+        sendMessage.mockImplementation((message) =>
+            message.type === "get-state"
+                ? Promise.resolve({ state: { state: "idle" } })
+                : message.type === "get-folders"
+                  ? new Promise((resolve) => {
+                        finishFolders = resolve;
+                    })
+                  : Promise.resolve({ ok: true }),
+        );
+
+        await import("../../../extensions/recorder/popup/popup.js");
+        await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
+        expect(node("folder-picker").value).toBe("folder-1");
+        expect(node("folder-picker").children[1].textContent).toBe(
+            "Private / Calls",
+        );
+
+        await node("start").click();
+
+        expect(sendMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "start-recording" }),
+        );
+        expect(storageSet).not.toHaveBeenCalled();
+        expect(close).toHaveBeenCalledOnce();
+        finishFolders?.({ ok: true, folders: [] });
+    });
+
+    it("uses the localized saved-folder label when the remembered folder has no label", async () => {
+        const { node, sendMessage } = setupPopup(
+            "https://example.com",
+            "folder-1",
+        );
+        sendMessage.mockImplementation((message) =>
+            message.type === "get-state"
+                ? Promise.resolve({ state: { state: "idle" } })
+                : message.type === "get-folders"
+                  ? new Promise(() => {})
+                  : Promise.resolve({ ok: true }),
+        );
+
+        await import("../../../extensions/recorder/popup/popup.js");
+        await vi.waitFor(() => expect(node("view-idle").hidden).toBe(false));
+        expect(node("folder-picker").children[1].textContent).toBe(
+            "savedFolder",
+        );
     });
 
     it("shows upload progress, waits for server completion, then returns to start", async () => {

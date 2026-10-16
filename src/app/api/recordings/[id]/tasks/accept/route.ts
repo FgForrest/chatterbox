@@ -22,7 +22,7 @@ function idList(value: unknown, field: string): string[] {
 
 /**
  * Finish the recording's task review: ticked rows become tasks. Takes the
- * `{proposals, updates}` ids the reviewer saw; 409 when they changed.
+ * `{proposals, updates, matches}` ids the reviewer saw; 409 when they changed.
  */
 export const POST = apiHandler<RecordingContext>(async (request, context) => {
     const { id } = await (context as RecordingContext).params;
@@ -32,6 +32,7 @@ export const POST = apiHandler<RecordingContext>(async (request, context) => {
         await acceptReview(viewer, id, {
             proposals: idList(body.proposals, "proposals"),
             updates: idList(body.updates, "updates"),
+            matches: idList(body.matches, "matches"),
         }),
     );
 });

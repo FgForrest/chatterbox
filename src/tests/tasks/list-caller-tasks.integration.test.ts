@@ -9,7 +9,13 @@
 
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { recordings, recordingTasks, users } from "@/db/schema";
+import {
+    chatterItems,
+    recordings,
+    recordingTasks,
+    taskMentions,
+    users,
+} from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -416,5 +422,43 @@ describeWithDatabase("listCallerTasks (PostgreSQL)", () => {
         expect(
             await getCallerTask(viewer("carol"), task.aliceSharedForBob ?? ""),
         ).toBeNull();
+    });
+
+    it("returns the latest visible evidence item's own metadata", async () => {
+        await db()
+            .update(chatterItems)
+            .set({
+                title: encryptText("Bob follow-up"),
+                occurredAt: new Date("2026-10-14T09:00:00.000Z"),
+            })
+            .where(eq(chatterItems.id, "b-shared"));
+        await db()
+            .insert(taskMentions)
+            .values({
+                taskId: task.aliceSharedForBob ?? "",
+                itemId: "b-shared",
+                userId: BOB,
+                view: "org",
+                statementAt: new Date("2026-10-14T09:05:00.000Z"),
+                matchDecision: "accepted",
+            });
+
+        const listed = await getCallerTask(
+            viewer("bob"),
+            task.aliceSharedForBob ?? "",
+        );
+
+        expect(listed).toMatchObject({
+            evidenceItemId: "b-shared",
+            evidenceItemKind: "audio",
+            recording: { id: "a-shared" },
+            evidence: {
+                id: "b-shared",
+                title: "Bob follow-up",
+                startTime: "2026-10-14T09:00:00.000Z",
+                view: "private",
+                kind: "audio",
+            },
+        });
     });
 });

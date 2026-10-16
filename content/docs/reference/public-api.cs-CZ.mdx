@@ -1,9 +1,9 @@
 ---
 title: Veřejné API
-description: Veřejné rozhraní /api/v1/* pro čtení — ověřování, koncové body, chyby a limity.
+description: Veřejné rozhraní /api/v1/* — ověřování, koncové body, chyby a limity.
 ---
 
-Rozhraní `/api/v1/*` je veřejné a stabilní API služby Chatterbox, určené pouze ke čtení.
+Rozhraní `/api/v1/*` je veřejné a stabilní API služby Chatterbox.
 Ověření probíhá pomocí osobních API klíčů; integrace jako Zapier, n8n,
 a vaše vlastní skripty jej mohou používat.
 
@@ -28,8 +28,10 @@ Odešlete svůj osobní API klíč jako Bearer token:
 Authorization: Bearer op_K7vR8x...
 ```
 
-Klíče mají 27 znaků: `op_` + 24 náhodných znaků bezpečných pro URL. Klíče
-mají aktuálně pouze oprávnění pro čtení. Odvolané nebo expirované klíče jsou odmítnuty s odpovědí `401 UNAUTHORIZED`. Tokeny jsou v klidu uchovávány HMAC-hashované (šifrování uložených dat).
+Klíče mají 27 znaků: `op_` + 24 náhodných znaků bezpečných pro URL. Běžné klíče
+mají oprávnění pro čtení; spárované klíče rekordéru mají také oprávnění
+`recordings:write`. Odvolané nebo expirované klíče jsou odmítnuty s odpovědí
+`401 UNAUTHORIZED`. Tokeny jsou v klidu uchovávány HMAC-hashované.
 
 <span id="rate-limits" />
 
@@ -138,8 +140,9 @@ Odpověď:
       "filesize_bytes": 1234567,
       "device": { "serial_number": "...", "name": "Plaud Note", "model": "..." },
       "has_transcription": true,
-      "has_summary": false,
+      "has_summary": true,
       "audio_reaped": false,
+      "processing": { "phase": "summary", "state": "done" },
       "links": {
         "self": "/api/v1/recordings/...",
         "transcript": "/api/v1/recordings/.../transcript",
@@ -155,6 +158,16 @@ Odpověď:
 `audio_reaped` je `true` pokud byla zvuková stopa odstraněna dle retenční politiky
 vlastníka. Nahrávka i její metadata zůstávají; `links.audio` odpovídá
 `410 Gone`. Sledujte tento příznak místo toho, abyste považovali 410 za chybu.
+
+`processing` uvádí aktuální fázi zpracování nahrávky a její stav. Nahrávky
+zpracované před zavedením tohoto postupu vracejí svou poslední ustálenou fázi,
+nebo `{ "phase": "categorize", "state": "skipped" }`, pokud nemají řádek
+zpracování. Do čekajícího stavu přejdou až tehdy, když po zavedení postupu
+dorazí nový obsah.
+
+`phase` má jednu z hodnot `categorize`, `transcribe`, `learn`, `summary`,
+`taskReview` nebo `share`. `state` má jednu z hodnot `pending`, `waiting`,
+`running`, `done`, `skipped`, `failed`, `outdated` nebo `not_processed`.
 
 Stránkování je **kurzorové, sestupně dle `updated_at`**. Když
 `has_more` je `true`, předejte `next_cursor` v dalším dotazu.
@@ -269,14 +282,69 @@ curl -L -H "Authorization: Bearer op_..." \
 pro nesplnitelné začátky (za koncem souboru nebo `start > end`). Nadměrné hodnoty
 `end` jsou zkráceny na `fileSize - 1` dle RFC 7233.
 
+<span id="recording-sessions" />
 <span id="what-about-writes" />
 
-## A co zápis?
+## Zápis: relace rekordéru
 
-Nejsou k dispozici žádné veřejné endpointy pro zápis. Povrch `/api/v1/*` je
-záměrně pouze pro čtení. Pokud potřebujete data *zapsat*, spusťte
-uživatelské rozhraní Chatterbox nebo synchronizujte zdrojový účet Plaud
-pomocí nastaveného synchronizačního cyklu.
+Výše uvedené endpointy pro čtení přijímají každý platný klíč. Zápis vyžaduje
+oprávnění `recordings:write`, které používá pouze rozhraní streamovaných relací
+rekordéru. Klíč jen s oprávněním `read` tyto endpointy volat nemůže.
+
+Toto rozhraní používá rozšíření [Meeting Recorder](../guides/meeting-recorder),
+které odesílá zvuk po částech už během nahrávání:
+
+1. `POST /api/v1/recording-sessions` otevře relaci. Tělo obsahuje `mimeType`
+   (`audio/webm` nebo `audio/ogg`), `channelLayout`, `startedAt` a nepovinná pole
+   `platformHint`, `clientVersion`, `timezoneOffsetMinutes`,
+   `noticeAcknowledgedAt` a `folderId`. Složka musí být osobní složka mimo
+   kořen nebo zapisovatelná složka Organizace. Kořenová složka vrátí
+   `400 INVALID_INPUT`; neznámá nebo nepřístupná složka vrátí stejný kód s
+   hodnotou `folderId` v `details.field`. Odpověď `201` je úplná reprezentace relace včetně
+   `folder_id`, `processing`, jednorázového klíče `encryption` a limitů nahrávání
+   v `limits`.
+2. `PUT /api/v1/recording-sessions/{id}/chunks/{index}` odešle jednu část jako
+   nezpracované tělo požadavku s hlavičkou `X-Chunk-SHA256`. Indexy začínají od
+   nuly a musí být souvislé.
+3. `POST /api/v1/recording-sessions/{id}/complete` označí relaci za dokončenou
+   pomocí `chunkCount`, `endedAt` a `stopReason`. Server ověří části, sestaví je
+   a vytvoří nahrávku. Odpověď obsahuje `job_id`.
+4. `GET /api/v1/recording-sessions/{id}` vrací stav a přijaté indexy částí pro
+   obnovení po přerušení. Odpovědi relace obsahují také `folder_id` a
+   `processing: { phase, state }`. Před vznikem nahrávky je zpracování
+   `{ "phase": "categorize", "state": "pending" }`; po dokončení odpovídá
+   stavu nahrávky.
+5. `DELETE /api/v1/recording-sessions/{id}` relaci zruší a smaže uložené části.
+
+Spárované rozšíření načítá výchozí nastavení serveru z
+`GET /api/v1/recorder/config` se stejným oprávněním. Stejný klíč může volat
+`GET /api/v1/recorder/folders`, který vrací osobní složky držitele klíče mimo
+kořen a zapisovatelné složky Organizace:
+
+```json
+{
+  "data": [
+    { "id": "...", "name": "Klient A", "path": "Soukromé / Klient A", "scope": "personal" },
+    { "id": "...", "name": "Prodej", "path": "Organizace / Prodej", "scope": "org" }
+  ]
+}
+```
+
+Složky jsou seřazené nejprve osobní a potom podle `path`. Endpoint používá
+rate-limit klíče rekordéru: chybějící nebo neplatný klíč vrátí `401`, klíč bez
+oprávnění `recordings:write` vrátí `403` a vyčerpaný limit vrátí `429`.
+
+Je-li uvedeno `folderId`, dokončení nahrávku zařadí před pokračováním ve
+zpracování. Složka Organizace nejprve vytvoří záměr sdílení; zpracování
+automaticky pokračuje, jakmile se vyhodnotí použitelný profil složky, jinak v
+aplikaci čeká na volbu profilu nebo zásah kurátora. Bez `folderId` nahrávka čeká
+v aplikaci, až ji vlastník zařadí.
+Webhooky `transcription.completed` a `summary.completed` se proto u takové
+nahrávky odešlou až poté, co ji vlastník zařadí a zpracování dosáhne příslušné
+fáze.
+
+Jiné veřejné endpointy pro zápis nejsou k dispozici. Hotový zvuk můžete místo
+toho nahrát tlačítkem v uživatelském rozhraní.
 
 <span id="stability" />
 

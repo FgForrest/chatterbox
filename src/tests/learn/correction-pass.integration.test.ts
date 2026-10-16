@@ -337,7 +337,7 @@ describeWithDatabase("The correction pass (PostgreSQL)", () => {
         const release = await db()
             .select()
             .from(asyncJobs)
-            .where(eq(asyncJobs.kind, "learn.release"));
+            .where(eq(asyncJobs.kind, "pipeline.advance"));
         expect(release).toHaveLength(1);
         // The model read the Almanac and the transcript.
         const prompt = JSON.stringify(createCompletion.mock.calls[0]?.[0]);

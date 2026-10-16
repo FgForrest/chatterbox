@@ -29,7 +29,6 @@ import {
     mailUserById,
     resolveLocalPart,
 } from "@/lib/mail/addresses";
-import { processNewMail } from "@/lib/mail/auto-process";
 import { isMailEnabled, mailDomain } from "@/lib/mail/config";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { parseMessage } from "@/lib/mail/parse";
@@ -351,9 +350,6 @@ export async function ingestMail(input: IngestInput): Promise<IngestResult> {
             }
             // A duplicate may have been filed into another folder.
             await scheduleOwnerExports(delivery.ownerUserId);
-            if (!stored.duplicate) {
-                await processNewMail(delivery.ownerUserId, stored.itemId);
-            }
         }
     }
     for (const entry of outcomes) {

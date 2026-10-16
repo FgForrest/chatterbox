@@ -25,10 +25,12 @@ export ORG_ACCOUNT_NAME="Northwind Studio"
 export DEFAULT_STORAGE_TYPE="local"
 
 result="$(mktemp)"
-trap 'rm -f "$result"' EXIT
+trap 'rm -f "$result"; compose start app >/dev/null 2>&1 || true' EXIT
 
+compose stop app
 USER_GUIDE_SEED=wipe-this-database USER_GUIDE_SEED_OUT="$result" \
-    npx vitest run --config docs/user-guide/demo/vitest.config.ts
+    ./node_modules/.bin/vitest run --config docs/user-guide/demo/vitest.config.ts
+compose start app
 
 # The accounts are new, so is their audio. Speech-like noise as long as
 # each recording, so the player has something to play.
@@ -47,6 +49,4 @@ for (const file of audio) console.log(`${file.durationSeconds} ${file.storagePat
     ' sh "$seconds" "$path" </dev/null
 done
 
-# Drop the app's in-memory knowledge of the accounts the seed replaced.
-compose restart app
 echo "Demo data seeded. Sign in as alex@example.com / demo-password-123."

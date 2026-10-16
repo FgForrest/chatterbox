@@ -24,7 +24,7 @@ import {
     mailContents,
     mailLearnedParts,
     mailMessages,
-    recordingTasks,
+    taskMentions,
     userSettings,
     users,
 } from "@/db/schema";
@@ -34,6 +34,7 @@ import {
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
+import { deleteItemTaskVectorsInTx } from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 /** One part of a mail a retention policy can remove. */
@@ -177,9 +178,9 @@ function mailReapWhere(
                     ),
                     exists(
                         db
-                            .select({ id: recordingTasks.id })
-                            .from(recordingTasks)
-                            .where(eq(recordingTasks.itemId, chatterItems.id)),
+                            .select({ id: taskMentions.id })
+                            .from(taskMentions)
+                            .where(eq(taskMentions.itemId, chatterItems.id)),
                     ),
                 ),
             ) as SQL,
@@ -350,6 +351,10 @@ export async function deleteMailContent(
             )
             .returning({ id: mailContents.id });
         if (removed.length === 0) return false;
+        await deleteItemTaskVectorsInTx(tx, {
+            itemId,
+            ownerUserId,
+        });
         // Nothing cascades from the text: its anchors point at the item.
         await tx
             .delete(knowledgeFactEvidence)

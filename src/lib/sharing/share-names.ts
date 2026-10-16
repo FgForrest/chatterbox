@@ -3,6 +3,7 @@ import type { db } from "@/db";
 import {
     people,
     recordingTasks,
+    taskUpdateProposals,
     transcriptions,
     transcriptSpeakers,
 } from "@/db/schema";
@@ -10,6 +11,7 @@ import { orgOwnedCondition } from "@/lib/knowledge/org-people";
 import { promotePersonInTx } from "@/lib/knowledge/people";
 import { scopesNamingInTx } from "@/lib/knowledge/scope-generation";
 import { transcriptSpeakerLabels } from "@/lib/knowledge/speaker-labels";
+import { routeAwaitingShareTaskProposalsInTx } from "@/lib/tasks/routing";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -130,6 +132,25 @@ export async function publishTaskAssigneesInTx(
                 sql`not ${orgOwnedCondition(people.userId)}`,
             ),
         );
+    const proposalRows = await tx
+        .selectDistinct({
+            personId: taskUpdateProposals.proposedAssigneePersonId,
+        })
+        .from(taskUpdateProposals)
+        .innerJoin(
+            people,
+            eq(people.id, taskUpdateProposals.proposedAssigneePersonId),
+        )
+        .where(
+            and(
+                eq(taskUpdateProposals.itemId, recordingId),
+                inArray(taskUpdateProposals.state, [
+                    "awaiting_source_review",
+                    "awaiting_share",
+                ]),
+                sql`not ${orgOwnedCondition(people.userId)}`,
+            ),
+        );
     // From now on its assignees see these tasks: news for their badge.
     await tx
         .update(recordingTasks)
@@ -141,20 +162,38 @@ export async function publishTaskAssigneesInTx(
                 sql`${recordingTasks.assigneePersonId} is not null`,
             ),
         );
-    const personIds = rows.flatMap((row) =>
-        row.personId ? [row.personId] : [],
-    );
-    if (personIds.length === 0) return new Set();
-    const scopes = await scopesNamingInTx(tx, { personIds });
-    for (const personId of personIds) {
-        const promoted = await promotePersonInTx(tx, personId, orgUserId);
-        if (promoted && promoted !== personId) {
-            await tx
-                .update(recordingTasks)
-                .set({ assigneePersonId: promoted })
-                .where(eq(recordingTasks.assigneePersonId, personId));
+    const personIds = [
+        ...new Set(
+            [...rows, ...proposalRows].flatMap((row) =>
+                row.personId ? [row.personId] : [],
+            ),
+        ),
+    ];
+    const scopes = new Set<string>();
+    if (personIds.length > 0) {
+        for (const scope of await scopesNamingInTx(tx, { personIds })) {
+            scopes.add(scope);
+        }
+        for (const personId of personIds) {
+            const promoted = await promotePersonInTx(tx, personId, orgUserId);
+            if (promoted && promoted !== personId) {
+                await tx
+                    .update(recordingTasks)
+                    .set({ assigneePersonId: promoted })
+                    .where(eq(recordingTasks.assigneePersonId, personId));
+                await tx
+                    .update(taskUpdateProposals)
+                    .set({ proposedAssigneePersonId: promoted })
+                    .where(
+                        eq(
+                            taskUpdateProposals.proposedAssigneePersonId,
+                            personId,
+                        ),
+                    );
+            }
         }
     }
-    scopes.add(orgUserId);
+    await routeAwaitingShareTaskProposalsInTx(tx, recordingId);
+    if (personIds.length > 0) scopes.add(orgUserId);
     return scopes;
 }

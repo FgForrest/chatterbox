@@ -20,10 +20,15 @@ import {
 import { AppError, ErrorCode } from "@/lib/errors";
 import { nudge } from "@/lib/jobs/nudge";
 import { InvalidJobPayloadError } from "@/lib/jobs/types";
-import { isLearnAvailableFor } from "@/lib/knowledge/availability";
+import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { isUntimed } from "@/lib/knowledge/correction-anchors";
 import { vocabularyVersion } from "@/lib/knowledge/vocabulary";
 import { learnRunDead, learnRunOpen } from "@/lib/learn/learn-open";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import { type RecordingView, recordingJobSubject } from "@/lib/sharing/view";
 import { contentWriterRefusal, writerRefusalError } from "@/lib/sharing/writer";
@@ -114,7 +119,7 @@ export async function startLearnRun(input: {
             400,
         );
     }
-    if (!(await isLearnAvailableFor(actorUserId))) {
+    if (!isLearnDeploymentAvailable()) {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
             "Learn needs a chat provider. Add an OpenAI-compatible provider to run it.",
@@ -122,6 +127,34 @@ export async function startLearnRun(input: {
         );
     }
     const view: RecordingView = access.view;
+    const profile = await (trigger === "manual"
+        ? resolveManualItemProfile
+        : resolveItemProfile)(
+        access.recordingId,
+        view,
+        access.ownerUserId,
+        actorUserId,
+    );
+    const learnSettings = profile.settings.steps.learn;
+    if (trigger === "auto" && !learnSettings.automatic) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "Automatic Learn is off in this item's profile.",
+            400,
+        );
+    }
+    const provider = await resolveStepProvider({
+        step: "learn",
+        pin: learnSettings.provider,
+        actorUserId,
+    });
+    if (provider.kind !== "credential") {
+        throw new AppError(
+            ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
+            "Learn needs a chat provider. Add an OpenAI-compatible provider to run it.",
+            400,
+        );
+    }
     await settleDeadLearnRuns(access.recordingId);
     // The run, under the lock sharing, withdrawal, rewrites and erasure
     // take, with the transcript read and the writer rule checked there: a
@@ -134,6 +167,8 @@ export async function startLearnRun(input: {
                 actorUserId,
                 trigger,
                 actsForOrganization,
+                profileRevisionId: profile.revisionId,
+                payerUserId: provider.payerUserId,
             });
         }
         const [live] = await tx
@@ -221,6 +256,13 @@ export async function startLearnRun(input: {
                 trigger,
                 transcriptRevision: transcript.revision,
                 vocabularyVersion: await vocabularyVersion(tx),
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId: provider.payerUserId,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                },
             })
             .returning({ id: learnRuns.id });
         return {
@@ -336,11 +378,15 @@ async function insertMailRunInTx(
         actorUserId,
         trigger,
         actsForOrganization,
+        profileRevisionId,
+        payerUserId,
     }: {
         access: RecordingViewContext;
         actorUserId: string;
         trigger: "manual" | "auto";
         actsForOrganization?: boolean;
+        profileRevisionId: string;
+        payerUserId: string;
     },
 ): Promise<
     | { open: { id: string; jobId: string | null } }
@@ -380,7 +426,7 @@ async function insertMailRunInTx(
             )
             .limit(1),
         tx
-            .select({ revision: mailContents.revision })
+            .select({ id: mailContents.id, revision: mailContents.revision })
             .from(mailContents)
             .where(
                 and(
@@ -435,6 +481,13 @@ async function insertMailRunInTx(
             // A mail's content revision: a re-parse supersedes the run.
             transcriptRevision: content.revision,
             vocabularyVersion: await vocabularyVersion(tx),
+            profileRevisionId,
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId,
+            inputs: {
+                contentId: content.id,
+                contentRevision: content.revision,
+            },
         })
         .returning({ id: learnRuns.id });
     return { runId: (run as { id: string }).id, transcriptionId: null };
@@ -445,13 +498,30 @@ async function insertMailRunInTx(
  * (buried after a crash, or never queued): nothing will finish them.
  */
 export async function settleDeadLearnRuns(recordingId: string): Promise<void> {
-    await db
-        .update(learnRuns)
-        .set({
-            status: "failed",
-            errorCode: ErrorCode.INTERNAL_ERROR,
-            finishedAt: new Date(),
-            updatedAt: new Date(),
-        })
-        .where(and(eq(learnRuns.itemId, recordingId), learnRunDead()));
+    const advances = await db.transaction(async (tx) => {
+        const settled = await tx
+            .update(learnRuns)
+            .set({
+                status: "failed",
+                errorCode: ErrorCode.INTERNAL_ERROR,
+                finishedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(and(eq(learnRuns.itemId, recordingId), learnRunDead()))
+            .returning({ userId: learnRuns.userId, view: learnRuns.view });
+        const unique = new Map(
+            settled.map((run) => [`${run.userId}:${run.view}`, run]),
+        );
+        return Promise.all(
+            [...unique.values()].map((run) =>
+                requestAdvanceInTx(tx, {
+                    itemId: recordingId,
+                    userId: run.userId,
+                    view: run.view,
+                    reason: "learn-settled",
+                }),
+            ),
+        );
+    });
+    if (advances.some(Boolean)) nudge();
 }

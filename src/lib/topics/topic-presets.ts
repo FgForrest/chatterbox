@@ -14,13 +14,14 @@ import {
     type TemplateConfiguration,
     type TemplateKind,
 } from "@/lib/ai/prompt-templates";
+import type { AppLocale } from "@/lib/i18n/config";
 
 export type TopicPreset = "default";
 
-export const TOPIC_PRESETS: Readonly<Record<TopicPreset, { prompt: string }>> =
-    {
-        default: {
-            prompt: `Divide this conversation into its topics, as chapters of a recording someone will want to jump around in.
+/** Localized text of every built-in topic prompt. */
+export const TOPIC_PROMPTS_BY_LOCALE = {
+    default: {
+        en: `Divide this conversation into its topics, as chapters of a recording someone will want to jump around in.
 
 Guidelines:
 - Start a new topic where the conversation clearly moves to a different subject, not at every change of speaker.
@@ -30,7 +31,22 @@ Guidelines:
 
 Transcript:
 {transcription}`,
-        },
+        "cs-CZ": `Rozdělte tento rozhovor do témat jako na kapitoly nahrávky, mezi kterými se bude posluchač chtít přesouvat.
+
+Pokyny:
+- Nové téma začněte tam, kde rozhovor zřetelně přechází k jinému námětu, ne při každé změně mluvčího.
+- Nové téma vytvářejte přibližně po několika minutách; krátká nahrávka může mít jen dvě nebo tři. Nevytvářejte téma kratší než přibližně minutu, pokud se námět skutečně nezmění.
+- První téma začíná na začátku rozhovoru.
+- Názvy jsou krátké jmenné fráze o dvou až šesti slovech, které jako názvy kapitol pojmenovávají probíraný obsah. Nepoužívejte číslování, jména mluvčích, pokud nejsou předmětem hovoru, ani interpunkční znaménko na konci.
+
+Přepis:
+{transcription}`,
+    },
+} satisfies Record<TopicPreset, Record<AppLocale, string>>;
+
+export const TOPIC_PRESETS: Readonly<Record<TopicPreset, { prompt: string }>> =
+    {
+        default: { prompt: TOPIC_PROMPTS_BY_LOCALE.default.en },
     };
 
 export const TOPIC_TEMPLATE_KIND: TemplateKind<TopicPreset> = {

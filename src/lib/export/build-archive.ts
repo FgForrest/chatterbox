@@ -18,6 +18,8 @@ import {
     aiUsageEvents,
     apiCredentials,
     chatterItems,
+    folderDefaultProfiles,
+    itemProcessing,
     knowledgeAliases,
     knowledgeEntities,
     knowledgeEntityNotes,
@@ -29,9 +31,12 @@ import {
     knowledgeVocabularyProposalVotes,
     learnReviewItems,
     learnRuns,
+    mailPendingShares,
     people,
     personEmails,
     personNotes,
+    processingProfileRevisions,
+    processingProfiles,
     recordingFolderAssignments,
     recordingFolders,
     recordings,
@@ -45,6 +50,8 @@ import { decryptBuffer } from "@/lib/encryption";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import {
     type ArchiveScope,
+    archivedItemCondition,
+    archivedProfileCondition,
     archivedRecordingCondition,
     scopeUserId,
 } from "@/lib/export/archive-scope";
@@ -53,6 +60,8 @@ import { collectArchivedMail } from "@/lib/mail/archive";
 import type { StorageProvider } from "@/lib/storage/types";
 import {
     archivedAssigneeIds,
+    taskHomeMovesForArchive,
+    taskMentionsForArchive,
     tasksForArchive,
     taskUpdatesForArchive,
 } from "@/lib/tasks/archive";
@@ -256,10 +265,25 @@ export async function buildAndUploadExportArchive(input: {
     const taskMap = await tasksForArchive(scope, recordingIds, {
         proposals: true,
     });
+    const archivedMail = await collectArchivedMail(scope);
+    const mailIds = archivedMail.map((mail) => mail.id);
+    const mailTasks = await tasksForArchive(scope, mailIds, {
+        proposals: true,
+    });
+    const archivedTaskIds = new Set(
+        [...taskMap.values(), ...mailTasks.values()]
+            .flat()
+            .map((task) => task.id),
+    );
     const taskUpdateMap = await taskUpdatesForArchive(
         scope,
         recordingIds,
-        new Set([...taskMap.values()].flat().map((task) => task.id)),
+        archivedTaskIds,
+    );
+    const mailTaskUpdateMap = await taskUpdatesForArchive(
+        scope,
+        mailIds,
+        archivedTaskIds,
     );
 
     const archive = new ZipArchive({ zlib: { level: 6 } });
@@ -346,6 +370,21 @@ export async function buildAndUploadExportArchive(input: {
         entities?: { entities: number; aliases: number; notes: number };
         facts?: { facts: number; evidence: number };
         learn?: { runs: number; items: number };
+        profiles?: {
+            profiles: number;
+            revisions: number;
+            path: string;
+        };
+        processing?: {
+            folderDefaults: number;
+            itemChoices: number;
+            pendingOrganizationPlacements: number;
+            path: string;
+        };
+        taskEvidence?: {
+            mentions: { count: number; path: string | null };
+            homeMoves: { count: number; path: string | null };
+        };
         aiProviderRates?: { count: number; path: string };
         /** Mail of the pile: each a directory with message.eml and mail.json. */
         mail?: {
@@ -360,7 +399,7 @@ export async function buildAndUploadExportArchive(input: {
             raw: { included: boolean; reason?: string };
         }[];
     } = {
-        version: "2.2",
+        version: "2.3",
         scope: scope.kind,
         createdAt: new Date().toISOString(),
         userId,
@@ -512,6 +551,14 @@ export async function buildAndUploadExportArchive(input: {
                             provider: transcript.provider,
                             model: transcript.model,
                             detectedLanguage: transcript.detectedLanguage,
+                            profileRevisionId: transcript.profileRevisionId,
+                            builtinPromptsVersion:
+                                transcript.builtinPromptsVersion,
+                            inputs: transcript.inputs,
+                            producedByUserId: transcript.producedByUserId,
+                            payerUserId: transcript.payerUserId,
+                            revision: transcript.revision,
+                            audioMd5: transcript.audioMd5,
                             text: decryptText(transcript.text),
                             turns: readTranscriptTurns(transcript),
                             createdAt: transcript.createdAt.toISOString(),
@@ -547,6 +594,14 @@ export async function buildAndUploadExportArchive(input: {
                             transcriptionId: enhancement.transcriptionId,
                             provider: enhancement.provider,
                             model: enhancement.model,
+                            profileRevisionId: enhancement.profileRevisionId,
+                            builtinPromptsVersion:
+                                enhancement.builtinPromptsVersion,
+                            inputs: enhancement.inputs,
+                            outputLanguage: enhancement.outputLanguage,
+                            outputFormatLocale: enhancement.outputFormatLocale,
+                            producedByUserId: enhancement.producedByUserId,
+                            payerUserId: enhancement.payerUserId,
                             createdAt: enhancement.createdAt.toISOString(),
                         },
                         null,
@@ -572,6 +627,16 @@ export async function buildAndUploadExportArchive(input: {
                             keyPoints: item.keyPoints,
                             provider: item.provider,
                             model: item.model,
+                            profileRevisionId: item.profileRevisionId,
+                            builtinPromptsVersion: item.builtinPromptsVersion,
+                            inputs: item.inputs,
+                            outputLanguage: item.outputLanguage,
+                            outputFormatLocale: item.outputFormatLocale,
+                            multiPassRounds: item.multiPassRounds,
+                            multiPassUsed: item.multiPassUsed,
+                            multiPassMerged: item.multiPassMerged,
+                            producedByUserId: item.producedByUserId,
+                            payerUserId: item.payerUserId,
                             createdAt: item.createdAt.toISOString(),
                         })),
                         null,
@@ -712,12 +777,6 @@ export async function buildAndUploadExportArchive(input: {
 
     // Mail rides along: the raw message as it arrived (decrypted), and what
     // was read from it.
-    const archivedMail = await collectArchivedMail(scope);
-    const mailTasks = await tasksForArchive(
-        scope,
-        archivedMail.map((mail) => mail.id),
-        { proposals: true },
-    );
     for (const mail of archivedMail) {
         onProgress?.();
         const directory = `mail/${folderName({
@@ -725,7 +784,11 @@ export async function buildAndUploadExportArchive(input: {
             occurredAt: new Date(mail.occurredAt),
         })}`;
         const { rawStoragePath, ...rest } = mail;
-        const meta = { ...rest, tasks: mailTasks.get(mail.id) ?? [] };
+        const meta = {
+            ...rest,
+            tasks: mailTasks.get(mail.id) ?? [],
+            taskUpdates: mailTaskUpdateMap.get(mail.id) ?? [],
+        };
         let raw: { included: boolean; reason?: string } = {
             included: false,
             reason: "The message was not kept",
@@ -762,9 +825,60 @@ export async function buildAndUploadExportArchive(input: {
         });
     }
 
+    const containedItemIds = new Set([
+        ...recordingIds,
+        ...archivedMail.map((mail) => mail.id),
+    ]);
+    const processingChoices = await collectProcessingChoices(scope);
+    if (
+        processingChoices.folderDefaults.length > 0 ||
+        processingChoices.itemChoices.length > 0 ||
+        processingChoices.pendingOrganizationPlacements.length > 0
+    ) {
+        const path = "processing/choices.json";
+        archive.append(
+            Buffer.from(JSON.stringify(processingChoices, null, 2)),
+            { name: path },
+        );
+        manifest.processing = {
+            folderDefaults: processingChoices.folderDefaults.length,
+            itemChoices: processingChoices.itemChoices.length,
+            pendingOrganizationPlacements:
+                processingChoices.pendingOrganizationPlacements.length,
+            path,
+        };
+    }
+    const [taskMentions, taskHomeMoves] = await Promise.all([
+        taskMentionsForArchive(scope, archivedTaskIds, containedItemIds),
+        taskHomeMovesForArchive(scope, archivedTaskIds, containedItemIds),
+    ]);
+    if (taskMentions.length > 0 || taskHomeMoves.length > 0) {
+        const mentionsPath =
+            taskMentions.length > 0 ? "tasks/mentions.json" : null;
+        const homeMovesPath =
+            taskHomeMoves.length > 0 ? "tasks/home-moves.json" : null;
+        if (mentionsPath) {
+            archive.append(Buffer.from(JSON.stringify(taskMentions, null, 2)), {
+                name: mentionsPath,
+            });
+        }
+        if (homeMovesPath) {
+            archive.append(
+                Buffer.from(JSON.stringify(taskHomeMoves, null, 2)),
+                {
+                    name: homeMovesPath,
+                },
+            );
+        }
+        manifest.taskEvidence = {
+            mentions: { count: taskMentions.length, path: mentionsPath },
+            homeMoves: { count: taskHomeMoves.length, path: homeMovesPath },
+        };
+    }
+
     const organization = await collectFolderOrganization(
         scope,
-        new Set([...recordingIds, ...archivedMail.map((mail) => mail.id)]),
+        containedItemIds,
     );
     if (organization.folders.length > 0) {
         archive.append(Buffer.from(JSON.stringify(organization, null, 2)), {
@@ -849,6 +963,44 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
+    const profiles = await collectProfiles(scope, {
+        profileIds: new Set(
+            [
+                ...processingChoices.folderDefaults,
+                ...processingChoices.itemChoices,
+            ].flatMap((choice) => (choice.profileId ? [choice.profileId] : [])),
+        ),
+        revisionIds: new Set([
+            ...[
+                ...userTranscriptions,
+                ...userEnhancements,
+                ...learn.runs,
+                ...archivedMail.flatMap((mail) => mail.summaries),
+            ].flatMap((run) =>
+                run.profileRevisionId ? [run.profileRevisionId] : [],
+            ),
+            ...processingChoices.itemChoices.flatMap((choice) =>
+                choice.profileRevisionId ? [choice.profileRevisionId] : [],
+            ),
+        ]),
+    });
+    if (
+        profiles.profiles.length > 0 ||
+        profiles.revisions.length > 0 ||
+        profiles.externalProfileIds.length > 0 ||
+        profiles.externalRevisionIds.length > 0
+    ) {
+        const path = "profiles/profiles.json";
+        archive.append(Buffer.from(JSON.stringify(profiles, null, 2)), {
+            name: path,
+        });
+        manifest.profiles = {
+            profiles: profiles.profiles.length,
+            revisions: profiles.revisions.length,
+            path,
+        };
+    }
+
     // Prices the user set on their provider cards. The cards themselves
     // stay behind (their keys are secrets), so each rate names the card
     // by what a restore would re-add: provider, model, endpoint.
@@ -903,6 +1055,111 @@ interface ArchivedFolderOrganization {
         createdAt: string;
     }[];
     assignments: { recordingId: string; folderId: string }[];
+}
+
+interface ArchivedProcessingChoices {
+    folderDefaults: {
+        folderId: string;
+        channel: "audio" | "mail";
+        profileId: string | null;
+        manualOnly: boolean;
+    }[];
+    itemChoices: {
+        itemId: string;
+        view: "private" | "org";
+        profileId: string | null;
+        profileRevisionId: string | null;
+        manualOnly: boolean;
+    }[];
+    pendingOrganizationPlacements: {
+        itemId: string;
+        folderId: string;
+        requestedAt: string;
+    }[];
+}
+
+async function collectProcessingChoices(
+    scope: ArchiveScope,
+): Promise<ArchivedProcessingChoices> {
+    const userId = scopeUserId(scope);
+    const [folderDefaults, itemChoices, pendingOrganizationPlacements] =
+        await Promise.all([
+            db
+                .select({
+                    folderId: folderDefaultProfiles.folderId,
+                    channel: folderDefaultProfiles.channel,
+                    profileId: folderDefaultProfiles.profileId,
+                    manualOnly: folderDefaultProfiles.manualOnly,
+                })
+                .from(folderDefaultProfiles)
+                .innerJoin(
+                    recordingFolders,
+                    eq(recordingFolders.id, folderDefaultProfiles.folderId),
+                )
+                .where(eq(recordingFolders.userId, userId)),
+            db
+                .select({
+                    itemId: itemProcessing.itemId,
+                    view: itemProcessing.view,
+                    profileId: itemProcessing.profileId,
+                    profileRevisionId: itemProcessing.profileRevisionId,
+                    manualOnly: itemProcessing.manualOnly,
+                })
+                .from(itemProcessing)
+                .innerJoin(
+                    chatterItems,
+                    and(
+                        eq(chatterItems.id, itemProcessing.itemId),
+                        eq(chatterItems.userId, itemProcessing.userId),
+                    ),
+                )
+                .where(
+                    and(
+                        archivedItemCondition(scope),
+                        eq(
+                            itemProcessing.view,
+                            scope.kind === "personal" ? "private" : "org",
+                        ),
+                        or(
+                            isNotNull(itemProcessing.profileId),
+                            isNotNull(itemProcessing.profileRevisionId),
+                            eq(itemProcessing.manualOnly, true),
+                        ),
+                    ),
+                ),
+            scope.kind === "personal"
+                ? db
+                      .select({
+                          itemId: mailPendingShares.itemId,
+                          folderId: mailPendingShares.folderId,
+                          createdAt: mailPendingShares.createdAt,
+                      })
+                      .from(mailPendingShares)
+                      .innerJoin(
+                          chatterItems,
+                          and(
+                              eq(chatterItems.id, mailPendingShares.itemId),
+                              eq(chatterItems.userId, mailPendingShares.userId),
+                          ),
+                      )
+                      .where(
+                          and(
+                              eq(mailPendingShares.userId, scope.userId),
+                              archivedItemCondition(scope),
+                          ),
+                      )
+                : Promise.resolve([]),
+        ]);
+    return {
+        folderDefaults,
+        itemChoices,
+        pendingOrganizationPlacements: pendingOrganizationPlacements.map(
+            ({ createdAt, ...placement }) => ({
+                ...placement,
+                requestedAt: createdAt.toISOString(),
+            }),
+        ),
+    };
 }
 
 // The scope's own tree: a person's Private folders and their filing in
@@ -1533,15 +1790,23 @@ interface ArchivedLearn {
         recordingId: string;
         transcriptionId: string | null;
         view: string;
+        actorUserId: string | null;
+        payerUserId: string | null;
         trigger: string;
         status: string;
         path: string | null;
         provider: string | null;
         model: string | null;
         transcriptRevision: number;
+        profileRevisionId: string | null;
+        builtinPromptsVersion: string | null;
+        inputs: Record<string, unknown> | null;
         stats: Record<string, number> | null;
+        errorCode: string | null;
         createdAt: string;
+        startedAt: string | null;
         finishedAt: string | null;
+        updatedAt: string;
     }[];
     items: {
         runId: string;
@@ -1563,15 +1828,23 @@ async function collectLearn(userId: string): Promise<ArchivedLearn> {
             recordingId: learnRuns.itemId,
             transcriptionId: learnRuns.transcriptionId,
             view: learnRuns.view,
+            actorUserId: learnRuns.actorUserId,
+            payerUserId: learnRuns.payerUserId,
             trigger: learnRuns.trigger,
             status: learnRuns.status,
             path: learnRuns.path,
             provider: learnRuns.provider,
             model: learnRuns.model,
             transcriptRevision: learnRuns.transcriptRevision,
+            profileRevisionId: learnRuns.profileRevisionId,
+            builtinPromptsVersion: learnRuns.builtinPromptsVersion,
+            inputs: learnRuns.inputs,
             stats: learnRuns.stats,
+            errorCode: learnRuns.errorCode,
             createdAt: learnRuns.createdAt,
+            startedAt: learnRuns.startedAt,
             finishedAt: learnRuns.finishedAt,
+            updatedAt: learnRuns.updatedAt,
         })
         .from(learnRuns)
         .where(eq(learnRuns.scopeUserId, userId));
@@ -1598,12 +1871,128 @@ async function collectLearn(userId: string): Promise<ArchivedLearn> {
         runs: runs.map((run) => ({
             ...run,
             createdAt: run.createdAt.toISOString(),
+            startedAt: run.startedAt?.toISOString() ?? null,
             finishedAt: run.finishedAt?.toISOString() ?? null,
+            updatedAt: run.updatedAt.toISOString(),
         })),
         items: items.map((item) => ({
             ...item,
             payload: decryptJsonField(item.payload),
         })),
+    };
+}
+
+interface ArchivedProfiles {
+    profiles: {
+        id: string;
+        scope: "personal" | "organization";
+        channel: "audio" | "mail";
+        name: string;
+        description: string | null;
+        isDefault: boolean;
+        currentRevisionId: string | null;
+        version: number;
+        createdBy: string | null;
+        updatedBy: string | null;
+        createdAt: string;
+        updatedAt: string;
+        archivedAt: string | null;
+    }[];
+    revisions: {
+        id: string;
+        profileId: string;
+        settings: unknown;
+        createdBy: string | null;
+        createdAt: string;
+    }[];
+    externalProfileIds: string[];
+    /** Revisions referenced by runs but owned by another archive scope. */
+    externalRevisionIds: string[];
+}
+
+async function collectProfiles(
+    scope: ArchiveScope,
+    referenced: {
+        profileIds: ReadonlySet<string>;
+        revisionIds: ReadonlySet<string>;
+    },
+): Promise<ArchivedProfiles> {
+    const profileRows = await db
+        .select({
+            id: processingProfiles.id,
+            scope: processingProfiles.scope,
+            channel: processingProfiles.channel,
+            name: processingProfiles.name,
+            description: processingProfiles.description,
+            isDefault: processingProfiles.isDefault,
+            currentRevisionId: processingProfiles.currentRevisionId,
+            version: processingProfiles.version,
+            createdBy: processingProfiles.createdBy,
+            updatedBy: processingProfiles.updatedBy,
+            createdAt: processingProfiles.createdAt,
+            updatedAt: processingProfiles.updatedAt,
+            archivedAt: processingProfiles.archivedAt,
+        })
+        .from(processingProfiles)
+        .where(archivedProfileCondition(scope));
+    const revisionIds = [
+        ...new Set([
+            ...referenced.revisionIds,
+            ...profileRows.flatMap((profile) =>
+                profile.currentRevisionId ? [profile.currentRevisionId] : [],
+            ),
+        ]),
+    ];
+    const revisionRows =
+        revisionIds.length > 0
+            ? await db
+                  .select({
+                      id: processingProfileRevisions.id,
+                      profileId: processingProfileRevisions.profileId,
+                      settings: processingProfileRevisions.settings,
+                      createdBy: processingProfileRevisions.createdBy,
+                      createdAt: processingProfileRevisions.createdAt,
+                  })
+                  .from(processingProfileRevisions)
+                  .innerJoin(
+                      processingProfiles,
+                      eq(
+                          processingProfiles.id,
+                          processingProfileRevisions.profileId,
+                      ),
+                  )
+                  .where(
+                      and(
+                          inArray(processingProfileRevisions.id, revisionIds),
+                          archivedProfileCondition(scope),
+                      ),
+                  )
+            : [];
+    const archivedRevisionIds = new Set(
+        revisionRows.map((revision) => revision.id),
+    );
+    return {
+        profiles: profileRows.map((profile) => ({
+            ...profile,
+            name: decryptText(profile.name),
+            description: profile.description
+                ? decryptText(profile.description)
+                : null,
+            createdAt: profile.createdAt.toISOString(),
+            updatedAt: profile.updatedAt.toISOString(),
+            archivedAt: profile.archivedAt?.toISOString() ?? null,
+        })),
+        revisions: revisionRows.map((revision) => ({
+            ...revision,
+            settings: JSON.parse(decryptText(revision.settings)) as unknown,
+            createdAt: revision.createdAt.toISOString(),
+        })),
+        externalProfileIds: [...referenced.profileIds]
+            .filter((id) => !profileRows.some((profile) => profile.id === id))
+            .sort(),
+        externalRevisionIds: [...referenced.revisionIds]
+            .filter((id) => !archivedRevisionIds.has(id))
+            .sort(),
     };
 }
 

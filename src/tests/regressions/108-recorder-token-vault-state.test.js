@@ -68,6 +68,8 @@ const harness = vi.hoisted(() => {
         listeners,
         sessionValues,
         readToken: vi.fn(),
+        getSettings: vi.fn(),
+        saveSettings: vi.fn(),
         listChunkIndices: vi.fn(),
         createSession: vi.fn(),
         completeSession: vi.fn(),
@@ -81,16 +83,20 @@ vi.mock("../../../extensions/recorder/lib/token-vault.js", () => ({
     readToken: harness.readToken,
 }));
 vi.mock("../../../extensions/recorder/lib/settings.js", () => ({
-    getSettings: vi.fn(async () => ({
-        dataUseAcknowledgedAt: "2026-10-13T00:00:00.000Z",
-        serverUrl: "https://example.com",
-        serverDefaults: { encryptedRecordingProtocol: 1 },
-    })),
+    getSettings: harness.getSettings,
+    saveSettings: harness.saveSettings,
     isPaired: vi.fn(async () => true),
     anyPlatformAuto: vi.fn(() => false),
     effectivePlatformModes: vi.fn(() => ({})),
     effectiveQuietSeconds: vi.fn(() => 30),
 }));
+
+const defaultSettings = {
+    dataUseAcknowledgedAt: "2026-10-13T00:00:00.000Z",
+    serverUrl: "https://example.com",
+    serverDefaults: { encryptedRecordingProtocol: 1 },
+    folderId: null,
+};
 vi.mock("../../../extensions/recorder/lib/chunk-store.js", () => ({
     createLocalSession: harness.createLocalSession,
     deleteLocalSession: harness.deleteLocalSession,
@@ -128,6 +134,8 @@ beforeEach(() => {
     delete harness.sessionValues.recordingState;
     delete chrome.runtime.lastError;
     harness.readToken.mockReset();
+    harness.getSettings.mockReset().mockResolvedValue(defaultSettings);
+    harness.saveSettings.mockReset().mockResolvedValue(undefined);
     harness.listChunkIndices.mockReset().mockResolvedValue([]);
     harness.createSession.mockReset();
     harness.completeSession.mockReset();
@@ -150,6 +158,87 @@ beforeEach(() => {
 });
 
 describe("recorder token-vault failures", () => {
+    it("drops a rejected remembered folder and starts without it", async () => {
+        harness.getSettings.mockImplementation(async () => ({
+            ...defaultSettings,
+            folderId: "folder-1",
+        }));
+        harness.readToken.mockResolvedValue("recorder-token");
+        const rejected = new Error("This folder is unavailable");
+        rejected.status = 400;
+        rejected.field = "folderId";
+        harness.createSession
+            .mockRejectedValueOnce(rejected)
+            .mockResolvedValueOnce({
+                id: "session-folder-fallback",
+                encryption: { protocol: 1, key: "capture-key" },
+            });
+        chrome.tabCapture.getMediaStreamId.mockImplementation(
+            (_options, callback) => callback("stream-id"),
+        );
+
+        const response = await new Promise((resolve) => {
+            harness.listeners.message(
+                {
+                    type: "start-recording",
+                    payload: { tabId: 7, platformHint: "meet" },
+                },
+                {},
+                resolve,
+            );
+        });
+
+        expect(response).toEqual({
+            ok: true,
+            sessionId: "session-folder-fallback",
+        });
+        expect(harness.createSession).toHaveBeenCalledTimes(2);
+        expect(harness.createSession.mock.calls[0][1]).toMatchObject({
+            folderId: "folder-1",
+        });
+        expect(harness.createSession.mock.calls[1][1]).not.toHaveProperty(
+            "folderId",
+        );
+        expect(harness.saveSettings).toHaveBeenCalledWith({
+            folderId: null,
+            folderLabel: null,
+        });
+    });
+
+    it("shows an error when the folder fallback session also fails", async () => {
+        harness.getSettings.mockImplementation(async () => ({
+            ...defaultSettings,
+            folderId: "folder-1",
+        }));
+        harness.readToken.mockResolvedValue("recorder-token");
+        const rejected = new Error("This folder is unavailable");
+        rejected.status = 400;
+        rejected.field = "folderId";
+        harness.createSession
+            .mockRejectedValueOnce(rejected)
+            .mockRejectedValueOnce(new Error("Fallback session failed"));
+
+        await new Promise((resolve) => {
+            harness.listeners.message(
+                { type: "start-recording", payload: { tabId: 7 } },
+                {},
+                resolve,
+            );
+        });
+
+        const response = await pickerMessage("desktop-capture-ready");
+
+        expect(response).toEqual({
+            ok: false,
+            error: "Fallback session failed",
+        });
+        expect(harness.createSession).toHaveBeenCalledTimes(2);
+        expect(harness.sessionValues.recordingState).toMatchObject({
+            state: "error",
+            error: "Fallback session failed",
+        });
+    });
+
     it("does not enter the picker when the token cannot be read", async () => {
         harness.readToken.mockRejectedValue(new Error("Re-pair recorder"));
         const response = await new Promise((resolve) => {

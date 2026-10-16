@@ -8,9 +8,11 @@ import {
     recordingFolderAssignments,
     recordingFolders,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
 import { lockOrgTree, orgTreeChanged } from "@/lib/folders/folders";
+import { nudge } from "@/lib/jobs/nudge";
 import {
     knowledgeOnRecordingInTx,
     pruneUnsupportedFactsInTx,
@@ -20,7 +22,12 @@ import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { deleteRawMail } from "@/lib/mail/raw-storage";
 import { shareMailInTx } from "@/lib/mail/share-gate";
 import { getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/view";
+import {
+    deleteItemTaskDataInTx,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -96,62 +103,75 @@ export async function deleteMail(
     }
     let wasShared = false;
     const orgUserId = await getOrgUserId();
-    await db.transaction(async (tx) => {
-        if (orgUserId) await lockOrgTree(tx);
-        await lockMailInTx(tx, ownerUserId, itemId);
-        if (orgUserId) {
-            const [shared] = await tx
-                .select({ n: count() })
-                .from(recordingFolderAssignments)
-                .innerJoin(
-                    recordingFolders,
-                    eq(
-                        recordingFolders.id,
-                        recordingFolderAssignments.folderId,
-                    ),
-                )
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            if (orgUserId) await lockOrgTree(tx);
+            await lockItemTaskGraphInTx(tx, {
+                itemId,
+                ownerUserId,
+            });
+            await lockMailInTx(tx, ownerUserId, itemId);
+            if (orgUserId) {
+                const [shared] = await tx
+                    .select({ n: count() })
+                    .from(recordingFolderAssignments)
+                    .innerJoin(
+                        recordingFolders,
+                        eq(
+                            recordingFolders.id,
+                            recordingFolderAssignments.folderId,
+                        ),
+                    )
+                    .where(
+                        and(
+                            eq(recordingFolderAssignments.itemId, itemId),
+                            eq(recordingFolders.userId, orgUserId),
+                        ),
+                    );
+                wasShared = (shared?.n ?? 0) > 0;
+            }
+            const now = new Date();
+            await tx
+                .update(asyncJobs)
+                .set({
+                    status: "failed",
+                    completedAt: now,
+                    updatedAt: now,
+                    heartbeatAt: null,
+                    claimToken: null,
+                    errorCode: ErrorCode.RECORDING_NOT_FOUND,
+                    lastError: "Cancelled because the mail was deleted",
+                })
                 .where(
                     and(
-                        eq(recordingFolderAssignments.itemId, itemId),
-                        eq(recordingFolders.userId, orgUserId),
+                        inArray(asyncJobs.subjectId, [
+                            recordingJobSubject(itemId, "private"),
+                            recordingJobSubject(itemId, "org"),
+                        ]),
+                        inArray(asyncJobs.kind, ["summary", "learn.run"]),
+                        inArray(asyncJobs.status, ["pending", "processing"]),
                     ),
                 );
-            wasShared = (shared?.n ?? 0) > 0;
-        }
-        const now = new Date();
-        await tx
-            .update(asyncJobs)
-            .set({
-                status: "failed",
-                completedAt: now,
-                updatedAt: now,
-                heartbeatAt: null,
-                claimToken: null,
-                errorCode: ErrorCode.RECORDING_NOT_FOUND,
-                lastError: "Cancelled because the mail was deleted",
-            })
-            .where(
-                and(
-                    inArray(asyncJobs.subjectId, [
-                        recordingJobSubject(itemId, "private"),
-                        recordingJobSubject(itemId, "org"),
-                    ]),
-                    inArray(asyncJobs.kind, ["summary", "learn.run"]),
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                ),
-            );
-        const knowledge = await knowledgeOnRecordingInTx(tx, itemId);
-        await tx
-            .delete(chatterItems)
-            .where(
-                and(
-                    eq(chatterItems.id, itemId),
-                    eq(chatterItems.userId, ownerUserId),
-                ),
-            );
-        await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
-        await bumpScopeInTx(tx, knowledge.scopes);
-    });
+            const knowledge = await knowledgeOnRecordingInTx(tx, itemId);
+            await deleteItemTaskDataInTx(tx, {
+                itemId,
+                ownerUserId,
+                actorUserId: ownerUserId,
+                orgUserId,
+                reason: "deleted",
+            });
+            await tx
+                .delete(chatterItems)
+                .where(
+                    and(
+                        eq(chatterItems.id, itemId),
+                        eq(chatterItems.userId, ownerUserId),
+                    ),
+                );
+            await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
+            await bumpScopeInTx(tx, knowledge.scopes);
+        }),
+    );
     if (wasShared) await orgTreeChanged();
     // What the owner's exports wrote of it goes too.
     await enqueueExportPlansForUser(ownerUserId).catch((error: unknown) => {
@@ -198,7 +218,20 @@ export async function shareMail(input: {
             .limit(1);
         if (!pending) throw mailNotFound();
         await shareMailInTx(tx, { ...input, orgUserId });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "org",
+            reason: "placement",
+        });
     });
+    nudge();
     await orgTreeChanged();
 }
 
@@ -208,13 +241,22 @@ export async function dismissPendingShare(input: {
     itemId: string;
     folderId: string;
 }): Promise<void> {
-    await db
-        .delete(mailPendingShares)
-        .where(
-            and(
-                eq(mailPendingShares.itemId, input.itemId),
-                eq(mailPendingShares.userId, input.ownerUserId),
-                eq(mailPendingShares.folderId, input.folderId),
-            ),
-        );
+    await db.transaction(async (tx) => {
+        await tx
+            .delete(mailPendingShares)
+            .where(
+                and(
+                    eq(mailPendingShares.itemId, input.itemId),
+                    eq(mailPendingShares.userId, input.ownerUserId),
+                    eq(mailPendingShares.folderId, input.folderId),
+                ),
+            );
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+    });
+    nudge();
 }

@@ -5,9 +5,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { RoutedProposalsInbox } from "@/components/tasks/routed-proposals-inbox";
 import {
     announceTasksChanged,
     changeTask,
+    mergeTaskIntoTarget,
     TaskRequestError,
 } from "@/components/tasks/task-api";
 import { localToday } from "@/components/tasks/task-fields";
@@ -25,6 +27,63 @@ import { cn } from "@/lib/utils";
 import type { FolderOrganization, RecordingFolder } from "@/types/folder";
 
 const ALL = "all";
+
+function localizedMergeRule(
+    message: string,
+    copy: {
+        visible: string;
+        open: string;
+        organization: string;
+        curator: string;
+        ownerOrCurator: string;
+        owner: string;
+        shareFirst: string;
+    },
+): string {
+    switch (message) {
+        case "Merge rule: both tasks must be visible to the person merging":
+            return copy.visible;
+        case "Merge rule: the target must be an open task":
+            return copy.open;
+        case "Merge rule: an Organization task can be merged only into an Organization task":
+            return copy.organization;
+        case "Merge rule: merging someone else's task into your own requires a curator":
+            return copy.curator;
+        case "Merge rule: only the home owner or a curator may merge that owner's tasks":
+            return copy.ownerOrCurator;
+        case "Merge rule: only the merged task's home owner may attach it to someone else's task":
+            return copy.owner;
+        case "Merge rule: a private task can join an Organization task only after its home item is shared":
+            return copy.shareFirst;
+        default:
+            return message;
+    }
+}
+
+interface MergeFailureCopy {
+    visible: string;
+    open: string;
+    organization: string;
+    curator: string;
+    ownerOrCurator: string;
+    owner: string;
+    shareFirst: string;
+    fallback: string;
+}
+
+/** Shows the server's merge refusal in the Tasks UI. */
+export function showTaskMergeFailure(
+    error: unknown,
+    copy: MergeFailureCopy,
+): void {
+    if (error instanceof TaskRequestError && error.status === 403) {
+        toast.error(localizedMergeRule(error.message, copy));
+        return;
+    }
+    toast.error(
+        error instanceof Error && error.message ? error.message : copy.fallback,
+    );
+}
 
 /** A folder with its depth, for an indented picker. */
 function flattenFolders(
@@ -71,7 +130,6 @@ export function TaskList({ organization }: { organization: boolean }) {
 
     const [tasks, setTasks] = useState<TaskListItem[] | null>(null);
     const [folders, setFolders] = useState<RecordingFolder[]>([]);
-
     const setParam = (key: string, value: string | null) => {
         const next = new URLSearchParams(params.toString());
         if (value === null || value === ALL) next.delete(key);
@@ -182,6 +240,43 @@ export function TaskList({ organization }: { organization: boolean }) {
         pending.current.set(task.id, run);
     };
 
+    const merge = async (task: TaskListItem, targetTaskId: string) => {
+        const snapshot = tasks;
+        setTasks(
+            (current) => current?.filter((row) => row.id !== task.id) ?? null,
+        );
+        try {
+            const result = await mergeTaskIntoTarget(task.id, targetTaskId);
+            announceTasksChanged();
+            return { ownerNotified: result.mergeOwnerNotified };
+        } catch (error) {
+            setTasks(snapshot);
+            showTaskMergeFailure(error, {
+                visible: i18n(
+                    "Merge rule: you must be able to see both tasks.",
+                ),
+                open: i18n("Merge rule: the target must be an open task."),
+                organization: i18n(
+                    "Merge rule: an Organization task can only join another Organization task.",
+                ),
+                curator: i18n(
+                    "Merge rule: a curator must merge someone else's task into yours.",
+                ),
+                ownerOrCurator: i18n(
+                    "Merge rule: only the task's home owner or a curator may merge it.",
+                ),
+                owner: i18n(
+                    "Merge rule: only the merged task's home owner may attach it to someone else's task.",
+                ),
+                shareFirst: i18n(
+                    "Merge rule: share the private task's home item before merging it into an Organization task.",
+                ),
+                fallback: i18n("Could not merge the tasks"),
+            });
+            return false;
+        }
+    };
+
     const tabs = organization
         ? []
         : [
@@ -238,6 +333,8 @@ export function TaskList({ organization }: { organization: boolean }) {
                     </nav>
                 )}
             </div>
+
+            <RoutedProposalsInbox />
 
             <div className="flex flex-wrap items-center gap-2">
                 <Select
@@ -364,10 +461,14 @@ export function TaskList({ organization }: { organization: boolean }) {
                             key={task.id}
                             task={task}
                             recording={task.recording}
+                            evidence={task.evidence}
                             showAssignee={tab === "tracked" || task.canEdit}
                             organizationOnly={task.recording.view === "org"}
                             onChange={(change, optimistic) =>
                                 update(task, change, optimistic)
+                            }
+                            onMerge={(targetTaskId) =>
+                                merge(task, targetTaskId)
                             }
                         />
                     ))}

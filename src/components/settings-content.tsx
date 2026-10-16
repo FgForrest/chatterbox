@@ -14,6 +14,7 @@ import { MailSection } from "./settings-sections/mail-section";
 import { NotificationsSection } from "./settings-sections/notifications-section";
 import { PlaudAccountSection } from "./settings-sections/plaud-account-section";
 import { PlaybackSection } from "./settings-sections/playback-section";
+import { ProfilesSection } from "./settings-sections/profiles-section";
 import { ProvidersSection } from "./settings-sections/providers-section";
 import { StorageSection } from "./settings-sections/storage-section";
 import { SummarySection } from "./settings-sections/summary-section";
@@ -74,6 +75,8 @@ export function SettingsContent({
             return <TranscriptionSection mode="learning" />;
         case "summary":
             return <SummarySection />;
+        case "profiles":
+            return <ProfilesSection />;
         case "sync":
             return <SyncSection />;
         case "plaud-account":

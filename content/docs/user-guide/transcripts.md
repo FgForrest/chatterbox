@@ -7,12 +7,12 @@ description: Speakers, topics, playing a sentence, corrected words, copying and 
 
 A recording without a transcript offers two buttons:
 
-- **Transcribe** sends the audio to your transcription provider (Settings → Transcription → **Transcription provider**).
+- **Transcribe** sends the audio to your account's transcription provider (Settings → Transcription). It also works while the recording is still waiting to be filed.
 - **Transcribe in browser** runs Whisper inside your browser. It is free and nothing leaves your computer, but it is slower.
 
 **Re-transcribe** on a recording that has a transcript runs it again with your current provider. Speaker names you gave are carried over to the new transcript as suggestions, to confirm with one click.
 
-With **Auto-transcribe new recordings** on (Settings → Transcription), every new recording is transcribed as it arrives.
+A recording is transcribed automatically only after it is filed and its [processing profile](processing-and-profiles.md) has **Run automatically** on for transcription. The profile can choose a different provider and language from the account defaults used by **Transcribe**.
 
 ### Which provider to choose
 
@@ -53,7 +53,7 @@ Names you give appear everywhere the transcript does: in the summary, in exports
 
 ![The topics menu](images/topics-menu.png)
 
-**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then pick one from the **Topics** menu to jump there: the transcript scrolls to the heading and the player moves to its start. Turn on **Auto-detect topics** in Settings → Topics to detect them for every new transcript.
+**Topics** splits a long transcript into chapters with titles. Click **Detect topics** to make them, then pick one from the **Topics** menu to jump there: the transcript scrolls to the heading and the player moves to its start. A processing profile with **Run automatically** on for topics detects them after each new transcript.
 
 ### Long talks
 

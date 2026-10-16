@@ -12,6 +12,7 @@ import {
     recordingFolders,
 } from "@/db/schema";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { nudge } from "@/lib/jobs/nudge";
 import { touchAddress } from "@/lib/mail/addresses";
 import { summarizeAuth } from "@/lib/mail/dkim";
 import {
@@ -28,6 +29,11 @@ import type { ParsedMessage } from "@/lib/mail/parse";
 import type { MessageFacts } from "@/lib/mail/policy";
 import { deleteRawMail, storeRawMail } from "@/lib/mail/raw-storage";
 import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
+import {
+    requestArrivalInTx,
+    resolveArrivalProfile,
+} from "@/lib/pipeline/arrival";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -168,7 +174,7 @@ export async function storeMailForOwner(input: {
     const rawHash = rawMessageHash(owner, input.raw);
 
     const merge = async (itemId: string) => {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             await fileInTx(tx, delivery, itemId);
             await logAcceptedInTx(
                 tx,
@@ -178,7 +184,14 @@ export async function storeMailForOwner(input: {
                 input.facts,
                 receivedAt,
             );
+            return requestAdvanceInTx(tx, {
+                itemId,
+                userId: owner,
+                view: "private",
+                reason: "placement",
+            });
         });
+        if (advance) nudge();
         return { itemId, duplicate: true };
     };
 
@@ -210,8 +223,14 @@ export async function storeMailForOwner(input: {
     ]);
     const segments = markKnownQuotes(segmented.segments, knownQuotes);
     const rawStoragePath = await storeRawMail(owner, itemId, input.raw);
+    const arrivalProfile = await resolveArrivalProfile({
+        ownerUserId: owner,
+        itemId,
+        channel: "mail",
+        folderIds: [...delivery.folderIds, ...delivery.pendingShareFolderIds],
+    });
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             await tx.insert(chatterItems).values({
                 id: itemId,
                 userId: owner,
@@ -295,7 +314,14 @@ export async function storeMailForOwner(input: {
                 input.facts,
                 receivedAt,
             );
+            return requestArrivalInTx(tx, {
+                itemId,
+                userId: owner,
+                profile: arrivalProfile?.profile ?? null,
+                manualOnly: arrivalProfile?.manualOnly ?? false,
+            });
         });
+        if (advance) nudge();
     } catch (error) {
         await deleteRawMail(owner, rawStoragePath).catch(() => undefined);
         if (isUniqueViolation(error)) {

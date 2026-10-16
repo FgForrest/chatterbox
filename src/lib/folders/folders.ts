@@ -9,11 +9,14 @@ import {
     recordings,
     users,
 } from "@/db/schema";
+import { holderAccess } from "@/lib/authz/access-state";
 import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { enqueueExportPlansForUser } from "@/lib/folder-exports/jobs";
+import { isIdpAuthorization } from "@/lib/identity/factory";
+import { nudge } from "@/lib/jobs/nudge";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { lockOrgPeople } from "@/lib/knowledge/org-people";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -23,7 +26,7 @@ import {
 } from "@/lib/knowledge/share-knowledge";
 import { blockFolderAddressesInTx } from "@/lib/mail/address-blocking";
 import { ensureFolderAddress } from "@/lib/mail/addresses";
-import { shareMailInTx } from "@/lib/mail/share-gate";
+import { mailShareProblems, shareMailInTx } from "@/lib/mail/share-gate";
 import {
     assertOrgScopeWritable,
     getOrgUserId,
@@ -31,13 +34,19 @@ import {
     isOrgScopeEnabled,
 } from "@/lib/org/config";
 import { notifyOrgChange } from "@/lib/org/events";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { recordingJobSubject } from "@/lib/sharing/access";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
+import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import {
     publishSpeakerNamesInTx,
     publishTaskAssigneesInTx,
 } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import {
+    lockItemTaskGraphInTx,
+    withdrawItemTaskHomesInTx,
+} from "@/lib/tasks/mentions";
 import type {
     FolderKind,
     FolderOrganization,
@@ -104,7 +113,10 @@ interface AccessibleFolder {
     ownerId: string;
 }
 
-async function scheduleExportProjection(userId: string): Promise<void> {
+/** Schedule the owner's folder-export projection after a placement change. */
+export async function scheduleFolderExportProjection(
+    userId: string,
+): Promise<void> {
     await enqueueExportPlansForUser(userId).catch((error) => {
         console.error("Failed to schedule folder export projection:", error);
     });
@@ -114,7 +126,7 @@ async function scheduleExportProjection(userId: string): Promise<void> {
 export async function orgTreeChanged(): Promise<void> {
     await notifyOrgChange({ type: "tree" });
     const orgUserId = await getOrgUserId();
-    if (orgUserId) await scheduleExportProjection(orgUserId);
+    if (orgUserId) await scheduleFolderExportProjection(orgUserId);
 }
 
 function normalizeName(value: string): string {
@@ -262,6 +274,112 @@ export async function reachableCustomFolder(
     };
 }
 
+/**
+ * Return non-root folders the owner may categorize items into, in input order.
+ * Private and Organization roots are deliberately not categorization targets.
+ */
+export async function assertCategorizableFolders(
+    ownerUserId: string,
+    folderIds: readonly string[],
+    executor: Pick<typeof db, "select"> = db,
+): Promise<Array<{ folderId: string; ownerId: string; scope: FolderScope }>> {
+    const orgUserId = await getOrgUserId();
+    const allowedOwners = orgUserId
+        ? [...new Set([ownerUserId, orgUserId])]
+        : [ownerUserId];
+    const rows =
+        folderIds.length > 0
+            ? await executor
+                  .select({
+                      id: recordingFolders.id,
+                      userId: recordingFolders.userId,
+                      parentId: recordingFolders.parentId,
+                  })
+                  .from(recordingFolders)
+                  .where(
+                      and(
+                          inArray(recordingFolders.id, [...folderIds]),
+                          inArray(recordingFolders.userId, allowedOwners),
+                      ),
+                  )
+            : [];
+    const byId = new Map(rows.map((folder) => [folder.id, folder]));
+    const folders = folderIds.map((folderId) => {
+        const folder = byId.get(folderId);
+        if (!folder) throw folderNotFound();
+        if (folder.parentId === null) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Choose a folder below Private or Organization; root folders cannot categorize items",
+                400,
+            );
+        }
+        return {
+            folderId: folder.id,
+            ownerId: folder.userId,
+            scope:
+                orgUserId && folder.userId === orgUserId
+                    ? ("org" as const)
+                    : ("personal" as const),
+        };
+    });
+    if (folders.some((folder) => folder.scope === "org")) {
+        assertOrgScopeWritable();
+        if (isIdpAuthorization()) {
+            const access = await holderAccess(ownerUserId);
+            if (!access.ok || !access.capabilities.has("use")) {
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "You can no longer file items into the Organization",
+                    403,
+                );
+            }
+        }
+    }
+    return folders;
+}
+
+/**
+ * Return a non-root folder the owner may categorize an item into.
+ * Private and Organization roots are deliberately not categorization targets.
+ */
+export async function assertCategorizableFolder(
+    ownerUserId: string,
+    folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+): Promise<{ folderId: string; ownerId: string; scope: FolderScope }> {
+    const [folder] = await assertCategorizableFolders(
+        ownerUserId,
+        [folderId],
+        executor,
+    );
+    if (!folder) throw folderNotFound();
+    return folder;
+}
+
+/** Validate a folder supplied at an external entry path, with a useful 400. */
+export async function assertCategorizableFolderInput(
+    ownerUserId: string,
+    folderId: string,
+) {
+    try {
+        return await assertCategorizableFolder(ownerUserId, folderId);
+    } catch (error) {
+        if (
+            error instanceof AppError &&
+            (error.statusCode === 403 || error.statusCode === 404)
+        ) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "This folder does not exist or you cannot file recordings into it",
+                400,
+                { field: "folderId" },
+            );
+        }
+        throw error;
+    }
+}
+
 /** Changes to the Organization tree need the scope to be writable. */
 function assertWritable(target: AccessibleFolder): void {
     if (target.scope === "org") assertOrgScopeWritable();
@@ -286,18 +404,49 @@ export async function lockOrgTree(tx: Tx): Promise<void> {
  * that is about to commit and an unshare cannot pass each other. A mail has
  * no recording row: its item row is locked instead.
  */
-async function lockRecording(tx: Tx, recordingId: string): Promise<void> {
+export async function lockItemForFolderMutation(
+    tx: Tx,
+    recordingId: string,
+    ownerUserId?: string,
+): Promise<void> {
     const locked = await tx
         .select({ id: recordings.id })
         .from(recordings)
-        .where(eq(recordings.id, recordingId))
+        .where(
+            and(
+                eq(recordings.id, recordingId),
+                ownerUserId ? eq(recordings.userId, ownerUserId) : undefined,
+            ),
+        )
         .for("update");
     if (locked.length > 0) return;
     await tx
         .select({ id: chatterItems.id })
         .from(chatterItems)
-        .where(eq(chatterItems.id, recordingId))
+        .where(
+            and(
+                eq(chatterItems.id, recordingId),
+                ownerUserId ? eq(chatterItems.userId, ownerUserId) : undefined,
+            ),
+        )
         .for("update");
+}
+
+async function lockItemTaskGraphForFolderMutation(
+    tx: Tx,
+    itemId: string,
+): Promise<void> {
+    const [item] = await tx
+        .select({ ownerUserId: chatterItems.userId })
+        .from(chatterItems)
+        .where(eq(chatterItems.id, itemId))
+        .limit(1);
+    if (item) {
+        await lockItemTaskGraphInTx(tx, {
+            itemId,
+            ownerUserId: item.ownerUserId,
+        });
+    }
 }
 
 async function listTreeFolders(
@@ -530,7 +679,7 @@ export async function renameFolder(input: {
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
     return serializeFolder(updated, target.scope);
 }
@@ -694,7 +843,7 @@ export async function moveFolder(input: {
     if (moved.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
     return moved.folder;
 }
@@ -820,7 +969,7 @@ export async function deleteFolder(
     if (scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(userId);
+        await scheduleFolderExportProjection(userId);
     }
 }
 
@@ -852,7 +1001,7 @@ async function requireOwnedRecording(
 }
 
 /** Drop assignments to ancestors of another assignment in the same tree. */
-async function pruneRedundantAssignments(
+export async function pruneRedundantAssignmentsInTx(
     tx: Tx,
     treeOwnerId: string,
     recordingId: string,
@@ -906,6 +1055,129 @@ async function pruneRedundantAssignments(
 }
 
 /**
+ * Share an owner's item into one Organization folder in the caller's
+ * transaction. Takes the Organization tree, people and item locks in the
+ * established order. A refused gate returns its problems without writing.
+ */
+export async function shareItemToOrganizationFolderInTx(
+    tx: Tx,
+    input: {
+        ownerUserId: string;
+        itemId: string;
+        folderId: string;
+        orgUserId: string;
+    },
+): Promise<ShareGateProblem[]> {
+    await lockOrgTree(tx);
+    await lockOrgPeople(tx);
+    await lockItemForFolderMutation(tx, input.itemId, input.ownerUserId);
+    const [folder] = await tx
+        .select({ id: recordingFolders.id })
+        .from(recordingFolders)
+        .where(
+            and(
+                eq(recordingFolders.id, input.folderId),
+                eq(recordingFolders.userId, input.orgUserId),
+            ),
+        )
+        .limit(1);
+    if (!folder) throw folderNotFound();
+    const kind = await requireOwnedRecording(
+        tx,
+        input.ownerUserId,
+        input.itemId,
+    );
+    const wasShared = await isRecordingShared(
+        input.itemId,
+        input.orgUserId,
+        tx,
+    );
+    const problems = wasShared
+        ? []
+        : kind === "mail"
+          ? await mailShareProblems(tx, input.itemId, input.ownerUserId)
+          : await loadShareGate(tx, input.itemId, input.ownerUserId);
+    if (problems.length > 0) return problems;
+
+    if (kind === "mail") {
+        try {
+            await shareMailInTx(tx, {
+                ownerUserId: input.ownerUserId,
+                itemId: input.itemId,
+                folderId: folder.id,
+                orgUserId: input.orgUserId,
+            });
+        } catch (error) {
+            if (
+                error instanceof AppError &&
+                error.code === ErrorCode.SHARE_REQUIREMENTS_UNMET
+            ) {
+                return mailShareProblems(tx, input.itemId, input.ownerUserId);
+            }
+            throw error;
+        }
+        await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "private",
+            reason: "placement",
+        });
+        await requestAdvanceInTx(tx, {
+            itemId: input.itemId,
+            userId: input.ownerUserId,
+            view: "org",
+            reason: "placement",
+        });
+        return [];
+    }
+
+    await tx
+        .insert(recordingFolderAssignments)
+        .values({
+            userId: input.ownerUserId,
+            itemId: input.itemId,
+            folderId: folder.id,
+        })
+        .onConflictDoNothing();
+    await pruneRedundantAssignmentsInTx(tx, input.orgUserId, input.itemId);
+    await requestAdvanceInTx(tx, {
+        itemId: input.itemId,
+        userId: input.ownerUserId,
+        view: "private",
+        reason: "placement",
+    });
+    await requestAdvanceInTx(tx, {
+        itemId: input.itemId,
+        userId: input.ownerUserId,
+        view: "org",
+        reason: "placement",
+    });
+    if (wasShared) return [];
+
+    const names = await publishSpeakerNamesInTx(tx, {
+        recordingId: input.itemId,
+        ownerUserId: input.ownerUserId,
+        orgUserId: input.orgUserId,
+    });
+    const knowledge = await publishKnowledgeInTx(tx, {
+        recordingId: input.itemId,
+        ownerUserId: input.ownerUserId,
+        orgUserId: input.orgUserId,
+    });
+    const assignees = await publishTaskAssigneesInTx(tx, {
+        recordingId: input.itemId,
+        orgUserId: input.orgUserId,
+    });
+    await bumpScopeInTx(tx, [
+        ...names.scopes,
+        ...knowledge.scopes,
+        ...assignees,
+    ]);
+    return [];
+}
+
+/**
  * File a recording in a folder.
  *
  * Filing in the Organization tree is sharing, so only the owner may do it.
@@ -935,7 +1207,11 @@ export async function addRecordingToFolder(input: {
             404,
         );
     }
-    await requireOwnedRecording(db, input.userId, input.recordingId);
+    const kind = await requireOwnedRecording(
+        db,
+        input.userId,
+        input.recordingId,
+    );
     if (target.folder.kind === "private") {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -945,42 +1221,23 @@ export async function addRecordingToFolder(input: {
     }
     assertWritable(target);
 
-    await retryOnDeadlock(() =>
+    const problems = await retryOnDeadlock(() =>
         db.transaction(async (tx) => {
             if (target.scope === "org") {
-                await lockOrgTree(tx);
-                // Before the recording: sharing promotes people, and a
-                // promotion may merge them, which locks recordings.
-                await lockOrgPeople(tx);
-            }
-            await lockRecording(tx, input.recordingId);
-            // Deleted, or given away, since the check above.
-            const kind = await requireOwnedRecording(
-                tx,
-                input.userId,
-                input.recordingId,
-            );
-            if (target.scope === "org" && kind === "mail") {
-                await shareMailInTx(tx, {
+                return shareItemToOrganizationFolderInTx(tx, {
                     ownerUserId: input.userId,
                     itemId: input.recordingId,
                     folderId: target.folder.id,
                     orgUserId: target.ownerId,
                 });
-                await pruneRedundantAssignments(
-                    tx,
-                    target.ownerId,
-                    input.recordingId,
-                );
-                return;
             }
-            const wasShared =
-                target.scope === "org" &&
-                (await isRecordingShared(
-                    input.recordingId,
-                    target.ownerId,
-                    tx,
-                ));
+            await lockItemForFolderMutation(
+                tx,
+                input.recordingId,
+                input.userId,
+            );
+            // Deleted, or given away, since the check above.
+            await requireOwnedRecording(tx, input.userId, input.recordingId);
             await tx
                 .insert(recordingFolderAssignments)
                 .values({
@@ -989,54 +1246,35 @@ export async function addRecordingToFolder(input: {
                     folderId: target.folder.id,
                 })
                 .onConflictDoNothing();
-            await pruneRedundantAssignments(
+            await pruneRedundantAssignmentsInTx(
                 tx,
                 target.ownerId,
                 input.recordingId,
             );
-            if (target.scope !== "org" || wasShared) return;
-
-            // A shared recording is one recording: the Organization reads
-            // the owner's rows, so those are what must pass.
-            const problems = await loadShareGate(
-                tx,
-                input.recordingId,
-                input.userId,
-            );
-            if (problems.length > 0) {
-                throw new AppError(
-                    ErrorCode.SHARE_REQUIREMENTS_UNMET,
-                    "Name every speaker and finish the review before sharing",
-                    409,
-                    { problems },
-                );
-            }
-            const names = await publishSpeakerNamesInTx(tx, {
-                recordingId: input.recordingId,
-                ownerUserId: input.userId,
-                orgUserId: target.ownerId,
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: input.userId,
+                view: "private",
+                reason: "placement",
             });
-            // The knowledge on it: corrections, heard-as forms and facts.
-            const knowledge = await publishKnowledgeInTx(tx, {
-                recordingId: input.recordingId,
-                ownerUserId: input.userId,
-                orgUserId: target.ownerId,
-            });
-            const assignees = await publishTaskAssigneesInTx(tx, {
-                recordingId: input.recordingId,
-                orgUserId: target.ownerId,
-            });
-            await bumpScopeInTx(tx, [
-                ...names.scopes,
-                ...knowledge.scopes,
-                ...assignees,
-            ]);
+            return [];
         }),
     );
+    if (problems.length > 0) {
+        throw new AppError(
+            ErrorCode.SHARE_REQUIREMENTS_UNMET,
+            kind === "mail"
+                ? "Finish the review before sharing"
+                : "Name every speaker and finish the review before sharing",
+            409,
+            { problems },
+        );
+    }
+    nudge();
     if (target.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
 }
 
@@ -1067,23 +1305,36 @@ export async function removeRecordingFromFolder(input: {
     if (!target) return;
 
     if (target.scope === "personal") {
-        await db
-            .delete(recordingFolderAssignments)
-            .where(
-                and(
-                    eq(recordingFolderAssignments.userId, input.userId),
-                    eq(recordingFolderAssignments.itemId, input.recordingId),
-                    eq(recordingFolderAssignments.folderId, input.folderId),
-                ),
-            );
-        await scheduleExportProjection(input.userId);
+        await db.transaction(async (tx) => {
+            await tx
+                .delete(recordingFolderAssignments)
+                .where(
+                    and(
+                        eq(recordingFolderAssignments.userId, input.userId),
+                        eq(
+                            recordingFolderAssignments.itemId,
+                            input.recordingId,
+                        ),
+                        eq(recordingFolderAssignments.folderId, input.folderId),
+                    ),
+                );
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: input.userId,
+                view: "private",
+                reason: "placement",
+            });
+        });
+        nudge();
+        await scheduleFolderExportProjection(input.userId);
         return;
     }
 
     await requireMayWithdraw(input.userId, input.recordingId, orgUserId);
     await db.transaction(async (tx) => {
         await lockOrgTree(tx);
-        await lockRecording(tx, input.recordingId);
+        await lockItemTaskGraphForFolderMutation(tx, input.recordingId);
+        await lockItemForFolderMutation(tx, input.recordingId);
         // Not shared (any more): nothing to take out, and nothing withdrawn.
         // To the organization account it is then a recording it cannot see.
         if (!(await isRecordingShared(input.recordingId, target.ownerId, tx))) {
@@ -1114,9 +1365,28 @@ export async function removeRecordingFromFolder(input: {
         }
         await bumpScopeInTx(
             tx,
-            await endSharingIfUnfiled(tx, target.ownerId, input.recordingId),
+            await endSharingIfUnfiled(
+                tx,
+                target.ownerId,
+                input.recordingId,
+                input.userId,
+            ),
         );
+        const [owner] = await tx
+            .select({ userId: chatterItems.userId })
+            .from(chatterItems)
+            .where(eq(chatterItems.id, input.recordingId))
+            .limit(1);
+        if (owner) {
+            await requestAdvanceInTx(tx, {
+                itemId: input.recordingId,
+                userId: owner.userId,
+                view: "private",
+                reason: "placement",
+            });
+        }
     });
+    nudge();
     await orgTreeChanged();
 }
 
@@ -1135,28 +1405,47 @@ export async function unshareRecording(
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
     await requireMayWithdraw(userId, recordingId, orgUserId);
-    const withdrew = await db.transaction(async (tx) => {
-        await lockOrgTree(tx);
-        await lockRecording(tx, recordingId);
-        // Not shared (any more): nothing to withdraw.
-        if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
-            if (userId === orgUserId) throw notSharedForCurator();
-            return false;
-        }
-        if (!withdraw) {
-            throw new AppError(
-                ErrorCode.WITHDRAW_UNCONFIRMED,
-                "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
-                409,
+    const withdrew = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            await lockOrgTree(tx);
+            await lockItemTaskGraphForFolderMutation(tx, recordingId);
+            await lockItemForFolderMutation(tx, recordingId);
+            // Not shared (any more): nothing to withdraw.
+            if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
+                if (userId === orgUserId) throw notSharedForCurator();
+                return false;
+            }
+            if (!withdraw) {
+                throw new AppError(
+                    ErrorCode.WITHDRAW_UNCONFIRMED,
+                    "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
+                    409,
+                );
+            }
+            await bumpScopeInTx(
+                tx,
+                await withdrawRecordingInTx(tx, orgUserId, recordingId, userId),
             );
-        }
-        await bumpScopeInTx(
-            tx,
-            await withdrawRecordingInTx(tx, orgUserId, recordingId),
-        );
-        return true;
-    });
-    if (withdrew) await orgTreeChanged();
+            const [owner] = await tx
+                .select({ userId: chatterItems.userId })
+                .from(chatterItems)
+                .where(eq(chatterItems.id, recordingId))
+                .limit(1);
+            if (owner) {
+                await requestAdvanceInTx(tx, {
+                    itemId: recordingId,
+                    userId: owner.userId,
+                    view: "private",
+                    reason: "placement",
+                });
+            }
+            return true;
+        }),
+    );
+    if (withdrew) {
+        nudge();
+        await orgTreeChanged();
+    }
 }
 
 /**
@@ -1169,6 +1458,7 @@ export async function withdrawRecordingInTx(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
+    actorUserId: string,
 ): Promise<Set<string>> {
     const orgFolderIds = (
         await tx
@@ -1186,7 +1476,7 @@ export async function withdrawRecordingInTx(
                 ),
             );
     }
-    return endSharingIfUnfiled(tx, orgUserId, recordingId);
+    return endSharingIfUnfiled(tx, orgUserId, recordingId, actorUserId);
 }
 
 /**
@@ -1275,6 +1565,7 @@ async function endSharingIfUnfiled(
     tx: Tx,
     orgUserId: string,
     recordingId: string,
+    actorUserId: string,
 ): Promise<Set<string>> {
     const remaining = await tx
         .select({ folderId: recordingFolderAssignments.folderId })
@@ -1320,6 +1611,12 @@ async function endSharingIfUnfiled(
         .where(eq(chatterItems.id, recordingId))
         .limit(1);
     if (!owner) return new Set();
+    await withdrawItemTaskHomesInTx(tx, {
+        itemId: recordingId,
+        ownerUserId: owner.userId,
+        actorUserId,
+        orgUserId,
+    });
     return withdrawKnowledgeInTx(tx, {
         recordingId,
         ownerUserId: owner.userId,
@@ -1399,12 +1696,19 @@ export async function moveRecordingBetweenFolders(input: {
                     eq(recordingFolderAssignments.folderId, from.folder.id),
                 ),
             );
-        await pruneRedundantAssignments(tx, to.ownerId, input.recordingId);
+        await pruneRedundantAssignmentsInTx(tx, to.ownerId, input.recordingId);
+        await requestAdvanceInTx(tx, {
+            itemId: input.recordingId,
+            userId: existing.userId,
+            view: from.scope === "org" ? "org" : "private",
+            reason: "placement",
+        });
     });
+    nudge();
     if (to.scope === "org") {
         await orgTreeChanged();
     } else {
-        await scheduleExportProjection(input.userId);
+        await scheduleFolderExportProjection(input.userId);
     }
 }
 
