@@ -15,16 +15,20 @@ Pokud vaše organizace používá jednotné přihlašování, na přihlašovací
 
 ## Průvodce prvním spuštěním
 
-Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Jakýkoliv krok můžete přeskočit a vrátit se k němu později v Nastavení.
+Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Kroky s integracemi jsou nepovinné a zobrazí se jen tehdy, když je správce nastavil.
 
 | Krok | Co dělá |
 | --- | --- |
 | ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Chatterbox umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
 | ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče Riffado Connector, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Chatterbox začíná pravidelně stahovat vaše nahrávky. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
+| Kalendář Google a Meet (pokud jsou nastavené) | **Připojte Kalendář Google a Meet.** Přístup jen pro čtení pomůže rozpoznat schůzky a navrhnout mluvčí podle pozvaných hostů a účastníků Meet. |
+| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Chatterboxu. |
+| E-mail (pokud je nastavený) | **Posílejte e-maily do Chatterboxu.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
+| Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Chatterbox jako vlastní konektor do Claude nebo Claude Code. |
 | ![Done](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
-Pro zobrazení průvodce znovu přejděte do **Nastavení → Export/Záloha** a klikněte na **Znovu spustit úvodní nastavení**.
+Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje.
 
 <span id="finding-your-way-around" />
 

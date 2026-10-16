@@ -31,6 +31,8 @@ Jednou se přihlaste přímo do aplikace Chatterbox v prohlížeči. Claude se n
 
 ## Připojení Claude
 
+Pokud Chatterbox nabídne Claude při prvním nastavení, tento krok ukáže adresu konektoru a stejné pokyny jako níže.
+
 **Pokud Vaše organizace používá Claude Team nebo Enterprise**, administrátor Chatterbox přidal pro všechny:
 
 1. V Claude otevřete **Customize → Connectors**.

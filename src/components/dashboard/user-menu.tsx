@@ -12,10 +12,12 @@ import {
     Settings,
     Shield,
     Sun,
+    WandSparkles,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted, useLocale } from "next-intl";
 import posthog from "posthog-js";
+import { useEffect, useState } from "react";
 import { useHelp } from "@/components/help/help-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useTheme } from "@/hooks/use-theme";
 import { signOut } from "@/lib/auth-client";
+import { formatCompactRelativeTime, formatDateTime } from "@/lib/format-date";
 import { cn } from "@/lib/utils";
 
 interface UserMenuProps {
@@ -35,6 +38,7 @@ interface UserMenuProps {
     userEmail: string | null;
     onOpenSettings: () => void;
     onOpenShortcuts: () => void;
+    onOpenOnboarding: () => void;
     lastSyncTime: Date | null;
     nextSyncTime: Date | null;
     isAutoSyncing: boolean;
@@ -63,6 +67,7 @@ export function UserMenu({
     userEmail,
     onOpenSettings,
     onOpenShortcuts,
+    onOpenOnboarding,
     lastSyncTime,
     nextSyncTime,
     isAutoSyncing,
@@ -75,6 +80,14 @@ export function UserMenu({
     const { openHelp } = useHelp();
     const { theme, setTheme } = useTheme(initialTheme);
     const syncFailed = !isAutoSyncing && lastSyncResult?.success === false;
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [now, setNow] = useState(() => Date.now());
+
+    useEffect(() => {
+        if (!menuOpen) return;
+        const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+        return () => window.clearInterval(timer);
+    }, [menuOpen]);
 
     const themeOptions = [
         { value: "light" as const, label: i18n("Light"), icon: Sun },
@@ -83,7 +96,13 @@ export function UserMenu({
     ];
 
     return (
-        <DropdownMenu>
+        <DropdownMenu
+            open={menuOpen}
+            onOpenChange={(open) => {
+                if (open) setNow(Date.now());
+                setMenuOpen(open);
+            }}
+        >
             <DropdownMenuTrigger asChild>
                 <Button
                     variant="outline"
@@ -128,6 +147,10 @@ export function UserMenu({
                         <CircleHelp />
                         <span>{i18n("Help")}</span>
                     </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={onOpenOnboarding}>
+                        <WandSparkles />
+                        <span>{i18n("Run setup again")}</span>
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                         disabled={isAutoSyncing}
                         onSelect={onSync}
@@ -141,31 +164,59 @@ export function UserMenu({
                             />
                         )}
                         <span>
-                            {isAutoSyncing
-                                ? i18n("Syncing…")
-                                : syncFailed
-                                  ? i18n("Retry sync")
-                                  : i18n("Sync device")}
+                            {isAutoSyncing && i18n("Syncing…")}
+                            {!isAutoSyncing && syncFailed && i18n("Retry sync")}
+                            {!isAutoSyncing &&
+                                !syncFailed &&
+                                i18n("Sync device")}
                         </span>
                     </DropdownMenuItem>
                     {(lastSyncTime || nextSyncTime) && (
-                        <div className="px-2 pb-1 text-xs text-muted-foreground">
-                            {lastSyncTime && (
-                                <p>
-                                    {locale === "cs-CZ"
-                                        ? "Naposledy synchronizováno"
-                                        : "Last synced"}{" "}
-                                    {lastSyncTime.toLocaleString(locale)}
-                                </p>
-                            )}
-                            {nextSyncTime && (
-                                <p>
-                                    {locale === "cs-CZ"
-                                        ? "Další synchronizace"
-                                        : "Next sync"}{" "}
-                                    {nextSyncTime.toLocaleString(locale)}
-                                </p>
-                            )}
+                        <div
+                            className="overflow-hidden px-8 pb-1 text-xs text-muted-foreground"
+                            title={[
+                                lastSyncResult?.error,
+                                lastSyncTime
+                                    ? i18n("Last synced {time}", {
+                                          time: formatDateTime(
+                                              lastSyncTime,
+                                              "absolute",
+                                              locale,
+                                          ),
+                                      })
+                                    : null,
+                                nextSyncTime
+                                    ? i18n("Next sync {time}", {
+                                          time: formatDateTime(
+                                              nextSyncTime,
+                                              "absolute",
+                                              locale,
+                                          ),
+                                      })
+                                    : null,
+                            ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                        >
+                            <p className="truncate whitespace-nowrap">
+                                {lastSyncTime &&
+                                    i18n("Synced {time}", {
+                                        time: formatCompactRelativeTime(
+                                            lastSyncTime,
+                                            locale,
+                                            now,
+                                        ),
+                                    })}
+                                {lastSyncTime && nextSyncTime && " · "}
+                                {nextSyncTime &&
+                                    i18n("next {time}", {
+                                        time: formatCompactRelativeTime(
+                                            nextSyncTime,
+                                            locale,
+                                            now,
+                                        ),
+                                    })}
+                            </p>
                         </div>
                     )}
                     {isAdmin && (

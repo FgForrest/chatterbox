@@ -9,7 +9,10 @@ import {
     getGoogleOAuthConfig,
 } from "@/lib/integrations/google/config";
 import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
-import { meetConsentScopes } from "@/lib/integrations/google/meet-consent";
+import {
+    calendarAndMeetConsentScopes,
+    meetConsentScopes,
+} from "@/lib/integrations/google/meet-consent";
 import {
     buildAuthorizationUrl,
     createOAuthState,
@@ -23,17 +26,42 @@ import {
     sealGoogleOAuthState,
 } from "@/lib/integrations/google/oauth-state";
 
+type ConnectPurpose = "drive" | "calendar" | "meet" | "calendar-meet";
+
+function consentScopes(
+    purpose: ConnectPurpose,
+    existingScopes: string[],
+): string[] {
+    switch (purpose) {
+        case "meet":
+            return meetConsentScopes(existingScopes);
+        case "calendar-meet":
+            return calendarAndMeetConsentScopes(
+                existingScopes,
+                GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+            );
+        case "calendar":
+            return ["openid", "email", GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE];
+        case "drive":
+            return GOOGLE_CONNECT_SCOPES;
+    }
+}
+
 /** Starts connecting a Google account: a redirect to Google's consent. */
 export const GET = apiHandler(async (request) => {
     const session = await requireApiSession(request);
     const url = new URL(request.url);
     const requestedPurpose = url.searchParams.get("purpose");
-    const purpose =
-        requestedPurpose === "calendar" || requestedPurpose === "meet"
+    const purpose: ConnectPurpose =
+        requestedPurpose === "calendar" ||
+        requestedPurpose === "meet" ||
+        requestedPurpose === "calendar-meet"
             ? requestedPurpose
             : "drive";
     const config =
-        purpose === "calendar" || purpose === "meet"
+        purpose === "calendar" ||
+        purpose === "meet" ||
+        purpose === "calendar-meet"
             ? getGoogleOAuthConfig()
             : getGoogleIntegrationConfig();
     if (!config) {
@@ -56,16 +84,7 @@ export const GET = apiHandler(async (request) => {
     const response = NextResponse.redirect(
         buildAuthorizationUrl({
             config,
-            scopes:
-                purpose === "meet" && existing
-                    ? meetConsentScopes(existing.scopes)
-                    : purpose === "calendar"
-                      ? [
-                            "openid",
-                            "email",
-                            GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
-                        ]
-                      : GOOGLE_CONNECT_SCOPES,
+            scopes: consentScopes(purpose, existing?.scopes ?? []),
             state,
             codeChallenge: pkce.challenge,
             loginHint: existing?.email,

@@ -36,7 +36,6 @@ const EMPTY_PROVIDERS: Provider[] = [];
 interface SettingsContentProps {
     activeSection: SettingsSection;
     initialProviders?: Provider[];
-    onReRunOnboarding?: () => void;
     isHosted?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
@@ -47,7 +46,6 @@ interface SettingsContentProps {
 export function SettingsContent({
     activeSection,
     initialProviders = EMPTY_PROVIDERS,
-    onReRunOnboarding,
     isHosted = false,
     mailEnabled = false,
     accessManagement = false,
@@ -88,7 +86,7 @@ export function SettingsContent({
         case "notifications":
             return <NotificationsSection />;
         case "export":
-            return <ExportSection onReRunOnboarding={onReRunOnboarding} />;
+            return <ExportSection />;
         case "storage":
             return <StorageSection isHosted={isHosted} />;
         case "billing":

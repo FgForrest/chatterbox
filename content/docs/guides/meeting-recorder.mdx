@@ -17,29 +17,24 @@ let extensions capture system audio.
 
 ## Install
 
-The extension is not built into Chatterbox; it is a separate, load-unpackable
-folder under `extensions/recorder` in the repository, or a packaged zip.
+Open **Settings → Meeting Recorder** and click **Install from Chrome Web Store**.
+The extension works in Chrome, Edge, Brave and Vivaldi.
 
-1. Open `chrome://extensions` and turn on **Developer mode**.
-2. **Load unpacked** and select the `extensions/recorder` folder (or unzip a
-   release and select that folder).
-3. Open the extension's **Options** and grant microphone access.
+For extension development only, open `chrome://extensions`, enable **Developer
+mode**, choose **Load unpacked**, and select `extensions/recorder` from the
+repository.
 
 ## Connect it to Chatterbox
 
-Open **Settings → Meeting Recorder** in Chatterbox. The page detects the
-extension in your browser and tells you what to do:
+The setup has three moments:
 
-- **Set up recorder**: Chatterbox creates a write-only key (it can
-  create recordings but cannot read your library) and hands it to the
-  extension. Nothing to copy. Confirm the server in the extension's Options
-  page; Chrome may also ask you to grant host access.
-- **On a self-hosted Chatterbox, the first time only**: Chrome requires you to
-  allow the extension to reach your server once. Click the extension icon,
-  choose **Connect to your-server**, and the settings page updates by itself.
-  Then click Set up recorder.
-- **Manual setup** is always available at the bottom of the page if you prefer
-  to paste the key into the extension's Options yourself.
+1. Install the extension from the Chrome Web Store.
+2. Return to **Settings → Meeting Recorder**. Once Chatterbox detects the
+   extension, click **Connect**.
+3. Check that the page says **Connected to your-server**.
+
+If detection is unavailable, expand **Connect manually** and paste the server
+address and generated key into the extension's Options.
 
 Revoke a recorder key any time from the same page or under **API Keys**.
 

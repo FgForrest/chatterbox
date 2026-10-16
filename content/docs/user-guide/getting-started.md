@@ -11,16 +11,20 @@ If your organization uses single sign-on, the sign-in page shows one button inst
 
 ## The first-run wizard
 
-The first time you open Chatterbox, a short wizard helps you set up the essentials. You can skip any step and come back to it later in Settings.
+The first time you open Chatterbox, a short wizard helps you set up the essentials. Integration steps are optional and appear only when your administrator has configured them.
 
 | Step | What it does |
 | --- | --- |
 | ![Welcome](images/onboarding-welcome.png) | **Welcome.** What Chatterbox does: sync recordings, transcribe them, and summarize them with AI. |
 | ![Connect Plaud](images/onboarding-plaud.png) | **Connect your recorder account.** Sign in with the Riffado Connector browser extension, with an email code, or by pasting a token. Chatterbox then fetches your recordings on a schedule. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Set up an AI provider.** Opens Settings, where you add the service that transcribes and summarizes. See [AI providers](settings.md#ai-providers). |
+| Google Calendar and Meet (when configured) | **Connect Google Calendar and Meet.** Read-only access helps identify meetings and suggest speakers from invited guests and Meet attendees. |
+| Meeting Recorder | **Set up Meeting Recorder.** Install the Chrome extension and connect it to this Chatterbox instance. |
+| Mail (when configured) | **Send mail to Chatterbox.** Copy your personal address for sending or forwarding messages into your Chatter. |
+| Claude (when configured) | **Connect Claude.** Add Chatterbox as a custom connector in Claude or Claude Code. |
 | ![Done](images/onboarding-done.png) | **You're all set.** Click **Get Started**. |
 
-To see the wizard again, open **Settings → Export/Backup** and click **Re-run Onboarding**.
+To see the wizard again, open the user menu and choose **Run setup again**. This does not reset your completed setup.
 
 ## Finding your way around
 
