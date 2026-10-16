@@ -74,7 +74,7 @@ vi.mock("@/lib/uploads/video-extraction-job", async (importOriginal) => {
     return { ...actual, enqueueVideoExtractionJob: vi.fn() };
 });
 vi.mock("@/lib/uploads/save-uploaded-audio", () => ({
-    saveUploadedAudio: vi.fn(async () => ({})),
+    saveUploadedAudio: vi.fn(async () => ({ recordingId: "recording-1" })),
 }));
 vi.mock("@/lib/storage/factory", async () => {
     const { LocalStorage } = await import("@/lib/storage/local-storage");
@@ -246,6 +246,11 @@ describe("POST /api/recordings/upload", () => {
         const response = await POST(request);
 
         expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+            success: true,
+            filename: "voice",
+            recordingId: "recording-1",
+        });
         expect(saveUploadedAudio).toHaveBeenCalledTimes(1);
         const input = vi.mocked(saveUploadedAudio).mock.calls[0]?.[0];
         if (!input) throw new Error("saveUploadedAudio was not called");

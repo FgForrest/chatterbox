@@ -13,9 +13,19 @@ import {
     shouldExtractVideo,
 } from "@/lib/uploads/media-types";
 
+interface UploadStarted {
+    uploadId: string;
+    filename: string;
+}
+
+/** Identifies an upload after its recording has been saved. */
+export interface UploadCompletion extends UploadStarted {
+    recordingId: string | null;
+}
+
 interface Options {
-    /** Called after a successful upload so the parent can refresh data. */
-    onUploadComplete: () => void;
+    onUploadStarted?: (upload: UploadStarted) => void;
+    onUploadComplete: (upload: UploadCompletion) => void;
 }
 
 /**
@@ -27,7 +37,7 @@ interface Options {
  * resets `e.target.value` after pickup so picking the same file twice
  * in a row still fires a `change` event.
  */
-export function useUploadQueue({ onUploadComplete }: Options) {
+export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
     const [isUploading, setIsUploading] = useState(false);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -49,7 +59,12 @@ export function useUploadQueue({ onUploadComplete }: Options) {
     );
 
     const watchConversion = useCallback(
-        (jobId: string, placeholderId: string, filename: string) => {
+        (
+            jobId: string,
+            placeholderId: string,
+            filename: string,
+            savedFilename: string,
+        ) => {
             if (followers.current.has(jobId)) return;
             const controller = new AbortController();
             followers.current.set(jobId, controller);
@@ -64,7 +79,11 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     if (controller.signal.aborted) return;
                     if (job?.status === "completed") {
                         toast.success(`Audio from "${filename}" is ready`);
-                        onUploadComplete();
+                        onUploadComplete({
+                            recordingId: recordingIdFromResult(job.result),
+                            uploadId: placeholderId,
+                            filename: savedFilename,
+                        });
                     } else {
                         toast.error(
                             job?.error ||
@@ -121,10 +140,15 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                                   },
                               ],
                     );
+                    onUploadStarted?.({
+                        uploadId: placeholderId,
+                        filename: uploadBasename(upload.filename),
+                    });
                     watchConversion(
                         upload.jobId,
                         placeholderId,
                         upload.filename,
+                        uploadBasename(upload.filename),
                     );
                 }
             })
@@ -137,7 +161,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
             }
             followers.current.clear();
         };
-    }, [watchConversion]);
+    }, [onUploadStarted, watchConversion]);
 
     const handleUpload = useCallback(
         (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,6 +215,10 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     progress: 0,
                 },
             ]);
+            onUploadStarted?.({
+                uploadId: placeholderId,
+                filename: uploadBasename(file.name),
+            });
 
             setIsUploading(true);
             let conversionStarted = false;
@@ -208,10 +236,19 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                     toast.success(
                         `"${file.name}" uploaded. Extracting audio in the background.`,
                     );
-                    watchConversion(data.jobId, placeholderId, file.name);
+                    watchConversion(
+                        data.jobId,
+                        placeholderId,
+                        file.name,
+                        data.filename,
+                    );
                 } else {
                     toast.success(`"${data.filename}" uploaded`);
-                    onUploadComplete();
+                    onUploadComplete({
+                        recordingId: data.recordingId ?? null,
+                        uploadId: placeholderId,
+                        filename: data.filename,
+                    });
                 }
             } catch (error) {
                 toast.error(
@@ -228,7 +265,13 @@ export function useUploadQueue({ onUploadComplete }: Options) {
                 }
             }
         },
-        [onUploadComplete, selectedFile, updatePending, watchConversion],
+        [
+            onUploadComplete,
+            onUploadStarted,
+            selectedFile,
+            updatePending,
+            watchConversion,
+        ],
     );
 
     const cancelUpload = useCallback(() => setSelectedFile(null), []);
@@ -251,6 +294,7 @@ export function useUploadQueue({ onUploadComplete }: Options) {
 
 interface UploadResponse {
     filename: string;
+    recordingId?: string;
     conversion?: boolean;
     jobId?: string;
 }
@@ -305,6 +349,16 @@ function pendingFromProgress(
     return { phase, progress: percent };
 }
 
+function recordingIdFromResult(
+    result: Record<string, unknown> | null,
+): string | null {
+    return typeof result?.recordingId === "string" ? result.recordingId : null;
+}
+
+function uploadBasename(filename: string): string {
+    return filename.replace(/\.[^./]+$/, "");
+}
+
 /**
  * The file goes as the raw request body so the server can stream it to
  * storage; a multipart form would have to be held in memory whole.
@@ -343,6 +397,10 @@ function sendUpload(
             ) {
                 resolve({
                     filename: body.filename,
+                    recordingId:
+                        typeof body.recordingId === "string"
+                            ? body.recordingId
+                            : undefined,
                     conversion: body.conversion,
                     jobId: body.jobId,
                 });

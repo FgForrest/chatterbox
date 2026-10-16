@@ -189,7 +189,7 @@ export function UploadDialog({
                             onCancel={() => setNewFolderOpen(false)}
                             onCreated={handleFolderCreated}
                         />
-                    ) : (
+                    ) : folderParents.length > 0 ? (
                         <Button
                             type="button"
                             variant="outline"
@@ -199,7 +199,7 @@ export function UploadDialog({
                         >
                             {i18n("New folder")}
                         </Button>
-                    )}
+                    ) : null}
                 </div>
                 <DialogFooter>
                     <Button

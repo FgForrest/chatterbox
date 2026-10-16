@@ -54,6 +54,8 @@ interface RecordingListProps {
     onOrganize: () => void;
     /** The library the list shows, which the server search reads. */
     searchView?: "private" | "org";
+    emptyState?: React.ReactNode;
+    resetToRecentKey?: number;
 }
 
 export interface RecordingListHandle {
@@ -99,6 +101,8 @@ export function RecordingList({
     initialChunkSize,
     onOrganize,
     searchView = "private",
+    emptyState,
+    resetToRecentKey = 0,
     ref,
 }: RecordingListProps & { ref?: React.Ref<RecordingListHandle> }) {
     const i18n = useExtracted();
@@ -274,6 +278,15 @@ export function RecordingList({
         setVisibleCount(initialChunkSize);
     }, [initialChunkSize]);
     useEffect(() => {
+        if (resetToRecentKey === 0) return;
+        setQuery("");
+        setServerHits(null);
+        setSortOrder("newest");
+        setKindFilter("all");
+        setNeedsReviewOnly(false);
+        setVisibleCount(initialChunkSize);
+    }, [initialChunkSize, resetToRecentKey]);
+    useEffect(() => {
         setVisibleCount((c) =>
             c > filtered.length
                 ? Math.max(initialChunkSize, filtered.length)
@@ -429,6 +442,7 @@ export function RecordingList({
                                     ? i18n("No recordings match your search.")
                                     : i18n("No recordings yet.")}
                             </p>
+                            {emptyState}
                         </div>
                     )}
 

@@ -85,6 +85,7 @@ interface FolderTreeProps {
     ) => Promise<void>;
     /** The instance receives mail: deleting a folder stops its addresses. */
     mailEnabled?: boolean;
+    onNewFolder?: () => void;
 }
 
 /** Display name of a folder; roots are labelled by what they are. */
@@ -110,6 +111,7 @@ export function FolderTree({
     onAssignRecording,
     onMoveRecording,
     mailEnabled = false,
+    onNewFolder,
 }: FolderTreeProps) {
     const i18n = useExtracted();
     const confirm = useConfirm();
@@ -569,16 +571,30 @@ export function FolderTree({
                                     { count: customFolderCount },
                                 )}
                             </span>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs"
-                                onClick={onRecent}
-                            >
-                                <History className="size-3.5" />{" "}
-                                {i18n("Recent")}
-                            </Button>
+                            <div className="flex items-center gap-1">
+                                {onNewFolder ? (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2 text-xs"
+                                        onClick={onNewFolder}
+                                    >
+                                        <FolderPlus className="size-3.5" />{" "}
+                                        {i18n("New folder")}
+                                    </Button>
+                                ) : null}
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={onRecent}
+                                >
+                                    <History className="size-3.5" />{" "}
+                                    {i18n("Recent")}
+                                </Button>
+                            </div>
                         </div>
                     </div>
                     <div className="p-2">
