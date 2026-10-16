@@ -385,6 +385,20 @@ function assertWritable(target: AccessibleFolder): void {
     if (target.scope === "org") assertOrgScopeWritable();
 }
 
+/** Refuse an Organization-tree change unless the actor may curate it. */
+export function assertOrganizationTreeManager(
+    targets: ReadonlyArray<{ scope: FolderScope }>,
+    canCurate: boolean,
+): void {
+    if (targets.some((target) => target.scope === "org") && !canCurate) {
+        throw new AppError(
+            ErrorCode.FORBIDDEN,
+            "Only curators can change Organization folders",
+            403,
+        );
+    }
+}
+
 /**
  * Serialize Organization-tree changes.
  *
@@ -576,6 +590,7 @@ export async function createFolder(input: {
     userId: string;
     parentId: string;
     name: string;
+    canCurate?: boolean;
 }): Promise<RecordingFolder> {
     const name = normalizeName(input.name);
     const orgUserId = await getOrgUserId();
@@ -589,6 +604,9 @@ export async function createFolder(input: {
         throw new AppError(ErrorCode.NOT_FOUND, "Parent folder not found", 404);
     }
     assertWritable(parent);
+    if (parent.scope === "org" && parent.folder.parentId === null) {
+        assertOrganizationTreeManager([parent], input.canCurate === true);
+    }
 
     const siblings = await db
         .select({ sortOrder: recordingFolders.sortOrder })
@@ -638,6 +656,7 @@ export async function renameFolder(input: {
     userId: string;
     folderId: string;
     name: string;
+    canCurate?: boolean;
     /** The version the caller last saw; a mismatch is a 409. */
     version?: number;
 }): Promise<RecordingFolder> {
@@ -651,6 +670,7 @@ export async function renameFolder(input: {
     );
     if (!target || target.folder.kind !== "custom") throw folderNotFound();
     assertWritable(target);
+    assertOrganizationTreeManager([target], input.canCurate === true);
     if (
         input.version !== undefined &&
         input.version !== target.folder.version
@@ -689,6 +709,7 @@ export async function moveFolder(input: {
     folderId: string;
     parentId: string;
     beforeId?: string | null;
+    canCurate?: boolean;
     /** The version the caller last saw; a mismatch is a 409. */
     version?: number;
 }): Promise<RecordingFolder> {
@@ -706,12 +727,25 @@ export async function moveFolder(input: {
                 throw folderNotFound();
             }
             assertWritable(target);
+            const destination = await resolveFolder(
+                tx,
+                input.userId,
+                input.parentId,
+                orgUserId,
+            );
+            if (!destination) throw folderNotFound();
+            assertWritable(destination);
+            assertOrganizationTreeManager(
+                [target, destination],
+                input.canCurate === true,
+            );
             if (
                 input.version !== undefined &&
                 input.version !== target.folder.version
             ) {
                 throw staleFolder();
             }
+            if (target.ownerId !== destination.ownerId) throw folderNotFound();
             const folders = await listTreeFolders(tx, target.ownerId);
             const folder = folders.find((item) => item.id === input.folderId);
             const parent = folders.find((item) => item.id === input.parentId);
@@ -859,6 +893,7 @@ export async function moveFolder(input: {
 export async function deleteFolder(
     userId: string,
     folderId: string,
+    { canCurate = false }: { canCurate?: boolean } = {},
 ): Promise<void> {
     const orgUserId = await getOrgUserId();
     const scope = await db.transaction(async (tx) => {
@@ -866,6 +901,7 @@ export async function deleteFolder(
         const target = await resolveFolder(tx, userId, folderId, orgUserId);
         if (!target || target.folder.kind !== "custom") throw folderNotFound();
         assertWritable(target);
+        assertOrganizationTreeManager([target], canCurate);
 
         if (target.scope === "org" && orgUserId) {
             const folders = await listTreeFolders(tx, orgUserId);

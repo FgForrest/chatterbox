@@ -576,6 +576,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 userId: MEMBER,
                 parentId: orgRootId,
                 name: "Sales",
+                canCurate: true,
             });
             expect(
                 (

@@ -403,26 +403,38 @@ export function Workstation({
         ({
             recordingId,
             uploadId,
+            resumed,
         }: UploadCompletion): UploadCompletionAction | undefined => {
             const uploadSelection =
                 uploadSelectionRevisionsRef.current.get(uploadId);
             uploadSelectionRevisionsRef.current.delete(uploadId);
             refresh();
+            const selectUploadedRecording = (selectionRevision: number) => {
+                setLibraryMode("recent");
+                setSelectedFolderId(null);
+                setResetToRecentKey((key) => key + 1);
+                setPendingUploadSelection({
+                    recordingId,
+                    selectionRevision,
+                });
+            };
+            if (resumed) {
+                return {
+                    label: i18n("Open"),
+                    onClick: () => {
+                        selectUploadedRecording(selectionRevisionRef.current);
+                    },
+                };
+            }
             if (
                 uploadSelection === undefined ||
                 uploadSelection !== selectionRevisionRef.current
             ) {
                 return;
             }
-            setLibraryMode("recent");
-            setSelectedFolderId(null);
-            setResetToRecentKey((key) => key + 1);
-            setPendingUploadSelection({
-                recordingId,
-                selectionRevision: uploadSelection,
-            });
+            selectUploadedRecording(uploadSelection);
         },
-        [refresh],
+        [i18n, refresh],
     );
 
     const handleUploadFailed = useCallback((uploadId: string) => {
@@ -1216,6 +1228,7 @@ export function Workstation({
                                     }
                                     onMoveRecording={handleMoveBetweenFolders}
                                     mailEnabled={mailEnabled}
+                                    canCurate={canCurate}
                                 />
                             )}
                         </div>
@@ -1242,6 +1255,7 @@ export function Workstation({
                                 exportProviders={exportProviders}
                                 isOrgAccount={isOrgAccount}
                                 mailEnabled={mailEnabled}
+                                canCurate={canCurate}
                             />
                         ) : visibleRecordings.length === 0 &&
                           visibleOrgRecordings.length === 0 &&

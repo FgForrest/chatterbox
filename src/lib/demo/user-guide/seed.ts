@@ -198,6 +198,7 @@ export async function seedUserGuideDemo(
         alex,
         await rootFolderId(orgUserId, "public"),
         DEMO_ORG_FOLDERS,
+        true,
     );
     await db.insert(folderDefaultProfiles).values({
         folderId: folderAt(
@@ -439,6 +440,7 @@ async function createFolderTree(
     actorUserId: string,
     rootId: string,
     paths: readonly string[],
+    canCurate = false,
 ): Promise<Map<string, string>> {
     const ids = new Map<string, string>([["", rootId]]);
     for (const path of paths) {
@@ -451,6 +453,7 @@ async function createFolderTree(
             userId: actorUserId,
             parentId,
             name: path.slice(slash + 1),
+            canCurate,
         });
         ids.set(path, folder.id);
     }

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
+import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { deleteFolder, moveFolder, renameFolder } from "@/lib/folders/folders";
 
 type IdContext = { params: Promise<{ id: string }> };
 
 export const PATCH = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { actor, session } = await requireApiSessionActor(request);
+    const canCurate = await actsForOrganization(actor);
     const { id } = await (context as IdContext).params;
     const body = (await request.json().catch(() => null)) as {
         name?: unknown;
@@ -44,6 +46,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             folderId: id,
             name: body.name,
             version,
+            canCurate,
         });
         return NextResponse.json({ folder });
     }
@@ -67,6 +70,7 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
             parentId: body.parentId,
             beforeId: body.beforeId as string | null | undefined,
             version,
+            canCurate,
         });
         return NextResponse.json({ folder });
     }
@@ -79,8 +83,10 @@ export const PATCH = apiHandler<IdContext>(async (request, context) => {
 });
 
 export const DELETE = apiHandler<IdContext>(async (request, context) => {
-    const session = await requireApiSession(request);
+    const { actor, session } = await requireApiSessionActor(request);
     const { id } = await (context as IdContext).params;
-    await deleteFolder(session.user.id, id);
+    await deleteFolder(session.user.id, id, {
+        canCurate: await actsForOrganization(actor),
+    });
     return NextResponse.json({ deleted: true });
 });

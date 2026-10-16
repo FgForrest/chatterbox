@@ -11,6 +11,7 @@ import {
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workstation as WorkstationComponent } from "@/components/dashboard/workstation";
+import type { UploadCompletionAction } from "@/hooks/use-upload-queue";
 import type { Recording } from "@/types/recording";
 
 const mocks = vi.hoisted(() => ({
@@ -26,7 +27,7 @@ const mocks = vi.hoisted(() => ({
             uploadId: string;
             filename: string;
             resumed: boolean;
-        }) => void;
+        }) => UploadCompletionAction | undefined;
     },
 }));
 
@@ -365,14 +366,15 @@ describe("Workstation upload completion", () => {
                 filename: "Uploaded recording",
             }),
         );
-        act(() =>
-            mocks.uploadOptions?.onUploadComplete({
+        let action: UploadCompletionAction | undefined;
+        act(() => {
+            action = mocks.uploadOptions?.onUploadComplete({
                 recordingId: "uploaded",
                 uploadId: "upload-1",
                 filename: "Uploaded recording",
                 resumed: false,
-            }),
-        );
+            });
+        });
         rerender(<Workstation {...baseProps} recordings={[uploaded, first]} />);
 
         expect(
@@ -380,6 +382,46 @@ describe("Workstation upload completion", () => {
         ).toBeTruthy();
         expect(screen.getByText("Selected: Uploaded recording")).toBeTruthy();
         expect(mocks.refresh).toHaveBeenCalledTimes(1);
+        expect(action).toBeUndefined();
+    });
+
+    it("leaves the current view and selection alone for a resumed conversion until Open is used", () => {
+        const first = recording("first", "First recording");
+        const uploaded = recording("uploaded", "Resumed recording");
+        const { rerender } = render(
+            <Workstation {...baseProps} recordings={[first]} />,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: "Organize" }));
+        act(() =>
+            mocks.uploadOptions?.onUploadStarted?.({
+                uploadId: "conversion:resumed",
+                filename: "Resumed recording",
+            }),
+        );
+        let action: UploadCompletionAction | undefined;
+        act(() => {
+            action = mocks.uploadOptions?.onUploadComplete({
+                recordingId: "uploaded",
+                uploadId: "conversion:resumed",
+                filename: "Resumed recording",
+                resumed: true,
+            });
+        });
+        rerender(<Workstation {...baseProps} recordings={[uploaded, first]} />);
+
+        expect(
+            screen.getByRole("region", { name: "Folder tree" }),
+        ).toBeTruthy();
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
+        expect(action?.label).toBe("Open");
+
+        act(() => action?.onClick());
+
+        expect(
+            screen.getByRole("region", { name: "Recent recordings" }),
+        ).toBeTruthy();
+        expect(screen.getByText("Selected: Resumed recording")).toBeTruthy();
     });
 
     it("does not steal selection after the person selects another recording", () => {

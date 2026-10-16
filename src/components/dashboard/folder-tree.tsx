@@ -86,6 +86,7 @@ interface FolderTreeProps {
     /** The instance receives mail: deleting a folder stops its addresses. */
     mailEnabled?: boolean;
     onNewFolder?: () => void;
+    canCurate?: boolean;
 }
 
 /** Display name of a folder; roots are labelled by what they are. */
@@ -112,6 +113,7 @@ export function FolderTree({
     onMoveRecording,
     mailEnabled = false,
     onNewFolder,
+    canCurate = false,
 }: FolderTreeProps) {
     const i18n = useExtracted();
     const confirm = useConfirm();
@@ -241,6 +243,15 @@ export function FolderTree({
         return "inside";
     };
 
+    const canDropFolderOn = (
+        draggedId: string,
+        target: RecordingFolder,
+    ): boolean => {
+        const dragged = folders.find((folder) => folder.id === draggedId);
+        if (!dragged || dragged.scope !== target.scope) return false;
+        return dragged.scope !== "org" || canCurate;
+    };
+
     const dropFolder = (
         draggedId: string,
         target: RecordingFolder,
@@ -249,8 +260,7 @@ export function FolderTree({
         if (draggedId === target.id) return;
         // A folder never changes tree: Private folders are nobody else's
         // business and Organization folders are nobody's to take private.
-        const dragged = folders.find((folder) => folder.id === draggedId);
-        if (!dragged || dragged.scope !== target.scope) return;
+        if (!canDropFolderOn(draggedId, target)) return;
         if (placement === "inside") {
             void onMoveFolder(draggedId, target.id, null).catch(() => {});
             return;
@@ -275,6 +285,9 @@ export function FolderTree({
         const children = childrenByParent.get(folder.id) ?? [];
         const isExpanded = query.trim() ? true : expanded.has(folder.id);
         const canExpand = children.length > 0;
+        const canManage = folder.scope !== "org" || canCurate;
+        const canCreateSubfolder =
+            folder.scope !== "org" || folder.parentId !== null || canCurate;
         return (
             <div key={folder.id}>
                 <div
@@ -328,7 +341,7 @@ export function FolderTree({
                     )}
                     <button
                         type="button"
-                        draggable={folder.kind === "custom"}
+                        draggable={folder.kind === "custom" && canManage}
                         onDragStart={(event) => {
                             setDraggedFolderId(folder.id);
                             event.dataTransfer.setData(
@@ -353,7 +366,13 @@ export function FolderTree({
                                 setRecordingDropFolderId(folder.id);
                                 return;
                             }
-                            if (!draggedFolderId) return;
+                            if (
+                                !draggedFolderId ||
+                                !canDropFolderOn(draggedFolderId, folder)
+                            ) {
+                                setDropTarget(null);
+                                return;
+                            }
                             event.preventDefault();
                             event.dataTransfer.dropEffect = "move";
                             setRecordingDropFolderId(null);
@@ -402,12 +421,17 @@ export function FolderTree({
                                 }
                                 return;
                             }
-                            event.preventDefault();
                             const draggedId =
                                 draggedFolderId ||
                                 event.dataTransfer.getData(
                                     "application/x-riffado-folder",
                                 );
+                            if (!canDropFolderOn(draggedId, folder)) {
+                                setDropTarget(null);
+                                setDraggedFolderId(null);
+                                return;
+                            }
+                            event.preventDefault();
                             const placement =
                                 dropTarget?.folderId === folder.id
                                     ? dropTarget.placement
@@ -445,6 +469,10 @@ export function FolderTree({
                                 type="button"
                                 variant="ghost"
                                 size="icon-sm"
+                                disabled={
+                                    !canCreateSubfolder &&
+                                    !(folder.kind === "custom" && canManage)
+                                }
                                 className="size-7 opacity-100 sm:opacity-0 sm:group-hover/folder:opacity-100 data-[state=open]:opacity-100"
                                 aria-label={i18n(
                                     "Folder actions for {folder}",
@@ -455,12 +483,16 @@ export function FolderTree({
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                                onSelect={() => openAction("create", folder)}
-                            >
-                                <FolderPlus /> {i18n("New subfolder")}
-                            </DropdownMenuItem>
-                            {folder.kind === "custom" && (
+                            {canCreateSubfolder ? (
+                                <DropdownMenuItem
+                                    onSelect={() =>
+                                        openAction("create", folder)
+                                    }
+                                >
+                                    <FolderPlus /> {i18n("New subfolder")}
+                                </DropdownMenuItem>
+                            ) : null}
+                            {folder.kind === "custom" && canManage && (
                                 <>
                                     <DropdownMenuItem
                                         onSelect={() =>
@@ -478,7 +510,7 @@ export function FolderTree({
                                     </DropdownMenuItem>
                                 </>
                             )}
-                            {folder.kind === "custom" && (
+                            {folder.kind === "custom" && canManage && (
                                 <>
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem

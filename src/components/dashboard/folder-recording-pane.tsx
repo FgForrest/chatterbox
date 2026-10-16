@@ -78,6 +78,7 @@ interface FolderRecordingPaneProps {
     isOrgAccount?: boolean;
     /** The instance receives mail: custom folders have addresses. */
     mailEnabled?: boolean;
+    canCurate?: boolean;
 }
 
 export function FolderRecordingPane({
@@ -94,6 +95,7 @@ export function FolderRecordingPane({
     exportProviders,
     isOrgAccount = false,
     mailEnabled = false,
+    canCurate = false,
 }: FolderRecordingPaneProps) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -106,6 +108,7 @@ export function FolderRecordingPane({
         column: RecordingSortColumn;
         direction: SortDirection;
     }>({ column: "date", direction: "desc" });
+    const canManageFolder = folder.scope !== "org" || canCurate;
 
     const folderRecordings = useMemo(() => {
         const ids = recordingIdsVisibleInFolder(
@@ -295,7 +298,7 @@ export function FolderRecordingPane({
                             (isOrgAccount && folder.scope === "org")
                         }
                     />
-                    {folder.kind === "custom" && (
+                    {folder.kind === "custom" && canManageFolder && (
                         <>
                             <Button
                                 type="button"
