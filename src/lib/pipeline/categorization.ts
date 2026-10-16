@@ -2,8 +2,11 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
-import { assertCategorizableFolder } from "@/lib/folders/folders";
+import { assertCategorizableFolders } from "@/lib/folders/folders";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+
+/** Maximum number of folder ids accepted by one categorization request. */
+export const MAX_CATEGORIZATION_FOLDERS = 100;
 
 /** Validate an owner's categorization target and resolve its folder defaults. */
 export async function resolveCategorizationSelection(input: {
@@ -26,10 +29,9 @@ export async function resolveCategorizationSelection(input: {
     if (!item) throw new AppError(ErrorCode.NOT_FOUND, "Item not found", 404);
 
     const folderIds = [...new Set(input.folderIds)];
-    const folders = await Promise.all(
-        folderIds.map((folderId) =>
-            assertCategorizableFolder(input.ownerUserId, folderId),
-        ),
+    const folders = await assertCategorizableFolders(
+        input.ownerUserId,
+        folderIds,
     );
     const resolution = await resolveProfileForPlacements({
         ownerUserId: input.ownerUserId,

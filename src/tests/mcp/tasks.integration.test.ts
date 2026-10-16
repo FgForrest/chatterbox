@@ -531,6 +531,17 @@ describeWithDatabase("MCP task tools (PostgreSQL)", () => {
                     id: taskId,
                     url: "https://riffado.example.test/dashboard?recording=b-shared&view=org",
                 });
+                const forEvidenceOwner = await call<ListOut>(
+                    "list_tasks",
+                    bob(),
+                    { status: "all" },
+                );
+                expect(
+                    forEvidenceOwner.tasks.find((row) => row.id === taskId),
+                ).toMatchObject({
+                    recording: { id: "a-shared" },
+                    url: "https://riffado.example.test/dashboard?recording=b-shared",
+                });
             } finally {
                 await db()
                     .delete(taskMentions)

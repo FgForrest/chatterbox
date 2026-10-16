@@ -2,13 +2,21 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
-import { resolveCategorizationSelection } from "@/lib/pipeline/categorization";
+import {
+    MAX_CATEGORIZATION_FOLDERS,
+    resolveCategorizationSelection,
+} from "@/lib/pipeline/categorization";
 import { serializeProcessingResolution } from "@/lib/pipeline/categorization-presentation";
 
 type IdContext = { params: Promise<{ id: string }> };
 
 const previewSchema = z
-    .object({ folderIds: z.array(z.string().min(1)).min(1) })
+    .object({
+        folderIds: z
+            .array(z.string().min(1))
+            .min(1)
+            .max(MAX_CATEGORIZATION_FOLDERS),
+    })
     .strict();
 
 export const POST = apiHandler<IdContext>(async (request, context) => {

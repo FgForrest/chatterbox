@@ -25,7 +25,10 @@ import {
 } from "vitest";
 import {
     exportJobs,
+    folderDefaultProfiles,
+    itemProcessing,
     learnRuns,
+    mailPendingShares,
     people,
     personNotes,
     processingProfileRevisions,
@@ -338,13 +341,20 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         json: (path: string) => unknown;
     }) {
         const profileData = archive.json("profiles/profiles.json") as {
+            profiles?: { id: string }[];
             revisions?: { id: string }[];
+            externalProfileIds?: string[];
             externalRevisionIds?: string[];
         };
+        const resolvedProfiles = new Set([
+            ...(profileData.profiles ?? []).map((profile) => profile.id),
+            ...(profileData.externalProfileIds ?? []),
+        ]);
         const resolved = new Set([
             ...(profileData.revisions ?? []).map((revision) => revision.id),
             ...(profileData.externalRevisionIds ?? []),
         ]);
+        const profileReferences = new Set<string>();
         const references = new Set<string>();
         const visit = (value: unknown): void => {
             if (Array.isArray(value)) {
@@ -353,6 +363,9 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
             }
             if (!value || typeof value !== "object") return;
             for (const [key, child] of Object.entries(value)) {
+                if (key === "profileId" && typeof child === "string") {
+                    profileReferences.add(child);
+                }
                 if (key === "profileRevisionId" && typeof child === "string") {
                     references.add(child);
                 }
@@ -362,7 +375,7 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         for (const [path, contents] of archive.files) {
             if (path.endsWith(".json")) visit(JSON.parse(contents));
         }
-        return { references, resolved };
+        return { profileReferences, resolvedProfiles, references, resolved };
     }
 
     it("resolves the scope from the account", async () => {
@@ -1025,6 +1038,301 @@ describeWithDatabase("backup and export scope (PostgreSQL)", () => {
         expect(organizationMentions).not.toContainEqual(
             expect.objectContaining({ taskId: organizationTaskId }),
         );
+    });
+
+    it("archives processing choices in the scope that owns each folder, item view, or pending placement", async () => {
+        await db()
+            .insert(processingProfiles)
+            .values([
+                {
+                    id: "profile-alice-choice",
+                    ownerUserId: ALICE,
+                    scope: "personal",
+                    channel: "audio",
+                    name: encryptText("Alice choice"),
+                    currentRevisionId: "revision-alice-choice",
+                    createdBy: ALICE,
+                    updatedBy: ALICE,
+                },
+                {
+                    id: "profile-org-choice",
+                    ownerUserId: orgUserId,
+                    scope: "organization",
+                    channel: "audio",
+                    name: encryptText("Organization choice"),
+                    currentRevisionId: "revision-org-choice",
+                    createdBy: orgUserId,
+                    updatedBy: orgUserId,
+                },
+            ]);
+        await db()
+            .insert(processingProfileRevisions)
+            .values([
+                {
+                    id: "revision-alice-choice",
+                    profileId: "profile-alice-choice",
+                    settings: encryptText(JSON.stringify({ choice: "alice" })),
+                    createdBy: ALICE,
+                },
+                {
+                    id: "revision-org-choice",
+                    profileId: "profile-org-choice",
+                    settings: encryptText(JSON.stringify({ choice: "org" })),
+                    createdBy: orgUserId,
+                },
+            ]);
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "folder-alice-choice",
+                    userId: ALICE,
+                    name: encryptText("Alice processing"),
+                    nameHash: "alice-processing",
+                    kind: "custom",
+                },
+                {
+                    id: "folder-org-choice",
+                    userId: orgUserId,
+                    name: encryptText("Organization processing"),
+                    nameHash: "organization-processing",
+                    kind: "custom",
+                },
+                {
+                    id: "folder-bravo-choice",
+                    userId: BRAVO,
+                    name: encryptText("BRAVO-PROCESSING-FOLDER"),
+                    nameHash: "bravo-processing",
+                    kind: "custom",
+                },
+            ]);
+        await db()
+            .insert(folderDefaultProfiles)
+            .values([
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "audio",
+                    profileId: "profile-alice-choice",
+                },
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "mail",
+                    profileId: null,
+                    manualOnly: true,
+                },
+                {
+                    folderId: "folder-org-choice",
+                    channel: "audio",
+                    profileId: "profile-org-choice",
+                },
+                {
+                    folderId: "folder-bravo-choice",
+                    channel: "audio",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ]);
+        const itemChoices = [
+            {
+                itemId: PRIVATE_ALICE,
+                userId: ALICE,
+                view: "private" as const,
+                profileId: "profile-alice-choice",
+                profileRevisionId: "revision-alice-choice",
+                manualOnly: false,
+            },
+            {
+                itemId: SHARED,
+                userId: ALICE,
+                view: "private" as const,
+                profileId: null,
+                profileRevisionId: null,
+                manualOnly: true,
+            },
+            {
+                itemId: SHARED,
+                userId: ALICE,
+                view: "org" as const,
+                profileId: "profile-org-choice",
+                profileRevisionId: "revision-org-choice",
+                manualOnly: false,
+            },
+            {
+                itemId: PRIVATE_BRAVO,
+                userId: BRAVO,
+                view: "private" as const,
+                profileId: null,
+                profileRevisionId: null,
+                manualOnly: true,
+            },
+        ];
+        for (const choice of itemChoices) {
+            await db()
+                .insert(itemProcessing)
+                .values(choice)
+                .onConflictDoUpdate({
+                    target: [itemProcessing.itemId, itemProcessing.view],
+                    set: {
+                        profileId: choice.profileId,
+                        profileRevisionId: choice.profileRevisionId,
+                        manualOnly: choice.manualOnly,
+                    },
+                });
+        }
+        const requestedAt = new Date("2026-09-03T10:00:00Z");
+        await db().insert(mailPendingShares).values({
+            itemId: PRIVATE_ALICE,
+            userId: ALICE,
+            folderId: "folder-org-choice",
+            createdAt: requestedAt,
+        });
+
+        const personal = await archive({ kind: "personal", userId: ALICE });
+        expect(personal.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "audio",
+                    profileId: "profile-alice-choice",
+                    manualOnly: false,
+                },
+                {
+                    folderId: "folder-alice-choice",
+                    channel: "mail",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ],
+            itemChoices: expect.arrayContaining([
+                {
+                    itemId: PRIVATE_ALICE,
+                    view: "private",
+                    profileId: "profile-alice-choice",
+                    profileRevisionId: "revision-alice-choice",
+                    manualOnly: false,
+                },
+                {
+                    itemId: SHARED,
+                    view: "private",
+                    profileId: null,
+                    profileRevisionId: null,
+                    manualOnly: true,
+                },
+            ]),
+            pendingOrganizationPlacements: [
+                {
+                    itemId: PRIVATE_ALICE,
+                    folderId: "folder-org-choice",
+                    requestedAt: requestedAt.toISOString(),
+                },
+            ],
+        });
+        expect(
+            personal.json("processing/choices.json").itemChoices,
+        ).toHaveLength(2);
+        expect(personal.json("manifest.json").processing).toEqual({
+            folderDefaults: 2,
+            itemChoices: 2,
+            pendingOrganizationPlacements: 1,
+            path: "processing/choices.json",
+        });
+        const personalProfileReferences = profileRevisionReferences(personal);
+        expect(
+            [...personalProfileReferences.profileReferences].every((id) =>
+                personalProfileReferences.resolvedProfiles.has(id),
+            ),
+        ).toBe(true);
+        expect(
+            [...personalProfileReferences.references].every((id) =>
+                personalProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        expect(personal.text).not.toContain("BRAVO-PROCESSING-FOLDER");
+        expect(personal.json("profiles/profiles.json").profiles).toContainEqual(
+            expect.objectContaining({ id: "profile-alice-choice" }),
+        );
+        expect(
+            personal.json("profiles/profiles.json").revisions,
+        ).toContainEqual(
+            expect.objectContaining({ id: "revision-alice-choice" }),
+        );
+
+        const organization = await archive({
+            kind: "organization",
+            orgUserId,
+        });
+        expect(organization.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-org-choice",
+                    channel: "audio",
+                    profileId: "profile-org-choice",
+                    manualOnly: false,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: SHARED,
+                    view: "org",
+                    profileId: "profile-org-choice",
+                    profileRevisionId: "revision-org-choice",
+                    manualOnly: false,
+                },
+            ],
+            pendingOrganizationPlacements: [],
+        });
+        expect(organization.json("manifest.json").processing).toEqual({
+            folderDefaults: 1,
+            itemChoices: 1,
+            pendingOrganizationPlacements: 0,
+            path: "processing/choices.json",
+        });
+        const organizationProfileReferences =
+            profileRevisionReferences(organization);
+        expect(
+            [...organizationProfileReferences.profileReferences].every((id) =>
+                organizationProfileReferences.resolvedProfiles.has(id),
+            ),
+        ).toBe(true);
+        expect(
+            [...organizationProfileReferences.references].every((id) =>
+                organizationProfileReferences.resolved.has(id),
+            ),
+        ).toBe(true);
+        expect(organization.text).not.toContain("folder-alice-choice");
+        expect(organization.text).not.toContain(PRIVATE_ALICE);
+        expect(
+            organization.json("profiles/profiles.json").profiles,
+        ).toContainEqual(expect.objectContaining({ id: "profile-org-choice" }));
+        expect(
+            organization.json("profiles/profiles.json").revisions,
+        ).toContainEqual(
+            expect.objectContaining({ id: "revision-org-choice" }),
+        );
+
+        const bravo = await archive({ kind: "personal", userId: BRAVO });
+        expect(bravo.json("processing/choices.json")).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-bravo-choice",
+                    channel: "audio",
+                    profileId: null,
+                    manualOnly: true,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: PRIVATE_BRAVO,
+                    view: "private",
+                    profileId: null,
+                    profileRevisionId: null,
+                    manualOnly: true,
+                },
+            ],
+            pendingOrganizationPlacements: [],
+        });
+        expect(bravo.text).not.toContain("folder-alice-choice");
+        expect(bravo.text).not.toContain("profile-alice-choice");
     });
 
     it("renders a person's exports without the Organization's corrections", async () => {

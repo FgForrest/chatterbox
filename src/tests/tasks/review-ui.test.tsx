@@ -134,7 +134,7 @@ function state(data: RecordingTasks): RecordingTasksState {
     };
 }
 
-function openReview(data: Partial<RecordingTasks>) {
+function openReview(data: Partial<RecordingTasks>, organizationOnly = false) {
     const current = state({
         canEdit: true,
         reviewed: false,
@@ -148,7 +148,7 @@ function openReview(data: Partial<RecordingTasks>) {
         <TaskReviewLink
             state={current}
             speakers={[]}
-            organizationOnly={false}
+            organizationOnly={organizationOnly}
         />,
     );
     fireEvent.click(screen.getByRole("button", { name: /Review tasks/ }));
@@ -199,6 +199,80 @@ it("confirms undo while explaining that applied task changes stay", async () => 
 });
 
 describe("task review rows", () => {
+    it("shows non-curators read-only task controls", () => {
+        const current = state({
+            canEdit: false,
+            reviewed: true,
+            tasks: [
+                task({
+                    status: "open",
+                    canEdit: false,
+                    canClose: false,
+                }),
+            ],
+            proposals: [],
+            updates: [],
+            matches: [],
+        });
+        render(
+            <RecordingTasksList
+                state={current}
+                speakers={[]}
+                organizationOnly={true}
+                fallback={null}
+            />,
+        );
+
+        expect(screen.getByRole("checkbox", { name: "Done" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(
+            screen.getByRole("button", { name: "Assigned to Ada" }),
+        ).toHaveProperty("disabled", true);
+        expect(screen.queryByRole("textbox", { name: "Task" })).toBeNull();
+        expect(screen.queryByLabelText("Due date")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Add task" })).toBeNull();
+    });
+
+    it("limits review assignees to Organization people", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn().mockResolvedValue(
+                Response.json({
+                    people: [
+                        {
+                            id: "private-person",
+                            displayName: "Private Pat",
+                            primaryEmail: "pat@example.test",
+                            scope: "private",
+                        },
+                        {
+                            id: "org-person",
+                            displayName: "Organization Olivia",
+                            primaryEmail: "olivia@example.test",
+                            scope: "org",
+                        },
+                    ],
+                }),
+            ),
+        );
+        openReview(
+            {
+                proposals: [task({ assignee: null })],
+            },
+            true,
+        );
+
+        fireEvent.pointerDown(
+            screen.getByRole("button", { name: "Assigned to Nobody" }),
+        );
+
+        expect(await screen.findByText("Organization Olivia")).toBeTruthy();
+        expect(screen.queryByText("Private Pat")).toBeNull();
+    });
+
     it("shows an unticked suggested match with its candidate and evidence", () => {
         const onPlay = vi.fn();
         const current = state({

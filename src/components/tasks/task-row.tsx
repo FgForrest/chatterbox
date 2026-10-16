@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 export function TaskRow({
     task,
     recording,
+    evidence,
     showAssignee = true,
     speakers = [],
     organizationOnly,
@@ -32,6 +33,8 @@ export function TaskRow({
     task: TaskView;
     /** The recording it came from, on the Tasks page. */
     recording?: TaskListItem["recording"];
+    /** The latest visible item that evidences the task. */
+    evidence?: TaskListItem["evidence"];
     showAssignee?: boolean;
     speakers?: readonly SpeakerChoice[];
     organizationOnly: boolean;
@@ -113,23 +116,20 @@ export function TaskRow({
                             onChange({ dueDate }, { dueDate })
                         }
                     />
-                    {recording && (
+                    {evidence && (
                         <>
                             <Link
-                                href={`/dashboard?recording=${encodeURIComponent(task.evidenceItemId)}${recording.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && task.evidenceItemKind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
+                                href={`/dashboard?recording=${encodeURIComponent(evidence.id)}${evidence.view === "org" ? "&view=org" : ""}${task.evidenceStartMs !== null && evidence.kind !== "mail" ? `&playFrom=${task.evidenceStartMs}` : ""}`}
                                 className="truncate hover:text-primary hover:underline"
                             >
-                                {recording.title}
+                                {evidence.title}
                             </Link>
                             <span>
-                                {format.dateTime(
-                                    new Date(recording.startTime),
-                                    {
-                                        day: "numeric",
-                                        month: "short",
-                                        year: "numeric",
-                                    },
-                                )}
+                                {format.dateTime(new Date(evidence.startTime), {
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                })}
                             </span>
                         </>
                     )}

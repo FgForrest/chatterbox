@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseSummaryPayload } from "@/lib/summary/payload";
 import {
+    buildPlaudActionItemHints,
     buildTasksContext,
     localDay,
     recordingOffsetMinutes,
@@ -406,6 +407,15 @@ describe("buildTasksContext", () => {
         });
         expect(text).not.toContain("Already decided");
         expect(text).not.toContain("Open tasks");
+    });
+});
+
+describe("buildPlaudActionItemHints", () => {
+    it("truncates on Unicode code points", () => {
+        const hint = buildPlaudActionItemHints([`${"a".repeat(499)}😀x`]);
+
+        expect(hint.split("\n").at(-1)).toBe(`- ${"a".repeat(499)}😀`);
+        expect(hint).not.toContain("�");
     });
 });
 

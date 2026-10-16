@@ -26,7 +26,7 @@ export function buildPlaudActionItemHints(
     actionItems: readonly string[],
 ): string {
     const items = actionItems
-        .map((item) => oneLine(item).slice(0, 500))
+        .map((item) => [...oneLine(item)].slice(0, 500).join(""))
         .filter(Boolean)
         .slice(0, 20);
     if (items.length === 0) return "";

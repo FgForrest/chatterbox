@@ -1103,18 +1103,13 @@ async function runSyncRecordingsForUser(userId: string): Promise<SyncResult> {
  * (#203). Non-destructive: only fills gaps, never overwrites an existing
  * transcript/summary. Never throws out of sync; a dead token (401) stops the
  * pass, any other failure skips that one item.
- *
- * Returns the set of recordingIds that now hold a Plaud transcript so the
- * caller can decide (per `transcriptMode`) whether to also run the user's own
- * provider.
  */
 async function importPlaudContent(
     candidates: ImportCandidate[],
     context: SyncContext,
     plaudClient: Awaited<ReturnType<typeof createPlaudClient>>,
     result: SyncResult,
-): Promise<Set<string>> {
-    const transcriptImported = new Set<string>();
+): Promise<void> {
     let tokenDead = false;
 
     for (const candidate of candidates) {
@@ -1130,9 +1125,6 @@ async function importPlaudContent(
                     summarySuppressed: candidate.summarySuppressed,
                 },
             );
-            if (gaps.hasPlaudTranscript) {
-                transcriptImported.add(candidate.recordingId);
-            }
             if (!gaps.needsTranscript && !gaps.needsSummary) continue;
 
             const detail = await plaudClient.getFileDetail(
@@ -1166,7 +1158,6 @@ async function importPlaudContent(
                         audioMd5: candidate.audioMd5,
                     });
                     if (committed) {
-                        transcriptImported.add(candidate.recordingId);
                         await exportRecordingSidecarsIfEnabled(
                             context.userId,
                             candidate.recordingId,
@@ -1252,6 +1243,4 @@ async function importPlaudContent(
             }
         }
     }
-
-    return transcriptImported;
 }

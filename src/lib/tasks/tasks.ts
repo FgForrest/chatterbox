@@ -350,6 +350,8 @@ export async function listRecordingTasks(
             id: chatterItems.id,
             ownerUserId: chatterItems.userId,
             kind: chatterItems.kind,
+            title: chatterItems.title,
+            occurredAt: chatterItems.occurredAt,
             canEdit: sql<boolean>`${taskEditable(viewer, ANY_TASK_ITEM)}`,
             shared: sql<boolean>`${taskRecordingShared(viewer, ANY_TASK_ITEM)}`,
         })
@@ -421,6 +423,9 @@ export async function listRecordingTasks(
         mentions.latest.set(mention.taskId, {
             ...mention,
             kind: recording.kind,
+            title: decryptText(recording.title),
+            occurredAt: recording.occurredAt,
+            ownerUserId: recording.ownerUserId,
             quote: decryptOptional(mention.quote),
         });
     }
@@ -2600,6 +2605,13 @@ export interface TaskListItem extends TaskView {
         /** What the item is: a recording or a mail. */
         kind: "audio" | "mail";
     };
+    evidence: {
+        id: string;
+        title: string;
+        startTime: string;
+        view: "private" | "org";
+        kind: "audio" | "mail";
+    };
 }
 
 function addDays(day: string, days: number): string {
@@ -2777,23 +2789,42 @@ async function loadTaskListItems(
         viewer,
         rows.map((row) => row.id),
     );
-    return rows.map((row) => ({
-        ...toView(row, mentions),
-        visibleMentionQuotes:
-            mentions.quotes.get(row.id) ??
-            (mentions.taskIdsWithMentions.has(row.id)
-                ? []
-                : [decryptOptional(row.quote)]
-                      .filter((quote): quote is string => quote !== null)
-                      .map((text) => ({ text, kind: row.recordingKind }))),
-        recording: {
-            id: row.recordingId as string,
-            title: decryptText(row.recordingTitle),
-            startTime: row.recordingStart.toISOString(),
-            view: row.recordingOwner === viewer.userId ? "private" : "org",
-            kind: row.recordingKind,
-        },
-    }));
+    return rows.map((row) => {
+        const evidence = mentions.latest.get(row.id);
+        return {
+            ...toView(row, mentions),
+            visibleMentionQuotes:
+                mentions.quotes.get(row.id) ??
+                (mentions.taskIdsWithMentions.has(row.id)
+                    ? []
+                    : [decryptOptional(row.quote)]
+                          .filter((quote): quote is string => quote !== null)
+                          .map((text) => ({
+                              text,
+                              kind: row.recordingKind,
+                          }))),
+            recording: {
+                id: row.recordingId as string,
+                title: decryptText(row.recordingTitle),
+                startTime: row.recordingStart.toISOString(),
+                view: row.recordingOwner === viewer.userId ? "private" : "org",
+                kind: row.recordingKind,
+            },
+            evidence: {
+                id: evidence?.itemId ?? (row.recordingId as string),
+                title: evidence?.title ?? decryptText(row.recordingTitle),
+                startTime: (
+                    evidence?.occurredAt ?? row.recordingStart
+                ).toISOString(),
+                view:
+                    (evidence?.ownerUserId ?? row.recordingOwner) ===
+                    viewer.userId
+                        ? "private"
+                        : "org",
+                kind: evidence?.kind ?? row.recordingKind,
+            },
+        };
+    });
 }
 
 /** Open tasks assigned to the viewer since they last opened the list. */

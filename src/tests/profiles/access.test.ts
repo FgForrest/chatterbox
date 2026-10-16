@@ -3,7 +3,6 @@ import type { ActorContext } from "@/lib/authz/model";
 
 const mocks = vi.hoisted(() => ({
     actsForOrganization: vi.fn(),
-    userCuratesOrganizationNow: vi.fn(),
     holderAccess: vi.fn(),
     isIdpAuthorization: vi.fn(),
     isOrgScopeEnabled: vi.fn(),
@@ -11,7 +10,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/authz/curator", () => ({
     actsForOrganization: mocks.actsForOrganization,
-    userCuratesOrganizationNow: mocks.userCuratesOrganizationNow,
 }));
 vi.mock("@/lib/authz/access-state", () => ({
     holderAccess: mocks.holderAccess,
@@ -23,11 +21,7 @@ vi.mock("@/lib/org/config", () => ({
     isOrgScopeEnabled: mocks.isOrgScopeEnabled,
 }));
 
-import {
-    mayEditProfile,
-    mayEditProfileInJob,
-    mayUseProfile,
-} from "@/lib/profiles/access";
+import { mayEditProfile, mayUseProfile } from "@/lib/profiles/access";
 
 const owner: ActorContext = {
     kind: "user",
@@ -55,9 +49,6 @@ describe("profile permissions", () => {
         mocks.isIdpAuthorization.mockReturnValue(false);
         mocks.actsForOrganization.mockImplementation(
             async (actor: ActorContext) => actor.actorId === "org",
-        );
-        mocks.userCuratesOrganizationNow.mockImplementation(
-            async (userId: string) => userId === "org",
         );
         mocks.holderAccess.mockResolvedValue({
             ok: true,
@@ -101,27 +92,11 @@ describe("profile permissions", () => {
         await expect(mayUseProfile("other", organization)).resolves.toBe(false);
     });
 
-    it("rechecks current curator access for jobs", async () => {
-        await expect(mayEditProfileInJob("owner", personal)).resolves.toBe(
-            true,
-        );
-        await expect(mayEditProfileInJob("other", organization)).resolves.toBe(
-            false,
-        );
-        mocks.userCuratesOrganizationNow.mockResolvedValue(true);
-        await expect(mayEditProfileInJob("other", organization)).resolves.toBe(
-            true,
-        );
-    });
-
     it("denies organization use and edits while the scope is disabled", async () => {
         mocks.isOrgScopeEnabled.mockReturnValue(false);
 
         await expect(mayUseProfile("owner", organization)).resolves.toBe(false);
         await expect(mayEditProfile(orgAccount, organization)).resolves.toBe(
-            false,
-        );
-        await expect(mayEditProfileInJob("org", organization)).resolves.toBe(
             false,
         );
     });

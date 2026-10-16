@@ -123,6 +123,9 @@ export interface TaskMentionEvidence {
     taskId: string;
     itemId: string;
     kind: "audio" | "mail";
+    title: string;
+    occurredAt: Date;
+    ownerUserId: string;
     quote: string | null;
     evidenceStartMs: number | null;
     evidenceSegmentIndex: number | null;
@@ -166,6 +169,9 @@ async function loadTaskMentions(
                 taskId: taskMentions.taskId,
                 itemId: taskMentions.itemId,
                 kind: chatterItems.kind,
+                title: chatterItems.title,
+                occurredAt: chatterItems.occurredAt,
+                ownerUserId: chatterItems.userId,
                 quote: taskMentions.quote,
                 evidenceStartMs: taskMentions.evidenceStartMs,
                 evidenceSegmentIndex: taskMentions.evidenceSegmentIndex,
@@ -198,6 +204,7 @@ async function loadTaskMentions(
     for (const row of rows) {
         const evidence = {
             ...row,
+            title: decryptText(row.title),
             quote: row.quote ? decryptText(row.quote) : null,
         };
         if (!latest.has(row.taskId)) latest.set(row.taskId, evidence);

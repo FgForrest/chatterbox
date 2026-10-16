@@ -340,7 +340,7 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         });
     });
 
-    it("resolves a Mynah transcription pin without checking runtime availability", async () => {
+    it("resolves a Mynah transcription pin only while Mynah is configured", async () => {
         state.mynahConfigured = true;
         await expect(
             resolveStepProvider({
@@ -361,6 +361,38 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
                     credentialId: RIFFADO_INCLUDED_PROVIDER_ID,
                     scope: "personal",
                 },
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "NOT_FOUND",
+            message: expect.stringContaining("no longer available"),
+        });
+    });
+
+    it("fails loudly when the selected Mynah default is no longer configured", async () => {
+        await databaseClient()
+            .update(userSettings)
+            .set({
+                defaultTranscriptionProviderId: RIFFADO_INCLUDED_PROVIDER_ID,
+            })
+            .where(eq(userSettings.userId, "actor"));
+
+        await expect(
+            resolveStepProvider({
+                step: "transcription",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "NO_TRANSCRIPTION_PROVIDER",
+            message: expect.stringContaining("no longer available"),
+        });
+
+        state.mynahConfigured = true;
+        await expect(
+            resolveStepProvider({
+                step: "transcription",
+                pin: null,
                 actorUserId: "actor",
             }),
         ).resolves.toMatchObject({ kind: "managed", payerUserId: "actor" });

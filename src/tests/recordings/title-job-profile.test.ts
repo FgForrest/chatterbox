@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
     readTitleInput: vi.fn(),
     resolveItemProfile: vi.fn(),
     select: vi.fn(),
+    processing: {
+        phases: {} as Record<string, unknown>,
+        profileRevisionId: null as string | null,
+    },
 }));
 
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
@@ -44,6 +48,7 @@ describe("title job profile switch", () => {
         mocks.isHeldForLearn.mockResolvedValue(false);
         mocks.select.mockImplementation((fields: Record<string, unknown>) => {
             const recording = "plaudFileId" in fields;
+            const processing = "phases" in fields;
             const chain = {
                 from: () => chain,
                 innerJoin: () => chain,
@@ -51,15 +56,20 @@ describe("title job profile switch", () => {
                 where: () => chain,
                 limit: () =>
                     Promise.resolve(
-                        recording
-                            ? [
-                                  {
-                                      kind: "audio",
-                                      plaudFileId: "plaud-1",
-                                      titleEditedAt: null,
-                                  },
-                              ]
-                            : [{ syncTitleToPlaud: false }],
+                        processing
+                            ? [mocks.processing]
+                            : recording
+                              ? [
+                                    {
+                                        kind: "audio",
+                                        plaudFileId: "plaud-1",
+                                        titleEditedAt: null,
+                                        phases: mocks.processing.phases,
+                                        profileRevisionId:
+                                            mocks.processing.profileRevisionId,
+                                    },
+                                ]
+                              : [{ syncTitleToPlaud: false }],
                     ),
             };
             return chain;
@@ -69,6 +79,8 @@ describe("title job profile switch", () => {
             text: "Quarterly launch",
         });
         mocks.applyGeneratedTitle.mockResolvedValue(true);
+        mocks.processing.phases = {};
+        mocks.processing.profileRevisionId = null;
     });
 
     it.each([
@@ -86,5 +98,51 @@ describe("title job profile switch", () => {
 
         expect(mocks.applyGeneratedTitle).toHaveBeenCalledTimes(calls);
         expect(mocks.emitEvent).toHaveBeenCalledTimes(calls);
+    });
+
+    it("skips a queued title already completed for the same fence", async () => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            assigned: true,
+            revisionId: "profile-revision-1",
+            settings: { steps: { title: { automatic: true } } },
+        });
+        mocks.readTitleInput.mockResolvedValue({
+            source: "summary",
+            text: "Quarterly launch",
+            fence: {
+                contentId: "summary-source-1",
+                contentSourceId: "riffado",
+                contentRevision: 2,
+                profileRevisionId: "profile-revision-1",
+            },
+        });
+        mocks.processing.profileRevisionId = "profile-revision-1";
+        mocks.processing.phases = {
+            summary: {
+                state: "done",
+                generation: 4,
+                at: "2026-10-16T00:00:00.000Z",
+                inputs: {
+                    contentId: "summary-source-1",
+                    contentSourceId: "riffado",
+                    contentRevision: 2,
+                },
+                steps: {
+                    title: {
+                        contentId: "summary-source-1",
+                        contentSourceId: "riffado",
+                        contentRevision: 2,
+                        profileRevisionId: "profile-revision-1",
+                        generation: 4,
+                        state: "done",
+                    },
+                },
+            },
+        };
+
+        expect(await titleJobHandler.run(context())).toEqual({
+            skipped: "done",
+        });
+        expect(mocks.applyGeneratedTitle).not.toHaveBeenCalled();
     });
 });

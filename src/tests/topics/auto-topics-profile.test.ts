@@ -58,4 +58,19 @@ describe("automatic topics profile switch", () => {
 
         expect(mocks.enqueueJob).toHaveBeenCalledTimes(queued ? 1 : 0);
     });
+
+    it("does not queue while another topics job is active", async () => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: { steps: { topics: { automatic: true } } },
+        });
+        mocks.getActiveJob.mockResolvedValue({
+            payload: { source: "plaud" },
+        });
+
+        await queueAutoTopics("user-1", "recording-1", "riffado");
+
+        expect(mocks.countRateLimitedJobs).not.toHaveBeenCalled();
+        expect(mocks.consumeRateLimitBucket).not.toHaveBeenCalled();
+        expect(mocks.enqueueJob).not.toHaveBeenCalled();
+    });
 });

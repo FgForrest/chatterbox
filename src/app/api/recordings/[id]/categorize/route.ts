@@ -18,7 +18,10 @@ import {
 } from "@/lib/folders/folders";
 import { nudge } from "@/lib/jobs/nudge";
 import { getOrgUserId } from "@/lib/org/config";
-import { resolveCategorizationSelection } from "@/lib/pipeline/categorization";
+import {
+    MAX_CATEGORIZATION_FOLDERS,
+    resolveCategorizationSelection,
+} from "@/lib/pipeline/categorization";
 import { loadPrivateCategorizationPanel } from "@/lib/pipeline/categorization-presentation";
 import { markPhasesOutdatedForProfileChange } from "@/lib/pipeline/outdated";
 import { recordIntendedPlacementInTx } from "@/lib/pipeline/share-intent";
@@ -32,7 +35,10 @@ type IdContext = { params: Promise<{ id: string }> };
 
 const categorizeSchema = z
     .object({
-        folderIds: z.array(z.string().min(1)).min(1),
+        folderIds: z
+            .array(z.string().min(1))
+            .min(1)
+            .max(MAX_CATEGORIZATION_FOLDERS),
         profileId: z.string().min(1).optional(),
         manualOnly: z.boolean().optional(),
     })

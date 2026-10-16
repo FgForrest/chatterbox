@@ -345,6 +345,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 source: "riffado",
                 tasks,
                 updates: [],
+                reviewer: alice,
                 fingerprintOf: taskFingerprint,
                 ...extra,
             },
@@ -2121,6 +2122,52 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 status: "done",
             }),
         );
+    });
+
+    it("reports only the stored state when rejection races with an apply", async () => {
+        const target = await addTask(alice, REC, {
+            text: "Publish the concurrent decision notes",
+            status: "open",
+        });
+        const [proposal] = await db()
+            .insert(taskUpdateProposals)
+            .values({
+                taskId: target.id,
+                itemId: LATER,
+                userId: ALICE,
+                kind: "due",
+                dueDate: "2026-10-30",
+                statementAt: new Date("2026-10-08T10:00:00Z"),
+                state: "awaiting_target_review",
+                routedTo: [ALICE],
+                version: target.version,
+            })
+            .returning({ id: taskUpdateProposals.id });
+        if (!proposal) throw new Error("missing routed proposal");
+
+        const decisions = await Promise.allSettled([
+            applyRoutedTaskProposal(alice, LATER, proposal.id),
+            rejectRoutedTaskProposal(alice, LATER, proposal.id),
+        ]);
+        const [stored] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                obsoleteReason: taskUpdateProposals.obsoleteReason,
+            })
+            .from(taskUpdateProposals)
+            .where(eq(taskUpdateProposals.id, proposal.id));
+        expect(stored).toBeDefined();
+        const completed = decisions.filter(
+            (decision) => decision.status === "fulfilled",
+        );
+        expect(completed.length).toBeGreaterThan(0);
+        for (const decision of completed) {
+            if (decision.status !== "fulfilled") continue;
+            expect(decision.value).toEqual({
+                state: stored?.state,
+                obsoleteReason: stored?.obsoleteReason,
+            });
+        }
     });
 
     it("routes an awaiting-share proposal to another member's shared task", async () => {

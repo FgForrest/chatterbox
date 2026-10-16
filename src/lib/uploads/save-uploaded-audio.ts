@@ -50,6 +50,29 @@ export interface SavedUploadedAudio {
     filesize: number;
 }
 
+/** Resolve an upload's folder and the profile selected by that placement. */
+export async function resolveUploadedAudioPlacement(input: {
+    userId: string;
+    itemId: string;
+    folderId?: string | null;
+    deferredFolderFallback?: DeferredFolderFallback;
+}) {
+    const folder = await resolveUploadedAudioFolder(
+        input.userId,
+        input.folderId,
+        input.deferredFolderFallback,
+    );
+    const profileResolution = folder
+        ? await resolveArrivalProfile({
+              ownerUserId: input.userId,
+              itemId: input.itemId,
+              channel: "audio",
+              folderIds: [folder.folderId],
+          })
+        : null;
+    return { folder, profileResolution };
+}
+
 function isUnavailableFolderError(error: unknown): boolean {
     return (
         error instanceof AppError &&
@@ -81,19 +104,12 @@ export async function saveUploadedAudio(
     input: SaveUploadedAudioInput,
 ): Promise<SavedUploadedAudio> {
     const recordingId = nanoid();
-    const folder = await resolveUploadedAudioFolder(
-        input.userId,
-        input.folderId,
-        input.deferredFolderFallback,
-    );
-    const profileResolution = folder
-        ? await resolveArrivalProfile({
-              ownerUserId: input.userId,
-              itemId: recordingId,
-              channel: "audio",
-              folderIds: [folder.folderId],
-          })
-        : null;
+    const { folder, profileResolution } = await resolveUploadedAudioPlacement({
+        userId: input.userId,
+        itemId: recordingId,
+        folderId: input.folderId,
+        deferredFolderFallback: input.deferredFolderFallback,
+    });
     const storageKey = buildRecordingStagingPath(
         input.userId,
         recordingId,

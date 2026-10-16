@@ -272,6 +272,34 @@ describeWithDatabase("task merges", () => {
         ).resolves.toMatchObject({ id: "shared-target" });
     });
 
+    it("refuses a curator merging one member's task into another member's", async () => {
+        await item("three-party-source-item", ALICE, true);
+        await item("three-party-target-item", BOB, true);
+        await task({
+            id: "three-party-source",
+            itemId: "three-party-source-item",
+            userId: ALICE,
+            view: "org",
+        });
+        await task({
+            id: "three-party-target",
+            itemId: "three-party-target-item",
+            userId: BOB,
+            view: "org",
+        });
+
+        await expect(
+            mergeTaskIntoTask(
+                viewer(CAROL, true),
+                "three-party-source",
+                "three-party-target",
+            ),
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            message: expect.stringContaining("home owner"),
+        });
+    });
+
     it("attaches an own shared task to another owner's task and routes every supported difference", async () => {
         const statementAt = new Date("2026-10-05T12:00:00.000Z");
         await item("cross-source-item", ALICE, true);

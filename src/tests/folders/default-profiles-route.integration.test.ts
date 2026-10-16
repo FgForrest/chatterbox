@@ -50,6 +50,7 @@ const { dbProxy, dbRef, state } = vi.hoisted(() => {
         state: {
             actorId: "folder-owner",
             capabilities: new Set<"use" | "org.curate">(["use"]),
+            holderMayUse: true,
         },
     };
 });
@@ -80,7 +81,7 @@ vi.mock("@/lib/identity/factory", () => ({
 }));
 vi.mock("@/lib/authz/access-state", () => ({
     holderAccess: async (userId: string) =>
-        userId === "outsider"
+        userId === "outsider" || !state.holderMayUse
             ? { ok: false, reason: "disabled" }
             : { ok: true, capabilities: new Set(["use"]) },
 }));
@@ -232,6 +233,7 @@ describeWithDatabase("folder default profile routes", () => {
     beforeEach(async () => {
         state.actorId = OWNER;
         state.capabilities = new Set(["use"]);
+        state.holderMayUse = true;
         await db().delete(folderDefaultProfiles);
         await db().delete(recordingFolders);
         await db().delete(processingProfiles);
@@ -424,6 +426,27 @@ describeWithDatabase("folder default profile routes", () => {
             context("org-folder"),
         );
         expect(response.status).toBe(403);
+    });
+
+    it("refuses Organization defaults after a member loses use access", async () => {
+        state.actorId = MEMBER;
+        state.capabilities = new Set();
+        state.holderMayUse = false;
+
+        const read = await GET(
+            request("GET", "org-folder"),
+            context("org-folder"),
+        );
+        expect(read.status).toBe(403);
+
+        const write = await PUT(
+            request("PUT", "org-folder", {
+                channel: "audio",
+                profileId: null,
+            }),
+            context("org-folder"),
+        );
+        expect(write.status).toBe(403);
     });
 
     it("refuses defaults on roots", async () => {

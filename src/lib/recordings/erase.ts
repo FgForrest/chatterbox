@@ -128,7 +128,8 @@ async function cancelArtifactJobs(
 }
 
 /**
- * Erase one kind of a recording's local data.
+ * Erase one kind of a recording's local artifact. When this removes the last
+ * artifact, its derived task data is removed too.
  *
  * A shared recording is the organization account's to change, so its
  * owner's erase takes it out of the Organization first: refused (409)

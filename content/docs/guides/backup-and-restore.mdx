@@ -21,10 +21,10 @@ up any other binary blob.
 
 **Settings → Export/Backup → Create Backup** (or `POST /api/backup`)
 queues a job that builds a **zip containing everything**: the audio for
-every recording, its transcripts and summary, and a `manifest.json`
-describing what went in. It is built in the background — the request
-returns immediately rather than blocking while audio streams out of
-storage — and the panel reports progress.
+every recording, its transcripts and summary, mail, tasks, processing
+choices, and a `manifest.json` describing what went in. It is built in
+the background — the request returns immediately rather than blocking
+while audio streams out of storage — and the panel reports progress.
 
 A recording whose audio cannot be read does not fail the archive; it is
 noted in the manifest and skipped, so you still get everything else.
@@ -69,17 +69,28 @@ items; private and withdrawn mentions are omitted.
 
 `profiles/profiles.json` contains the profiles owned by the archive's scope.
 Its `profiles` array holds profile metadata, and `revisions` holds each
-current revision plus every revision referenced by an archived run. Names,
-descriptions and revision `settings` are decrypted; `settings` is JSON, not
-an encrypted database envelope. `transcripts.json`, `summaries.json`, mail
-summaries and `knowledge/learn.json` carry `profileRevisionId` together with
-the run provenance fields such as `builtinPromptsVersion`, `inputs`, payer,
-provider and model. If a run references a profile revision owned by another
-scope, its id appears in `externalRevisionIds`; the external revision's
-settings are not copied. Thus every `profileRevisionId` resolves either to a
-row in `revisions` or to an id in `externalRevisionIds`. Organization
-profiles are in the Organization backup; personal profiles are in their
-owner's backup.
+current revision plus every revision referenced by an archived run or item
+choice. Names, descriptions and revision `settings` are decrypted; `settings`
+is JSON, not an encrypted database envelope. `transcripts.json`,
+`summaries.json`, mail summaries and `knowledge/learn.json` carry
+`profileRevisionId` together with the run provenance fields such as
+`builtinPromptsVersion`, `inputs`, payer, provider and model. References to a
+profile or revision owned by another scope appear in `externalProfileIds` or
+`externalRevisionIds`; the external profile's metadata and settings are not
+copied. Organization profiles are in the Organization backup; personal
+profiles are in their owner's backup.
+
+`processing/choices.json` preserves user-authored workflow choices without
+copying derived queue state. `folderDefaults` records each folder's explicit
+audio or mail profile, including **Nothing automatic**; a missing row still
+means inherit. `itemChoices` records the selected `profileId`, immutable
+`profileRevisionId`, `manualOnly` flag and view for each item. A personal
+archive carries the owner's private-view choices, while the Organization
+archive carries org-view choices for currently shared items. Finally,
+`pendingOrganizationPlacements` records the item, target Organization folder
+and request time while sharing is waiting at the gate. Those pending intents
+belong only to the item's owner and therefore appear only in the personal
+archive until sharing succeeds.
 
 Finished archives stay downloadable for **7 days**, then a cleanup pass
 deletes them.

@@ -22,10 +22,10 @@ Samotné audio soubory jsou uloženy ve Vámi nastaveném úložišti
 
 Pomocí **Nastavení → Export/Záloha → Vytvořit zálohu** (nebo `POST /api/backup`)
 zadáte úlohu, která sestaví **zip obsahující vše**: audio pro každou
-nahrávku, její přepisy a shrnutí, a `manifest.json`
-popisující, co bylo zahrnuto. Archiv vzniká na pozadí — požadavek
-je vyřízen okamžitě, místo aby čekal na vyčerpání audio dat ze
-úložiště — a panel průběžně hlásí stav.
+nahrávku, její přepisy a shrnutí, poštu, úkoly, volby zpracování a
+`manifest.json` popisující, co bylo zahrnuto. Archiv vzniká na pozadí —
+požadavek je vyřízen okamžitě, místo aby čekal na vyčerpání audio dat
+ze úložiště — a panel průběžně hlásí stav.
 
 Nahrávka, u které nelze přečíst audio, nezpůsobí chybu celého archivu;
 je uvedena v manifestu a vynechána, takže všechny ostatní údaje
@@ -73,16 +73,27 @@ soukromé a stažené zmínky vynechává.
 
 `profiles/profiles.json` obsahuje profily vlastněné rozsahem archivu. Pole
 `profiles` obsahuje metadata profilů a `revisions` každou aktuální revizi i
-každou revizi odkazovanou archivovaným během. Názvy, popisy a `settings`
-revizí jsou dešifrované; `settings` je JSON, nikoli šifrovaná databázová
-obálka. `transcripts.json`, `summaries.json`, souhrny e-mailů a
-`knowledge/learn.json` obsahují `profileRevisionId` spolu s poli původu běhu,
-například `builtinPromptsVersion`, `inputs`, plátce, poskytovatele a model.
-Pokud běh odkazuje na revizi profilu vlastněnou jiným rozsahem, její id je v
-`externalRevisionIds`; nastavení externí revize se nekopíruje. Každé
-`profileRevisionId` tak odkazuje buď na řádek v `revisions`, nebo na id v
-`externalRevisionIds`. Profily Organizace jsou v záloze Organizace, osobní
-profily v záloze jejich vlastníka.
+každou revizi odkazovanou archivovaným během nebo volbou položky. Názvy,
+popisy a `settings` revizí jsou dešifrované; `settings` je JSON, nikoli
+šifrovaná databázová obálka. `transcripts.json`, `summaries.json`, souhrny
+e-mailů a `knowledge/learn.json` obsahují `profileRevisionId` spolu s poli
+původu běhu, například `builtinPromptsVersion`, `inputs`, plátce,
+poskytovatele a model. Odkazy na profil nebo revizi vlastněné jiným rozsahem
+jsou v `externalProfileIds` nebo `externalRevisionIds`; metadata ani nastavení
+externího profilu se nekopírují. Profily Organizace jsou v záloze Organizace,
+osobní profily v záloze jejich vlastníka.
+
+`processing/choices.json` uchovává volby pracovního postupu provedené
+uživatelem, nikoli odvozený stav fronty. `folderDefaults` zaznamenává výslovný
+profil složky pro audio nebo poštu, včetně volby **Nic automaticky**; chybějící
+řádek nadále znamená dědit. `itemChoices` u každé položky zaznamenává zvolené
+`profileId`, neměnné `profileRevisionId`, příznak `manualOnly` a pohled. Osobní
+záloha obsahuje soukromé volby vlastníka, zatímco záloha Organizace obsahuje
+volby pohledu Organizace u aktuálně sdílených položek. Nakonec
+`pendingOrganizationPlacements` zaznamenává položku, cílovou složku Organizace
+a čas požadavku, dokud sdílení čeká na schválení. Tyto čekající záměry patří
+jen vlastníkovi položky, a proto se do úspěšného sdílení objevují pouze v jeho
+osobní záloze.
 
 Hotové archivy zůstávají ke stažení po **7 dní**, poté jsou při úklidu
 odstraněny.

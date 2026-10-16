@@ -30,6 +30,7 @@ import {
 } from "@/lib/knowledge/speaker-references";
 import { decodeVector, encodeVector } from "@/lib/knowledge/vector-search";
 import { heardIsFirstNameOnly } from "@/lib/learn/name-match";
+import { secretAddressMasker } from "@/lib/mail/redact";
 import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import {
     ANY_TASK_ITEM,
@@ -899,18 +900,20 @@ export async function loadTasksPromptContext({
         });
     });
 
+    const text = buildTasksContext({
+        noun,
+        recordedAt: recording.occurredAt,
+        offsetMinutes: recordingOffsetMinutes(
+            recording.timezone,
+            recording.zonemins,
+        ),
+        language,
+        decided: decidedRows.map((row) => decryptText(row.text)),
+        open,
+    });
+    const mask = await secretAddressMasker([text]);
     return {
-        text: buildTasksContext({
-            noun,
-            recordedAt: recording.occurredAt,
-            offsetMinutes: recordingOffsetMinutes(
-                recording.timezone,
-                recording.zonemins,
-            ),
-            language,
-            decided: decidedRows.map((row) => decryptText(row.text)),
-            open,
-        }),
+        text: mask(text),
         refs,
         scopeFingerprint: await itemScopeFingerprint(
             recording.id,

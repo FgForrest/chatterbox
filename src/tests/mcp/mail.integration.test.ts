@@ -21,6 +21,8 @@ import {
     mailContents,
     mailMessages,
     recordingFolders,
+    recordingTasks,
+    taskMentions,
     users,
 } from "@/db/schema";
 import {
@@ -108,6 +110,7 @@ vi.mock("openai", async (importOriginal) => {
 });
 
 import { encrypt } from "@/lib/encryption";
+import { encryptText } from "@/lib/encryption/fields";
 import { addRecordingToFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { confirmFactFromMailInTx } from "@/lib/knowledge/facts";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
@@ -382,6 +385,48 @@ describeWithDatabase("mail through the MCP server (PostgreSQL)", () => {
             { query: "contract" },
         );
         expect(found.tasks.map((row) => row.id)).toEqual([task?.id]);
+    });
+
+    it("masks secret addresses in mail task text without mail:read", async () => {
+        const [task] = await db()
+            .insert(recordingTasks)
+            .values({
+                itemId,
+                userId: "u-jan",
+                status: "open",
+                text: encryptText(`File through ${token}@klepna.example`),
+                source: "manual",
+            })
+            .returning({ id: recordingTasks.id });
+        if (!task) throw new Error("task not inserted");
+        await db().insert(taskMentions).values({
+            taskId: task.id,
+            itemId,
+            userId: "u-jan",
+            view: "private",
+            statementAt: new Date(),
+            matchDecision: "home",
+        });
+
+        try {
+            const listed = await call<{ tasks: TaskOut[] }>(
+                "list_tasks",
+                jan(READ),
+                {},
+            );
+            const result = listed.tasks.find((row) => row.id === task.id);
+            expect(result?.text).toContain("•");
+            expect(JSON.stringify(result)).not.toContain(token);
+            expect(result).toMatchObject({
+                kind: "mail",
+                recording: null,
+                url: null,
+            });
+        } finally {
+            await db()
+                .delete(recordingTasks)
+                .where(eq(recordingTasks.id, task.id));
+        }
     });
 
     it("lists a fact from mail without mail:read, its evidence left out", async () => {

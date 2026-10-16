@@ -18,6 +18,7 @@ import {
     users,
 } from "@/db/schema";
 import type { PhaseRecord } from "@/lib/pipeline/types";
+import type { TaskViewer } from "@/lib/tasks/access";
 import {
     applyPlaudActionItemProposals,
     plaudActionItemsFingerprint,
@@ -79,6 +80,13 @@ const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const USER_ID = "plaud-proposals-user";
 const ITEM_ID = "plaud-proposals-item";
+const reviewer: TaskViewer = {
+    userId: USER_ID,
+    emailHash: "owner",
+    isOrg: false,
+    isCurator: false,
+    orgUserId: null,
+};
 
 function phaseRecord(fingerprint: string): PhaseRecord {
     const content = {
@@ -281,6 +289,7 @@ describeWithDatabase("Plaud summary task proposals", () => {
                     ],
                     matches: [],
                     updates: [],
+                    reviewer,
                     fingerprintOf: taskFingerprint,
                 },
             }),

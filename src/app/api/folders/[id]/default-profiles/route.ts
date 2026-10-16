@@ -4,9 +4,11 @@ import { z } from "zod";
 import { db } from "@/db";
 import { folderDefaultProfiles, recordingFolders } from "@/db/schema";
 import { requireApiSessionActor } from "@/lib/auth-server";
+import { holderAccess } from "@/lib/authz/access-state";
 import { actsForOrganization } from "@/lib/authz/curator";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { isIdpAuthorization } from "@/lib/identity/factory";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import {
     type FolderDefaultProfileDetails,
@@ -85,6 +87,16 @@ async function accessibleFolder(
         const scope =
             organizationUserId === folder.ownerUserId ? "org" : "personal";
         if (scope === "org" && !isOrgScopeEnabled()) throw folderNotFound();
+        if (scope === "org" && isIdpAuthorization()) {
+            const access = await holderAccess(actorUserId);
+            if (!access.ok || !access.capabilities.has("use")) {
+                throw new AppError(
+                    ErrorCode.FORBIDDEN,
+                    "You can no longer use the Organization",
+                    403,
+                );
+            }
+        }
         return { ...folder, scope };
     }
     throw folderNotFound();

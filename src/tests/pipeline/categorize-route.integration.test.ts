@@ -582,6 +582,33 @@ describeWithDatabase("categorize route", () => {
         });
     });
 
+    it("fails loudly for an explicit profile that cannot be resolved", async () => {
+        await addItem();
+
+        const response = await POST(
+            request(["personal-a"], "missing-profile"),
+            context(),
+        );
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({
+            code: "INVALID_INPUT",
+            error: "The profile is not available for this item",
+        });
+        expect(await processing()).toBeUndefined();
+    });
+
+    it("bounds folder selections on categorize and preview", async () => {
+        await addItem();
+        const tooMany = Array.from({ length: 101 }, () => "personal-a");
+
+        expect((await POST(request(tooMany), context())).status).toBe(400);
+        expect((await PREVIEW(previewRequest(tooMany), context())).status).toBe(
+            400,
+        );
+        expect(await processing()).toBeUndefined();
+    });
+
     it("accepts Nothing automatic and freezes the owner's default profile", async () => {
         await addItem();
 

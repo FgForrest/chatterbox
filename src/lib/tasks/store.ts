@@ -88,7 +88,7 @@ export interface TaskProposals {
     matches?: ProposedTaskMatch[];
     updates: ProposedTaskUpdate[];
     /** Reviewer whose candidate visibility is rechecked when output commits. */
-    reviewer?: TaskViewer;
+    reviewer: TaskViewer;
     /**
      * The keyed fingerprint of a task text (`taskFingerprint`), passed in so
      * this module needs no secret of its own: the write compares the
@@ -317,12 +317,7 @@ export async function writeTaskProposalsInTx(
                                   "dropped",
                               ]),
                               isNull(chatterItems.deletedAt),
-                              proposals.reviewer
-                                  ? taskVisible(
-                                        proposals.reviewer,
-                                        ANY_TASK_ITEM,
-                                    )
-                                  : undefined,
+                              taskVisible(proposals.reviewer, ANY_TASK_ITEM),
                           ),
                       )
               ).map((row) => [row.id, row] as const)

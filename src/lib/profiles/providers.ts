@@ -221,6 +221,13 @@ async function resolvePinnedPersonal(input: {
                 400,
             );
         }
+        if (!isMynahConfigured()) {
+            throw new AppError(
+                ErrorCode.NOT_FOUND,
+                `${RIFFADO_INCLUDED_PROVIDER_LABEL} is no longer available on this instance. Choose another provider in the profile.`,
+                404,
+            );
+        }
         return managedProvider(input.actorUserId);
     }
 
@@ -354,6 +361,13 @@ async function resolveUnpinnedTranscription(
         .limit(1);
     const pointer = settings?.defaultTranscriptionProviderId ?? null;
     if (isRiffadoIncludedProviderId(pointer)) {
+        if (!isMynahConfigured()) {
+            throw new AppError(
+                ErrorCode.NO_TRANSCRIPTION_PROVIDER,
+                `${RIFFADO_INCLUDED_PROVIDER_LABEL} is no longer available on this instance. Choose another provider in Settings.`,
+                400,
+            );
+        }
         return {
             ...(await managedProvider(actorUserId)),
             actorSettings: settings,

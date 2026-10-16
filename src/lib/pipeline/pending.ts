@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { chatterItems, itemProcessing, transcriptions } from "@/db/schema";
-import { resolveItemProfile } from "@/lib/profiles/resolve";
+import {
+    AssignedProfileUnavailableError,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 
 export type PipelineQueueStep = "summary" | "topics";
 
@@ -31,7 +34,13 @@ export async function pipelineMayQueue(
         .limit(1);
 
     if (!item || item.summaryDueAt !== null || item.manualOnly) return false;
-    const profile = await resolveItemProfile(itemId, "private", userId);
+    const profile = await resolveItemProfile(itemId, "private", userId).catch(
+        (error: unknown) => {
+            if (error instanceof AssignedProfileUnavailableError) return null;
+            throw error;
+        },
+    );
+    if (!profile) return false;
     if (step === "summary") {
         return profile.settings.steps.summary.automatic;
     }

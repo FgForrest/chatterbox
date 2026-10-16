@@ -1,6 +1,11 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, recordings, userSettings } from "@/db/schema";
+import {
+    chatterItems,
+    itemProcessing,
+    recordings,
+    userSettings,
+} from "@/db/schema";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { markSummaryStepFailed } from "@/lib/pipeline/state";
@@ -92,6 +97,34 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
             input.fence.profileRevisionId = profile.assigned
                 ? profile.revisionId
                 : null;
+            const [processing] = await db
+                .select({
+                    phases: itemProcessing.phases,
+                    profileRevisionId: itemProcessing.profileRevisionId,
+                })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, payload.recordingId),
+                        eq(itemProcessing.userId, userId),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+                .limit(1);
+            const step = processing?.phases.summary?.steps?.title;
+            if (
+                step?.state === "done" &&
+                step.contentId === input.fence.contentId &&
+                (step.contentSourceId ??
+                    processing?.phases.summary?.inputs?.contentSourceId) ===
+                    input.fence.contentSourceId &&
+                step.contentRevision === input.fence.contentRevision &&
+                (step.profileRevisionId ??
+                    processing?.profileRevisionId ??
+                    null) === input.fence.profileRevisionId
+            ) {
+                return { skipped: "done" };
+            }
         }
         const retitled = await applyGeneratedTitle({
             userId,

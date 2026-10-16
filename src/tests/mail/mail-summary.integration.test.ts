@@ -778,6 +778,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                             quotedAt: new Date("2026-10-08T17:40:00.000Z"),
                         },
                     ],
+                    reviewer: viewer,
                     fingerprintOf: taskFingerprint,
                 },
             });

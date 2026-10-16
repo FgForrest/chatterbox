@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+    AssignedProfileUnavailableError: class extends Error {},
     resolveItemProfile: vi.fn(),
     select: vi.fn(),
 }));
 
 vi.mock("@/db", () => ({ db: { select: mocks.select } }));
 vi.mock("@/lib/profiles/resolve", () => ({
+    AssignedProfileUnavailableError: mocks.AssignedProfileUnavailableError,
     resolveItemProfile: mocks.resolveItemProfile,
 }));
 
@@ -84,5 +86,15 @@ describe("pipeline pending profile automation", () => {
             pipelineMayQueue("user-1", "item-1", "summary"),
         ).resolves.toBe(false);
         expect(mocks.resolveItemProfile).not.toHaveBeenCalled();
+    });
+
+    it("treats an unavailable assigned profile as unable to queue", async () => {
+        mocks.resolveItemProfile.mockRejectedValue(
+            new mocks.AssignedProfileUnavailableError(),
+        );
+
+        await expect(
+            pipelineMayQueue("user-1", "item-1", "summary"),
+        ).resolves.toBe(false);
     });
 });

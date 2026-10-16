@@ -56,6 +56,7 @@ import type {
     GenerateSummaryOptions,
     GenerateSummaryResult,
 } from "./generate-summary";
+import { resolveMultiPass } from "./multi-pass-resolution";
 import { runSummary, summaryModelFor } from "./summary-model";
 
 export { MAIL_SUMMARY_PROMPT_ID } from "@/lib/profiles/settings";
@@ -280,13 +281,9 @@ export async function generateMailSummary(
         outputLanguage,
         "extractions",
     );
-    // The tasks already decided name what people typed, an address too.
-    const tasksText = (await secretAddressMasker([tasksContext.text]))(
-        tasksContext.text,
-    );
     const prompt = [
         promptTemplate.replaceAll("{transcription}", () => mailText),
-        tasksText,
+        tasksContext.text,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -301,14 +298,13 @@ export async function generateMailSummary(
         .filter(Boolean)
         .join(" ");
 
-    const pinnedMultiPass = profileSettings?.steps.summary.provider
-        ? profileSettings.steps.summary.multiPass
-        : null;
-    const multiPassOn = pinnedMultiPass
-        ? pinnedMultiPass.enabled &&
-          (opts.trigger !== "auto" || pinnedMultiPass.automaticToo)
-        : actorSettingsRow?.summaryMultiPass === true &&
-          (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
+    const multiPassResolution = resolveMultiPass({
+        profileSummary: profileSettings?.steps.summary ?? null,
+        hasProfile: profile !== null,
+        actorSettings: actorSettingsRow,
+        settings: userSettingsRow,
+        trigger: opts.trigger,
+    });
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
@@ -330,23 +326,7 @@ export async function generateMailSummary(
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassOn
-            ? {
-                  rounds:
-                      pinnedMultiPass?.rounds ??
-                      actorSettingsRow?.summaryMultiPassRounds ??
-                      null,
-                  mergePrompt: pinnedMultiPass
-                      ? pinnedMultiPass.mergePrompt
-                      : (profile ? actorSettingsRow : userSettingsRow)
-                              ?.summaryMergePrompt
-                        ? (decryptText(
-                              (profile ? actorSettingsRow : userSettingsRow)
-                                  ?.summaryMergePrompt ?? null,
-                          ) ?? null)
-                        : null,
-              }
-            : null,
+        multiPass: multiPassResolution.config,
         onProgress: opts.onProgress,
         tasksEnabled,
     });
@@ -400,11 +380,7 @@ export async function generateMailSummary(
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),
-            multiPass: multiPassOn
-                ? pinnedMultiPass
-                    ? "profile"
-                    : "person"
-                : "off",
+            multiPass: multiPassResolution.source,
         },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,

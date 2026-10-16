@@ -19,7 +19,7 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
-import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
@@ -56,6 +56,7 @@ import {
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
+import { resolveMultiPass } from "./multi-pass-resolution";
 import { readPlaudActionItems } from "./read-summary";
 import { runSummary, summaryModelFor } from "./summary-model";
 
@@ -469,15 +470,13 @@ export async function generateSummaryForRecording(
     // Multi-pass applies to the auto path only if separately enabled: a manual
     // summary is one recording the user is waiting on, while a sync can fire a
     // dozen, and each one multiplies by `rounds`.
-    const pinnedMultiPass = profileSettings?.steps.summary.provider
-        ? profileSettings.steps.summary.multiPass
-        : null;
-    const multiPassOn = pinnedMultiPass
-        ? pinnedMultiPass.enabled &&
-          (opts.trigger !== "auto" || pinnedMultiPass.automaticToo)
-        : actorSettingsRow?.summaryMultiPass === true &&
-          (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
-
+    const multiPassResolution = resolveMultiPass({
+        profileSummary: profileSettings?.steps.summary ?? null,
+        hasProfile: profile !== null,
+        actorSettings: actorSettingsRow,
+        settings: userSettingsRow,
+        trigger: opts.trigger,
+    });
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
@@ -499,23 +498,7 @@ export async function generateSummaryForRecording(
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassOn
-            ? {
-                  rounds:
-                      pinnedMultiPass?.rounds ??
-                      actorSettingsRow?.summaryMultiPassRounds ??
-                      null,
-                  mergePrompt: pinnedMultiPass
-                      ? pinnedMultiPass.mergePrompt
-                      : (profile ? actorSettingsRow : userSettingsRow)
-                              ?.summaryMergePrompt
-                        ? (decryptText(
-                              (profile ? actorSettingsRow : userSettingsRow)
-                                  ?.summaryMergePrompt ?? null,
-                          ) ?? null)
-                        : null,
-              }
-            : null,
+        multiPass: multiPassResolution.config,
         onProgress: opts.onProgress,
         tasksEnabled,
     });
@@ -567,11 +550,7 @@ export async function generateSummaryForRecording(
             ...(tasksContext.scopeFingerprint
                 ? { scopeFingerprint: tasksContext.scopeFingerprint }
                 : {}),
-            multiPass: multiPassOn
-                ? pinnedMultiPass
-                    ? "profile"
-                    : "person"
-                : "off",
+            multiPass: multiPassResolution.source,
         },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,

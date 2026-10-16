@@ -64,6 +64,7 @@ vi.mock("@/lib/env", () => ({
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         BETTER_AUTH_SECRET: "task-candidates-test-secret",
         DATABASE_URL: "postgres://unused",
+        MAIL_DOMAIN: "klepna.example",
     },
 }));
 vi.mock("@/lib/org/config", () => ({
@@ -71,6 +72,10 @@ vi.mock("@/lib/org/config", () => ({
 }));
 vi.mock("@/lib/knowledge/embeddings", () => ({
     embeddingClient: embeddingClientMock,
+}));
+vi.mock("@/lib/mail/addresses", () => ({
+    resolveLocalPart: async (localPart: string) =>
+        localPart === "owner.secret" ? { kind: "secret", localPart } : null,
 }));
 
 import {
@@ -312,6 +317,46 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
         );
         expect(context.text).toContain("Organization launch task");
         expect(context.text).not.toContain("Other user's private task");
+    });
+
+    it("masks a secret mail address in task context for an audio summary prompt", async () => {
+        await item("audio-target", OWNER, "audio");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "audio-target",
+            userId: OWNER,
+            folderId: "private-a",
+        });
+        await item("mail-source", OWNER, "mail");
+        await db().insert(recordingFolderAssignments).values({
+            itemId: "mail-source",
+            userId: OWNER,
+            folderId: "private-a",
+        });
+        await candidate({
+            id: "mail-task",
+            itemId: "mail-source",
+            userId: OWNER,
+            text: "Reply to owner.secret@klepna.example",
+            view: "private",
+        });
+
+        const context = await loadTasksPromptContext({
+            recording: {
+                id: "audio-target",
+                userId: OWNER,
+                occurredAt: new Date("2026-10-15T10:00:00.000Z"),
+                timezone: null,
+                zonemins: null,
+            },
+            transcriptionId: null,
+            orgView: false,
+            reviewer,
+            noun: "recording",
+            itemText: "Reply to the owner",
+        });
+
+        expect(context.text).toContain("owner.••••••@klepna.example");
+        expect(context.text).not.toContain("owner.secret@klepna.example");
     });
 
     it("computes a missing current-generation task vector lazily and reuses it", async () => {

@@ -593,6 +593,7 @@ function ProposalRow({
                     type="checkbox"
                     className="mt-1.5 size-4 shrink-0"
                     checked={task.ticked}
+                    disabled={!task.canEdit}
                     onChange={(event) =>
                         onChange(
                             { ticked: event.target.checked },
@@ -603,11 +604,15 @@ function ProposalRow({
                 />
             )}
             <div className="min-w-0 flex-1 space-y-1.5">
-                <TaskTextInput
-                    text={task.text}
-                    onSave={(text) => onChange({ text }, { text })}
-                    className="w-full py-0.5"
-                />
+                {task.canEdit ? (
+                    <TaskTextInput
+                        text={task.text}
+                        onSave={(text) => onChange({ text }, { text })}
+                        className="w-full py-0.5"
+                    />
+                ) : (
+                    <p className="px-1 py-0.5">{task.text}</p>
+                )}
                 {task.source === "plaud" && (
                     <p className="px-1 text-xs font-medium text-muted-foreground">
                         {i18n("Not matched against earlier tasks")}
@@ -620,6 +625,7 @@ function ProposalRow({
                         check={task.assigneeCheck}
                         speakers={speakers}
                         organizationOnly={organizationOnly}
+                        disabled={!task.canEdit}
                         onChange={(person) =>
                             onChange(
                                 { assigneePersonId: person?.personId ?? null },
@@ -635,7 +641,7 @@ function ProposalRow({
                         value={task.dueDate}
                         phrase={task.duePhrase}
                         overdue={false}
-                        disabled={false}
+                        disabled={!task.canEdit}
                         onChange={(dueDate) =>
                             onChange({ dueDate }, { dueDate })
                         }
@@ -657,7 +663,7 @@ function ProposalRow({
                         </span>
                     )}
                     <ProvenanceNote provenance={task.evidenceProvenance} />
-                    {!selection && (
+                    {!selection && task.canEdit && (
                         <MergeTaskPicker
                             itemId={task.recordingId}
                             sourceTaskId={task.id}
@@ -903,7 +909,7 @@ function AmbiguousMatchRow({
                         onNavigate={onNavigate}
                     />
                 )}
-                {proposal && (
+                {proposal?.canEdit && (
                     <MergeTaskPicker
                         itemId={proposal.recordingId}
                         sourceTaskId={proposal.id}

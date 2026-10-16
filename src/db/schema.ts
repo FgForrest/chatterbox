@@ -147,7 +147,7 @@ export const adminAuditLog = pgTable(
     }),
 );
 
-// Admin mutation log (hosted-only). Separate from read audit so mutations
+// Admin mutation log. Separate from read audit so mutations
 // are easy to query/review in isolation. before/after JSON captures the
 // minimum diff needed to understand the change without storing PII
 // content (e.g., for softDeleteRecording we store filename hashes/sizes,

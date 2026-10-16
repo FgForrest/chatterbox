@@ -18,6 +18,8 @@ import {
     aiUsageEvents,
     apiCredentials,
     chatterItems,
+    folderDefaultProfiles,
+    itemProcessing,
     knowledgeAliases,
     knowledgeEntities,
     knowledgeEntityNotes,
@@ -29,6 +31,7 @@ import {
     knowledgeVocabularyProposalVotes,
     learnReviewItems,
     learnRuns,
+    mailPendingShares,
     people,
     personEmails,
     personNotes,
@@ -47,6 +50,7 @@ import { decryptBuffer } from "@/lib/encryption";
 import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import {
     type ArchiveScope,
+    archivedItemCondition,
     archivedProfileCondition,
     archivedRecordingCondition,
     scopeUserId,
@@ -369,6 +373,12 @@ export async function buildAndUploadExportArchive(input: {
         profiles?: {
             profiles: number;
             revisions: number;
+            path: string;
+        };
+        processing?: {
+            folderDefaults: number;
+            itemChoices: number;
+            pendingOrganizationPlacements: number;
             path: string;
         };
         taskEvidence?: {
@@ -819,6 +829,25 @@ export async function buildAndUploadExportArchive(input: {
         ...recordingIds,
         ...archivedMail.map((mail) => mail.id),
     ]);
+    const processingChoices = await collectProcessingChoices(scope);
+    if (
+        processingChoices.folderDefaults.length > 0 ||
+        processingChoices.itemChoices.length > 0 ||
+        processingChoices.pendingOrganizationPlacements.length > 0
+    ) {
+        const path = "processing/choices.json";
+        archive.append(
+            Buffer.from(JSON.stringify(processingChoices, null, 2)),
+            { name: path },
+        );
+        manifest.processing = {
+            folderDefaults: processingChoices.folderDefaults.length,
+            itemChoices: processingChoices.itemChoices.length,
+            pendingOrganizationPlacements:
+                processingChoices.pendingOrganizationPlacements.length,
+            path,
+        };
+    }
     const [taskMentions, taskHomeMoves] = await Promise.all([
         taskMentionsForArchive(scope, archivedTaskIds, containedItemIds),
         taskHomeMovesForArchive(scope, archivedTaskIds, containedItemIds),
@@ -934,10 +963,15 @@ export async function buildAndUploadExportArchive(input: {
         };
     }
 
-    const profiles = await collectProfiles(
-        scope,
-        new Set(
+    const profiles = await collectProfiles(scope, {
+        profileIds: new Set(
             [
+                ...processingChoices.folderDefaults,
+                ...processingChoices.itemChoices,
+            ].flatMap((choice) => (choice.profileId ? [choice.profileId] : [])),
+        ),
+        revisionIds: new Set([
+            ...[
                 ...userTranscriptions,
                 ...userEnhancements,
                 ...learn.runs,
@@ -945,11 +979,15 @@ export async function buildAndUploadExportArchive(input: {
             ].flatMap((run) =>
                 run.profileRevisionId ? [run.profileRevisionId] : [],
             ),
-        ),
-    );
+            ...processingChoices.itemChoices.flatMap((choice) =>
+                choice.profileRevisionId ? [choice.profileRevisionId] : [],
+            ),
+        ]),
+    });
     if (
         profiles.profiles.length > 0 ||
         profiles.revisions.length > 0 ||
+        profiles.externalProfileIds.length > 0 ||
         profiles.externalRevisionIds.length > 0
     ) {
         const path = "profiles/profiles.json";
@@ -1017,6 +1055,111 @@ interface ArchivedFolderOrganization {
         createdAt: string;
     }[];
     assignments: { recordingId: string; folderId: string }[];
+}
+
+interface ArchivedProcessingChoices {
+    folderDefaults: {
+        folderId: string;
+        channel: "audio" | "mail";
+        profileId: string | null;
+        manualOnly: boolean;
+    }[];
+    itemChoices: {
+        itemId: string;
+        view: "private" | "org";
+        profileId: string | null;
+        profileRevisionId: string | null;
+        manualOnly: boolean;
+    }[];
+    pendingOrganizationPlacements: {
+        itemId: string;
+        folderId: string;
+        requestedAt: string;
+    }[];
+}
+
+async function collectProcessingChoices(
+    scope: ArchiveScope,
+): Promise<ArchivedProcessingChoices> {
+    const userId = scopeUserId(scope);
+    const [folderDefaults, itemChoices, pendingOrganizationPlacements] =
+        await Promise.all([
+            db
+                .select({
+                    folderId: folderDefaultProfiles.folderId,
+                    channel: folderDefaultProfiles.channel,
+                    profileId: folderDefaultProfiles.profileId,
+                    manualOnly: folderDefaultProfiles.manualOnly,
+                })
+                .from(folderDefaultProfiles)
+                .innerJoin(
+                    recordingFolders,
+                    eq(recordingFolders.id, folderDefaultProfiles.folderId),
+                )
+                .where(eq(recordingFolders.userId, userId)),
+            db
+                .select({
+                    itemId: itemProcessing.itemId,
+                    view: itemProcessing.view,
+                    profileId: itemProcessing.profileId,
+                    profileRevisionId: itemProcessing.profileRevisionId,
+                    manualOnly: itemProcessing.manualOnly,
+                })
+                .from(itemProcessing)
+                .innerJoin(
+                    chatterItems,
+                    and(
+                        eq(chatterItems.id, itemProcessing.itemId),
+                        eq(chatterItems.userId, itemProcessing.userId),
+                    ),
+                )
+                .where(
+                    and(
+                        archivedItemCondition(scope),
+                        eq(
+                            itemProcessing.view,
+                            scope.kind === "personal" ? "private" : "org",
+                        ),
+                        or(
+                            isNotNull(itemProcessing.profileId),
+                            isNotNull(itemProcessing.profileRevisionId),
+                            eq(itemProcessing.manualOnly, true),
+                        ),
+                    ),
+                ),
+            scope.kind === "personal"
+                ? db
+                      .select({
+                          itemId: mailPendingShares.itemId,
+                          folderId: mailPendingShares.folderId,
+                          createdAt: mailPendingShares.createdAt,
+                      })
+                      .from(mailPendingShares)
+                      .innerJoin(
+                          chatterItems,
+                          and(
+                              eq(chatterItems.id, mailPendingShares.itemId),
+                              eq(chatterItems.userId, mailPendingShares.userId),
+                          ),
+                      )
+                      .where(
+                          and(
+                              eq(mailPendingShares.userId, scope.userId),
+                              archivedItemCondition(scope),
+                          ),
+                      )
+                : Promise.resolve([]),
+        ]);
+    return {
+        folderDefaults,
+        itemChoices,
+        pendingOrganizationPlacements: pendingOrganizationPlacements.map(
+            ({ createdAt, ...placement }) => ({
+                ...placement,
+                requestedAt: createdAt.toISOString(),
+            }),
+        ),
+    };
 }
 
 // The scope's own tree: a person's Private folders and their filing in
@@ -1762,13 +1905,17 @@ interface ArchivedProfiles {
         createdBy: string | null;
         createdAt: string;
     }[];
+    externalProfileIds: string[];
     /** Revisions referenced by runs but owned by another archive scope. */
     externalRevisionIds: string[];
 }
 
 async function collectProfiles(
     scope: ArchiveScope,
-    referencedRevisionIds: ReadonlySet<string>,
+    referenced: {
+        profileIds: ReadonlySet<string>;
+        revisionIds: ReadonlySet<string>;
+    },
 ): Promise<ArchivedProfiles> {
     const profileRows = await db
         .select({
@@ -1790,7 +1937,7 @@ async function collectProfiles(
         .where(archivedProfileCondition(scope));
     const revisionIds = [
         ...new Set([
-            ...referencedRevisionIds,
+            ...referenced.revisionIds,
             ...profileRows.flatMap((profile) =>
                 profile.currentRevisionId ? [profile.currentRevisionId] : [],
             ),
@@ -1840,7 +1987,10 @@ async function collectProfiles(
             settings: JSON.parse(decryptText(revision.settings)) as unknown,
             createdAt: revision.createdAt.toISOString(),
         })),
-        externalRevisionIds: [...referencedRevisionIds]
+        externalProfileIds: [...referenced.profileIds]
+            .filter((id) => !profileRows.some((profile) => profile.id === id))
+            .sort(),
+        externalRevisionIds: [...referenced.revisionIds]
             .filter((id) => !archivedRevisionIds.has(id))
             .sort(),
     };

@@ -1127,95 +1127,169 @@ export async function rejectRoutedTaskProposal(
     sourceItemId: string,
     proposalId: string,
 ): Promise<RoutedProposalDecision> {
-    return db.transaction(async (tx) => {
-        const [proposal] = await tx
-            .select({
-                taskId: taskUpdateProposals.taskId,
-                kind: taskUpdateProposals.kind,
-                routedTo: taskUpdateProposals.routedTo,
-                sourceVisible: sql<boolean>`${and(
-                    isNull(chatterItems.deletedAt),
-                    or(
-                        eq(chatterItems.userId, viewer.userId),
-                        recordingSharedCondition(chatterItems.id),
+    const [authorized] = await db
+        .select({ id: taskUpdateProposals.id })
+        .from(taskUpdateProposals)
+        .innerJoin(
+            routedSourceItem,
+            and(
+                eq(routedSourceItem.id, taskUpdateProposals.itemId),
+                eq(routedSourceItem.userId, taskUpdateProposals.userId),
+            ),
+        )
+        .innerJoin(
+            recordingTasks,
+            eq(recordingTasks.id, taskUpdateProposals.taskId),
+        )
+        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                eq(taskUpdateProposals.id, proposalId),
+                eq(taskUpdateProposals.itemId, sourceItemId),
+                eq(taskUpdateProposals.state, "awaiting_target_review"),
+                routedProposalCondition(viewer),
+            ),
+        )
+        .limit(1);
+    if (!authorized) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Task proposal not found", 404);
+    }
+    return retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const [source] = await tx
+                .select({
+                    itemId: taskUpdateProposals.itemId,
+                    ownerUserId: taskUpdateProposals.userId,
+                })
+                .from(taskUpdateProposals)
+                .where(
+                    and(
+                        eq(taskUpdateProposals.id, proposalId),
+                        eq(taskUpdateProposals.itemId, sourceItemId),
                     ),
-                )}`,
-            })
-            .from(taskUpdateProposals)
-            .innerJoin(
-                chatterItems,
-                and(
-                    eq(chatterItems.id, taskUpdateProposals.itemId),
-                    eq(chatterItems.userId, taskUpdateProposals.userId),
-                ),
-            )
-            .where(
-                and(
-                    eq(taskUpdateProposals.id, proposalId),
-                    eq(taskUpdateProposals.itemId, sourceItemId),
-                    eq(taskUpdateProposals.state, "awaiting_target_review"),
-                    viewer.isCurator
-                        ? undefined
-                        : directRecipientCondition(viewer),
-                ),
-            )
-            .limit(1);
-        if (!proposal) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Task proposal not found",
-                404,
-            );
-        }
-        const target = await targetFor(tx, viewer, proposal.taskId);
-        if (!routedDirectlyTo(proposal.routedTo, viewer)) {
-            if (!(viewer.isCurator && target?.shared)) {
+                )
+                .limit(1);
+            if (!source) {
                 throw new AppError(
                     ErrorCode.NOT_FOUND,
                     "Task proposal not found",
                     404,
                 );
             }
-        }
-        const obsoleteReason = !proposal.sourceVisible
-            ? "source_withdrawn"
-            : !target?.visible
-              ? "task_invisible"
-              : null;
-        if (obsoleteReason) {
-            await setProposalState(tx, proposalId, "obsolete", {
-                actorUserId: viewer.userId,
-                routedTo: null,
-                obsoleteReason,
+            await lockItemTaskGraphInTx(tx, {
+                itemId: source.itemId,
+                ownerUserId: source.ownerUserId,
             });
-            return { state: "obsolete", obsoleteReason };
-        }
-        if (
-            !target ||
-            (!viewer.isCurator && !mayApply(proposal.kind, target))
-        ) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Task proposal not found",
-                404,
-            );
-        }
-        await tx
-            .update(taskUpdateProposals)
-            .set({
-                state: "rejected",
-                routedTo: null,
-                decidedByUserId: viewer.userId,
-                decidedAt: new Date(),
-                updatedAt: new Date(),
-            })
-            .where(
-                and(
-                    eq(taskUpdateProposals.id, proposalId),
-                    eq(taskUpdateProposals.itemId, sourceItemId),
-                    eq(taskUpdateProposals.state, "awaiting_target_review"),
-                ),
-            );
-        return { state: "rejected", obsoleteReason: null };
-    });
+            const [proposal] = await tx
+                .select({
+                    taskId: taskUpdateProposals.taskId,
+                    kind: taskUpdateProposals.kind,
+                    state: taskUpdateProposals.state,
+                    obsoleteReason: taskUpdateProposals.obsoleteReason,
+                    routedTo: taskUpdateProposals.routedTo,
+                    sourceVisible: sql<boolean>`${and(
+                        isNull(chatterItems.deletedAt),
+                        or(
+                            eq(chatterItems.userId, viewer.userId),
+                            recordingSharedCondition(chatterItems.id),
+                        ),
+                    )}`,
+                })
+                .from(taskUpdateProposals)
+                .innerJoin(
+                    chatterItems,
+                    and(
+                        eq(chatterItems.id, taskUpdateProposals.itemId),
+                        eq(chatterItems.userId, taskUpdateProposals.userId),
+                    ),
+                )
+                .where(
+                    and(
+                        eq(taskUpdateProposals.id, proposalId),
+                        eq(taskUpdateProposals.itemId, source.itemId),
+                        eq(taskUpdateProposals.userId, source.ownerUserId),
+                    ),
+                )
+                .limit(1);
+            if (!proposal) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Task proposal not found",
+                    404,
+                );
+            }
+            if (
+                proposal.state === "applied" ||
+                proposal.state === "rejected" ||
+                proposal.state === "obsolete"
+            ) {
+                return {
+                    state: proposal.state,
+                    obsoleteReason:
+                        proposal.obsoleteReason as ObsoleteProposalReason | null,
+                };
+            }
+            if (proposal.state !== "awaiting_target_review") {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Task proposal state changed",
+                    409,
+                );
+            }
+            const target = await targetFor(tx, viewer, proposal.taskId);
+            if (!routedDirectlyTo(proposal.routedTo, viewer)) {
+                if (!(viewer.isCurator && target?.shared)) {
+                    throw new AppError(
+                        ErrorCode.NOT_FOUND,
+                        "Task proposal not found",
+                        404,
+                    );
+                }
+            }
+            const obsoleteReason = !proposal.sourceVisible
+                ? "source_withdrawn"
+                : !target?.visible
+                  ? "task_invisible"
+                  : null;
+            if (
+                !obsoleteReason &&
+                (!target ||
+                    (!viewer.isCurator && !mayApply(proposal.kind, target)))
+            ) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Task proposal not found",
+                    404,
+                );
+            }
+            const state = obsoleteReason ? "obsolete" : "rejected";
+            const [updated] = await tx
+                .update(taskUpdateProposals)
+                .set({
+                    state,
+                    routedTo: null,
+                    decidedByUserId: viewer.userId,
+                    decidedAt: new Date(),
+                    obsoleteReason,
+                    updatedAt: new Date(),
+                })
+                .where(
+                    and(
+                        eq(taskUpdateProposals.id, proposalId),
+                        eq(taskUpdateProposals.itemId, source.itemId),
+                        eq(taskUpdateProposals.userId, source.ownerUserId),
+                        eq(taskUpdateProposals.state, "awaiting_target_review"),
+                    ),
+                )
+                .returning({ state: taskUpdateProposals.state });
+            if (!updated) {
+                throw new AppError(
+                    ErrorCode.CONFLICT,
+                    "Task proposal state changed",
+                    409,
+                );
+            }
+            return { state, obsoleteReason };
+        }),
+    );
 }

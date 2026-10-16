@@ -461,6 +461,7 @@ export function TaskList({ organization }: { organization: boolean }) {
                             key={task.id}
                             task={task}
                             recording={task.recording}
+                            evidence={task.evidence}
                             showAssignee={tab === "tracked" || task.canEdit}
                             organizationOnly={task.recording.view === "org"}
                             onChange={(change, optimistic) =>

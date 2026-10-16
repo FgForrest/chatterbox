@@ -128,7 +128,11 @@ function evidenceReadable(caller: McpCaller, task: TaskListItem): boolean {
 async function mailMasker(tasks: readonly TaskListItem[]): Promise<Mask> {
     const texts = [
         ...tasks
-            .filter((task) => task.recording.kind === "mail")
+            .filter(
+                (task) =>
+                    task.recording.kind === "mail" ||
+                    task.evidence.kind === "mail",
+            )
             .flatMap((task) => [
                 task.text,
                 task.quote ?? "",
@@ -154,6 +158,7 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
         !tasks.some(
             (task) =>
                 task.recording.kind === "mail" ||
+                task.evidence.kind === "mail" ||
                 task.visibleMentionQuotes.some(
                     (mention) => mention.kind === "mail",
                 ),
@@ -168,7 +173,7 @@ async function maskedMailTasks(tasks: TaskListItem[]): Promise<TaskListItem[]> {
             ...mention,
             text: mention.kind === "mail" ? mask(mention.text) : mention.text,
         }));
-        return task.recording.kind === "mail"
+        return task.recording.kind === "mail" || task.evidence.kind === "mail"
             ? {
                   ...task,
                   visibleMentionQuotes: mentions,
@@ -191,7 +196,8 @@ function toItem(
     maskMail: Mask = (text) => text,
 ): TaskItem {
     const writes = caller.roles.has("tasks:write");
-    const mail = task.recording.kind === "mail";
+    const mail =
+        task.recording.kind === "mail" || task.evidenceItemKind === "mail";
     const evidenceMail = task.evidenceItemKind === "mail";
     const mask: Mask = mail ? maskMail : (text) => text;
     const quoteMask: Mask =
@@ -200,7 +206,7 @@ function toItem(
     const quoteReadable =
         task.evidenceItemKind !== "mail" || mayReadMail(caller);
     const url = evidenceReadable(caller, task)
-        ? recordingUrl(task.evidenceItemId, task.recording.view)
+        ? recordingUrl(task.evidenceItemId, task.evidence.view)
         : null;
     const homeUrl = source
         ? recordingUrl(task.recording.id, task.recording.view)
@@ -556,6 +562,7 @@ const updateTaskTool = defineTool({
             {
                 ...updated,
                 recording: before.recording,
+                evidence: before.evidence,
                 visibleMentionQuotes: before.visibleMentionQuotes,
             },
         ]);

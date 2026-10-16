@@ -9,10 +9,7 @@ import { DEFAULT_BUCKETS } from "@/lib/audio/waveform";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
-import {
-    requestArrivalInTx,
-    resolveArrivalProfile,
-} from "@/lib/pipeline/arrival";
+import { requestArrivalInTx } from "@/lib/pipeline/arrival";
 import { captureServerEvent } from "@/lib/posthog-server";
 import { buildRecordingStagingPath } from "@/lib/recordings/filename";
 import { enqueueStorageReconciliationJob } from "@/lib/recordings/storage-reconciliation-job";
@@ -20,7 +17,7 @@ import type { StorageProvider } from "@/lib/storage/types";
 import { readAudioFileDurationMs } from "@/lib/uploads/audio-duration";
 import {
     type DeferredFolderFallback,
-    resolveUploadedAudioFolder,
+    resolveUploadedAudioPlacement,
     type SavedUploadedAudio,
 } from "@/lib/uploads/save-uploaded-audio";
 import { getAudioMimeType } from "@/lib/utils";
@@ -65,19 +62,12 @@ export async function saveUploadedAudioFile(input: {
     }
     input.signal?.throwIfAborted();
     const recordingId = nanoid();
-    const folder = await resolveUploadedAudioFolder(
-        input.userId,
-        input.folderId,
-        input.deferredFolderFallback,
-    );
-    const profileResolution = folder
-        ? await resolveArrivalProfile({
-              ownerUserId: input.userId,
-              itemId: recordingId,
-              channel: "audio",
-              folderIds: [folder.folderId],
-          })
-        : null;
+    const { folder, profileResolution } = await resolveUploadedAudioPlacement({
+        userId: input.userId,
+        itemId: recordingId,
+        folderId: input.folderId,
+        deferredFolderFallback: input.deferredFolderFallback,
+    });
     const storageKey = buildRecordingStagingPath(
         input.userId,
         recordingId,

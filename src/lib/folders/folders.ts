@@ -275,42 +275,55 @@ export async function reachableCustomFolder(
 }
 
 /**
- * Return a non-root folder the owner may categorize an item into.
+ * Return non-root folders the owner may categorize items into, in input order.
  * Private and Organization roots are deliberately not categorization targets.
  */
-export async function assertCategorizableFolder(
+export async function assertCategorizableFolders(
     ownerUserId: string,
-    folderId: string,
+    folderIds: readonly string[],
     executor: Pick<typeof db, "select"> = db,
-): Promise<{ folderId: string; ownerId: string; scope: FolderScope }> {
+): Promise<Array<{ folderId: string; ownerId: string; scope: FolderScope }>> {
     const orgUserId = await getOrgUserId();
     const allowedOwners = orgUserId
         ? [...new Set([ownerUserId, orgUserId])]
         : [ownerUserId];
-    const [folder] = await executor
-        .select({
-            id: recordingFolders.id,
-            userId: recordingFolders.userId,
-            parentId: recordingFolders.parentId,
-        })
-        .from(recordingFolders)
-        .where(
-            and(
-                eq(recordingFolders.id, folderId),
-                inArray(recordingFolders.userId, allowedOwners),
-            ),
-        )
-        .limit(1);
-    if (!folder) throw folderNotFound();
-    if (folder.parentId === null) {
-        throw new AppError(
-            ErrorCode.INVALID_INPUT,
-            "Choose a folder below Private or Organization; root folders cannot categorize items",
-            400,
-        );
-    }
-    const scope = orgUserId && folder.userId === orgUserId ? "org" : "personal";
-    if (scope === "org") {
+    const rows =
+        folderIds.length > 0
+            ? await executor
+                  .select({
+                      id: recordingFolders.id,
+                      userId: recordingFolders.userId,
+                      parentId: recordingFolders.parentId,
+                  })
+                  .from(recordingFolders)
+                  .where(
+                      and(
+                          inArray(recordingFolders.id, [...folderIds]),
+                          inArray(recordingFolders.userId, allowedOwners),
+                      ),
+                  )
+            : [];
+    const byId = new Map(rows.map((folder) => [folder.id, folder]));
+    const folders = folderIds.map((folderId) => {
+        const folder = byId.get(folderId);
+        if (!folder) throw folderNotFound();
+        if (folder.parentId === null) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                "Choose a folder below Private or Organization; root folders cannot categorize items",
+                400,
+            );
+        }
+        return {
+            folderId: folder.id,
+            ownerId: folder.userId,
+            scope:
+                orgUserId && folder.userId === orgUserId
+                    ? ("org" as const)
+                    : ("personal" as const),
+        };
+    });
+    if (folders.some((folder) => folder.scope === "org")) {
         assertOrgScopeWritable();
         if (isIdpAuthorization()) {
             const access = await holderAccess(ownerUserId);
@@ -323,7 +336,25 @@ export async function assertCategorizableFolder(
             }
         }
     }
-    return { folderId: folder.id, ownerId: folder.userId, scope };
+    return folders;
+}
+
+/**
+ * Return a non-root folder the owner may categorize an item into.
+ * Private and Organization roots are deliberately not categorization targets.
+ */
+export async function assertCategorizableFolder(
+    ownerUserId: string,
+    folderId: string,
+    executor: Pick<typeof db, "select"> = db,
+): Promise<{ folderId: string; ownerId: string; scope: FolderScope }> {
+    const [folder] = await assertCategorizableFolders(
+        ownerUserId,
+        [folderId],
+        executor,
+    );
+    if (!folder) throw folderNotFound();
+    return folder;
 }
 
 /** Validate a folder supplied at an external entry path, with a useful 400. */
