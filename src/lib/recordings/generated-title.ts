@@ -12,20 +12,21 @@ import { encryptText } from "@/lib/encryption/fields";
 import { nudge } from "@/lib/jobs/nudge";
 import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
 import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { titleStepDoneForFence } from "@/lib/recordings/title-fence";
 import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type GeneratedTitleStoreOptions = {
+    skipIfTitleStepDoneForFence?: boolean;
+};
 
-async function titleFenceMatches(
-    tx: Tx,
-    userId: string,
-    itemId: string,
-    kind: "audio" | "mail",
-    fence: TitleInputFence,
-): Promise<boolean> {
+async function readTitleProcessingInTx(tx: Tx, userId: string, itemId: string) {
     const [processing] = await tx
-        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .select({
+            phases: itemProcessing.phases,
+            profileRevisionId: itemProcessing.profileRevisionId,
+        })
         .from(itemProcessing)
         .where(
             and(
@@ -35,7 +36,18 @@ async function titleFenceMatches(
             ),
         )
         .limit(1);
-    if ((processing?.profileRevisionId ?? null) !== fence.profileRevisionId) {
+    return processing;
+}
+
+async function titleFenceMatches(
+    tx: Tx,
+    userId: string,
+    itemId: string,
+    kind: "audio" | "mail",
+    fence: TitleInputFence,
+    profileRevisionId: string | null,
+): Promise<boolean> {
+    if (profileRevisionId !== fence.profileRevisionId) {
         return false;
     }
     if (kind === "mail") {
@@ -165,6 +177,7 @@ export async function storeGeneratedTitle(
     expectedTitleEditedAt?: Date | null,
     actorUserId = userId,
     fence?: TitleInputFence,
+    options?: GeneratedTitleStoreOptions,
 ): Promise<boolean> {
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
@@ -189,19 +202,38 @@ export async function storeGeneratedTitle(
         ) {
             return { stored: false, advance: false };
         }
-        if (
-            fence &&
-            !(await titleFenceMatches(tx, userId, recordingId, "audio", fence))
-        ) {
-            return {
-                stored: false,
-                advance: await requestTitleAfterFenceInTx(
+        if (fence) {
+            const processing = await readTitleProcessingInTx(
+                tx,
+                userId,
+                recordingId,
+            );
+            if (
+                options?.skipIfTitleStepDoneForFence &&
+                titleStepDoneForFence(processing, fence)
+            ) {
+                return { stored: false, advance: false };
+            }
+            if (
+                !(await titleFenceMatches(
                     tx,
                     userId,
                     recordingId,
+                    "audio",
                     fence,
-                ),
-            };
+                    processing?.profileRevisionId ?? null,
+                ))
+            ) {
+                return {
+                    stored: false,
+                    advance: await requestTitleAfterFenceInTx(
+                        tx,
+                        userId,
+                        recordingId,
+                        fence,
+                    ),
+                };
+            }
         }
         const now = new Date();
         const titleCondition = expectedTitleEditedAt
@@ -244,6 +276,7 @@ export async function storeGeneratedMailTitle(
     expectedTitleEditedAt?: Date | null,
     actorUserId = userId,
     fence?: TitleInputFence,
+    options?: GeneratedTitleStoreOptions,
 ): Promise<boolean> {
     const orgUserId = await sharingOrgUserId();
     const outcome = await db.transaction(async (tx) => {
@@ -271,19 +304,38 @@ export async function storeGeneratedMailTitle(
         ) {
             return { stored: false, advance: false };
         }
-        if (
-            fence &&
-            !(await titleFenceMatches(tx, userId, itemId, "mail", fence))
-        ) {
-            return {
-                stored: false,
-                advance: await requestTitleAfterFenceInTx(
+        if (fence) {
+            const processing = await readTitleProcessingInTx(
+                tx,
+                userId,
+                itemId,
+            );
+            if (
+                options?.skipIfTitleStepDoneForFence &&
+                titleStepDoneForFence(processing, fence)
+            ) {
+                return { stored: false, advance: false };
+            }
+            if (
+                !(await titleFenceMatches(
                     tx,
                     userId,
                     itemId,
+                    "mail",
                     fence,
-                ),
-            };
+                    processing?.profileRevisionId ?? null,
+                ))
+            ) {
+                return {
+                    stored: false,
+                    advance: await requestTitleAfterFenceInTx(
+                        tx,
+                        userId,
+                        itemId,
+                        fence,
+                    ),
+                };
+            }
         }
         const titleCondition = expectedTitleEditedAt
             ? eq(chatterItems.titleEditedAt, expectedTitleEditedAt)

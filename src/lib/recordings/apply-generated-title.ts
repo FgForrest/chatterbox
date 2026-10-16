@@ -32,6 +32,7 @@ export async function applyGeneratedTitle(input: {
     actorUserId?: string;
     view?: RecordingView;
     fence?: TitleInputFence;
+    skipIfTitleStepDoneForFence?: boolean;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -54,6 +55,10 @@ export async function applyGeneratedTitle(input: {
                   input.expectedTitleEditedAt,
                   input.actorUserId ?? userId,
                   input.fence,
+                  {
+                      skipIfTitleStepDoneForFence:
+                          input.skipIfTitleStepDoneForFence,
+                  },
               )
             : await storeGeneratedTitle(
                   userId,
@@ -62,6 +67,10 @@ export async function applyGeneratedTitle(input: {
                   input.expectedTitleEditedAt,
                   input.actorUserId ?? userId,
                   input.fence,
+                  {
+                      skipIfTitleStepDoneForFence:
+                          input.skipIfTitleStepDoneForFence,
+                  },
               )
         : false;
     if (!generatedTitle || !retitled) return false;

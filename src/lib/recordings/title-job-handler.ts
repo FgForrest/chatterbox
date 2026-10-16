@@ -11,6 +11,7 @@ import { isHeldForLearn } from "@/lib/learn/hold";
 import { markSummaryStepFailed } from "@/lib/pipeline/state";
 import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
+import { titleStepDoneForFence } from "@/lib/recordings/title-fence";
 import { readTitleInput } from "@/lib/recordings/title-input";
 import {
     parseTitleJobPayload,
@@ -111,18 +112,7 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
                     ),
                 )
                 .limit(1);
-            const step = processing?.phases.summary?.steps?.title;
-            if (
-                step?.state === "done" &&
-                step.contentId === input.fence.contentId &&
-                (step.contentSourceId ??
-                    processing?.phases.summary?.inputs?.contentSourceId) ===
-                    input.fence.contentSourceId &&
-                step.contentRevision === input.fence.contentRevision &&
-                (step.profileRevisionId ??
-                    processing?.profileRevisionId ??
-                    null) === input.fence.profileRevisionId
-            ) {
+            if (titleStepDoneForFence(processing, input.fence)) {
                 return { skipped: "done" };
             }
         }
@@ -133,6 +123,7 @@ export const titleJobHandler: JobHandler<TitleJobPayload> = {
             plaudFileId: item.plaudFileId ?? undefined,
             syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
             kind: item.kind,
+            skipIfTitleStepDoneForFence: true,
         });
         if (retitled) {
             await emitEvent("recording.updated", userId, payload.recordingId);

@@ -98,6 +98,25 @@ describe("title job profile switch", () => {
 
         expect(mocks.applyGeneratedTitle).toHaveBeenCalledTimes(calls);
         expect(mocks.emitEvent).toHaveBeenCalledTimes(calls);
+        if (automatic) {
+            expect(mocks.applyGeneratedTitle).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    skipIfTitleStepDoneForFence: true,
+                }),
+            );
+        }
+    });
+
+    it("does not emit an update when the guarded write is skipped", async () => {
+        mocks.resolveItemProfile.mockResolvedValue({
+            settings: { steps: { title: { automatic: true } } },
+        });
+        mocks.applyGeneratedTitle.mockResolvedValue(false);
+
+        expect(await titleJobHandler.run(context())).toEqual({
+            retitled: false,
+        });
+        expect(mocks.emitEvent).not.toHaveBeenCalled();
     });
 
     it("skips a queued title already completed for the same fence", async () => {
