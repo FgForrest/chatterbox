@@ -157,12 +157,14 @@ export function MailSummaryCard({
                             : i18n("No summary yet.")}
                     </p>
                 )}
-                <TaskReviewLink
-                    state={taskState}
-                    speakers={NO_SPEAKERS}
-                    organizationOnly={view === "org"}
-                    allowAdd={hasSummary}
-                />
+                <div id={`mail-task-review-${mail.id}`}>
+                    <TaskReviewLink
+                        state={taskState}
+                        speakers={NO_SPEAKERS}
+                        organizationOnly={view === "org"}
+                        allowAdd={hasSummary}
+                    />
+                </div>
                 {summary?.scopeChanged && canChange && (
                     <p className="text-sm text-amber-600 dark:text-amber-400">
                         {i18n("Folders changed since this summary:")}{" "}

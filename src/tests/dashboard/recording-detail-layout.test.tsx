@@ -36,8 +36,13 @@ vi.mock("@/components/recordings/erase-recording-menu", () => ({
     EraseRecordingMenu: () => null,
 }));
 
-vi.mock("@/components/recordings/recording-folder-tags", () => ({
-    RecordingFolderTags: () => <div data-testid="folder-tags" />,
+vi.mock("@/components/pipeline/item-workflow", () => ({
+    ItemWorkflow: () => (
+        <>
+            <div data-testid="workflow-strip" />
+            <div data-testid="folder-row" />
+        </>
+    ),
 }));
 
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
@@ -109,6 +114,29 @@ describe("recording detail layout", () => {
             />,
         );
         expect(playFrom).toHaveBeenCalledTimes(1);
+    });
+
+    it("orders the title, workflow, folder row, player, and detail panels", () => {
+        render(
+            <WorkstationDetailPane
+                {...sharedProps}
+                currentRecording={recording}
+            />,
+        );
+
+        const ordered = [
+            screen.getByRole("heading", { name: "Planning session" }),
+            screen.getByTestId("workflow-strip"),
+            screen.getByTestId("folder-row"),
+            screen.getByTestId("recording-player"),
+            screen.getByTestId("transcription-panel"),
+        ];
+        for (let index = 1; index < ordered.length; index += 1) {
+            expect(
+                ordered[index - 1].compareDocumentPosition(ordered[index]) &
+                    Node.DOCUMENT_POSITION_FOLLOWING,
+            ).toBeTruthy();
+        }
     });
 
     it.each([

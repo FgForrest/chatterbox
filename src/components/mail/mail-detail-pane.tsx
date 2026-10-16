@@ -18,9 +18,8 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MailLearnCard } from "@/components/mail/mail-learn-card";
 import { MailSummaryCard } from "@/components/mail/mail-summary-card";
+import { ItemWorkflow, openWidget } from "@/components/pipeline/item-workflow";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
-import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
-import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatBytes } from "@/lib/format-bytes";
@@ -291,92 +290,86 @@ export function MailDetailPane({
             >
                 <ArrowLeft className="size-4" /> {i18n("Back to the pile")}
             </Button>
+            <div className="space-y-1">
+                <div className="flex items-start justify-between gap-3">
+                    <h2 className="text-lg font-semibold break-words">
+                        {mail.filename || i18n("(no subject)")}
+                    </h2>
+                    {isOwn && (
+                        <div className="flex shrink-0 gap-1">
+                            {detail?.hasRaw && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Download the message")}
+                                    asChild
+                                >
+                                    <a
+                                        href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
+                                        download
+                                    >
+                                        <Download className="size-4" />
+                                    </a>
+                                </Button>
+                            )}
+                            {mail.view !== "org" && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label={i18n("Delete")}
+                                    onClick={remove}
+                                >
+                                    <Trash2 className="size-4" />
+                                </Button>
+                            )}
+                        </div>
+                    )}
+                </div>
+                {!isOwn && mail.ownerName && (
+                    <p className="text-xs text-muted-foreground">
+                        {i18n("Shared by {owner}", {
+                            owner: mail.ownerName,
+                        })}
+                    </p>
+                )}
+            </div>
+            {detail && (
+                <ItemWorkflow
+                    itemId={mail.id}
+                    kind="mail"
+                    initialData={detail.processing}
+                    folders={folders}
+                    folderAssignments={folderAssignments}
+                    onSelectFolder={onSelectFolder}
+                    onAddToFolder={onAddToFolder}
+                    onRemoveFromFolder={onRemoveFromFolder}
+                    onMoveBetweenFolders={onMoveBetweenFolders}
+                    isOwn={isOwn}
+                    canWithdraw={isOwn || (mail.view === "org" && isOrgAccount)}
+                    view={mail.view === "org" ? "org" : "private"}
+                    onLearn={() => openWidget(`mail-learn-${mail.id}`)}
+                    onSummary={() =>
+                        document
+                            .getElementById(`mail-summary-${mail.id}`)
+                            ?.scrollIntoView({ behavior: "smooth" })
+                    }
+                    onReviewLearn={() =>
+                        document
+                            .getElementById(`mail-learn-${mail.id}`)
+                            ?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "center",
+                            })
+                    }
+                    onReviewTasks={() =>
+                        openWidget(`mail-task-review-${mail.id}`)
+                    }
+                    onChanged={onChanged}
+                    onFolderCreated={onFolderCreated}
+                />
+            )}
             <Card>
                 <CardContent className="space-y-4 p-4 sm:p-6">
-                    <div className="flex items-start justify-between gap-3">
-                        <h2 className="text-lg font-semibold break-words">
-                            {mail.filename || i18n("(no subject)")}
-                        </h2>
-                        {isOwn && (
-                            <div className="flex shrink-0 gap-1">
-                                {detail?.hasRaw && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={i18n(
-                                            "Download the message",
-                                        )}
-                                        asChild
-                                    >
-                                        <a
-                                            href={`/api/mail/${encodeURIComponent(mail.id)}/raw`}
-                                            download
-                                        >
-                                            <Download className="size-4" />
-                                        </a>
-                                    </Button>
-                                )}
-                                {mail.view !== "org" && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={i18n("Delete")}
-                                        onClick={remove}
-                                    >
-                                        <Trash2 className="size-4" />
-                                    </Button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    {!isOwn && mail.ownerName && (
-                        <p className="text-xs text-muted-foreground">
-                            {i18n("Shared by {owner}", {
-                                owner: mail.ownerName,
-                            })}
-                        </p>
-                    )}
-                    <RecordingFolderTags
-                        recordingId={mail.id}
-                        folders={folders}
-                        assignments={folderAssignments}
-                        onSelectFolder={onSelectFolder}
-                        onAdd={onAddToFolder}
-                        onRemove={onRemoveFromFolder}
-                        isOwn={isOwn}
-                        canWithdraw={
-                            isOwn || (mail.view === "org" && isOrgAccount)
-                        }
-                        organizationOnly={mail.view === "org"}
-                        onMove={onMoveBetweenFolders}
-                    />
-                    {isOwn && mail.view !== "org" && detail?.processing && (
-                        <WorkflowIndicator
-                            initialData={detail.processing}
-                            onLearn={() =>
-                                document
-                                    .getElementById(`mail-learn-${mail.id}`)
-                                    ?.scrollIntoView({ behavior: "smooth" })
-                            }
-                            onSummary={() =>
-                                document
-                                    .getElementById(`mail-summary-${mail.id}`)
-                                    ?.scrollIntoView({ behavior: "smooth" })
-                            }
-                            onReviewLearn={() =>
-                                document
-                                    .getElementById(`mail-learn-${mail.id}`)
-                                    ?.scrollIntoView({ behavior: "smooth" })
-                            }
-                            onReviewTasks={() =>
-                                document
-                                    .getElementById(`mail-summary-${mail.id}`)
-                                    ?.scrollIntoView({ behavior: "smooth" })
-                            }
-                            onChanged={onChanged}
-                            onFolderCreated={onFolderCreated}
-                        />
-                    )}
                     {failed && (
                         <p className="text-sm text-destructive">
                             {i18n("The mail could not be loaded.")}

@@ -1,24 +1,8 @@
 "use client";
 
-import {
-    Check,
-    CircleDashed,
-    CircleX,
-    Clock3,
-    Loader2,
-    Minus,
-    TriangleAlert,
-    X,
-} from "lucide-react";
+import { Check, LoaderCircle, Minus, TriangleAlert } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
-import {
-    CategorizePanel,
-    type CategorizeSubmission,
-} from "@/components/pipeline/categorize-panel";
-import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
-import { onTasksChanged } from "@/components/tasks/task-api";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Tooltip,
@@ -26,286 +10,272 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
-import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
-import type { PhaseName, PhaseRecord, PhaseState } from "@/lib/pipeline/types";
+import type {
+    WorkflowActionCode,
+    WorkflowStatus,
+    WorkflowStep,
+} from "@/lib/pipeline/workflow-status";
+import { cn } from "@/lib/utils";
 
-export type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
-
-interface WorkflowIndicatorProps {
-    itemId?: string;
-    initialData?: ItemProcessingPresentation | null;
-    onTranscribe?: () => void;
-    onLearn?: () => void;
-    onSummary?: () => void;
-    onReviewLearn?: () => void;
-    onReviewTasks?: () => void;
-    onChanged?: () => void;
-    onFolderCreated?: (folder: CreatedFolder) => void;
+interface WorkflowStripProps {
+    workflow: WorkflowStatus;
+    onAction?: (action: WorkflowActionCode) => void;
 }
 
-interface DisplayPhase {
-    name: PhaseName;
-    state: PhaseState | "manual";
-    record?: PhaseRecord;
+type WorkflowDensity = "full" | "focused" | "compact";
+
+const STRIP_PADDING = 24;
+const FULL_CIRCLE = 28;
+const FULL_CONNECTOR = 16;
+const FULL_COPY_GAP = 6;
+const COMPACT_CIRCLE = 24;
+const COMPACT_CONNECTOR = 6;
+const COMPACT_COPY_GAP = 4;
+
+function estimateCopyWidth(label: string): number {
+    return Math.max(...label.split("|").map((part) => part.length)) * 6;
 }
 
-function stateIcon(state: DisplayPhase["state"]) {
-    const className = "size-4 shrink-0";
+function chooseDensity(
+    width: number,
+    copyWidths: number[],
+    focused: Set<number>,
+): WorkflowDensity {
+    const columnWidth =
+        (width - STRIP_PADDING) / Math.max(copyWidths.length, 1);
+    const fullFits = copyWidths.every(
+        (copyWidth, index) =>
+            (index > 0 ? FULL_CONNECTOR : 0) +
+                FULL_CIRCLE +
+                FULL_COPY_GAP +
+                copyWidth <=
+            columnWidth,
+    );
+    if (fullFits) return "full";
+    const focusedFits = copyWidths.every(
+        (copyWidth, index) =>
+            (index > 0 ? COMPACT_CONNECTOR : 0) +
+                COMPACT_CIRCLE +
+                (focused.has(index) ? COMPACT_COPY_GAP + copyWidth : 0) <=
+            columnWidth,
+    );
+    return focusedFits ? "focused" : "compact";
+}
+
+function stateColor(state: WorkflowStep["state"]): string {
     switch (state) {
-        case "done":
-            return <Check className={className} aria-hidden />;
-        case "running":
-            return (
-                <Loader2 className={`${className} animate-spin`} aria-hidden />
-            );
-        case "waiting":
-            return <Clock3 className={className} aria-hidden />;
-        case "failed":
-            return <CircleX className={className} aria-hidden />;
+        case "next":
+            return "text-primary";
+        case "review":
         case "outdated":
-            return <TriangleAlert className={className} aria-hidden />;
-        case "skipped":
-        case "manual":
-            return <Minus className={className} aria-hidden />;
-        case "not_processed":
-            return <TriangleAlert className={className} aria-hidden />;
+            return "text-[var(--step-review)]";
+        case "working":
+            return "text-[var(--step-working)]";
+        case "problem":
+            return "text-[var(--step-problem)]";
         default:
-            return <CircleDashed className={className} aria-hidden />;
+            return "text-muted-foreground";
     }
 }
 
-export function WorkflowIndicator({
-    itemId,
-    initialData,
-    onTranscribe,
-    onLearn,
-    onSummary,
-    onReviewLearn,
-    onReviewTasks,
-    onChanged,
-    onFolderCreated,
-}: WorkflowIndicatorProps) {
+function StepCircle({
+    step,
+    number,
+    density,
+}: {
+    step: WorkflowStep;
+    number: number;
+    density: WorkflowDensity;
+}) {
+    const compact = density !== "full";
+    const base =
+        "workflow-step-circle relative flex shrink-0 items-center justify-center rounded-full border text-xs font-medium";
+    const size = compact ? "size-6" : "size-7";
+    switch (step.state) {
+        case "done":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-[var(--step-done)] bg-[var(--step-done)] text-white",
+                    )}
+                >
+                    <Check className="size-4" strokeWidth={2.4} aria-hidden />
+                </span>
+            );
+        case "next":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-primary bg-primary text-primary-foreground",
+                    )}
+                >
+                    {number}
+                </span>
+            );
+        case "review":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-[var(--step-review)] bg-[var(--step-review-tint)] text-[var(--step-review)]",
+                    )}
+                >
+                    {number}
+                </span>
+            );
+        case "working":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-[var(--step-working)] text-[var(--step-working)]",
+                    )}
+                >
+                    <span>{number}</span>
+                    <LoaderCircle
+                        className={cn(
+                            "absolute -inset-px animate-spin motion-reduce:animate-none",
+                            size,
+                        )}
+                        aria-hidden
+                    />
+                </span>
+            );
+        case "problem":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-[var(--step-problem)] bg-[var(--step-problem)] text-white",
+                    )}
+                >
+                    !
+                </span>
+            );
+        case "outdated":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-[var(--step-review)] bg-[var(--step-review-tint)] text-[var(--step-review)]",
+                    )}
+                >
+                    <TriangleAlert className="size-3.5" aria-hidden />
+                </span>
+            );
+        case "manual":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-dashed border-muted-foreground text-muted-foreground",
+                    )}
+                >
+                    {number}
+                </span>
+            );
+        case "skipped":
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-border bg-muted/40 text-muted-foreground",
+                    )}
+                >
+                    <Minus className="size-3.5" aria-hidden />
+                </span>
+            );
+        default:
+            return (
+                <span
+                    className={cn(
+                        base,
+                        size,
+                        "border-border bg-muted/40 text-muted-foreground",
+                    )}
+                >
+                    {number}
+                </span>
+            );
+    }
+}
+
+/** A one-row workflow stepper with its current actor and next action. */
+export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
     const i18n = useExtracted();
-    const [data, setData] = useState(initialData ?? null);
-    const [panelOpen, setPanelOpen] = useState(false);
-    const [panelData, setPanelData] =
-        useState<CategorizationPanelPresentation | null>(null);
-    const [panelLoading, setPanelLoading] = useState(false);
-    const [processingAgain, setProcessingAgain] = useState(false);
-    const panelRequest = useRef<Promise<void> | null>(null);
-    const taskRefreshTimer = useRef<number | null>(null);
-    const activeItemId = data?.itemId;
+    const stripRef = useRef<HTMLElement>(null);
+    const copyMeasureRefs = useRef<Array<HTMLSpanElement | null>>([]);
+    const [density, setDensity] = useState<WorkflowDensity>("compact");
 
-    useEffect(() => setData(initialData ?? null), [initialData]);
-
-    useEffect(() => {
-        if (taskRefreshTimer.current !== null) {
-            window.clearTimeout(taskRefreshTimer.current);
-            taskRefreshTimer.current = null;
-        }
-        setPanelData((current) =>
-            current?.itemId === activeItemId ? current : null,
-        );
-        panelRequest.current = null;
-    }, [activeItemId]);
-
-    useEffect(
-        () => () => {
-            if (taskRefreshTimer.current !== null) {
-                window.clearTimeout(taskRefreshTimer.current);
-            }
-        },
-        [],
-    );
-
-    const load = useCallback(
-        async (targetId: string | undefined, kind: "audio" | "mail") => {
-            if (!targetId) return;
-            const url =
-                kind === "mail"
-                    ? `/api/mail/${encodeURIComponent(targetId)}`
-                    : `/api/recordings/${encodeURIComponent(targetId)}?processing=1`;
-            try {
-                const response = await fetch(url);
-                if (!response.ok) return;
-                const body = (await response.clone().json()) as {
-                    processing?: ItemProcessingPresentation | null;
-                };
-                setData(body.processing ?? null);
-            } catch {}
-        },
-        [],
-    );
-
-    const refreshAfterTaskChange = useCallback(
-        (targetId: string, kind: "audio" | "mail") => {
-            if (taskRefreshTimer.current !== null) {
-                window.clearTimeout(taskRefreshTimer.current);
-            }
-            let attempts = 0;
-            const refresh = () => {
-                attempts += 1;
-                void load(targetId, kind);
-                if (attempts < 4) {
-                    taskRefreshTimer.current = window.setTimeout(
-                        refresh,
-                        attempts * 250,
-                    );
-                } else {
-                    taskRefreshTimer.current = null;
-                }
-            };
-            refresh();
-        },
-        [load],
-    );
-
-    useEffect(() => {
-        if (initialData !== undefined) return;
-        void load(itemId, "audio");
-    }, [initialData, itemId, load]);
-
-    useEffect(
-        () =>
-            onTasksChanged(() => {
-                if (data) refreshAfterTaskChange(data.itemId, data.kind);
-            }),
-        [data, refreshAfterTaskChange],
-    );
-
-    const loadPanel = useCallback(() => {
-        if (!data || panelData || panelRequest.current) return;
-        setPanelLoading(true);
-        const request = fetch(
-            `/api/recordings/${encodeURIComponent(data.itemId)}/categorize`,
-        )
-            .then(async (response) => {
-                if (!response.ok) throw new Error(String(response.status));
-                setPanelData(
-                    (await response.json()) as CategorizationPanelPresentation,
-                );
-            })
-            .catch(() => {
-                toast.error(i18n("The filing options could not be loaded."));
-            })
-            .finally(() => {
-                panelRequest.current = null;
-                setPanelLoading(false);
-            });
-        panelRequest.current = request;
-    }, [data, i18n, panelData]);
-
-    const openPanel = useCallback(() => {
-        setPanelOpen(true);
-        loadPanel();
-    }, [loadPanel]);
-
-    const phases = useMemo<DisplayPhase[]>(() => {
-        if (!data || data.legacy) return [];
-        const names: PhaseName[] = [
-            "categorize",
-            ...(data.kind === "audio" ? (["transcribe"] as const) : []),
-            "learn",
-            "summary",
-            "taskReview",
-            ...(data.intents.length > 0 ? (["share"] as const) : []),
-        ];
-        return names.map((name) => {
-            const record = data.phases[name];
-            if (record?.state === "outdated") {
-                return { name, state: "outdated" as const, record };
-            }
-            if (
-                name === "transcribe" ||
-                name === "learn" ||
-                name === "summary"
-            ) {
-                const output =
-                    name === "transcribe"
-                        ? data.outputs.transcript
-                        : name === "learn"
-                          ? data.outputs.learn
-                          : data.outputs.summary;
-                const automatic =
-                    !data.manualOnly &&
-                    (data.profile?.automatic[name] ?? false);
-                if (data.manualOnly || (data.profile !== null && !automatic)) {
-                    return {
-                        name,
-                        state: output ? ("done" as const) : ("manual" as const),
-                        record,
-                    };
-                }
-            }
-            return { name, state: record?.state ?? "pending", record };
-        });
-    }, [data]);
-
-    if (!data) return null;
-
-    const phaseLabel = (name: PhaseName) => {
-        switch (name) {
+    const stepLabel = (id: WorkflowStep["id"]) => {
+        switch (id) {
+            case "record":
+                return i18n("Record");
+            case "receive":
+                return i18n("Receive");
             case "categorize":
-                return i18n("Categorize");
+                return i18n({
+                    id: "workflowStepCategorize",
+                    message: "Categorize",
+                });
             case "transcribe":
                 return i18n("Transcribe");
             case "learn":
                 return i18n("Learn");
             case "summary":
-                return i18n("Summary");
+                return i18n({
+                    id: "workflowStepSummarize",
+                    message: "Summarize",
+                });
             case "taskReview":
                 return i18n("Task review");
             case "share":
-                return i18n("Share");
+                return i18n({
+                    id: "workflowStepShare",
+                    message: "Share",
+                });
         }
     };
-    const stateLabel = (phase: DisplayPhase) => {
-        if (
-            phase.name === "categorize" &&
-            phase.state === "waiting" &&
-            phase.record?.reason === "needs_folder"
-        ) {
-            return i18n("Waiting for you to file it");
-        }
-        if (
-            phase.name === "learn" &&
-            phase.record?.reason === "review_pending_timeout"
-        ) {
-            return i18n("Learn review pending; summary made without it");
-        }
-        if (
-            phase.name === "summary" &&
-            phase.record?.reason === "plaud_tasks"
-        ) {
-            return i18n("Tasks from Plaud's summary");
-        }
-        if (
-            phase.name === "taskReview" &&
-            (phase.state === "pending" || phase.state === "waiting") &&
-            !data.outputs.summary
-        ) {
-            return i18n("Not started");
-        }
-        switch (phase.state) {
-            case "pending":
-                return i18n("Pending");
-            case "waiting":
-                return i18n("Waiting");
-            case "running":
-                return i18n("Running");
+    const stateLabel = (state: WorkflowStep["state"]) => {
+        switch (state) {
             case "done":
                 return i18n("Done");
-            case "skipped":
-                return i18n("Skipped");
-            case "failed":
+            case "next":
+                return i18n({
+                    id: "workflowStateNext",
+                    message: "Next",
+                });
+            case "review":
+                return i18n("Review needed");
+            case "working":
+                return i18n({
+                    id: "workflowStateRunning",
+                    message: "Running",
+                });
+            case "queued":
+                return i18n("Queued");
+            case "waiting":
+                return i18n("Waiting");
+            case "others":
+                return i18n("Waiting for a curator");
+            case "problem":
                 return i18n("Failed");
             case "outdated":
                 return i18n("Outdated");
-            case "not_processed":
-                return i18n("Not processed");
             case "manual":
-                return i18n("By hand");
+                return i18n("Manual");
+            case "skipped":
+                return i18n("Skipped");
         }
     };
     const skippedReason = (reason: string | undefined) => {
@@ -337,301 +307,357 @@ export function WorkflowIndicator({
                 return i18n("This step was skipped.");
         }
     };
-    const actionFor = (phase: DisplayPhase) => {
-        if (
-            phase.name === "categorize" &&
-            (phase.state === "waiting" ||
-                (phase.state === "failed" &&
-                    phase.record?.reason === "profile_unavailable"))
-        ) {
-            return {
-                label:
-                    phase.record?.reason === "needs_profile" ||
-                    phase.record?.reason === "profile_unavailable"
-                        ? i18n("Choose a profile")
-                        : i18n("File it"),
-                action: openPanel,
-            };
+    const actor = () => {
+        switch (workflow.status?.actor) {
+            case "working":
+                return i18n("Working.");
+            case "queued":
+                return i18n("Queued.");
+            case "problem":
+                return i18n("Problem.");
+            case "others":
+                return i18n("Waiting for someone else.");
+            default:
+                return i18n("Your turn.");
         }
-        if (phase.name === "learn" && phase.state === "waiting") {
-            return { label: i18n("Review Learn"), action: onReviewLearn };
-        }
-        if (
-            phase.name === "taskReview" &&
-            phase.state === "waiting" &&
-            data.outputs.summary
-        ) {
-            return { label: i18n("Review tasks"), action: onReviewTasks };
-        }
-        if (phase.state !== "manual" && phase.state !== "outdated") return null;
-        if (phase.name === "transcribe") {
-            return { label: i18n("Transcribe"), action: onTranscribe };
-        }
-        if (phase.name === "learn") {
-            return { label: i18n("Learn"), action: onLearn };
-        }
-        if (phase.name === "summary") {
-            return { label: i18n("Generate summary"), action: onSummary };
-        }
-        return null;
     };
-    const categorizeHasAction = phases.some(
-        (phase) => phase.name === "categorize" && actionFor(phase) !== null,
+    const message = () => {
+        const status = workflow.status;
+        if (!status) return "";
+        switch (status.message) {
+            case "notFiled":
+                return status.params?.kind === "mail"
+                    ? i18n(
+                          "Choose a folder and a profile. Nothing is processed until the email is filed.",
+                      )
+                    : i18n(
+                          "Choose a folder and a profile. Nothing is processed until the recording is filed.",
+                      );
+            case "profilesDisagree":
+                return i18n(
+                    "The folders suggest different profiles. Choose one to continue.",
+                );
+            case "profileUnavailable":
+                return i18n(
+                    "The assigned profile is no longer available. Choose another one.",
+                );
+            case "curatorProfile":
+                return i18n(
+                    "A curator has to set this folder's profile first.",
+                );
+            case "transcriptionQueued":
+                return i18n("Queued. Transcription starts shortly.");
+            case "transcribing":
+                return i18n(
+                    "Transcribing. It continues in the background; you can leave this page.",
+                );
+            case "manualTranscription":
+                return i18n(
+                    "Transcribe the recording; the next steps then run by themselves.",
+                );
+            case "learnQueued":
+                return i18n("Queued. Learn starts shortly.");
+            case "learnRunning":
+                return i18n(
+                    "Learn is reading the transcript with your Almanac.",
+                );
+            case "learnReview":
+                return i18n(
+                    "Learn found {count, plural, one {# suggestion} other {# suggestions}}. The summary waits for your review, at most 3 days.",
+                    { count: status.params?.count ?? 0 },
+                );
+            case "learnTimedOut":
+                return i18n(
+                    "The summary was written without your Learn review, which waited 3 days. You can still review it.",
+                );
+            case "summaryQueued":
+                return i18n("Queued. Writing starts shortly.");
+            case "summaryRunning":
+                return i18n("Writing the summary, title and topics.");
+            case "taskReviewQueued":
+                return i18n("Queued. Task review starts shortly.");
+            case "taskReview":
+                return i18n(
+                    "{count, plural, one {# task change waits} other {# task changes wait}} for your review.",
+                    { count: status.params?.count ?? 0 },
+                );
+            case "shareConfirmation":
+                return i18n(
+                    "Nothing runs automatically for this item. Share it to {folders} when you are ready.",
+                    { folders: status.params?.folders?.join(", ") ?? "" },
+                );
+            case "shareQueued":
+                return i18n("Queued. Sharing starts shortly.");
+            case "failureNoProvider":
+                return i18n(
+                    "No provider is configured for this step. Choose one in Settings, then try again.",
+                );
+            case "failureProvider":
+                return i18n(
+                    "The provider rejected the request. Check the provider and model in Settings, then try again.",
+                );
+            case "failureTimeout":
+                return i18n(
+                    "The provider took too long to respond. Try again; if it keeps happening, check the provider.",
+                );
+            case "failureBudget":
+                return i18n(
+                    "Your included Mynah transcription allowance is used up. Wait for it to reset or add your own provider, then try again.",
+                );
+            case "failureRateLimited":
+                return i18n(
+                    "The provider is receiving too many requests. Wait a moment, then try again.",
+                );
+            case "failureUnavailable":
+                return i18n(
+                    "The provider is temporarily unavailable. Try again shortly.",
+                );
+            case "failureContextTooLong":
+                return i18n(
+                    "This item is too long for the selected model. Choose a model with a larger context window, then try again.",
+                );
+            case "failureTranscription":
+                return i18n(
+                    "Transcription failed. Check the transcription provider in Settings, then try again.",
+                );
+            case "failureSourceUnavailable":
+                return i18n(
+                    "The source recording or stored content is no longer available. Restore it before trying again.",
+                );
+            case "failureAccess":
+                return i18n(
+                    "This item can no longer be processed here. Check its access and sharing, then try again.",
+                );
+            case "stepFailed":
+                return i18n(
+                    "This step failed. Try again; if it keeps failing, check its provider in Settings.",
+                );
+            case "learnChanged":
+                return i18n("Learn changed after the summary was written.");
+            case "profileChanged":
+                return i18n(
+                    "The profile changed after this item was processed.",
+                );
+            case "transcriptChanged":
+                return i18n(
+                    "The transcript changed after the summary was written.",
+                );
+        }
+    };
+    const actionLabel = (action: WorkflowActionCode) => {
+        switch (action) {
+            case "file":
+                return i18n("File it");
+            case "chooseProfile":
+                return i18n("Choose profile");
+            case "transcribe":
+                return i18n("Transcribe");
+            case "reviewLearn":
+                return i18n("Review Learn");
+            case "reviewTasks":
+                return i18n("Review tasks");
+            case "shareNow":
+                return i18n("Share now");
+            case "retry":
+                return i18n("Try again");
+            case "processAgain":
+                return i18n("Process again");
+        }
+    };
+    const labels = workflow.steps.map((step) => ({
+        name: stepLabel(step.id),
+        state: stateLabel(step.state),
+    }));
+    const needsPersonIndex = workflow.steps.findIndex((step) =>
+        ["next", "review", "outdated"].includes(step.state),
     );
-    const cancelIntent = async (folderId: string) => {
-        const previous = data;
-        setData({
-            ...data,
-            intents: data.intents.filter(
-                (intent) => intent.folderId !== folderId,
-            ),
+    const markedCurrentIndex = workflow.steps.findIndex((step) => step.current);
+    const currentIndex =
+        markedCurrentIndex >= 0
+            ? markedCurrentIndex
+            : Math.max(needsPersonIndex, 0);
+    const focusedIndexes = new Set(
+        [currentIndex, needsPersonIndex].filter((index) => index >= 0),
+    );
+    const focusedKey = [...focusedIndexes].join(",");
+    const labelsKey = labels
+        .map((label) => `${label.name}|${label.state}`)
+        .join(";");
+    useLayoutEffect(() => {
+        const strip = stripRef.current;
+        if (!workflow.visible || !strip || !labelsKey) return;
+        const focused = new Set(focusedKey.split(",").map(Number));
+        const estimates = labelsKey.split(";").map(estimateCopyWidth);
+        const measure = (width: number) => {
+            const copyWidths = estimates.map(
+                (estimate, index) =>
+                    copyMeasureRefs.current[index]?.getBoundingClientRect()
+                        .width || estimate,
+            );
+            setDensity(chooseDensity(width, copyWidths, focused));
+        };
+        measure(strip.getBoundingClientRect().width);
+        if (typeof ResizeObserver === "undefined") return;
+        const observer = new ResizeObserver((entries) => {
+            const width = entries[0]?.contentRect.width;
+            if (width !== undefined) measure(width);
         });
-        try {
-            const response = await fetch(
-                `/api/recordings/${encodeURIComponent(data.itemId)}/intended-placements/${encodeURIComponent(folderId)}`,
-                { method: "DELETE" },
-            );
-            if (!response.ok) throw new Error("Intent cancellation failed");
-        } catch {
-            setData(previous);
-            toast.error(
-                i18n(
-                    "The intended Organization placement could not be cancelled.",
-                ),
-            );
-            return;
-        }
-        toast.success(i18n("Intended Organization placement cancelled."));
-        onChanged?.();
-    };
-    const processAgain = async () => {
-        if (processingAgain) return;
-        setProcessingAgain(true);
-        try {
-            const response = await fetch(
-                `/api/recordings/${encodeURIComponent(data.itemId)}/process-again`,
-                { method: "POST" },
-            );
-            if (!response.ok) throw new Error(String(response.status));
-            setData((current) =>
-                current ? { ...current, processAgain: false } : current,
-            );
-            toast.success(i18n("Processing requested."));
-            onChanged?.();
-        } catch {
-            toast.error(i18n("The item could not be processed again."));
-        } finally {
-            setProcessingAgain(false);
-        }
-    };
-    const optimisticallyCategorize = (submission: CategorizeSubmission) => {
-        const previous = data;
-        const selected = submission.folderIds.flatMap((folderId) => {
-            const folder = panelData?.folders.find(
-                (candidate) => candidate.id === folderId,
-            );
-            return folder ? [folder] : [];
-        });
-        setData({
-            ...data,
-            manualOnly: submission.manualOnly ?? data.manualOnly,
-            placements: selected.filter(
-                (folder) => folder.scope === "personal",
-            ),
-            intents: selected
-                .filter((folder) => folder.scope === "org")
-                .map((folder) => ({
-                    folderId: folder.id,
-                    name: folder.name,
-                    path: folder.path,
-                })),
-            phases: {
-                ...data.phases,
-                categorize: {
-                    state: "done",
-                    reason: "categorized",
-                    generation: data.phases.categorize?.generation ?? 0,
-                    at: new Date().toISOString(),
-                },
-            },
-            profile: data.profile,
-        });
-        return () => setData(previous);
-    };
+        observer.observe(strip);
+        return () => observer.disconnect();
+    }, [focusedKey, labelsKey, workflow.visible]);
+
+    if (!workflow.visible) return null;
+
+    const showCopy = (index: number) =>
+        density === "full" ||
+        (density === "focused" && focusedIndexes.has(index));
+    const currentStep = workflow.steps[currentIndex];
+    const currentLabel = labels[currentIndex];
 
     return (
         <TooltipProvider>
-            <section className="space-y-3" aria-label={i18n("Workflow")}>
-                <div className="flex flex-wrap items-center gap-2">
-                    {data.intents.map((intent) => (
+            <section
+                ref={stripRef}
+                className="workflow-strip relative overflow-hidden rounded-lg border bg-card"
+                aria-label={i18n("Workflow")}
+                data-density={density}
+            >
+                <div
+                    className="pointer-events-none absolute invisible whitespace-nowrap"
+                    aria-hidden
+                >
+                    {labels.map((label, index) => (
                         <span
-                            key={intent.folderId}
-                            className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-1 text-xs"
+                            key={`${workflow.steps[index]?.id}-${index}-measure`}
+                            ref={(element) => {
+                                copyMeasureRefs.current[index] = element;
+                            }}
+                            className="block w-max leading-tight"
                         >
-                            {i18n("{folder} · shares after review", {
-                                folder: intent.path,
-                            })}
-                            <button
-                                type="button"
-                                className="rounded-full p-0.5 hover:bg-muted"
-                                aria-label={i18n("Cancel {folder}", {
-                                    folder: intent.path,
-                                })}
-                                onClick={() =>
-                                    void cancelIntent(intent.folderId)
-                                }
-                            >
-                                <X className="size-3" />
-                            </button>
+                            <span className="block text-[13px]">
+                                {label.name}
+                            </span>
+                            <span className="block text-xs">{label.state}</span>
                         </span>
                     ))}
-                    {data.legacy ? (
-                        <>
-                            <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
-                                {i18n("Processed before profiles")}
-                            </span>
-                            {(data.taskReviewWaiting ?? 0) > 0 && (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={onReviewTasks}
-                                >
-                                    <Clock3 className="size-3.5" aria-hidden />
-                                    {i18n("Review tasks ({count})", {
-                                        count: String(
-                                            data.taskReviewWaiting ?? 0,
-                                        ),
-                                    })}
-                                </Button>
-                            )}
-                        </>
-                    ) : data.profile ? (
-                        <span className="rounded-full border px-2.5 py-1 text-xs">
-                            {i18n("Profile")}: {data.profile.name}
-                            {data.profile.scope === "organization"
-                                ? ` · ${i18n("Organization")}`
-                                : ""}
-                            {data.manualOnly
-                                ? ` · ${i18n("Nothing automatic")}`
-                                : ""}
-                        </span>
-                    ) : null}
-                    {!categorizeHasAction && (
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={openPanel}
-                            onMouseEnter={loadPanel}
-                            onFocus={loadPanel}
-                            disabled={panelLoading}
-                        >
-                            {data.phases.categorize?.state === "done"
-                                ? i18n("Change folders")
-                                : i18n("File it")}
-                        </Button>
-                    )}
-                    {data.processAgain && !data.manualOnly && (
-                        <Button
-                            type="button"
-                            size="sm"
-                            onClick={() => void processAgain()}
-                            disabled={processingAgain}
-                        >
-                            {processingAgain && (
-                                <Loader2
-                                    className="mr-1 size-3 animate-spin"
-                                    aria-hidden
-                                />
-                            )}
-                            {i18n("Process again")}
-                        </Button>
-                    )}
                 </div>
-
-                {!data.legacy && (
-                    <ol className="flex flex-wrap gap-2">
-                        {phases.map((phase) => {
-                            const action = actionFor(phase);
-                            const content = (
-                                <li
-                                    key={phase.name}
-                                    className="flex min-h-9 items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs"
-                                >
-                                    {stateIcon(phase.state)}
-                                    <span className="font-medium">
-                                        {phaseLabel(phase.name)}
-                                    </span>
-                                    <span className="text-muted-foreground">
-                                        {stateLabel(phase)}
-                                    </span>
-                                    {action && (
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="ghost"
-                                            className="h-6 px-1.5 text-xs"
-                                            onClick={action.action}
-                                            onMouseEnter={
-                                                phase.name === "categorize"
-                                                    ? loadPanel
-                                                    : undefined
-                                            }
-                                            onFocus={
-                                                phase.name === "categorize"
-                                                    ? loadPanel
-                                                    : undefined
-                                            }
+                <ol
+                    className="flex flex-nowrap items-start px-3 py-4"
+                    aria-label={i18n("Workflow steps")}
+                >
+                    {workflow.steps.map((step, index) => {
+                        const content = (
+                            <li
+                                key={`${step.id}-${index}`}
+                                className={cn(
+                                    "workflow-step flex min-w-0 flex-1 items-start",
+                                    density !== "full" &&
+                                        index === workflow.steps.length - 1 &&
+                                        "flex-none",
+                                    step.state === "skipped" &&
+                                        "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                )}
+                                data-current={step.current}
+                                aria-current={step.current ? "step" : undefined}
+                                aria-label={`${stepLabel(step.id)}, ${stateLabel(step.state)}`}
+                                tabIndex={
+                                    step.state === "skipped" ? 0 : undefined
+                                }
+                            >
+                                {index > 0 && (
+                                    <span
+                                        className={cn(
+                                            "h-px shrink-0 bg-border",
+                                            density === "full"
+                                                ? "mt-3.5 w-4"
+                                                : "mt-3 w-1.5",
+                                        )}
+                                    />
+                                )}
+                                <StepCircle
+                                    step={step}
+                                    number={index + 1}
+                                    density={density}
+                                />
+                                {showCopy(index) && (
+                                    <span
+                                        className={cn(
+                                            "workflow-step-copy whitespace-nowrap leading-tight",
+                                            density === "full"
+                                                ? "ml-1.5"
+                                                : "ml-1",
+                                        )}
+                                    >
+                                        <span className="block text-[13px] font-normal text-foreground">
+                                            {labels[index]?.name}
+                                        </span>
+                                        <span
+                                            className={cn(
+                                                "mt-1 block text-xs",
+                                                stateColor(step.state),
+                                            )}
                                         >
-                                            {action.label}
-                                        </Button>
-                                    )}
-                                </li>
-                            );
-                            return phase.state === "skipped" ? (
-                                <Tooltip key={phase.name}>
-                                    <TooltipTrigger asChild>
-                                        {content}
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        {skippedReason(phase.record?.reason)}
-                                    </TooltipContent>
-                                </Tooltip>
-                            ) : phase.name === "taskReview" &&
-                              (phase.state === "pending" ||
-                                  phase.state === "waiting") &&
-                              !data.outputs.summary ? (
-                                <Tooltip key={phase.name}>
-                                    <TooltipTrigger asChild>
-                                        {content}
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        {i18n("Starts after the summary.")}
-                                    </TooltipContent>
-                                </Tooltip>
-                            ) : (
-                                content
-                            );
-                        })}
-                    </ol>
+                                            {labels[index]?.state}
+                                        </span>
+                                    </span>
+                                )}
+                            </li>
+                        );
+                        return step.state === "skipped" ? (
+                            <Tooltip key={`${step.id}-${index}`}>
+                                <TooltipTrigger asChild>
+                                    {content}
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                    {skippedReason(step.reason)}
+                                </TooltipContent>
+                            </Tooltip>
+                        ) : (
+                            content
+                        );
+                    })}
+                </ol>
+                {density === "compact" && currentStep && currentLabel && (
+                    <p className="-mt-1 px-3 pb-3 text-center text-[13px] leading-tight">
+                        <span className="text-foreground">
+                            {currentLabel.name}
+                        </span>{" "}
+                        <span className={stateColor(currentStep.state)}>
+                            {currentLabel.state}
+                        </span>
+                    </p>
+                )}
+                {workflow.status && (
+                    <output
+                        className="flex flex-wrap items-center gap-3 border-t px-4 py-3 text-sm"
+                        aria-live="polite"
+                    >
+                        <p className="min-w-0 flex-1 text-muted-foreground">
+                            {workflow.status.actor !== "queued" && (
+                                <>
+                                    <strong className="font-medium text-foreground">
+                                        {actor()}
+                                    </strong>{" "}
+                                </>
+                            )}
+                            {message()}
+                        </p>
+                        {workflow.status.action && (
+                            <Button
+                                type="button"
+                                size="sm"
+                                className="shrink-0"
+                                onClick={() =>
+                                    workflow.status?.action &&
+                                    onAction?.(workflow.status.action)
+                                }
+                            >
+                                {actionLabel(workflow.status.action)}
+                            </Button>
+                        )}
+                    </output>
                 )}
             </section>
-            {panelData && (
-                <CategorizePanel
-                    data={panelData}
-                    open={panelOpen}
-                    onOpenChange={setPanelOpen}
-                    onFolderCreated={onFolderCreated}
-                    onOptimisticCategorize={optimisticallyCategorize}
-                    onCategorized={() => {
-                        setPanelOpen(false);
-                        setPanelData(null);
-                        void load(data.itemId, data.kind);
-                        onChanged?.();
-                    }}
-                />
-            )}
         </TooltipProvider>
     );
 }

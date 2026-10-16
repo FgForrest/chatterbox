@@ -28,8 +28,6 @@ import {
     SpeakerTags,
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
-import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
-import { WorkflowIndicator } from "@/components/pipeline/workflow-indicator";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -116,7 +114,6 @@ interface TranscriptionPanelProps {
      * re-transcribed in another tab.
      */
     onTranscriptStale?: () => void;
-    onFolderCreated?: (folder: CreatedFolder) => void;
     /** Seek the recording audio to a provider-reported transcript turn. */
     onSeekToTurn?: (startMs: number) => void;
     /** Seek and start playback for speaker navigation, up to `endMs` if given. */
@@ -242,7 +239,6 @@ export function TranscriptionPanel({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
-    onFolderCreated,
     onSeekToTurn,
     onPlayFromTurn,
     getPlaybackMs,
@@ -715,31 +711,10 @@ export function TranscriptionPanel({
     }, [summaryData, summarySpeakerTags]);
 
     return (
-        <div className="space-y-4">
-            {!orgView && (
-                <WorkflowIndicator
-                    itemId={recording.id}
-                    onTranscribe={() => onTranscribe()}
-                    onLearn={() =>
-                        transcriptSectionRef.current?.scrollIntoView({
-                            behavior: "smooth",
-                        })
-                    }
-                    onSummary={handleSummarize}
-                    onReviewLearn={() =>
-                        transcriptSectionRef.current?.scrollIntoView({
-                            behavior: "smooth",
-                        })
-                    }
-                    onReviewTasks={() =>
-                        document
-                            .getElementById(`recording-summary-${recording.id}`)
-                            ?.scrollIntoView({ behavior: "smooth" })
-                    }
-                    onChanged={onTranscriptStale}
-                    onFolderCreated={onFolderCreated}
-                />
-            )}
+        <div
+            id={`recording-transcription-${recording.id}`}
+            className="space-y-4"
+        >
             {correcting && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
@@ -949,31 +924,37 @@ export function TranscriptionPanel({
                                     </button>
                                 )}
                                 {canLearn && activeTranscript && (
-                                    <LearnReview
-                                        // Another recording, view, source
-                                        // or revision is another review.
-                                        key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
-                                        recordingId={recording.id}
-                                        view={view}
-                                        source={
-                                            activeTranscript.source === "plaud"
-                                                ? "plaud"
-                                                : "riffado"
-                                        }
-                                        turns={activeTranscript.turns ?? []}
-                                        onSeek={onSeekToTurn}
-                                        onPlaySpeaker={
-                                            onPlayFromTurn
-                                                ? (label) =>
-                                                      handlePlaySpeaker(
-                                                          label,
-                                                          true,
-                                                      )
-                                                : undefined
-                                        }
-                                        onFinished={handleReviewFinished}
-                                        onMarks={setLearnMarks}
-                                    />
+                                    <span
+                                        id={`recording-learn-review-${recording.id}`}
+                                        className="inline-flex"
+                                    >
+                                        <LearnReview
+                                            // Another recording, view, source
+                                            // or revision is another review.
+                                            key={`${recording.id}:${view ?? "private"}:${activeTranscript.source}:${activeTranscriptKey}`}
+                                            recordingId={recording.id}
+                                            view={view}
+                                            source={
+                                                activeTranscript.source ===
+                                                "plaud"
+                                                    ? "plaud"
+                                                    : "riffado"
+                                            }
+                                            turns={activeTranscript.turns ?? []}
+                                            onSeek={onSeekToTurn}
+                                            onPlaySpeaker={
+                                                onPlayFromTurn
+                                                    ? (label) =>
+                                                          handlePlaySpeaker(
+                                                              label,
+                                                              true,
+                                                          )
+                                                    : undefined
+                                            }
+                                            onFinished={handleReviewFinished}
+                                            onMarks={setLearnMarks}
+                                        />
+                                    </span>
                                 )}
                             </div>
                             {transcriptExpanded && (
@@ -1219,12 +1200,17 @@ export function TranscriptionPanel({
                                             ? i18n("Collapse summary")
                                             : i18n("Expand summary")}
                                     </button>
-                                    <TaskReviewLink
-                                        state={taskState}
-                                        speakers={taskSpeakers}
-                                        organizationOnly={orgView}
-                                        onPlay={playTask}
-                                    />
+                                    <span
+                                        id={`recording-task-review-${recording.id}`}
+                                        className="inline-flex"
+                                    >
+                                        <TaskReviewLink
+                                            state={taskState}
+                                            speakers={taskSpeakers}
+                                            organizationOnly={orgView}
+                                            onPlay={playTask}
+                                        />
+                                    </span>
                                 </div>
 
                                 {summaryExpanded && (
@@ -1441,13 +1427,18 @@ export function TranscriptionPanel({
                                 </p>
                                 {/* Tasks a replaced summary left, until a new one comes */}
                                 <div className="mt-6 w-full space-y-3 text-left">
-                                    <TaskReviewLink
-                                        state={taskState}
-                                        speakers={taskSpeakers}
-                                        organizationOnly={orgView}
-                                        allowAdd={false}
-                                        onPlay={playTask}
-                                    />
+                                    <span
+                                        id={`recording-task-review-${recording.id}`}
+                                        className="inline-flex"
+                                    >
+                                        <TaskReviewLink
+                                            state={taskState}
+                                            speakers={taskSpeakers}
+                                            organizationOnly={orgView}
+                                            allowAdd={false}
+                                            onPlay={playTask}
+                                        />
+                                    </span>
                                     <RecordingTasks
                                         state={taskState}
                                         speakers={taskSpeakers}

@@ -14,6 +14,7 @@ import {
 } from "@/components/pipeline/categorize-panel";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
         text.replace(/\{(\w+)\}/g, (_match, key: string) =>
             String(values?.[key] ?? ""),
@@ -68,273 +69,151 @@ const base: CategorizePanelData = {
     },
 };
 
-function renderPanel(data: CategorizePanelData = base) {
+const details = {
+    "profile-1": {
+        description: "Discussion, decisions, and tasks.",
+        automatic: {
+            transcribe: true,
+            learn: true,
+            summary: true,
+            title: true,
+            topics: true,
+        },
+    },
+    "profile-2": {
+        description: "Follow-ups from sales conversations.",
+        automatic: {
+            transcribe: false,
+            learn: false,
+            summary: true,
+            title: false,
+            topics: false,
+        },
+    },
+};
+
+function renderPanel(
+    data: CategorizePanelData = base,
+    props: Partial<React.ComponentProps<typeof CategorizePanel>> = {},
+) {
     return render(
         <CategorizePanel
             data={data}
-            open
-            onOpenChange={vi.fn()}
+            kind="audio"
+            mode="folder"
+            profileDetails={details}
             onCategorized={vi.fn()}
+            {...props}
         />,
     );
 }
 
-function previewResponse(
-    resolution: CategorizePanelData["resolution"],
-): Response {
-    return Response.json({ resolution });
-}
-
-describe("categorization panel", () => {
+describe("CategorizePanel", () => {
     afterEach(() => {
         cleanup();
         vi.unstubAllGlobals();
     });
 
-    it("keeps roots disabled and shows a changeable resolved prefill", () => {
+    it("is an inline filing card with one folder and profile dropdown", () => {
         renderPanel();
-
-        expect(screen.queryByText("Suggested match")).toBeNull();
-        expect(screen.getByText("From the folder's default")).toBeTruthy();
+        expect(screen.queryByRole("dialog")).toBeNull();
         expect(
-            screen.getByRole("combobox", { name: "Profile" }).textContent,
-        ).toContain("Meetings");
+            screen.getByRole("heading", { name: "Categorize recording" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("combobox", { name: "Folder" })).toBeTruthy();
+        const profile = screen.getByRole("combobox", { name: "Profile" });
+        expect(profile).toBeTruthy();
+        expect(profile.hasAttribute("data-filing-profile")).toBe(true);
         expect(
-            (screen.getByLabelText("Private") as HTMLInputElement).disabled,
-        ).toBe(true);
-        expect(
-            (screen.getByLabelText("Organization") as HTMLInputElement)
-                .disabled,
-        ).toBe(true);
+            screen.getByText("Discussion, decisions, and tasks."),
+        ).toBeTruthy();
         expect(
             screen.getByText(
-                "Top-level folders hold no items; choose or create a folder inside them.",
+                "After categorizing, these run by themselves: transcription, Learn, summary, title, and topics.",
             ),
         ).toBeTruthy();
-
-        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
-        expect(screen.getByText("Sales calls")).toBeTruthy();
-        expect(screen.getByText("Nothing automatic")).toBeTruthy();
+        expect(
+            screen.getByRole("link", {
+                name: "Manage profiles in Settings → Profiles.",
+            }),
+        ).toHaveProperty("href", expect.stringContaining("/settings#profiles"));
     });
 
-    it("includes Organization in profile choices and hides the prefill hint after a change", () => {
-        renderPanel({
-            ...base,
-            profiles: [
-                ...base.profiles,
-                {
-                    id: "organization-recordings",
-                    name: "Recordings",
-                    scope: "organization",
-                },
-            ],
+    it("requires a folder when the item has no placement", () => {
+        renderPanel({ ...base, selectedFolderIds: [] });
+
+        expect(
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain("Choose a folder");
+        expect(
+            screen
+                .getByRole("button", { name: "Categorize recording" })
+                .hasAttribute("disabled"),
+        ).toBe(true);
+    });
+
+    it("keeps the carried placement in choose-profile mode", () => {
+        renderPanel(base, { mode: "profile" });
+
+        expect(
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain("Private › Notes");
+    });
+
+    it("hides the profile description panel when the description is empty", () => {
+        renderPanel(base, {
+            profileDetails: {
+                ...details,
+                "profile-1": { ...details["profile-1"], description: null },
+            },
         });
 
-        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
-        expect(screen.getByText("Recordings · Organization")).toBeTruthy();
-        fireEvent.click(screen.getByText("Nothing automatic"));
-        expect(screen.queryByText("From the folder's default")).toBeNull();
+        expect(screen.queryByText("No profile description.")).toBeNull();
+        expect(screen.queryByText(/^Meetings:/)).toBeNull();
     });
 
-    it("keeps the item's current profile when folders resolve differently", async () => {
-        const fetchMock = vi.fn();
-        vi.stubGlobal("fetch", fetchMock);
-        renderPanel({
-            ...base,
-            currentProfile: {
-                id: "profile-2",
-                name: "Sales calls",
-                scope: "personal",
-            },
-        });
-
-        expect(
-            screen.getByRole("combobox", { name: "Profile" }).textContent,
-        ).toContain("Sales calls");
-        expect(screen.getByText("Current profile")).toBeTruthy();
-
-        fireEvent.click(screen.getByLabelText("Organization › Sales"));
-        await new Promise((resolve) => window.setTimeout(resolve, 250));
-
-        expect(fetchMock).not.toHaveBeenCalled();
-        expect(
-            screen.getByRole("combobox", { name: "Profile" }).textContent,
-        ).toContain("Sales calls");
-    });
-
-    it.each([
-        {
-            name: "resolved",
-            resolution: {
-                status: "resolved" as const,
-                profile: {
-                    id: "profile-2",
-                    name: "Sales calls",
-                    scope: "personal" as const,
-                },
-                manualOnly: false,
-                source: "folder" as const,
-            },
-            expected: "Sales calls",
-        },
-        {
-            name: "Nothing automatic",
-            resolution: {
-                status: "resolved" as const,
-                profile: {
-                    id: "profile-1",
-                    name: "Meetings",
-                    scope: "personal" as const,
-                },
-                manualOnly: true,
-                source: "folder" as const,
-            },
-            expected: "Nothing automatic",
-        },
-        {
-            name: "choose",
-            resolution: {
-                status: "choose" as const,
-                candidates: [
-                    {
-                        kind: "profile" as const,
-                        profile: {
-                            id: "profile-1",
-                            name: "Meetings",
-                            scope: "personal" as const,
-                        },
-                    },
-                    { kind: "manual_only" as const },
-                ],
-            },
-            expected: "Choose a profile",
-        },
-    ])("previews $name when the folder selection changes", async (testCase) => {
-        const fetchMock = vi.fn(async () =>
-            previewResponse(testCase.resolution),
-        );
-        vi.stubGlobal("fetch", fetchMock);
+    it("offers Nothing automatic last and updates the automation panel", () => {
         renderPanel();
-
-        fireEvent.click(screen.getByLabelText("Organization › Sales"));
-
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                "/api/recordings/item-1/categorize/preview",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({ folderIds: ["notes", "sales"] }),
-                }),
-            ),
-        );
-        expect(
-            screen.getByRole("combobox", { name: "Profile" }).textContent,
-        ).toContain(testCase.expected);
-    });
-
-    it("submits no override when the prefilled choice is unchanged", async () => {
-        const fetchMock = vi.fn(async () =>
-            Response.json({ requestedGeneration: 2 }),
-        );
-        vi.stubGlobal("fetch", fetchMock);
-        renderPanel();
-
-        fireEvent.click(screen.getByRole("button", { name: "File it" }));
-
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                "/api/recordings/item-1/categorize",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({ folderIds: ["notes"] }),
-                }),
-            ),
-        );
-    });
-
-    it("submits only the changed profile override", async () => {
-        const fetchMock = vi.fn(async () =>
-            Response.json({ requestedGeneration: 2 }),
-        );
-        vi.stubGlobal("fetch", fetchMock);
-        renderPanel();
-
-        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
-        fireEvent.click(screen.getByText("Sales calls"));
-        fireEvent.click(screen.getByRole("button", { name: "File it" }));
-
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                "/api/recordings/item-1/categorize",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({
-                        folderIds: ["notes"],
-                        profileId: "profile-2",
-                    }),
-                }),
-            ),
-        );
-    });
-
-    it("submits Nothing automatic only when it replaces the prefill", async () => {
-        const fetchMock = vi.fn(async () =>
-            Response.json({ requestedGeneration: 2 }),
-        );
-        vi.stubGlobal("fetch", fetchMock);
-        renderPanel();
-
         fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
         fireEvent.click(screen.getByText("Nothing automatic"));
-        fireEvent.click(screen.getByRole("button", { name: "File it" }));
-
-        await waitFor(() =>
-            expect(fetchMock).toHaveBeenCalledWith(
-                "/api/recordings/item-1/categorize",
-                expect.objectContaining({
-                    method: "POST",
-                    body: JSON.stringify({
-                        folderIds: ["notes"],
-                        manualOnly: true,
-                    }),
-                }),
+        expect(
+            screen.getByText(
+                "Nothing runs automatically. You start each step yourself.",
             ),
-        );
+        ).toBeTruthy();
     });
 
-    it("creates and selects a folder when only roots exist", async () => {
-        const fetchMock = vi.fn(async (input: string | URL | Request) => {
-            const url = String(input);
-            if (url === "/api/folders") {
+    it("creates a first-level folder without a parent picker", async () => {
+        const onFolderCreated = vi.fn();
+        const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+            if (String(input) === "/api/folders") {
                 return Response.json(
                     {
                         folder: {
                             id: "new-folder",
                             parentId: "private-root",
                             name: "Clients",
+                            kind: "custom",
+                            sortOrder: 0,
                             scope: "personal",
+                            version: 0,
                         },
                     },
                     { status: 201 },
                 );
             }
-            return previewResponse(base.resolution);
+            return Response.json({ resolution: base.resolution });
         });
         vi.stubGlobal("fetch", fetchMock);
-        renderPanel({
-            ...base,
-            folders: base.folders.filter((folder) => folder.parentId === null),
-            selectedFolderIds: [],
-        });
+        renderPanel(base, { onFolderCreated });
 
-        expect(
-            screen.getByText("Create a folder to file this item"),
-        ).toBeTruthy();
-        fireEvent.click(screen.getByRole("button", { name: "New folder" }));
+        fireEvent.click(screen.getByRole("combobox", { name: "Folder" }));
+        fireEvent.click(screen.getByText("New folder…"));
+        expect(screen.queryByText("Parent folder")).toBeNull();
         fireEvent.change(screen.getByRole("textbox", { name: "Folder name" }), {
             target: { value: "Clients" },
         });
-        fireEvent.click(screen.getByRole("button", { name: "Create folder" }));
+        fireEvent.click(screen.getByRole("button", { name: "Create" }));
 
         await waitFor(() =>
             expect(fetchMock).toHaveBeenCalledWith(
@@ -348,9 +227,87 @@ describe("categorization panel", () => {
                 }),
             ),
         );
+        expect(onFolderCreated).toHaveBeenCalled();
         expect(
-            (screen.getByLabelText("Private › Clients") as HTMLInputElement)
-                .checked,
-        ).toBe(true);
+            screen.getByRole("combobox", { name: "Folder" }).textContent,
+        ).toContain("Clients");
+    });
+
+    it("posts the single folder and chosen profile optimistically", async () => {
+        const onOptimisticCategorize = vi.fn(() => vi.fn());
+        const fetchMock = vi.fn(async () =>
+            Response.json({ requestedGeneration: 2 }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        renderPanel(base, { onOptimisticCategorize });
+
+        fireEvent.click(screen.getByRole("combobox", { name: "Profile" }));
+        fireEvent.click(screen.getByText("Sales calls"));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Categorize recording" }),
+        );
+
+        const submission = { folderIds: ["notes"], profileId: "profile-2" };
+        expect(onOptimisticCategorize).toHaveBeenCalledWith(submission);
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/item-1/categorize",
+                expect.objectContaining({
+                    method: "POST",
+                    body: JSON.stringify(submission),
+                }),
+            ),
+        );
+    });
+
+    it("shows and focuses the profile reason in choose-profile mode", () => {
+        renderPanel(
+            {
+                ...base,
+                resolution: {
+                    status: "choose",
+                    candidates: [
+                        { kind: "profile", profile: base.profiles[0] },
+                        { kind: "manual_only" },
+                    ],
+                },
+            },
+            { mode: "profile", reason: "needs_profile" },
+        );
+        expect(
+            screen.getByText(
+                "These folders suggest different profiles. Choose one to continue.",
+            ),
+        ).toBeTruthy();
+        expect(document.activeElement).toBe(
+            screen.getByRole("combobox", { name: "Profile" }),
+        );
+    });
+
+    it("offers Transcribe now only for audio", () => {
+        const onTranscribe = vi.fn();
+        const { rerender } = render(
+            <CategorizePanel
+                data={base}
+                kind="audio"
+                mode="folder"
+                profileDetails={details}
+                onTranscribe={onTranscribe}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Transcribe now" }));
+        expect(onTranscribe).toHaveBeenCalledOnce();
+
+        rerender(
+            <CategorizePanel
+                data={base}
+                kind="mail"
+                mode="folder"
+                profileDetails={details}
+            />,
+        );
+        expect(
+            screen.queryByRole("button", { name: "Transcribe now" }),
+        ).toBeNull();
     });
 });
