@@ -25,6 +25,7 @@ import {
     recordingFolders,
     recordingTaskRejections,
     recordingTasks,
+    taskContentVectors,
     taskHomeMoves,
     taskMentions,
     taskUpdateProposals,
@@ -144,6 +145,7 @@ import {
     mergeTaskIntoTask,
     recordingsAwaitingTaskReview,
     tickUpdateProposal,
+    undoTaskMatch,
     updateTask,
 } from "@/lib/tasks/tasks";
 import {
@@ -1002,6 +1004,163 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         ).toEqual([{ quote: null, decision: "home" }]);
     });
 
+    it("keeps a suggested match the reviewer ticked through a re-summary", async () => {
+        const target = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(REC, [], {
+            matches: [
+                match(target.id, {
+                    evidenceProvenance: "unverified",
+                    ticked: false,
+                }),
+            ],
+        });
+        const [suggested] = (await review(alice)).matches;
+        if (!suggested) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            REC,
+            suggested.id,
+            true,
+            suggested.version,
+        );
+
+        await summarize(REC, []);
+
+        expect((await review(alice)).matches).toMatchObject([
+            { id: suggested.id, ticked: true },
+        ]);
+    });
+
+    it("finishes parallel re-summaries and merges without deadlocks", async () => {
+        for (let iteration = 0; iteration < 8; iteration++) {
+            const source = await addTask(alice, REC, {
+                text: `Concurrent source ${iteration}`,
+                status: "open",
+            });
+            const target = await addTask(alice, LATER, {
+                text: `Concurrent target ${iteration}`,
+                status: "open",
+            });
+            await Promise.all([
+                summarize(REC, [], { matches: [match(target.id)] }),
+                mergeTaskIntoTask(alice, source.id, target.id),
+            ]);
+        }
+    });
+
+    it("settles untouched task review when a summary runs with Tasks off", async () => {
+        const target = await addTask(alice, LATER, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(REC, [proposal("Draft the pricing page")], {
+            matches: [match(target.id)],
+        });
+        const result = await upsertEnhancement({
+            userId: ALICE,
+            recordingId: REC,
+            transcriptionId: transcriptId,
+            summary: "Summary without tasks.",
+            keyPoints: [],
+            actionItems: [],
+            source: "riffado",
+            provider: "openai",
+            model: "gpt",
+            allowReaped: true,
+            tasks: null,
+        });
+        expect(result.committed).toBe(true);
+        expect(await review(alice)).toMatchObject({
+            proposals: [],
+            updates: [],
+            matches: [],
+        });
+    });
+
+    it("undoes an accepted match for the item owner without reverting fields", async () => {
+        const target = await addTask(alice, REC, {
+            text: "Send the partner email",
+            status: "open",
+        });
+        await summarize(LATER, [], {
+            matches: [match(target.id)],
+            updates: [
+                {
+                    taskId: target.id,
+                    kind: "due",
+                    dueDate: "2026-10-30",
+                    duePhrase: null,
+                    quote: "send it by October 30",
+                    evidenceStartMs: 2_000,
+                },
+            ],
+        });
+        const before = await review(alice, LATER);
+        const update = before.updates[0];
+        if (!update) throw new Error("missing update");
+        await tickUpdateProposal(alice, LATER, update.id, true, update.version);
+        await acceptReview(alice, LATER);
+        expect((await review(alice, LATER)).tasks).toMatchObject([
+            { id: target.id, canUndoMatch: true },
+        ]);
+
+        await expect(
+            undoTaskMatch(bob, LATER, target.id),
+        ).rejects.toMatchObject({
+            statusCode: 404,
+        });
+        await undoTaskMatch(alice, LATER, target.id);
+
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, target.id),
+                ),
+            );
+        expect(mention?.decision).toBe("undone");
+        const [stored] = await db()
+            .select({ dueDate: recordingTasks.dueDate })
+            .from(recordingTasks)
+            .where(eq(recordingTasks.id, target.id));
+        expect(stored?.dueDate).toBe("2026-10-30");
+        expect((await review(alice, LATER)).tasks).toEqual([]);
+        await expect(
+            undoTaskMatch(alice, REC, target.id),
+        ).rejects.toMatchObject({
+            statusCode: 409,
+        });
+    });
+
+    it("lets an Organization curator undo a match on a shared item", async () => {
+        const target = await addTask(alice, REC, {
+            text: "Publish the launch brief",
+            status: "open",
+        });
+        await summarize(LATER, [], { matches: [match(target.id)] });
+        await acceptReview(alice, LATER);
+        await share(REC);
+        await share(LATER);
+
+        await undoTaskMatch(org, LATER, target.id);
+
+        const [mention] = await db()
+            .select({ decision: taskMentions.matchDecision })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, LATER),
+                    eq(taskMentions.taskId, target.id),
+                ),
+            );
+        expect(mention?.decision).toBe("undone");
+    });
+
     it("accepts the ticked, rejects the rest for good, and keeps tasks over a re-summarize", async () => {
         await summarize(REC, [
             proposal("Draft the pricing page"),
@@ -1487,6 +1646,8 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             expect(
                 (await listRoutedTaskProposals(curator)).map((row) => row.id),
             ).toContain(privateRouted?.id);
+            expect(await countNewTasks(curator)).toBe(1);
+            await markTasksSeen(curator);
             expect(await countNewTasks(curator)).toBe(1);
             await expect(
                 applyRoutedTaskProposal(
@@ -2546,6 +2707,20 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
 
     it("moves the home when the last remaining artifact is erased", async () => {
         await summarize(REC, []);
+        await db()
+            .insert(taskContentVectors)
+            .values({
+                id: "erase-content-vector",
+                userId: ALICE,
+                itemId: REC,
+                contentSourceId: "transcription",
+                contentRevision: 1,
+                vectorGeneration: "erase-model",
+                chunkIndex: 0,
+                dim: 2,
+                vector: "encrypted-vector",
+                inputHmac: "0".repeat(64),
+            });
         const task = await addTask(alice, REC, {
             text: "Send the partner email",
             status: "open",
@@ -2572,6 +2747,12 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             )[0]?.itemId,
         ).toBe(REC);
         await eraseLocalArtifact(ALICE, REC, "transcript");
+        expect(
+            await db()
+                .select()
+                .from(taskContentVectors)
+                .where(eq(taskContentVectors.itemId, REC)),
+        ).toEqual([]);
         expect(
             (
                 await db()
@@ -2688,6 +2869,20 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             status: "open",
         });
         await db()
+            .insert(taskContentVectors)
+            .values({
+                id: "withdraw-content-vector",
+                userId: ALICE,
+                itemId: REC,
+                contentSourceId: "transcription",
+                contentRevision: 1,
+                vectorGeneration: "withdraw-model",
+                chunkIndex: 0,
+                dim: 2,
+                vector: "encrypted-vector",
+                inputHmac: "0".repeat(64),
+            });
+        await db()
             .insert(taskMentions)
             .values({
                 taskId: moved.id,
@@ -2700,6 +2895,12 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             });
 
         await unshareRecording(ALICE, REC, { withdraw: true });
+        expect(
+            await db()
+                .select()
+                .from(taskContentVectors)
+                .where(eq(taskContentVectors.itemId, REC)),
+        ).toEqual([]);
 
         const stored = await db()
             .select({ id: recordingTasks.id, itemId: recordingTasks.itemId })

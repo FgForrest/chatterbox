@@ -540,7 +540,7 @@ export async function generateSummaryForRecording(
               console.error("[summary] task proposals unavailable:", error);
               return undefined;
           })
-        : undefined;
+        : null;
 
     const { committed, reason } = await upsertEnhancement({
         userId,

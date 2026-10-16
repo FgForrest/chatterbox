@@ -163,6 +163,7 @@ const tx = {
             return Promise.resolve();
         },
     }),
+    delete: () => ({ where: () => Promise.resolve() }),
     update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
 };
 

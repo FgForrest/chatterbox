@@ -1374,41 +1374,43 @@ export async function unshareRecording(
     const orgUserId = await getOrgUserId();
     if (!orgUserId) return;
     await requireMayWithdraw(userId, recordingId, orgUserId);
-    const withdrew = await db.transaction(async (tx) => {
-        await lockOrgTree(tx);
-        await lockItemTaskGraphForFolderMutation(tx, recordingId);
-        await lockItemForFolderMutation(tx, recordingId);
-        // Not shared (any more): nothing to withdraw.
-        if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
-            if (userId === orgUserId) throw notSharedForCurator();
-            return false;
-        }
-        if (!withdraw) {
-            throw new AppError(
-                ErrorCode.WITHDRAW_UNCONFIRMED,
-                "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
-                409,
+    const withdrew = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            await lockOrgTree(tx);
+            await lockItemTaskGraphForFolderMutation(tx, recordingId);
+            await lockItemForFolderMutation(tx, recordingId);
+            // Not shared (any more): nothing to withdraw.
+            if (!(await isRecordingShared(recordingId, orgUserId, tx))) {
+                if (userId === orgUserId) throw notSharedForCurator();
+                return false;
+            }
+            if (!withdraw) {
+                throw new AppError(
+                    ErrorCode.WITHDRAW_UNCONFIRMED,
+                    "Taking the recording out of the Organization needs withdraw: true, sent once the owner's retention warning was seen",
+                    409,
+                );
+            }
+            await bumpScopeInTx(
+                tx,
+                await withdrawRecordingInTx(tx, orgUserId, recordingId, userId),
             );
-        }
-        await bumpScopeInTx(
-            tx,
-            await withdrawRecordingInTx(tx, orgUserId, recordingId, userId),
-        );
-        const [owner] = await tx
-            .select({ userId: chatterItems.userId })
-            .from(chatterItems)
-            .where(eq(chatterItems.id, recordingId))
-            .limit(1);
-        if (owner) {
-            await requestAdvanceInTx(tx, {
-                itemId: recordingId,
-                userId: owner.userId,
-                view: "private",
-                reason: "placement",
-            });
-        }
-        return true;
-    });
+            const [owner] = await tx
+                .select({ userId: chatterItems.userId })
+                .from(chatterItems)
+                .where(eq(chatterItems.id, recordingId))
+                .limit(1);
+            if (owner) {
+                await requestAdvanceInTx(tx, {
+                    itemId: recordingId,
+                    userId: owner.userId,
+                    view: "private",
+                    reason: "placement",
+                });
+            }
+            return true;
+        }),
+    );
     if (withdrew) {
         nudge();
         await orgTreeChanged();

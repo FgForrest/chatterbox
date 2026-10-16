@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -439,6 +439,25 @@ describeWithDatabase("task merges", () => {
         ).resolves.toMatchObject({ id: "curator-target" });
     });
 
+    it("answers 404 when either merge task is not visible", async () => {
+        await item("hidden-source-item", ALICE);
+        await item("hidden-target-item", BOB);
+        await task({
+            id: "hidden-source",
+            itemId: "hidden-source-item",
+            userId: ALICE,
+        });
+        await task({
+            id: "hidden-target",
+            itemId: "hidden-target-item",
+            userId: BOB,
+        });
+
+        await expect(
+            mergeTaskIntoTask(viewer(CAROL), "hidden-source", "hidden-target"),
+        ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
     it("refuses private into Organization until the source item is shared", async () => {
         await item("private-source-item", ALICE);
         await item("organization-target-item", BOB, true);
@@ -866,6 +885,84 @@ describeWithDatabase("task merges", () => {
                 .from(taskUpdateProposals)
                 .where(eq(taskUpdateProposals.taskId, "conflict-target")),
         ).toEqual([{ id: "conflict-target-proposal" }]);
+    });
+
+    it("moves a pending proposal past decided history without duplicating pending rows", async () => {
+        await item("history-source-item", ALICE);
+        await item("history-target-item", ALICE);
+        await item("history-evidence-item", ALICE);
+        await task({
+            id: "history-source",
+            itemId: "history-source-item",
+            userId: ALICE,
+        });
+        await task({
+            id: "history-target",
+            itemId: "history-target-item",
+            userId: ALICE,
+        });
+        await db()
+            .insert(taskUpdateProposals)
+            .values([
+                {
+                    id: "history-source-pending",
+                    taskId: "history-source",
+                    itemId: "history-evidence-item",
+                    userId: ALICE,
+                    kind: "done",
+                    state: "awaiting_source_review",
+                },
+                {
+                    id: "history-target-decided",
+                    taskId: "history-target",
+                    itemId: "history-evidence-item",
+                    userId: ALICE,
+                    kind: "done",
+                    state: "rejected",
+                    decidedAt: new Date(),
+                },
+            ]);
+
+        await mergeTaskIntoTask(
+            viewer(ALICE),
+            "history-source",
+            "history-target",
+        );
+
+        expect(
+            await db()
+                .select({
+                    id: taskUpdateProposals.id,
+                    state: taskUpdateProposals.state,
+                })
+                .from(taskUpdateProposals)
+                .where(eq(taskUpdateProposals.taskId, "history-target")),
+        ).toEqual(
+            expect.arrayContaining([
+                {
+                    id: "history-source-pending",
+                    state: "awaiting_source_review",
+                },
+                { id: "history-target-decided", state: "rejected" },
+            ]),
+        );
+        const duplicates = await db()
+            .select({ count: sql<number>`count(*)::int` })
+            .from(taskUpdateProposals)
+            .where(
+                inArray(taskUpdateProposals.state, [
+                    "awaiting_source_review",
+                    "awaiting_share",
+                    "awaiting_target_review",
+                ]),
+            )
+            .groupBy(
+                taskUpdateProposals.taskId,
+                taskUpdateProposals.itemId,
+                taskUpdateProposals.kind,
+            )
+            .having(sql`count(*) > 1`);
+        expect(duplicates).toEqual([]);
     });
 
     it("refuses Organization tasks into private tasks for owners and curators", async () => {

@@ -34,6 +34,7 @@ import {
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { isRecordingShared, sharedItemCondition } from "@/lib/sharing/shared";
+import { deleteItemTaskVectorsInTx } from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 /** One part of a mail a retention policy can remove. */
@@ -350,6 +351,10 @@ export async function deleteMailContent(
             )
             .returning({ id: mailContents.id });
         if (removed.length === 0) return false;
+        await deleteItemTaskVectorsInTx(tx, {
+            itemId,
+            ownerUserId,
+        });
         // Nothing cascades from the text: its anchors point at the item.
         await tx
             .delete(knowledgeFactEvidence)

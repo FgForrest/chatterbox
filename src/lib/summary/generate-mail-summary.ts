@@ -372,7 +372,7 @@ export async function generateMailSummary(
               console.error("[summary] task proposals unavailable:", error);
               return undefined;
           })
-        : undefined;
+        : null;
 
     const { committed, reason } = await upsertEnhancement({
         userId: ctx.contentUserId,

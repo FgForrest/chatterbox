@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RotateCcw, Trash2 } from "lucide-react";
+import { Play, RotateCcw, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useExtracted, useFormatter } from "next-intl";
 import {
@@ -27,6 +27,7 @@ export function TaskRow({
     onPlay,
     onChange,
     onMerge,
+    onUndoMatch,
 }: {
     task: TaskView;
     /** The recording it came from, on the Tasks page. */
@@ -40,6 +41,7 @@ export function TaskRow({
     onMerge?: (
         targetTaskId: string,
     ) => Promise<{ ownerNotified?: boolean } | boolean>;
+    onUndoMatch?: () => void;
 }) {
     const i18n = useExtracted();
     const format = useFormatter();
@@ -159,6 +161,16 @@ export function TaskRow({
                                 onMerge={onMerge}
                             />
                         )}
+                    {task.canUndoMatch && onUndoMatch && (
+                        <button
+                            type="button"
+                            className="inline-flex items-center gap-1 hover:text-foreground"
+                            onClick={onUndoMatch}
+                        >
+                            <Unlink className="size-3" />
+                            {i18n("Undo match")}
+                        </button>
+                    )}
                     {task.canEdit && (
                         <button
                             type="button"

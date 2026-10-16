@@ -8,17 +8,21 @@ import {
     it,
     vi,
 } from "vitest";
+import { explainScopedTaskCandidatePlan } from "@/db/queries/tasks";
 import {
     chatterItems,
+    mailContents,
+    mailMessages,
     mailPendingShares,
     recordingFolderAssignments,
     recordingFolders,
     recordingTasks,
+    taskContentVectors,
     taskMentions,
     taskVectors,
     users,
 } from "@/db/schema";
-import { encryptText } from "@/lib/encryption/fields";
+import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
 import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import type { TaskViewer } from "@/lib/tasks/access";
 import {
@@ -586,6 +590,36 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
             .update(chatterItems)
             .set({ title: encryptText("Calibrate the cobalt spectrometer") })
             .where(eq(chatterItems.id, TARGET));
+        await db()
+            .insert(mailMessages)
+            .values({
+                id: TARGET,
+                userId: OWNER,
+                rawHash: "target-mail",
+                receivedAt: new Date("2026-10-01T00:00:00.000Z"),
+                sizeBytes: 1,
+                auth: {},
+                senderVerified: true,
+            });
+        await db()
+            .insert(mailContents)
+            .values({
+                id: "target-content",
+                itemId: TARGET,
+                userId: OWNER,
+                revision: 3,
+                parserVersion: 1,
+                segments: encryptJsonField([
+                    {
+                        index: 0,
+                        role: "body",
+                        participantRef: null,
+                        depth: 0,
+                        at: null,
+                        text: "Calibrate the cobalt spectrometer",
+                    },
+                ]),
+            });
         await item("search-empty-similar", OWNER, "mail");
         await item("search-empty-recent", OWNER, "mail");
         await db()
@@ -610,6 +644,19 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
             view: "private",
             statementAt: new Date("2026-09-01T00:00:00.000Z"),
         });
+        const embed = vi.fn(async (texts: readonly string[]) =>
+            texts.map((value) =>
+                Float32Array.from([
+                    value.includes("cobalt") ? 1 : 0,
+                    value.includes("catering") ? 1 : 0,
+                ]),
+            ),
+        );
+        embeddingClientMock.mockReturnValue({
+            model: "candidate-model",
+            available: true,
+            embed,
+        });
         await candidate({
             id: "search-empty-recent-task",
             itemId: "search-empty-recent",
@@ -618,6 +665,34 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
             view: "private",
             statementAt: new Date("2026-10-10T00:00:00.000Z"),
         });
+        await db()
+            .insert(taskContentVectors)
+            .values([
+                {
+                    id: "target-content-old-revision",
+                    userId: OWNER,
+                    itemId: TARGET,
+                    contentSourceId: "target-content",
+                    contentRevision: 2,
+                    vectorGeneration: "candidate-model",
+                    chunkIndex: 0,
+                    dim: 2,
+                    vector: "stale-revision",
+                    inputHmac: "0".repeat(64),
+                },
+                {
+                    id: "target-content-old-generation",
+                    userId: OWNER,
+                    itemId: TARGET,
+                    contentSourceId: "target-content",
+                    contentRevision: 3,
+                    vectorGeneration: "old-model",
+                    chunkIndex: 0,
+                    dim: 2,
+                    vector: "stale-generation",
+                    inputHmac: "0".repeat(64),
+                },
+            ]);
 
         const result = await searchMergeCandidates(reviewer, TARGET, {
             text: "",
@@ -629,6 +704,23 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
             "search-empty-similar-task",
         ]);
         expect(result.nextOffset).toBe(1);
+        const secondPage = await searchMergeCandidates(reviewer, TARGET, {
+            text: "",
+            offset: 1,
+            limit: 1,
+        });
+        expect(secondPage.candidates.map((row) => row.id)).toEqual([
+            "search-empty-recent-task",
+        ]);
+        expect(embed).toHaveBeenCalledTimes(1);
+        expect(
+            await db()
+                .select({
+                    revision: taskContentVectors.contentRevision,
+                    generation: taskContentVectors.vectorGeneration,
+                })
+                .from(taskContentVectors),
+        ).toEqual([{ revision: 3, generation: "candidate-model#r1" }]);
     });
 
     it("keeps private and Organization merge targets in their matching scope", async () => {
@@ -708,6 +800,77 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
             "search-org-private-task",
         );
     });
+
+    it("plans a seeded folder-first candidate lookup without scanning all tasks", async () => {
+        const folderRows = Array.from({ length: 60 }, (_, index) => ({
+            id: `scale-folder-${String(index).padStart(2, "0")}`,
+            userId: index < 30 ? OWNER : ORG,
+            parentId: index < 30 ? "private-a" : "org-team",
+            name: encryptText(`Scale ${index}`),
+            nameHash: lookupHash(`scale-${index}`),
+            kind: "custom" as const,
+        }));
+        await db().insert(recordingFolders).values(folderRows);
+        const itemRows = Array.from({ length: 3_000 }, (_, index) => ({
+            id: `scale-item-${String(index).padStart(4, "0")}`,
+            userId: index % 3 === 1 ? OTHER : OWNER,
+            kind: "mail" as const,
+            title: encryptText(`Scale item ${index}`),
+            occurredAt: new Date("2026-09-01T00:00:00.000Z"),
+        }));
+        const taskRows = itemRows.map((row, index) => ({
+            id: `scale-task-${String(index).padStart(4, "0")}`,
+            itemId: row.id,
+            userId: row.userId,
+            status: "open" as const,
+            text: encryptText(`Scale task ${index}`),
+            source: "manual" as const,
+        }));
+        const mentionRows = taskRows.map((row, index) => ({
+            id: `scale-mention-${String(index).padStart(4, "0")}`,
+            taskId: row.id,
+            itemId: row.itemId,
+            userId: row.userId,
+            view: index >= 1_500 ? ("org" as const) : ("private" as const),
+            statementAt: new Date("2026-09-01T00:00:00.000Z"),
+            matchDecision: "home" as const,
+        }));
+        const assignmentRows = itemRows.map((row, index) => ({
+            itemId: row.id,
+            userId: row.userId,
+            folderId: folderRows[Math.floor(index / 50)]?.id ?? "",
+        }));
+        for (let offset = 0; offset < itemRows.length; offset += 500) {
+            await db()
+                .insert(chatterItems)
+                .values(itemRows.slice(offset, offset + 500));
+            await db()
+                .insert(recordingTasks)
+                .values(taskRows.slice(offset, offset + 500));
+            await db()
+                .insert(taskMentions)
+                .values(mentionRows.slice(offset, offset + 500));
+            await db()
+                .insert(recordingFolderAssignments)
+                .values(assignmentRows.slice(offset, offset + 500));
+        }
+
+        const plan = await explainScopedTaskCandidatePlan(
+            itemRows.slice(0, 50).map((row) => row.id),
+        );
+        expect(plan.join("\n")).not.toMatch(
+            /Seq Scan on (?:public\.)?recording_tasks/u,
+        );
+        const result = await searchMergeCandidates(reviewer, TARGET, {
+            text: "Scale task 25",
+            offset: 0,
+            limit: 5,
+        });
+        expect(result.candidates).toHaveLength(5);
+        expect(
+            result.candidates.every((row) => row.id.startsWith("scale-task-")),
+        ).toBe(true);
+    }, 30_000);
 
     it("warns and falls back when the configured embedding service fails", async () => {
         await item("source-fallback", OWNER, "mail");

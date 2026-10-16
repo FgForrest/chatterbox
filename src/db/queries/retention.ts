@@ -28,6 +28,7 @@ import {
 } from "@/lib/knowledge/fact-evidence";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import { deleteItemTaskVectorsInTx } from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 /** One kind of data a retention policy can remove. */
@@ -564,6 +565,12 @@ export async function deleteTranscriptsForRecording(
                 ),
             )
             .returning({ id: transcriptions.id });
+        if (rows.length > 0) {
+            await deleteItemTaskVectorsInTx(tx, {
+                itemId: recordingId,
+                ownerUserId,
+            });
+        }
         await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
         // Stamping a recording that had no transcript would be a lie, and
         // would suppress auto-transcription of it for good.

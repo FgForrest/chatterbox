@@ -155,6 +155,49 @@ export async function writeTaskProposalsInTx(
         )
         .limit(1);
     if (!item) return;
+    const ambiguousMatches = proposals.tasks.flatMap((task) => {
+        const candidateTaskIds = [...new Set(task.candidateTaskIds ?? [])];
+        return candidateTaskIds.map(
+            (taskId): ProposedTaskMatch => ({
+                taskId,
+                quote: task.quote,
+                evidenceStartMs: task.evidenceStartMs,
+                evidenceText: task.evidenceText,
+                evidenceProvenance: task.evidenceProvenance,
+                quotedAt: task.quotedAt,
+                ticked: shouldPreselectTaskOutcome(
+                    "match",
+                    candidateTaskIds.length,
+                    task.evidenceProvenance,
+                ),
+            }),
+        );
+    });
+    const proposedMatches = [
+        ...(proposals.matches ?? []).map((match) => ({
+            ...match,
+            ticked: shouldPreselectTaskOutcome(
+                "match",
+                1,
+                match.evidenceProvenance,
+            ),
+        })),
+        ...ambiguousMatches,
+    ];
+    const targets = [
+        ...new Set([
+            ...proposedMatches.map((match) => match.taskId),
+            ...proposals.updates.map((update) => update.taskId),
+        ]),
+    ].sort();
+    if (targets.length > 0) {
+        await tx
+            .select({ id: recordingTasks.id })
+            .from(recordingTasks)
+            .where(inArray(recordingTasks.id, targets))
+            .orderBy(recordingTasks.id)
+            .for("key share");
+    }
     if (proposals.source === "riffado") {
         await tx
             .delete(taskMentions)
@@ -164,6 +207,7 @@ export async function writeTaskProposalsInTx(
                     eq(taskMentions.userId, ownerUserId),
                     eq(taskMentions.view, view),
                     eq(taskMentions.matchDecision, "suggested"),
+                    sql`${taskMentions.updatedAt} = ${taskMentions.createdAt}`,
                 ),
             );
     }
@@ -265,41 +309,6 @@ export async function writeTaskProposalsInTx(
               ).map((row) => row.id)
             : [],
     );
-    const ambiguousMatches = proposals.tasks.flatMap((task) => {
-        const candidateTaskIds = [...new Set(task.candidateTaskIds ?? [])];
-        return candidateTaskIds.map(
-            (taskId): ProposedTaskMatch => ({
-                taskId,
-                quote: task.quote,
-                evidenceStartMs: task.evidenceStartMs,
-                evidenceText: task.evidenceText,
-                evidenceProvenance: task.evidenceProvenance,
-                quotedAt: task.quotedAt,
-                ticked: shouldPreselectTaskOutcome(
-                    "match",
-                    candidateTaskIds.length,
-                    task.evidenceProvenance,
-                ),
-            }),
-        );
-    });
-    const proposedMatches = [
-        ...(proposals.matches ?? []).map((match) => ({
-            ...match,
-            ticked: shouldPreselectTaskOutcome(
-                "match",
-                1,
-                match.evidenceProvenance,
-            ),
-        })),
-        ...ambiguousMatches,
-    ];
-    const targets = [
-        ...new Set([
-            ...proposedMatches.map((match) => match.taskId),
-            ...proposals.updates.map((update) => update.taskId),
-        ]),
-    ];
     const openTasks = new Map(
         targets.length > 0
             ? (

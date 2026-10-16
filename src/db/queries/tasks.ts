@@ -1,4 +1,5 @@
 import { type SQL, type SQLWrapper, sql } from "drizzle-orm";
+import { db } from "@/db";
 import { chatterItems, recordingTasks, taskUpdateProposals } from "@/db/schema";
 import { recordingSharedCondition } from "@/lib/knowledge/org-people";
 
@@ -28,4 +29,25 @@ export function liveFollowUpCondition(): SQL {
         taskUpdateProposals.taskId,
         taskUpdateProposals.userId,
     );
+}
+
+/** PostgreSQL's plan for the folder-first candidate join used by task matching. */
+export async function explainScopedTaskCandidatePlan(
+    itemIds: readonly string[],
+): Promise<string[]> {
+    if (itemIds.length === 0) return [];
+    const values = sql.join(
+        itemIds.map((itemId) => sql`${itemId}`),
+        sql`, `,
+    );
+    const rows = await db.execute<{ "QUERY PLAN": string }>(sql`
+        explain (format text)
+        select task.id
+        from task_mentions mention
+        inner join recording_tasks task on task.id = mention.task_id
+        where mention.item_id in (${values})
+          and mention.match_decision in ('home', 'accepted')
+          and task.status = 'open'
+    `);
+    return rows.map((row) => row["QUERY PLAN"]);
 }

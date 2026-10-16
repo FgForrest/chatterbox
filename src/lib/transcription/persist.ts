@@ -170,7 +170,7 @@ export interface UpsertEnhancementArgs {
      * The task proposals the summary made, stored with it in its
      * transaction: they replace the ones its source made before.
      */
-    tasks?: TaskProposals;
+    tasks?: TaskProposals | null;
     /** Demo/restore writes remain on the synthesized legacy pipeline state. */
     pipeline?: "trigger" | "legacy";
 }
@@ -727,6 +727,11 @@ export async function upsertEnhancement(
                             ? args.inputs.contentRevision
                             : null,
                     proposals: args.tasks,
+                });
+            } else if (args.tasks === null && typeof tx.delete === "function") {
+                await dropReplaceableTaskReviewInTx(tx, {
+                    recordingId,
+                    ownerUserId: userId,
                 });
             }
 

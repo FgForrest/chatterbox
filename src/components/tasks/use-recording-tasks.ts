@@ -14,6 +14,7 @@ import {
     mergeTaskProposals,
     TaskRequestError,
     tickTaskUpdate,
+    undoTaskMatch,
 } from "@/components/tasks/task-api";
 import type {
     RecordingTasks,
@@ -83,6 +84,7 @@ export interface RecordingTasksState {
     tickUpdate: (update: TaskUpdateView, ticked: boolean) => void;
     tickMatch: (match: TaskMatchView, ticked: boolean) => void;
     mergeInto: (sourceTaskId: string, targetTaskId: string) => Promise<boolean>;
+    undoMatch: (task: TaskView) => Promise<void>;
     /** Accept what is ticked; true when the review is done. */
     accept: () => Promise<boolean>;
 }
@@ -367,6 +369,20 @@ export function useRecordingTasks(
         }
     };
 
+    const undoMatch = async (task: TaskView) => {
+        await undoTaskMatch(recordingId, task.id);
+        setData((current) =>
+            current
+                ? {
+                      ...current,
+                      tasks: current.tasks.filter((row) => row.id !== task.id),
+                  }
+                : current,
+        );
+        announceTasksChanged();
+        toast.success(i18n("Task match undone"));
+    };
+
     const waiting = data ? waitingDecisions(data) : 0;
     return {
         itemId: recordingId,
@@ -381,6 +397,7 @@ export function useRecordingTasks(
         tickUpdate,
         tickMatch,
         mergeInto,
+        undoMatch,
         accept,
     };
 }

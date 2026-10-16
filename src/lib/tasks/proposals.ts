@@ -1,15 +1,4 @@
-import {
-    and,
-    asc,
-    desc,
-    eq,
-    exists,
-    inArray,
-    isNull,
-    ne,
-    or,
-    sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
@@ -19,6 +8,7 @@ import {
     people,
     recordingFolderAssignments,
     recordingTasks,
+    taskContentVectors,
     taskMentions,
     taskVectors,
 } from "@/db/schema";
@@ -71,6 +61,7 @@ import {
     rankTaskSearchCandidates,
     TASK_CANDIDATE_LIMIT,
     type TaskRankingCandidate,
+    taskContentChunks,
 } from "@/lib/tasks/ranking";
 import type {
     ProposedTask,
@@ -168,32 +159,24 @@ async function scopedCandidates(
     reviewer: TaskViewer,
     scopeFolderIds: readonly string[],
 ): Promise<CandidateTask[]> {
-    const inActualPlacement = exists(
+    const [assigned, pending] = await Promise.all([
         db
             .select({ itemId: recordingFolderAssignments.itemId })
             .from(recordingFolderAssignments)
             .where(
-                and(
-                    eq(recordingFolderAssignments.itemId, taskMentions.itemId),
-                    eq(recordingFolderAssignments.userId, taskMentions.userId),
-                    inArray(recordingFolderAssignments.folderId, [
-                        ...scopeFolderIds,
-                    ]),
-                ),
+                inArray(recordingFolderAssignments.folderId, [
+                    ...scopeFolderIds,
+                ]),
             ),
-    );
-    const inIntendedPlacement = exists(
         db
             .select({ itemId: mailPendingShares.itemId })
             .from(mailPendingShares)
-            .where(
-                and(
-                    eq(mailPendingShares.itemId, taskMentions.itemId),
-                    eq(mailPendingShares.userId, taskMentions.userId),
-                    inArray(mailPendingShares.folderId, [...scopeFolderIds]),
-                ),
-            ),
-    );
+            .where(inArray(mailPendingShares.folderId, [...scopeFolderIds])),
+    ]);
+    const scopedItemIds = [
+        ...new Set([...assigned, ...pending].map((row) => row.itemId)),
+    ];
+    if (scopedItemIds.length === 0) return [];
     const rows = await db
         .select({
             id: recordingTasks.id,
@@ -212,8 +195,8 @@ async function scopedCandidates(
             })}`,
             statementAt: taskMentions.statementAt,
         })
-        .from(recordingTasks)
-        .innerJoin(taskMentions, eq(taskMentions.taskId, recordingTasks.id))
+        .from(taskMentions)
+        .innerJoin(recordingTasks, eq(recordingTasks.id, taskMentions.taskId))
         .innerJoin(
             candidateHomeItem,
             eq(candidateHomeItem.id, recordingTasks.itemId),
@@ -236,6 +219,7 @@ async function scopedCandidates(
                     userId: candidateHomeItem.userId,
                 }),
                 linkedTaskMentionCondition(),
+                inArray(taskMentions.itemId, scopedItemIds),
                 taskMentionVisible(
                     reviewer,
                     {
@@ -249,7 +233,6 @@ async function scopedCandidates(
                         deletedAt: candidateMentionItem.deletedAt,
                     },
                 ),
-                or(inActualPlacement, inIntendedPlacement),
             ),
         )
         .orderBy(
@@ -442,36 +425,130 @@ async function persistTaskVectors(
     const byId = new Map(
         candidates.map((candidate) => [candidate.id, candidate]),
     );
+    const rows = [];
     for (const [taskId, vector] of vectors) {
         const candidate = byId.get(taskId);
         if (!candidate) continue;
-        await db
-            .insert(taskVectors)
-            .values({
-                userId: candidate.userId,
-                taskId,
-                vectorGeneration: generation,
-                dim: vector.length,
-                vector: encryptText(encodeVector(vector)),
-                inputHmac: domainLookupHash("vector-input", candidate.text),
-            })
-            .onConflictDoUpdate({
-                target: [taskVectors.taskId, taskVectors.vectorGeneration],
-                set: {
-                    userId: candidate.userId,
-                    dim: vector.length,
-                    vector: encryptText(encodeVector(vector)),
-                    inputHmac: domainLookupHash("vector-input", candidate.text),
-                    createdAt: new Date(),
-                },
-            });
+        rows.push({
+            userId: candidate.userId,
+            taskId,
+            vectorGeneration: generation,
+            dim: vector.length,
+            vector: encryptText(encodeVector(vector)),
+            inputHmac: domainLookupHash("vector-input", candidate.text),
+        });
     }
+    if (rows.length === 0) return;
+    await db
+        .insert(taskVectors)
+        .values(rows)
+        .onConflictDoUpdate({
+            target: [taskVectors.taskId, taskVectors.vectorGeneration],
+            set: {
+                userId: sql`excluded.user_id`,
+                dim: sql`excluded.dim`,
+                vector: sql`excluded.vector`,
+                inputHmac: sql`excluded.input_hmac`,
+                createdAt: new Date(),
+            },
+        });
+}
+
+interface ContentVectorKey {
+    itemId: string;
+    userId: string;
+    sourceId: string;
+    revision: number;
+}
+
+async function currentContentVectors(
+    key: ContentVectorKey,
+    generation: string,
+    text: string,
+): Promise<Float32Array[]> {
+    const chunks = taskContentChunks(text);
+    if (chunks.length === 0) return [];
+    const rows = await db
+        .select({
+            chunkIndex: taskContentVectors.chunkIndex,
+            inputHmac: taskContentVectors.inputHmac,
+            vector: taskContentVectors.vector,
+        })
+        .from(taskContentVectors)
+        .where(
+            and(
+                eq(taskContentVectors.userId, key.userId),
+                eq(taskContentVectors.itemId, key.itemId),
+                eq(taskContentVectors.contentSourceId, key.sourceId),
+                eq(taskContentVectors.contentRevision, key.revision),
+                eq(taskContentVectors.vectorGeneration, generation),
+            ),
+        )
+        .orderBy(asc(taskContentVectors.chunkIndex));
+    if (rows.length !== chunks.length) return [];
+    const vectors: Float32Array[] = [];
+    for (const [index, chunk] of chunks.entries()) {
+        const row = rows[index];
+        if (
+            !row ||
+            row.chunkIndex !== index ||
+            row.inputHmac !== domainLookupHash("vector-input", chunk)
+        ) {
+            return [];
+        }
+        vectors.push(decodeVector(decryptText(row.vector)));
+    }
+    return vectors;
+}
+
+async function persistContentVectors(
+    key: ContentVectorKey,
+    generation: string,
+    text: string,
+    vectors: readonly Float32Array[],
+): Promise<void> {
+    const chunks = taskContentChunks(text);
+    await db.transaction(async (tx) => {
+        await tx
+            .delete(taskContentVectors)
+            .where(
+                and(
+                    eq(taskContentVectors.userId, key.userId),
+                    eq(taskContentVectors.itemId, key.itemId),
+                    eq(taskContentVectors.contentSourceId, key.sourceId),
+                    or(
+                        ne(taskContentVectors.contentRevision, key.revision),
+                        ne(taskContentVectors.vectorGeneration, generation),
+                    ),
+                ),
+            );
+        if (chunks.length !== vectors.length || chunks.length === 0) return;
+        await tx
+            .insert(taskContentVectors)
+            .values(
+                chunks.map((chunk, index) => ({
+                    userId: key.userId,
+                    itemId: key.itemId,
+                    contentSourceId: key.sourceId,
+                    contentRevision: key.revision,
+                    vectorGeneration: generation,
+                    chunkIndex: index,
+                    dim: vectors[index]?.length ?? 0,
+                    vector: encryptText(
+                        encodeVector(vectors[index] as Float32Array),
+                    ),
+                    inputHmac: domainLookupHash("vector-input", chunk),
+                })),
+            )
+            .onConflictDoNothing();
+    });
 }
 
 async function rankedCandidateEntries(
     candidates: readonly CandidateTask[],
     itemText: string,
     participantPersonIds: readonly string[],
+    contentKey?: ContentVectorKey,
 ): Promise<{
     ranked: RankedTaskCandidate<CandidateTask>[];
     usedEmbeddings: boolean;
@@ -489,7 +566,12 @@ async function rankedCandidateEntries(
     }
     try {
         const generation = vectorGenerationFor(client.model);
-        const held = await currentTaskVectors(candidates, generation);
+        const [held, itemVectors] = await Promise.all([
+            currentTaskVectors(candidates, generation),
+            contentKey
+                ? currentContentVectors(contentKey, generation, itemText)
+                : Promise.resolve([]),
+        ]);
         const withVectors = candidates.map((candidate) => ({
             ...candidate,
             vector: held.get(candidate.id) ?? null,
@@ -499,6 +581,7 @@ async function rankedCandidateEntries(
                 itemText,
                 participantPersonIds,
                 candidates: withVectors,
+                itemVectors,
             },
             {
                 embed: (texts) => client.embed(texts),
@@ -515,6 +598,14 @@ async function rankedCandidateEntries(
                 candidates,
                 generation,
                 result.generatedVectors,
+            );
+        }
+        if (result.usedEmbeddings && contentKey && itemVectors.length === 0) {
+            await persistContentVectors(
+                contentKey,
+                generation,
+                itemText,
+                result.itemVectors,
             );
         }
         return {
@@ -663,6 +754,14 @@ export async function searchMergeCandidates(
         eligible,
         rankingText,
         participantPersonIds,
+        content
+            ? {
+                  itemId: item.id,
+                  userId: item.userId,
+                  sourceId: content.sourceId,
+                  revision: content.revision,
+              }
+            : undefined,
     );
     const matching = text
         ? rankTaskSearchCandidates(ranking.ranked, text, ranking.usedEmbeddings)

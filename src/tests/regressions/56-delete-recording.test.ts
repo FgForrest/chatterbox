@@ -327,6 +327,7 @@ import {
     recordings as recordingsTable,
     recordingTaskRejections,
     recordingTasks,
+    taskContentVectors,
     taskMentions,
     taskUpdateProposals,
     transcriptions as transcriptionsTable,
@@ -379,15 +380,17 @@ describe("DELETE /api/recordings/[id]", () => {
                           ? "learn_dismissals"
                           : t === recordingTasks
                             ? "recording_tasks"
-                            : t === taskMentions
-                              ? "task_mentions"
-                              : t === recordingTaskRejections
-                                ? "recording_task_rejections"
-                                : t === taskUpdateProposals
-                                  ? "task_update_proposals"
-                                  : t === chatterItems
-                                    ? "chatter_items"
-                                    : "unknown";
+                            : t === taskContentVectors
+                              ? "task_content_vectors"
+                              : t === taskMentions
+                                ? "task_mentions"
+                                : t === recordingTaskRejections
+                                  ? "recording_task_rejections"
+                                  : t === taskUpdateProposals
+                                    ? "task_update_proposals"
+                                    : t === chatterItems
+                                      ? "chatter_items"
+                                      : "unknown";
 
         (db.transaction as Mock).mockImplementation(
             async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -633,7 +636,7 @@ describe("DELETE /api/recordings/[id]", () => {
             (db.transaction as Mock).mock.invocationCallOrder[0],
         );
         // All writes ran in the same transaction…
-        expect(txCalls).toHaveLength(11);
+        expect(txCalls).toHaveLength(12);
         // …in this order: queued jobs → transcriptions → ai_enhancements →
         // Learn dismissals → webhook redaction → recording → its item.
         expect(txCalls.map((c) => `${c.op}:${c.table}`)).toEqual([
@@ -642,6 +645,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "delete:ai_enhancements",
             "delete:task_mentions",
             "delete:recording_tasks",
+            "delete:task_content_vectors",
             "delete:task_update_proposals",
             "delete:recording_task_rejections",
             "delete:learn_dismissals",
@@ -718,6 +722,7 @@ describe("DELETE /api/recordings/[id]", () => {
             "delete:ai_enhancements",
             "delete:task_mentions",
             "delete:recording_tasks",
+            "delete:task_content_vectors",
             "delete:task_update_proposals",
             "delete:recording_task_rejections",
             "delete:learn_dismissals",

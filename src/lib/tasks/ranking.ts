@@ -96,6 +96,7 @@ export interface RankedTaskCandidate<T extends TaskRankingCandidate> {
 export interface TaskEmbeddingRankingResult<T extends TaskRankingCandidate> {
     ranked: RankedTaskCandidate<T>[];
     generatedVectors: Map<string, Float32Array>;
+    itemVectors: readonly Float32Array[];
     usedEmbeddings: boolean;
 }
 
@@ -261,6 +262,7 @@ export async function rankTaskCandidatesWithEmbeddings<
         return {
             ranked: rankTaskCandidates({ ...input, itemVectors: undefined }),
             generatedVectors: new Map(),
+            itemVectors: [],
             usedEmbeddings: false,
         };
     }
@@ -269,6 +271,7 @@ export async function rankTaskCandidatesWithEmbeddings<
         return {
             ranked: rankTaskCandidates({ ...input, itemVectors: undefined }),
             generatedVectors: new Map(),
+            itemVectors: [],
             usedEmbeddings: false,
         };
     }
@@ -312,6 +315,7 @@ export async function rankTaskCandidatesWithEmbeddings<
                 itemVectors,
             }) as RankedTaskCandidate<T>[],
             generatedVectors,
+            itemVectors,
             usedEmbeddings: true,
         };
     } catch (error) {
@@ -326,6 +330,7 @@ export async function rankTaskCandidatesWithEmbeddings<
                 })),
             }) as RankedTaskCandidate<T>[],
             generatedVectors: new Map(),
+            itemVectors: [],
             usedEmbeddings: false,
         };
     }

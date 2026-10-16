@@ -2935,6 +2935,46 @@ export const taskVectors = pgTable(
     }),
 );
 
+export const taskContentVectors = pgTable(
+    "task_content_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        contentSourceId: varchar("content_source_id", { length: 20 }).notNull(),
+        contentRevision: integer("content_revision").notNull(),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        chunkIndex: integer("chunk_index").notNull(),
+        dim: integer("dim").notNull(),
+        vector: text("vector").notNull(),
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        contentGenerationChunkUnique: unique(
+            "task_content_vectors_content_generation_chunk_unique",
+        ).on(
+            table.itemId,
+            table.contentSourceId,
+            table.contentRevision,
+            table.vectorGeneration,
+            table.chunkIndex,
+        ),
+        userItemIdx: index("task_content_vectors_user_id_item_id_idx").on(
+            table.userId,
+            table.itemId,
+        ),
+    }),
+);
+
 // A task proposal somebody said no to, so the next summary of the recording
 // does not propose it again. A keyed HMAC, nothing readable.
 export const recordingTaskRejections = pgTable(
@@ -3029,11 +3069,11 @@ export const taskUpdateProposals = pgTable(
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        unique: unique("task_update_proposals_unique").on(
-            table.taskId,
-            table.itemId,
-            table.kind,
-        ),
+        pendingUnique: uniqueIndex("task_update_proposals_pending_unique")
+            .on(table.taskId, table.itemId, table.kind)
+            .where(
+                sql`${table.state} in ('awaiting_source_review', 'awaiting_share', 'awaiting_target_review')`,
+            ),
         recordingIdx: index("task_update_proposals_recording_id_idx").on(
             table.itemId,
         ),

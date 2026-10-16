@@ -131,6 +131,16 @@ export function mergeProposalIntoTarget(
     });
 }
 
+export function undoTaskMatch(
+    recordingId: string,
+    taskId: string,
+): Promise<void> {
+    return send(
+        recordingUrl(recordingId, `/${encodeURIComponent(taskId)}/match`),
+        { method: "DELETE" },
+    );
+}
+
 /** Tell whatever counts tasks (the nav badges) to count again. */
 const TASKS_CHANGED = "riffado:tasks-changed";
 

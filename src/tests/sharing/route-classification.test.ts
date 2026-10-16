@@ -87,6 +87,7 @@ const CLASSIFIED: Record<string, Record<string, Rule>> = {
     // Tasks: seen by whoever sees the recording, reviewed and changed by
     // whoever may change it, closed also by the owner and the assignee.
     "recordings/[id]/tasks/route.ts": { GET: "tasks", POST: "tasks" },
+    "recordings/[id]/tasks/[taskId]/match/route.ts": { DELETE: "tasks" },
     "recordings/[id]/tasks/accept/route.ts": { POST: "tasks" },
     "recordings/[id]/tasks/merge/route.ts": {
         GET: "tasks",

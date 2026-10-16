@@ -3,7 +3,6 @@ import {
     asc,
     eq,
     exists,
-    gt,
     inArray,
     isNull,
     lte,
@@ -20,6 +19,7 @@ import {
     taskUpdateProposals,
     users,
 } from "@/db/schema";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
@@ -471,7 +471,16 @@ export async function movePendingTaskProposalsInTx(
             kind: taskUpdateProposals.kind,
         })
         .from(taskUpdateProposals)
-        .where(eq(taskUpdateProposals.taskId, input.targetTaskId));
+        .where(
+            and(
+                eq(taskUpdateProposals.taskId, input.targetTaskId),
+                inArray(taskUpdateProposals.state, [
+                    "awaiting_source_review",
+                    "awaiting_share",
+                    "awaiting_target_review",
+                ]),
+            ),
+        );
     const held = new Set(
         conflicts.map((proposal) => `${proposal.itemId}\0${proposal.kind}`),
     );
@@ -662,11 +671,38 @@ export async function routeAwaitingShareTaskProposalsInTx(
             ),
         );
     if (proposals.length === 0) return;
+    const taskIds = [
+        ...new Set(proposals.map((proposal) => proposal.taskId)),
+    ].sort();
+    await tx
+        .select({ id: recordingTasks.id })
+        .from(recordingTasks)
+        .where(inArray(recordingTasks.id, taskIds))
+        .orderBy(asc(recordingTasks.id))
+        .for("update");
+    const lockedProposals = await tx
+        .select({
+            id: taskUpdateProposals.id,
+            kind: taskUpdateProposals.kind,
+            taskId: taskUpdateProposals.taskId,
+        })
+        .from(taskUpdateProposals)
+        .where(
+            and(
+                inArray(
+                    taskUpdateProposals.id,
+                    proposals.map((proposal) => proposal.id),
+                ),
+                eq(taskUpdateProposals.itemId, sourceItemId),
+                eq(taskUpdateProposals.userId, sourceOwnerUserId),
+                eq(taskUpdateProposals.state, "awaiting_share"),
+            ),
+        );
     const sourceViewer = await taskViewer({
         id: sourceOwnerUserId,
         email: source.email,
     });
-    for (const proposal of proposals) {
+    for (const proposal of lockedProposals) {
         const target = await targetFor(tx, sourceViewer, proposal.taskId);
         if (!target?.visible) {
             await setProposalState(tx, proposal.id, "obsolete", {
@@ -841,10 +877,9 @@ export async function listRoutedTaskProposals(
     }));
 }
 
-/** Counts pending routed proposals newer than the viewer's badge timestamp. */
+/** Counts every pending routed proposal visible to the viewer. */
 export async function countRoutedTaskProposals(
     viewer: TaskViewer,
-    since: Date | null,
 ): Promise<number> {
     const [row] = await db
         .select({ count: sql<number>`count(*)::int` })
@@ -864,7 +899,6 @@ export async function countRoutedTaskProposals(
         .where(
             and(
                 eq(taskUpdateProposals.state, "awaiting_target_review"),
-                since ? gt(taskUpdateProposals.updatedAt, since) : undefined,
                 routedProposalCondition(viewer),
                 isNull(chatterItems.deletedAt),
                 taskVisible(viewer, ANY_TASK_ITEM),
@@ -890,150 +924,190 @@ export async function applyRoutedTaskProposal(
     sourceItemId: string,
     proposalId: string,
 ): Promise<RoutedProposalDecision> {
-    const result = await db.transaction(async (tx) => {
-        const [source] = await tx
-            .select({
-                itemId: taskUpdateProposals.itemId,
-                ownerUserId: taskUpdateProposals.userId,
-            })
-            .from(taskUpdateProposals)
-            .where(
-                and(
-                    eq(taskUpdateProposals.id, proposalId),
-                    eq(taskUpdateProposals.itemId, sourceItemId),
-                ),
-            )
-            .limit(1);
-        if (!source) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Task proposal not found",
-                404,
-            );
-        }
-        await lockItemTaskGraphInTx(tx, {
-            itemId: source.itemId,
-            ownerUserId: source.ownerUserId,
-        });
-        const [proposal] = await tx
-            .select({
-                id: taskUpdateProposals.id,
-                taskId: taskUpdateProposals.taskId,
-                kind: taskUpdateProposals.kind,
-                dueDate: taskUpdateProposals.dueDate,
-                duePhrase: taskUpdateProposals.duePhrase,
-                proposedAssigneePersonId:
-                    taskUpdateProposals.proposedAssigneePersonId,
-                proposedAssigneeHint: taskUpdateProposals.proposedAssigneeHint,
-                proposedAssigneeCheck:
-                    taskUpdateProposals.proposedAssigneeCheck,
-                quote: taskUpdateProposals.quote,
-                evidenceStartMs: taskUpdateProposals.evidenceStartMs,
-                evidenceSegmentIndex: taskUpdateProposals.evidenceSegmentIndex,
-                evidenceCharStart: taskUpdateProposals.evidenceCharStart,
-                evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
-                evidenceProvenance: taskUpdateProposals.evidenceProvenance,
-                statementAt: taskUpdateProposals.statementAt,
-                version: taskUpdateProposals.version,
-                routedTo: taskUpdateProposals.routedTo,
-                sourceVisible: sql<boolean>`${and(
-                    isNull(chatterItems.deletedAt),
-                    or(
-                        eq(chatterItems.userId, viewer.userId),
-                        recordingSharedCondition(chatterItems.id),
-                    ),
-                )}`,
-            })
-            .from(taskUpdateProposals)
-            .innerJoin(
-                chatterItems,
-                and(
-                    eq(chatterItems.id, taskUpdateProposals.itemId),
-                    eq(chatterItems.userId, taskUpdateProposals.userId),
-                ),
-            )
-            .where(
-                and(
-                    eq(taskUpdateProposals.id, proposalId),
-                    eq(taskUpdateProposals.itemId, source.itemId),
-                    eq(taskUpdateProposals.userId, source.ownerUserId),
-                    eq(taskUpdateProposals.state, "awaiting_target_review"),
-                    viewer.isCurator
-                        ? undefined
-                        : directRecipientCondition(viewer),
-                ),
-            )
-            .limit(1);
-        if (!proposal) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Task proposal not found",
-                404,
-            );
-        }
-        const target = await targetFor(tx, viewer, proposal.taskId);
-        const directlyRouted = routedDirectlyTo(proposal.routedTo, viewer);
-        if (!directlyRouted && !(viewer.isCurator && target?.shared)) {
-            throw new AppError(
-                ErrorCode.NOT_FOUND,
-                "Task proposal not found",
-                404,
-            );
-        }
-        const effectiveAt = proposal.statementAt;
-        let reason: ObsoleteProposalReason | null = null;
-        const attachmentNotice = proposal.kind === "attach_merge";
-        if (!proposal.sourceVisible) reason = "source_withdrawn";
-        else if (!target?.visible) reason = "task_invisible";
-        else if (target.status !== "open") reason = "task_closed";
-        else if (!attachmentNotice && target.version !== proposal.version)
-            reason = "version_changed";
-        else if (
-            !attachmentNotice &&
-            !chronologyAllows(proposal, target, effectiveAt)
+    const [authorized] = await db
+        .select({ id: taskUpdateProposals.id })
+        .from(taskUpdateProposals)
+        .innerJoin(
+            routedSourceItem,
+            and(
+                eq(routedSourceItem.id, taskUpdateProposals.itemId),
+                eq(routedSourceItem.userId, taskUpdateProposals.userId),
+            ),
         )
-            reason = "earlier_statement";
-        else if (!attachmentNotice && !mayApply(proposal.kind, target))
-            reason = "rights_lost";
-        if (reason || !target) {
-            await setProposalState(tx, proposal.id, "obsolete", {
+        .innerJoin(
+            recordingTasks,
+            eq(recordingTasks.id, taskUpdateProposals.taskId),
+        )
+        .innerJoin(chatterItems, eq(chatterItems.id, recordingTasks.itemId))
+        .where(
+            and(
+                eq(taskUpdateProposals.id, proposalId),
+                eq(taskUpdateProposals.itemId, sourceItemId),
+                eq(taskUpdateProposals.state, "awaiting_target_review"),
+                routedProposalCondition(viewer),
+            ),
+        )
+        .limit(1);
+    if (!authorized) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Task proposal not found", 404);
+    }
+    const result = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const [source] = await tx
+                .select({
+                    itemId: taskUpdateProposals.itemId,
+                    ownerUserId: taskUpdateProposals.userId,
+                })
+                .from(taskUpdateProposals)
+                .where(
+                    and(
+                        eq(taskUpdateProposals.id, proposalId),
+                        eq(taskUpdateProposals.itemId, sourceItemId),
+                    ),
+                )
+                .limit(1);
+            if (!source) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Task proposal not found",
+                    404,
+                );
+            }
+            await lockItemTaskGraphInTx(tx, {
+                itemId: source.itemId,
+                ownerUserId: source.ownerUserId,
+            });
+            const [proposal] = await tx
+                .select({
+                    id: taskUpdateProposals.id,
+                    taskId: taskUpdateProposals.taskId,
+                    kind: taskUpdateProposals.kind,
+                    dueDate: taskUpdateProposals.dueDate,
+                    duePhrase: taskUpdateProposals.duePhrase,
+                    proposedAssigneePersonId:
+                        taskUpdateProposals.proposedAssigneePersonId,
+                    proposedAssigneeHint:
+                        taskUpdateProposals.proposedAssigneeHint,
+                    proposedAssigneeCheck:
+                        taskUpdateProposals.proposedAssigneeCheck,
+                    quote: taskUpdateProposals.quote,
+                    evidenceStartMs: taskUpdateProposals.evidenceStartMs,
+                    evidenceSegmentIndex:
+                        taskUpdateProposals.evidenceSegmentIndex,
+                    evidenceCharStart: taskUpdateProposals.evidenceCharStart,
+                    evidenceCharEnd: taskUpdateProposals.evidenceCharEnd,
+                    evidenceProvenance: taskUpdateProposals.evidenceProvenance,
+                    statementAt: taskUpdateProposals.statementAt,
+                    version: taskUpdateProposals.version,
+                    routedTo: taskUpdateProposals.routedTo,
+                    sourceVisible: sql<boolean>`${and(
+                        isNull(chatterItems.deletedAt),
+                        or(
+                            eq(chatterItems.userId, viewer.userId),
+                            recordingSharedCondition(chatterItems.id),
+                        ),
+                    )}`,
+                })
+                .from(taskUpdateProposals)
+                .innerJoin(
+                    chatterItems,
+                    and(
+                        eq(chatterItems.id, taskUpdateProposals.itemId),
+                        eq(chatterItems.userId, taskUpdateProposals.userId),
+                    ),
+                )
+                .where(
+                    and(
+                        eq(taskUpdateProposals.id, proposalId),
+                        eq(taskUpdateProposals.itemId, source.itemId),
+                        eq(taskUpdateProposals.userId, source.ownerUserId),
+                        eq(taskUpdateProposals.state, "awaiting_target_review"),
+                        viewer.isCurator
+                            ? undefined
+                            : directRecipientCondition(viewer),
+                    ),
+                )
+                .limit(1);
+            if (!proposal) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Task proposal not found",
+                    404,
+                );
+            }
+            const target = await targetFor(tx, viewer, proposal.taskId);
+            const directlyRouted = routedDirectlyTo(proposal.routedTo, viewer);
+            if (!directlyRouted && !(viewer.isCurator && target?.shared)) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Task proposal not found",
+                    404,
+                );
+            }
+            const effectiveAt = proposal.statementAt;
+            let reason: ObsoleteProposalReason | null = null;
+            const attachmentNotice = proposal.kind === "attach_merge";
+            if (!proposal.sourceVisible) reason = "source_withdrawn";
+            else if (!target?.visible) reason = "task_invisible";
+            else if (target.status !== "open") reason = "task_closed";
+            else if (!attachmentNotice && target.version !== proposal.version)
+                reason = "version_changed";
+            else if (
+                !attachmentNotice &&
+                !chronologyAllows(proposal, target, effectiveAt)
+            )
+                reason = "earlier_statement";
+            else if (!attachmentNotice && !mayApply(proposal.kind, target))
+                reason = "rights_lost";
+            if (reason || !target) {
+                await setProposalState(tx, proposal.id, "obsolete", {
+                    actorUserId: viewer.userId,
+                    routedTo: null,
+                    obsoleteReason: reason ?? "task_invisible",
+                });
+                return {
+                    decision: {
+                        state: "obsolete" as const,
+                        obsoleteReason: reason ?? "task_invisible",
+                    },
+                    changed: null,
+                };
+            }
+            await applyToTarget(
+                tx,
+                proposal,
+                target,
+                viewer.userId,
+                effectiveAt,
+            );
+            await setProposalState(tx, proposal.id, "applied", {
                 actorUserId: viewer.userId,
                 routedTo: null,
-                obsoleteReason: reason ?? "task_invisible",
             });
+            if (!attachmentNotice) {
+                await settleEarlierTaskProposalsInTx(tx, {
+                    taskId: target.taskId,
+                    ownerUserId: target.ownerUserId,
+                    kinds:
+                        proposal.kind === "done" || proposal.kind === "drop"
+                            ? ["done", "drop"]
+                            : proposal.kind === "assignee"
+                              ? ["assignee"]
+                              : ["due", "due_phrase"],
+                    effectiveAt,
+                });
+            }
             return {
-                decision: {
-                    state: "obsolete" as const,
-                    obsoleteReason: reason ?? "task_invisible",
-                },
-                changed: null,
+                decision: { state: "applied" as const, obsoleteReason: null },
+                changed: attachmentNotice
+                    ? null
+                    : {
+                          ownerUserId: target.ownerUserId,
+                          itemId: target.itemId,
+                      },
             };
-        }
-        await applyToTarget(tx, proposal, target, viewer.userId, effectiveAt);
-        await setProposalState(tx, proposal.id, "applied", {
-            actorUserId: viewer.userId,
-            routedTo: null,
-        });
-        if (!attachmentNotice) {
-            await settleEarlierTaskProposalsInTx(tx, {
-                taskId: target.taskId,
-                ownerUserId: target.ownerUserId,
-                kinds:
-                    proposal.kind === "done" || proposal.kind === "drop"
-                        ? ["done", "drop"]
-                        : proposal.kind === "assignee"
-                          ? ["assignee"]
-                          : ["due", "due_phrase"],
-                effectiveAt,
-            });
-        }
-        return {
-            decision: { state: "applied" as const, obsoleteReason: null },
-            changed: attachmentNotice
-                ? null
-                : { ownerUserId: target.ownerUserId, itemId: target.itemId },
-        };
-    });
+        }),
+    );
     if (result.changed) {
         await changed(result.changed.ownerUserId, result.changed.itemId);
     }

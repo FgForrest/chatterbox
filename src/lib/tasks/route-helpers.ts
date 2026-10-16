@@ -79,3 +79,21 @@ export async function enforceTaskMergeSearchRateLimit(
         { retryAfter },
     );
 }
+
+/** Bound task mutations for one signed-in user. */
+export async function enforceTaskWriteRateLimit(
+    viewer: TaskViewer,
+): Promise<void> {
+    const result = await consumeRateLimitBucket(
+        `tasks:write:user:${viewer.userId}`,
+        { limit: 120, windowMs: 60_000 },
+    );
+    if (result.allowed) return;
+    const retryAfter = Math.max(
+        1,
+        Math.ceil((result.resetAt.getTime() - Date.now()) / 1_000),
+    );
+    throw new AppError(ErrorCode.RATE_LIMITED, "Too many task changes", 429, {
+        retryAfter,
+    });
+}

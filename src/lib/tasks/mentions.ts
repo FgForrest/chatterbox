@@ -18,6 +18,7 @@ import {
     recordings,
     recordingTaskRejections,
     recordingTasks,
+    taskContentVectors,
     taskHomeMoves,
     taskMentions,
     taskUpdateProposals,
@@ -305,7 +306,7 @@ async function taskGraphItemRefs(
 ): Promise<ItemRef[]> {
     const ids = new Set([sourceItemId]);
     if (taskIds.length > 0) {
-        const [tasks, mentions] = await Promise.all([
+        const [tasks, mentions, proposals] = await Promise.all([
             tx
                 .select({ itemId: recordingTasks.itemId })
                 .from(recordingTasks)
@@ -314,8 +315,14 @@ async function taskGraphItemRefs(
                 .select({ itemId: taskMentions.itemId })
                 .from(taskMentions)
                 .where(inArray(taskMentions.taskId, [...taskIds])),
+            tx
+                .select({ itemId: taskUpdateProposals.itemId })
+                .from(taskUpdateProposals)
+                .where(inArray(taskUpdateProposals.taskId, [...taskIds])),
         ]);
-        for (const row of [...tasks, ...mentions]) ids.add(row.itemId);
+        for (const row of [...tasks, ...mentions, ...proposals]) {
+            ids.add(row.itemId);
+        }
     }
     return tx
         .select({ id: chatterItems.id, kind: chatterItems.kind })
@@ -369,56 +376,91 @@ export async function lockItemTaskGraphInTx(
     tx: Tx,
     input: { itemId: string; ownerUserId: string },
 ): Promise<LockedTaskRow[]> {
-    let taskIds = await taskIdsOnItem(tx, input.itemId, input.ownerUserId);
-    let refs = await taskGraphItemRefs(tx, input.itemId, taskIds);
-    await lockItemRefs(tx, refs);
-
-    taskIds = await taskIdsOnItem(tx, input.itemId, input.ownerUserId);
-    const rereadRefs = await taskGraphItemRefs(tx, input.itemId, taskIds);
-    const lockedItemIds = new Set(refs.map((ref) => ref.id));
-    const missingBeforeTasks = rereadRefs.filter(
-        (ref) => !lockedItemIds.has(ref.id),
+    let plannedTaskIds = await taskIdsOnItem(
+        tx,
+        input.itemId,
+        input.ownerUserId,
     );
-    await lockItemRefs(tx, missingBeforeTasks);
-    refs = [...refs, ...missingBeforeTasks];
-
-    let tasks = await readLockedTasks(tx, taskIds);
-    const mentions =
-        taskIds.length === 0
-            ? []
-            : await tx
-                  .select({ itemId: taskMentions.itemId })
-                  .from(taskMentions)
-                  .where(inArray(taskMentions.taskId, taskIds));
-    const lockedAfterTasks = new Set(refs.map((ref) => ref.id));
-    const missedIds = [
-        ...new Set(
-            mentions
-                .map((mention) => mention.itemId)
-                .filter((itemId) => !lockedAfterTasks.has(itemId)),
-        ),
-    ];
-    if (missedIds.length > 0) {
-        const missedRefs = await tx
-            .select({ id: chatterItems.id, kind: chatterItems.kind })
-            .from(chatterItems)
-            .where(inArray(chatterItems.id, missedIds))
-            .orderBy(asc(chatterItems.id));
-        await lockItemRefs(tx, missedRefs);
-        taskIds = await taskIdsOnItem(tx, input.itemId, input.ownerUserId);
-        tasks = await readLockedTasks(tx, taskIds);
-        if (taskIds.length > 0) {
-            await tx
-                .select({ itemId: taskMentions.itemId })
-                .from(taskMentions)
-                .where(inArray(taskMentions.taskId, taskIds));
+    let plannedRefs = await taskGraphItemRefs(tx, input.itemId, plannedTaskIds);
+    for (let attempt = 0; attempt < 8; attempt++) {
+        try {
+            const lockAttempt = async (lockedTx: Tx) => {
+                await lockItemRefs(lockedTx, plannedRefs);
+                const taskIds = await taskIdsOnItem(
+                    lockedTx,
+                    input.itemId,
+                    input.ownerUserId,
+                );
+                const refs = await taskGraphItemRefs(
+                    lockedTx,
+                    input.itemId,
+                    taskIds,
+                );
+                const plannedItemIds = new Set(
+                    plannedRefs.map((ref) => ref.id),
+                );
+                if (
+                    taskIds.some(
+                        (taskId) => !plannedTaskIds.includes(taskId),
+                    ) ||
+                    refs.some((ref) => !plannedItemIds.has(ref.id))
+                ) {
+                    throw new TaskGraphChangedError(taskIds, refs);
+                }
+                const tasks = await readLockedTasks(lockedTx, taskIds);
+                const finalTaskIds = await taskIdsOnItem(
+                    lockedTx,
+                    input.itemId,
+                    input.ownerUserId,
+                );
+                const finalRefs = await taskGraphItemRefs(
+                    lockedTx,
+                    input.itemId,
+                    finalTaskIds,
+                );
+                if (
+                    finalTaskIds.some(
+                        (taskId) => !plannedTaskIds.includes(taskId),
+                    ) ||
+                    finalRefs.some((ref) => !plannedItemIds.has(ref.id))
+                ) {
+                    throw new TaskGraphChangedError(finalTaskIds, finalRefs);
+                }
+                return tasks;
+            };
+            return typeof tx.transaction === "function"
+                ? await tx.transaction(lockAttempt)
+                : await lockAttempt(tx);
+        } catch (error) {
+            if (!(error instanceof TaskGraphChangedError)) throw error;
+            plannedTaskIds = [
+                ...new Set([...plannedTaskIds, ...error.taskIds]),
+            ].sort();
+            const refs = new Map(
+                [...plannedRefs, ...error.refs].map((ref) => [ref.id, ref]),
+            );
+            plannedRefs = [...refs.values()].sort((left, right) =>
+                left.id.localeCompare(right.id),
+            );
         }
     }
-    return tasks;
+    throw new Error("Task graph changed too often to acquire ordered locks");
+}
+
+class TaskGraphChangedError extends Error {
+    constructor(
+        readonly taskIds: string[],
+        readonly refs: ItemRef[],
+    ) {
+        super("Task graph changed while acquiring locks");
+    }
 }
 
 async function moveItemTaskHomesInTx(tx: Tx, input: MoveInput): Promise<void> {
     const locked = await lockItemTaskGraphInTx(tx, input);
+    if (input.reason === "withdrawn") {
+        await deleteItemTaskVectorsInTx(tx, input);
+    }
     const now = new Date();
     if (input.reason === "withdrawn") {
         await tx
@@ -716,6 +758,7 @@ export async function deleteItemTaskDataInTx(
     },
 ): Promise<void> {
     await moveItemTaskHomesInTx(tx, { ...input, removeMentions: true });
+    await deleteItemTaskVectorsInTx(tx, input);
     await tx
         .delete(taskUpdateProposals)
         .where(
@@ -730,6 +773,21 @@ export async function deleteItemTaskDataInTx(
             and(
                 eq(recordingTaskRejections.itemId, input.itemId),
                 eq(recordingTaskRejections.userId, input.ownerUserId),
+            ),
+        );
+}
+
+/** Remove content-derived task vectors for an owner-owned item. */
+export async function deleteItemTaskVectorsInTx(
+    tx: Tx,
+    input: { itemId: string; ownerUserId: string },
+): Promise<void> {
+    await tx
+        .delete(taskContentVectors)
+        .where(
+            and(
+                eq(taskContentVectors.itemId, input.itemId),
+                eq(taskContentVectors.userId, input.ownerUserId),
             ),
         );
 }

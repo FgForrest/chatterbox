@@ -21,6 +21,7 @@ import {
 } from "@/db/schema";
 import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import { actsForOrganization } from "@/lib/authz/curator";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
@@ -379,145 +380,155 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     // Before the transaction, which must not take a second pooled
     // connection while it holds the recording lock.
     const orgUserId = await getOrgUserId();
-    const didTombstone = await db.transaction(async (tx) => {
-        const now = new Date();
-        // Withdrawing takes the Organization tree lock before the
-        // recording's, as every change to the tree does, so no folder move
-        // can file the recording again beside this delete.
-        if (orgUserId) await lockOrgTree(tx);
-        await lockItemTaskGraphInTx(tx, {
-            itemId: id,
-            ownerUserId: userId,
-        });
+    const didTombstone = await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            // Withdrawing takes the Organization tree lock before the
+            // recording's, as every change to the tree does, so no folder move
+            // can file the recording again beside this delete.
+            if (orgUserId) await lockOrgTree(tx);
+            await lockItemTaskGraphInTx(tx, {
+                itemId: id,
+                ownerUserId: userId,
+            });
 
-        // Lock the parent recording row up front. Without this, a
-        // concurrent transcribe/summary writer (which also re-checks
-        // tombstone under FOR UPDATE) could slip a new transcript or
-        // ai_enhancement row in between our child-row deletes and the
-        // final tombstone, leaving orphan rows pointing at a tombstoned
-        // recording. With the lock, concurrent writers either run before
-        // us (their rows get deleted by the child-row deletes below) or
-        // after us (they observe `deletedAt != null` and bail).
-        const [locked] = await tx
-            .select({ deletedAt: recordings.deletedAt })
-            .from(recordings)
-            .where(and(eq(recordings.id, id), eq(recordings.userId, userId)))
-            .for("update")
-            .limit(1);
+            // Lock the parent recording row up front. Without this, a
+            // concurrent transcribe/summary writer (which also re-checks
+            // tombstone under FOR UPDATE) could slip a new transcript or
+            // ai_enhancement row in between our child-row deletes and the
+            // final tombstone, leaving orphan rows pointing at a tombstoned
+            // recording. With the lock, concurrent writers either run before
+            // us (their rows get deleted by the child-row deletes below) or
+            // after us (they observe `deletedAt != null` and bail).
+            const [locked] = await tx
+                .select({ deletedAt: recordings.deletedAt })
+                .from(recordings)
+                .where(
+                    and(eq(recordings.id, id), eq(recordings.userId, userId)),
+                )
+                .for("update")
+                .limit(1);
 
-        // A concurrent DELETE already tombstoned and committed; nothing
-        // for us to do. Return false so we don't emit a duplicate event.
-        if (!locked || locked.deletedAt) return false;
+            // A concurrent DELETE already tombstoned and committed; nothing
+            // for us to do. Return false so we don't emit a duplicate event.
+            if (!locked || locked.deletedAt) return false;
 
-        // Nothing queued for either view may run against a deleted
-        // recording; it would only fail after spending a provider call.
-        await tx
-            .update(asyncJobs)
-            .set({
-                status: "failed",
-                completedAt: now,
-                updatedAt: now,
-                heartbeatAt: null,
-                claimToken: null,
-                errorCode: ErrorCode.RECORDING_NOT_FOUND,
-                lastError: "Cancelled because the recording was deleted",
-            })
-            .where(
-                and(
-                    inArray(asyncJobs.subjectId, [
-                        recordingJobSubject(id, "private"),
-                        recordingJobSubject(id, "org"),
-                    ]),
-                    inArray(asyncJobs.kind, [
-                        "transcription",
-                        "summary",
-                        "topics",
-                        "learn.run",
-                        "title.generate",
-                        "learn.release",
-                        "learn.correct",
-                        "pipeline.advance",
-                    ]),
-                    inArray(asyncJobs.status, ["pending", "processing"]),
-                ),
-            );
-
-        // Every content row of the recording, whichever account holds it:
-        // it goes for everyone at once, the Organization included, and the
-        // facts said only here with it.
-        const knowledge = await knowledgeOnRecordingInTx(tx, id);
-        await tx
-            .delete(transcriptions)
-            .where(eq(transcriptions.recordingId, id));
-        await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
-
-        await tx.delete(aiEnhancements).where(eq(aiEnhancements.itemId, id));
-        await deleteItemTaskDataInTx(tx, {
-            itemId: id,
-            ownerUserId: userId,
-            actorUserId: userId,
-            orgUserId,
-            reason: "deleted",
-        });
-        // Learn runs and their items went with the transcripts; what was
-        // dismissed has nothing left to answer for.
-        await tx.delete(learnDismissals).where(eq(learnDismissals.itemId, id));
-
-        if (orgUserId) {
-            const orgFolderIds = tx
-                .select({ id: recordingFolders.id })
-                .from(recordingFolders)
-                .where(eq(recordingFolders.userId, orgUserId));
-            const unshared = await tx
-                .delete(recordingFolderAssignments)
+            // Nothing queued for either view may run against a deleted
+            // recording; it would only fail after spending a provider call.
+            await tx
+                .update(asyncJobs)
+                .set({
+                    status: "failed",
+                    completedAt: now,
+                    updatedAt: now,
+                    heartbeatAt: null,
+                    claimToken: null,
+                    errorCode: ErrorCode.RECORDING_NOT_FOUND,
+                    lastError: "Cancelled because the recording was deleted",
+                })
                 .where(
                     and(
-                        eq(recordingFolderAssignments.itemId, id),
-                        inArray(
-                            recordingFolderAssignments.folderId,
-                            orgFolderIds,
+                        inArray(asyncJobs.subjectId, [
+                            recordingJobSubject(id, "private"),
+                            recordingJobSubject(id, "org"),
+                        ]),
+                        inArray(asyncJobs.kind, [
+                            "transcription",
+                            "summary",
+                            "topics",
+                            "learn.run",
+                            "title.generate",
+                            "learn.release",
+                            "learn.correct",
+                            "pipeline.advance",
+                        ]),
+                        inArray(asyncJobs.status, ["pending", "processing"]),
+                    ),
+                );
+
+            // Every content row of the recording, whichever account holds it:
+            // it goes for everyone at once, the Organization included, and the
+            // facts said only here with it.
+            const knowledge = await knowledgeOnRecordingInTx(tx, id);
+            await tx
+                .delete(transcriptions)
+                .where(eq(transcriptions.recordingId, id));
+            await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
+
+            await tx
+                .delete(aiEnhancements)
+                .where(eq(aiEnhancements.itemId, id));
+            await deleteItemTaskDataInTx(tx, {
+                itemId: id,
+                ownerUserId: userId,
+                actorUserId: userId,
+                orgUserId,
+                reason: "deleted",
+            });
+            // Learn runs and their items went with the transcripts; what was
+            // dismissed has nothing left to answer for.
+            await tx
+                .delete(learnDismissals)
+                .where(eq(learnDismissals.itemId, id));
+
+            if (orgUserId) {
+                const orgFolderIds = tx
+                    .select({ id: recordingFolders.id })
+                    .from(recordingFolders)
+                    .where(eq(recordingFolders.userId, orgUserId));
+                const unshared = await tx
+                    .delete(recordingFolderAssignments)
+                    .where(
+                        and(
+                            eq(recordingFolderAssignments.itemId, id),
+                            inArray(
+                                recordingFolderAssignments.folderId,
+                                orgFolderIds,
+                            ),
                         ),
+                    )
+                    .returning({
+                        folderId: recordingFolderAssignments.folderId,
+                    });
+                wasShared = unshared.length > 0;
+            }
+
+            await tx
+                .update(webhookDeliveries)
+                .set({
+                    payload: createRedactedWebhookPayload(id, now),
+                    updatedAt: now,
+                })
+                .where(
+                    and(
+                        eq(webhookDeliveries.recordingId, id),
+                        eq(webhookDeliveries.userId, userId),
+                    ),
+                );
+
+            // Returning lets us tell whether THIS request flipped the
+            // tombstone vs. a concurrent DELETE having already done it. We
+            // only want to emit `recording.deleted` for the winning request.
+            const tombstoned = await tx
+                .update(recordings)
+                .set({ deletedAt: now, updatedAt: now })
+                .where(
+                    and(
+                        eq(recordings.id, id),
+                        eq(recordings.userId, userId),
+                        isNull(recordings.deletedAt),
                     ),
                 )
-                .returning({ folderId: recordingFolderAssignments.folderId });
-            wasShared = unshared.length > 0;
-        }
+                .returning({ id: recordings.id });
+            if (tombstoned.length > 0) {
+                // Nothing waits for Learn on a deleted recording.
+                await markItemDeleted(tx, { id, userId, at: now });
+            }
 
-        await tx
-            .update(webhookDeliveries)
-            .set({
-                payload: createRedactedWebhookPayload(id, now),
-                updatedAt: now,
-            })
-            .where(
-                and(
-                    eq(webhookDeliveries.recordingId, id),
-                    eq(webhookDeliveries.userId, userId),
-                ),
-            );
-
-        // Returning lets us tell whether THIS request flipped the
-        // tombstone vs. a concurrent DELETE having already done it. We
-        // only want to emit `recording.deleted` for the winning request.
-        const tombstoned = await tx
-            .update(recordings)
-            .set({ deletedAt: now, updatedAt: now })
-            .where(
-                and(
-                    eq(recordings.id, id),
-                    eq(recordings.userId, userId),
-                    isNull(recordings.deletedAt),
-                ),
-            )
-            .returning({ id: recordings.id });
-        if (tombstoned.length > 0) {
-            // Nothing waits for Learn on a deleted recording.
-            await markItemDeleted(tx, { id, userId, at: now });
-        }
-
-        await bumpScopeInTx(tx, knowledge.scopes);
-        return tombstoned.length > 0;
-    });
+            await bumpScopeInTx(tx, knowledge.scopes);
+            return tombstoned.length > 0;
+        }),
+    );
 
     if (didTombstone) {
         await emitEvent("recording.deleted", userId, id);

@@ -8,6 +8,8 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
+import { RecordingTasks as RecordingTasksList } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
 import type {
@@ -52,6 +54,7 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
         statusChangedAt: null,
         canEdit: true,
         canClose: true,
+        canUndoMatch: false,
         ...overrides,
     };
 }
@@ -124,6 +127,7 @@ function state(data: RecordingTasks): RecordingTasksState {
         add: vi.fn(async () => {}),
         merge: vi.fn(async () => true),
         mergeInto: vi.fn(async () => true),
+        undoMatch: vi.fn(async () => {}),
         tickUpdate: vi.fn(),
         tickMatch: vi.fn(),
         accept: vi.fn(async () => true),
@@ -151,12 +155,50 @@ function openReview(data: Partial<RecordingTasks>) {
     return current;
 }
 
-describe("task review rows", () => {
-    afterEach(() => {
-        cleanup();
-        vi.unstubAllGlobals();
-    });
+afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+});
 
+it("confirms undo while explaining that applied task changes stay", async () => {
+    const current = state({
+        canEdit: true,
+        reviewed: true,
+        tasks: [
+            task({
+                id: "linked-task",
+                status: "open",
+                canUndoMatch: true,
+            }),
+        ],
+        proposals: [],
+        updates: [],
+        matches: [],
+    });
+    render(
+        <ConfirmDialogProvider>
+            <RecordingTasksList
+                state={current}
+                speakers={[]}
+                organizationOnly={false}
+                fallback={null}
+            />
+        </ConfirmDialogProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo match" }));
+    expect(screen.getByText("Undo this task match?")).toBeTruthy();
+    expect(
+        screen.getByText(
+            "This removes the link from this item. Changes already applied to the task stay.",
+        ),
+    ).toBeTruthy();
+    const buttons = screen.getAllByRole("button", { name: "Undo match" });
+    fireEvent.click(buttons[buttons.length - 1] as HTMLElement);
+    await waitFor(() => expect(current.undoMatch).toHaveBeenCalledTimes(1));
+});
+
+describe("task review rows", () => {
     it("shows a preselected suggested match with its candidate and evidence", () => {
         const onPlay = vi.fn();
         const current = state({
