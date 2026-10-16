@@ -316,6 +316,16 @@ export function MeetingRecorderSetup({
         );
     }
 
+    const autoPlatformNames = status
+        ? status.defaults.auto_record_platforms
+              .map(
+                  (id) =>
+                      status.platforms.find((platform) => platform.id === id)
+                          ?.name ?? id,
+              )
+              .join(", ")
+        : "";
+
     return (
         <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
@@ -481,6 +491,11 @@ export function MeetingRecorderSetup({
                         {i18n("Connected recorders")}
                     </summary>
                     <div className="mt-3 space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Each key is write-only: it can create recordings but cannot read your library.",
+                            )}
+                        </p>
                         {status.keys.map((key) => (
                             <div
                                 key={key.id}
@@ -488,8 +503,13 @@ export function MeetingRecorderSetup({
                             >
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0">
-                                        <p className="truncate font-medium">
-                                            {key.name}
+                                        <p className="flex min-w-0 items-center gap-2">
+                                            <span className="truncate font-medium">
+                                                {key.name}
+                                            </span>
+                                            <span className="shrink-0 rounded border px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                                                {key.key_prefix}
+                                            </span>
                                         </p>
                                         <p className="text-xs text-muted-foreground">
                                             {i18n("Last used {date}", {
@@ -555,6 +575,52 @@ export function MeetingRecorderSetup({
                                 )}
                             </div>
                         ))}
+                    </div>
+                </details>
+            )}
+
+            {mode === "settings" && status && (
+                <details className="rounded-lg border px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium">
+                        {i18n("Automatic recording")}
+                    </summary>
+                    <div className="mt-3 space-y-2 text-sm">
+                        <p className="text-xs text-muted-foreground">
+                            {i18n(
+                                "Defaults this server sends to paired extensions. Users can change them in the extension's options unless locked.",
+                            )}
+                        </p>
+                        <p>
+                            {autoPlatformNames
+                                ? i18n(
+                                      "Automatic recording is on by default for: {platforms}.",
+                                      { platforms: autoPlatformNames },
+                                  )
+                                : i18n(
+                                      "No platform records automatically by default.",
+                                  )}{" "}
+                            {i18n(
+                                "Recordings stop after {seconds} seconds of silence.",
+                                {
+                                    seconds: String(
+                                        status.defaults.auto_stop_quiet_seconds,
+                                    ),
+                                },
+                            )}
+                            {status.defaults.lock_defaults && (
+                                <>
+                                    {" "}
+                                    {i18n(
+                                        "These defaults are locked by the server.",
+                                    )}
+                                </>
+                            )}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            {i18n("Change with")}{" "}
+                            <code>RECORDER_AUTO_RECORD_PLATFORMS</code>{" "}
+                            {i18n("and related environment variables.")}
+                        </p>
                     </div>
                 </details>
             )}

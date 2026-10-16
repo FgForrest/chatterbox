@@ -41,7 +41,60 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 const detect = vi.fn<() => Promise<RecorderExtensionState>>();
 const pair = vi.fn().mockResolvedValue({ ok: true, pending: false });
 let userAgent = "";
-const status = {
+interface RecorderStatusFixture {
+    keys: {
+        id: string;
+        name: string;
+        key_prefix: string;
+        created_at: string;
+        last_used_at: string | null;
+    }[];
+    pending_captures: {
+        client_recording_id: string;
+        api_key_id: string;
+        created_at: string;
+        expires_at: string;
+    }[];
+    server_url: string;
+    extension_id: string;
+    defaults: {
+        auto_record_platforms: string[];
+        auto_stop_quiet_seconds: number;
+        notice_text: string;
+        lock_defaults: boolean;
+    };
+    platforms: { id: string; name: string }[];
+}
+
+const CHROME =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+const browserCases = [
+    ["Chrome", CHROME, true],
+    ["Edge", `${CHROME} Edg/140.0.0.0`, true],
+    ["Opera", `${CHROME} OPR/120.0.0.0`, true],
+    ["Chromium", CHROME.replace("Chrome/", "Chromium/"), true],
+    [
+        "Firefox",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+        false,
+    ],
+    [
+        "Safari",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15",
+        false,
+    ],
+    [
+        "Android Chrome",
+        CHROME.replace("X11; Linux x86_64", "Linux; Android 15"),
+        false,
+    ],
+    [
+        "iPhone",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/140.0.0.0 Mobile/15E148 Safari/604.1",
+        false,
+    ],
+] as const;
+const status: RecorderStatusFixture = {
     keys: [],
     pending_captures: [],
     server_url: "https://chatterbox.example.com",
@@ -55,13 +108,35 @@ const status = {
     platforms: [],
 };
 
+function stubRecorderStatus(nextStatus: RecorderStatusFixture) {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+        const path = String(input);
+        if (path === "/api/settings/recorder/pair") {
+            return Response.json({
+                ...nextStatus,
+                key_id: "key-1",
+                api_key: "op_recorder",
+            });
+        }
+        if (
+            init?.method === "DELETE" ||
+            path === "/api/settings/recorder/rebind"
+        ) {
+            return new Response(null, { status: 204 });
+        }
+        return Response.json(nextStatus);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+}
+
 function view(mode: "settings" | "onboarding"): ReactElement {
     if (mode === "settings") return <RecorderSection />;
     return <OnboardingStepRecorder storeUrl={RECORDER_EXTENSION_STORE_URL} />;
 }
 
 beforeEach(() => {
-    userAgent = "Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36";
+    userAgent = CHROME;
     detect.mockReset().mockResolvedValue({ kind: "not-installed" });
     pair.mockClear();
     vi.mocked(browserRecorderExtensionClient).mockReturnValue({
@@ -69,19 +144,7 @@ beforeEach(() => {
         pair,
         onPresence: vi.fn(() => vi.fn()),
     });
-    vi.stubGlobal(
-        "fetch",
-        vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-            if (init?.method === "POST") {
-                return Response.json({
-                    key_id: "key-1",
-                    api_key: "op_recorder",
-                    server_url: status.server_url,
-                });
-            }
-            return Response.json(status);
-        }),
-    );
+    stubRecorderStatus(status);
     vi.spyOn(navigator, "userAgent", "get").mockImplementation(() => userAgent);
 });
 
@@ -159,11 +222,51 @@ describe.each([
     });
 });
 
-describe("Meeting Recorder browser support", () => {
-    it("shows only desktop setup guidance in onboarding on a phone", async () => {
-        userAgent =
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1";
-        render(view("onboarding"));
+describe.each([
+    "settings",
+    "onboarding",
+] as const)("Meeting Recorder browser support in %s", (mode) => {
+    it.each(
+        browserCases,
+    )("handles %s compatibility", async (_browser, browserUserAgent, compatible) => {
+        userAgent = browserUserAgent;
+        render(view(mode));
+
+        if (mode === "settings") {
+            expect(
+                await screen.findByRole("link", {
+                    name: "Install from Chrome Web Store",
+                }),
+            ).toBeTruthy();
+            if (compatible) {
+                expect(
+                    screen.queryByText(
+                        "Open this page in a supported desktop browser to connect.",
+                    ),
+                ).toBeNull();
+            } else {
+                expect(
+                    screen.getByText(
+                        "Open this page in a supported desktop browser to connect.",
+                    ),
+                ).toBeTruthy();
+            }
+            return;
+        }
+
+        if (compatible) {
+            expect(
+                await screen.findByRole("link", {
+                    name: "Install from Chrome Web Store",
+                }),
+            ).toBeTruthy();
+            expect(
+                screen.queryByText(
+                    "Meeting Recorder works in desktop Chrome, Edge or Brave. Set it up from your computer with Run setup again in the menu.",
+                ),
+            ).toBeNull();
+            return;
+        }
 
         expect(
             await screen.findByText(
@@ -177,21 +280,202 @@ describe("Meeting Recorder browser support", () => {
         ).toBeNull();
         expect(screen.queryByText("Connect manually")).toBeNull();
     });
+});
 
-    it("keeps the install flow in Settings on a phone", async () => {
-        userAgent =
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1";
+describe("Meeting Recorder Settings details", () => {
+    const keys = [
+        {
+            id: "key-desk",
+            name: "Desk recorder",
+            key_prefix: "op_rec_desk",
+            created_at: "2026-10-01T10:00:00.000Z",
+            last_used_at: "2026-10-15T10:00:00.000Z",
+        },
+        {
+            id: "key-travel",
+            name: "Travel recorder",
+            key_prefix: "op_rec_travel",
+            created_at: "2026-10-02T10:00:00.000Z",
+            last_used_at: null,
+        },
+    ];
+    const pendingCapture = {
+        client_recording_id: "capture-1",
+        api_key_id: "key-desk",
+        created_at: "2026-10-16T10:00:00.000Z",
+        expires_at: "2026-10-17T10:00:00.000Z",
+    };
+
+    it("shows recorder names, key prefixes, and the write-only note", async () => {
+        stubRecorderStatus({ ...status, keys });
         render(view("settings"));
+        fireEvent.click(await screen.findByText("Connected recorders"));
 
-        expect(
-            await screen.findByRole("link", {
-                name: "Install from Chrome Web Store",
-            }),
-        ).toBeTruthy();
+        expect(screen.getByText("Desk recorder")).toBeTruthy();
+        expect(screen.getByText("op_rec_desk")).toBeTruthy();
+        expect(screen.getByText("Travel recorder")).toBeTruthy();
+        expect(screen.getByText("op_rec_travel")).toBeTruthy();
         expect(
             screen.getByText(
-                "Open this page in a supported desktop browser to connect.",
+                "Each key is write-only: it can create recordings but cannot read your library.",
             ),
         ).toBeTruthy();
+    });
+
+    it("revokes a recorder immediately when it has no pending captures", async () => {
+        const fetchMock = stubRecorderStatus({ ...status, keys });
+        render(view("settings"));
+        fireEvent.click(await screen.findByText("Connected recorders"));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Disconnect Desk recorder" }),
+        );
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/settings/api-keys/key-desk",
+                { method: "DELETE" },
+            ),
+        );
+    });
+
+    it("confirms before revoking a recorder with a pending capture", async () => {
+        const fetchMock = stubRecorderStatus({
+            ...status,
+            keys,
+            pending_captures: [pendingCapture],
+        });
+        render(view("settings"));
+        fireEvent.click(await screen.findByText("Connected recorders"));
+        const disconnect = screen.getByRole("button", {
+            name: "Disconnect Desk recorder",
+        });
+        fireEvent.click(disconnect);
+
+        expect(
+            screen.getByRole("button", { name: "Disconnect anyway" }),
+        ).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+        expect(
+            fetchMock.mock.calls.some(
+                ([input, init]) =>
+                    String(input) === "/api/settings/api-keys/key-desk" &&
+                    init?.method === "DELETE",
+            ),
+        ).toBe(false);
+
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(
+            screen.queryByRole("button", { name: "Disconnect anyway" }),
+        ).toBeNull();
+        fireEvent.click(disconnect);
+        fireEvent.click(
+            screen.getByRole("button", { name: "Disconnect anyway" }),
+        );
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/settings/api-keys/key-desk",
+                { method: "DELETE" },
+            ),
+        );
+    });
+
+    it("rebinds an unfinished recording to the selected recorder key", async () => {
+        const fetchMock = stubRecorderStatus({
+            ...status,
+            keys,
+            pending_captures: [pendingCapture],
+        });
+        render(view("settings"));
+        fireEvent.click(
+            await screen.findByText("Recover unfinished recordings"),
+        );
+        fireEvent.change(
+            screen.getByRole("combobox", { name: "New recorder key" }),
+            { target: { value: "key-travel" } },
+        );
+        fireEvent.click(
+            screen.getByRole("button", { name: "Authorize recovery" }),
+        );
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/settings/recorder/rebind",
+                {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        clientRecordingId: "capture-1",
+                        apiKeyId: "key-travel",
+                    }),
+                },
+            ),
+        );
+    });
+
+    it("summarizes automatic platforms, quiet time, and locked defaults", async () => {
+        stubRecorderStatus({
+            ...status,
+            defaults: {
+                auto_record_platforms: ["google-meet", "teams"],
+                auto_stop_quiet_seconds: 45,
+                notice_text: "",
+                lock_defaults: true,
+            },
+            platforms: [
+                { id: "google-meet", name: "Google Meet" },
+                { id: "teams", name: "Microsoft Teams" },
+            ],
+        });
+        render(view("settings"));
+        fireEvent.click(await screen.findByText("Automatic recording"));
+
+        expect(
+            screen.getByText(
+                /Automatic recording is on by default for: Google Meet, Microsoft Teams\./,
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/Recordings stop after 45 seconds of silence\./),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(/These defaults are locked by the server\./),
+        ).toBeTruthy();
+    });
+
+    it("states when no platform records automatically", async () => {
+        stubRecorderStatus(status);
+        render(view("settings"));
+        fireEvent.click(await screen.findByText("Automatic recording"));
+
+        expect(
+            screen.getByText(/No platform records automatically by default\./),
+        ).toBeTruthy();
+    });
+
+    it("omits every Settings-only detail during onboarding", async () => {
+        stubRecorderStatus({
+            ...status,
+            keys,
+            pending_captures: [pendingCapture],
+            defaults: {
+                ...status.defaults,
+                auto_record_platforms: ["google-meet"],
+                lock_defaults: true,
+            },
+            platforms: [{ id: "google-meet", name: "Google Meet" }],
+        });
+        render(view("onboarding"));
+        await screen.findByRole("link", {
+            name: "Install from Chrome Web Store",
+        });
+
+        expect(screen.queryByText("Connected recorders")).toBeNull();
+        expect(screen.queryByText("Automatic recording")).toBeNull();
+        expect(screen.queryByText("Recover unfinished recordings")).toBeNull();
+        expect(
+            screen.queryByText(
+                "Each key is write-only: it can create recordings but cannot read your library.",
+            ),
+        ).toBeNull();
     });
 });

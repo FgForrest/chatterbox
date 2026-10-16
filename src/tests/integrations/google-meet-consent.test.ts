@@ -61,6 +61,12 @@ const state = {
     expiresAt: Date.now() + 60_000,
     purpose: "meet" as const,
 };
+const calendarMeetState = {
+    ...state,
+    purpose: "calendar-meet" as const,
+    expectedSubject: undefined,
+    returnTo: "/dashboard?onboarding=google",
+};
 
 function idToken(subject: string): string {
     const encode = (value: unknown) =>
@@ -86,6 +92,18 @@ function finish(fetchImpl: typeof fetch) {
         userId: state.userId,
         sealedState: sealGoogleOAuthState(state),
         params: new URLSearchParams({ state: state.state, code: "code" }),
+        fetchImpl,
+    });
+}
+
+function finishCalendarMeet(fetchImpl: typeof fetch) {
+    return completeGoogleConnect({
+        userId: calendarMeetState.userId,
+        sealedState: sealGoogleOAuthState(calendarMeetState),
+        params: new URLSearchParams({
+            state: calendarMeetState.state,
+            code: "code",
+        }),
         fetchImpl,
     });
 }
@@ -161,12 +179,6 @@ describe("Meet incremental Google consent", () => {
     });
 
     it("accepts and stores one combined Calendar and Meet grant", async () => {
-        const combinedState = {
-            ...state,
-            purpose: "calendar-meet" as const,
-            expectedSubject: undefined,
-            returnTo: "/dashboard?onboarding=google",
-        };
         const scopes = calendarAndMeetConsentScopes(
             existing.scopes,
             calendarScope,
@@ -175,25 +187,92 @@ describe("Meet incremental Google consent", () => {
             .fn<typeof fetch>()
             .mockResolvedValue(tokenResponse(existing.subject, scopes));
 
-        await expect(
-            completeGoogleConnect({
-                userId: combinedState.userId,
-                sealedState: sealGoogleOAuthState(combinedState),
-                params: new URLSearchParams({
-                    state: combinedState.state,
-                    code: "code",
-                }),
-                fetchImpl,
-            }),
-        ).resolves.toEqual({
+        await expect(finishCalendarMeet(fetchImpl)).resolves.toEqual({
             outcome: "connected",
             returnTo: "/dashboard?onboarding=google",
         });
         expect(saveGoogleConnection).toHaveBeenCalledWith(
-            combinedState.userId,
+            calendarMeetState.userId,
             expect.objectContaining({ subject: existing.subject }),
             expect.objectContaining({ scopes }),
         );
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
+    it("rejects combined consent without the Calendar scope", async () => {
+        await expect(
+            finishCalendarMeet(
+                vi
+                    .fn<typeof fetch>()
+                    .mockResolvedValue(
+                        tokenResponse(existing.subject, [
+                            ...existing.scopes.filter(
+                                (scope) => scope !== calendarScope,
+                            ),
+                            GOOGLE_MEET_READ_SCOPE,
+                        ]),
+                    ),
+            ),
+        ).resolves.toMatchObject({ outcome: "missing_calendar_scope" });
+        expect(saveGoogleConnection).not.toHaveBeenCalled();
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
+    it("rejects combined consent without the Meet scope", async () => {
+        await expect(
+            finishCalendarMeet(
+                vi
+                    .fn<typeof fetch>()
+                    .mockResolvedValue(
+                        tokenResponse(existing.subject, existing.scopes),
+                    ),
+            ),
+        ).resolves.toMatchObject({ outcome: "missing_meet_scope" });
+        expect(saveGoogleConnection).not.toHaveBeenCalled();
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
+    it("rejects combined consent for another Google account", async () => {
+        await expect(
+            finishCalendarMeet(
+                vi
+                    .fn<typeof fetch>()
+                    .mockResolvedValue(
+                        tokenResponse(
+                            "other",
+                            calendarAndMeetConsentScopes(
+                                existing.scopes,
+                                calendarScope,
+                            ),
+                        ),
+                    ),
+            ),
+        ).resolves.toMatchObject({ outcome: "account_mismatch" });
+        expect(saveGoogleConnection).not.toHaveBeenCalled();
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
+    it("rejects combined consent that drops an existing scope", async () => {
+        vi.mocked(getGoogleConnectionStatus).mockResolvedValue({
+            ...existing,
+            scopes: [
+                ...existing.scopes,
+                "https://www.googleapis.com/auth/drive.file",
+            ],
+        });
+        await expect(
+            finishCalendarMeet(
+                vi
+                    .fn<typeof fetch>()
+                    .mockResolvedValue(
+                        tokenResponse(existing.subject, [
+                            ...existing.scopes,
+                            GOOGLE_MEET_READ_SCOPE,
+                        ]),
+                    ),
+            ),
+        ).resolves.toMatchObject({ outcome: "missing_existing_scope" });
+        expect(saveGoogleConnection).not.toHaveBeenCalled();
         expect(saveMeetGrant).not.toHaveBeenCalled();
     });
 

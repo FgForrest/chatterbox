@@ -30,16 +30,14 @@ type ConnectPurpose = "drive" | "calendar" | "meet" | "calendar-meet";
 
 function consentScopes(
     purpose: ConnectPurpose,
-    existingScopes: string[] | undefined,
+    existingScopes: string[],
 ): string[] {
     switch (purpose) {
         case "meet":
-            return existingScopes
-                ? meetConsentScopes(existingScopes)
-                : GOOGLE_CONNECT_SCOPES;
+            return meetConsentScopes(existingScopes);
         case "calendar-meet":
             return calendarAndMeetConsentScopes(
-                existingScopes ?? [],
+                existingScopes,
                 GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
             );
         case "calendar":
@@ -86,7 +84,7 @@ export const GET = apiHandler(async (request) => {
     const response = NextResponse.redirect(
         buildAuthorizationUrl({
             config,
-            scopes: consentScopes(purpose, existing?.scopes),
+            scopes: consentScopes(purpose, existing?.scopes ?? []),
             state,
             codeChallenge: pkce.challenge,
             loginHint: existing?.email,

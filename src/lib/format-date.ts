@@ -54,20 +54,24 @@ export function formatCompactRelativeTime(
     now = Date.now(),
 ): string {
     const difference = date.getTime() - now;
-    const absoluteSeconds = Math.abs(difference) / 1000;
-    let unit: Intl.RelativeTimeFormatUnit = "second";
-    let divisor = 1000;
-    if (absoluteSeconds >= 86_400) {
-        unit = "day";
-        divisor = 86_400_000;
-    } else if (absoluteSeconds >= 3_600) {
-        unit = "hour";
-        divisor = 3_600_000;
-    } else if (absoluteSeconds >= 60) {
+    const absolute = Math.abs(difference);
+    const sign = difference < 0 ? -1 : 1;
+    let unit: Intl.RelativeTimeFormatUnit = "day";
+    let magnitude = Math.round(absolute / 86_400_000);
+    const seconds = Math.round(absolute / 1000);
+    const minutes = Math.round(absolute / 60_000);
+    const hours = Math.round(absolute / 3_600_000);
+    if (seconds < 60) {
+        unit = "second";
+        magnitude = seconds;
+    } else if (minutes < 60) {
         unit = "minute";
-        divisor = 60_000;
+        magnitude = minutes;
+    } else if (hours < 24) {
+        unit = "hour";
+        magnitude = hours;
     }
-    const value = Math.round(difference / divisor);
+    const value = sign * magnitude;
     return new Intl.RelativeTimeFormat(locale, {
         numeric: "auto",
         style: "short",
