@@ -17,7 +17,7 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 2. [Zpracování a profily](processing-and-profiles.md): zařazení nových položek, volba receptu zpracování a čtení pracovního postupu.
 3. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
 4. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
-5. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, profily, vícekrokové zpracování a úkoly napříč nahrávkami a poštou.
+5. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, profily, Vícenásobné shrnování a úkoly napříč nahrávkami a poštou.
 6. [Almanach](almanac.md): osoby a věci, které Chatterbox zná, jejich přezdívky a fakta.
 7. [Učení](learn.md): nechte Chatterbox navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
 8. [Organizace](organization.md): sdílení nahrávek s kolegy.

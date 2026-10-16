@@ -12,23 +12,23 @@ Jakmile má nahrávka přepis, karta **Shrnutí** pod ním jej může shrnout. S
 1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Chatterbox si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
 2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí.
 
-Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení vícekrokového zpracování. Viz [Zpracování a profily](processing-and-profiles.md).
+Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
 
 ![Výběr profilu zpracování pro ruční shrnutí](images/summary-profile-picker.png)
 
-Během zpracování karta ukazuje, jak dlouho už operace trvá a u vícekrokového shrnutí, jak daleko je: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
+Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Vícenásobné shrnování** také postup: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
 Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. Za textem následují **Klíčové body**. Dvě ikony umožňují shrnutí zkopírovat nebo stáhnout jako Markdown soubor.
 
 Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Ukazatel pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 
-### Instrukce shrnutí a vícekrokové zpracování
+### Instrukce shrnutí a Vícenásobné shrnování
 
 Chatterbox obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
-Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **vícekrokové · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, odznak zežloutne, například **vícekrokové · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
+Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **Vícenásobné shrnování · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, odznak zežloutne, například **Vícenásobné shrnování · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
 
 <span id="tasks-from-a-summary" />
 <span id="tasks-across-items" />

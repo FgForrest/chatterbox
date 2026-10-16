@@ -13,7 +13,7 @@ Otevřete Nastavení z nabídky účtu (kulaté tlačítko s Vaší iniciálou),
 
 V **Nastavení → Profily** volíte, jak se nahrávky a pošta přepisují, učí, pojmenovávají, shrnují a převádějí na úkoly. Profily nahrazují dřívější přepínače automatizace účtu a výběr šablony vedle tlačítka **Shrnout**.
 
-Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a volby vícekrokového zpracování. Můžete nastavit jeden výchozí profil pro nahrávky a jeden pro poštu, nepoužívané profily archivovat a později je obnovit.
+Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a nastavení funkce **Vícenásobné shrnování**. Můžete nastavit jeden výchozí profil pro nahrávky a jeden pro poštu, nepoužívané profily archivovat a později je obnovit.
 
 Je-li Organizace povolena, členové vidí profily Organizace a mohou je duplikovat do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
 
@@ -60,9 +60,10 @@ v sekci **Profily**.
 
 ## Shrnutí
 
-Tato sekce zachovává výchozího poskytovatele shrnutí a vícekrokovou předvolbu
-účtu. Profil bez připnutého poskytovatele shrnutí je použije. Automatické názvy
-a shrnutí, jazyk a formát výstupu a vícekrokové chování profilu se nastavují v
+Tato sekce zachovává výchozího poskytovatele shrnutí a předvolbu funkce
+**Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí je
+použije. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
+**Vícenásobné shrnování** v profilu se nastavují v
 sekci **Profily**. Starší šablony shrnutí zůstávají jen pro čtení pod **Šablony
 z doby před profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
