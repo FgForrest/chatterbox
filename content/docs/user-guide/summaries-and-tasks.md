@@ -41,16 +41,14 @@ Click **Review tasks** on the summary to review new tasks, matches, and changes:
 
 ![Reviewing proposed tasks](images/task-review.png)
 
-- A new action can show **Suggested matches** to earlier open tasks from the same folder scope. One clear candidate is ticked only when its evidence is direct and verified. A quoted or unverified statement is never ticked. Deadline and completion changes are never ticked automatically.
+- A new action can show **Suggested matches** to earlier open tasks from the same folder scope. Every suggested match starts unticked, regardless of how many candidates were found or where its evidence came from. Tick the match you want to accept. Deadline and completion changes also start unticked.
 - When several candidates are plausible, choose the right one or **Keep as new**. **Merge into an earlier task** searches all open tasks in the folder scope, not only the suggested candidates.
 - A deadline change shows the **Current deadline** and **Proposed deadline**. A completion is marked **Needs confirmation**. An older statement than the task's latest edit appears as **Earlier mention** and needs no decision.
 - A summary can also propose **No longer needed** or **Handed to someone else**. These are never preselected. An unknown assignee is shown for checking, not silently created.
 - Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. **Add task** adds one the summary missed. **Save and continue later** preserves the review without applying it.
 
-<!-- TODO verify after 4a-fixB/C -->
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it.
 
-<!-- TODO verify after 4a-fixB/C -->
 After accepting a match, the item's task list lets the item owner undo it, or lets curators do so on a shared item. Undoing separates this mention into its own task. Field changes already applied to the earlier task stay applied.
 
 Accepted tasks are listed on the item. Tick one off when it is done, or use **Add task** to add one by hand. A task lives while at least one mention exists, even if the summary that first found it is replaced.

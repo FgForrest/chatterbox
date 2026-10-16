@@ -1,16 +1,13 @@
 import type { ItemContent } from "@/lib/content/types";
+import { env } from "@/lib/env";
 import { resolveLocalPart } from "@/lib/mail/addresses";
-import { mailDomain } from "@/lib/mail/config";
 
 function escapeRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function addressPattern(): RegExp {
-    return new RegExp(
-        `([a-z0-9][a-z0-9.+-]*)@${escapeRegExp(mailDomain())}`,
-        "gi",
-    );
+function addressPattern(domain: string): RegExp {
+    return new RegExp(`([a-z0-9][a-z0-9.+-]*)@${escapeRegExp(domain)}`, "gi");
 }
 
 /**
@@ -18,10 +15,10 @@ function addressPattern(): RegExp {
  * (`jan.••••••••••@klepna.example`), so places in a text stay where they
  * were.
  */
-function masked(localPart: string): string {
+function masked(localPart: string, domain: string): string {
     const dot = localPart.lastIndexOf(".");
     const kept = dot > 0 ? localPart.slice(0, dot + 1) : "";
-    return `${kept}${"•".repeat(localPart.length - kept.length)}@${mailDomain()}`;
+    return `${kept}${"•".repeat(localPart.length - kept.length)}@${domain}`;
 }
 
 /**
@@ -32,9 +29,11 @@ function masked(localPart: string): string {
 export async function secretAddressMasker(
     texts: readonly string[],
 ): Promise<(text: string) => string> {
+    const domain = env.MAIL_DOMAIN;
+    if (!domain) return (text) => text;
     const localParts = new Set<string>();
     for (const text of texts) {
-        for (const match of text.matchAll(addressPattern())) {
+        for (const match of text.matchAll(addressPattern(domain))) {
             if (match[1]) localParts.add(match[1].toLowerCase());
         }
     }
@@ -46,8 +45,10 @@ export async function secretAddressMasker(
     }
     if (secrets.size === 0) return (text) => text;
     return (text) =>
-        text.replace(addressPattern(), (whole, localPart: string) =>
-            secrets.has(localPart.toLowerCase()) ? masked(localPart) : whole,
+        text.replace(addressPattern(domain), (whole, localPart: string) =>
+            secrets.has(localPart.toLowerCase())
+                ? masked(localPart, domain)
+                : whole,
         );
 }
 
@@ -108,9 +109,11 @@ function percentDecoded(text: string): string {
 export async function secretAddressMaskerForHtml(
     html: string,
 ): Promise<(text: string) => string> {
+    const domain = env.MAIL_DOMAIN;
+    if (!domain) return (text) => text;
     const decoded = percentDecoded(withAddressCharactersPlain(html));
     const localParts = new Set<string>();
-    for (const match of decoded.matchAll(addressPattern())) {
+    for (const match of decoded.matchAll(addressPattern(domain))) {
         if (match[1]) localParts.add(match[1].toLowerCase());
     }
     const tokens = new Set<string>();

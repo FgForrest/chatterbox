@@ -30,38 +30,28 @@ export type TaskRowChange = (
     optimistic: Partial<TaskView>,
 ) => void;
 
-function reviewEvidenceKey(value: {
-    quote: string | null;
-    evidenceStartMs: number | null;
-    evidenceText: {
-        segmentIndex: number;
-        charStart: number;
-        charEnd: number;
-    } | null;
-}) {
-    return JSON.stringify([
-        value.quote,
-        value.evidenceStartMs,
-        value.evidenceText?.segmentIndex ?? null,
-        value.evidenceText?.charStart ?? null,
-        value.evidenceText?.charEnd ?? null,
-    ]);
-}
-
 function waitingDecisions(data: RecordingTasks): number {
-    const ambiguousKeys = new Set(
-        data.matches.filter((match) => match.ambiguous).map(reviewEvidenceKey),
+    const followUps = new Set(
+        data.updates
+            .filter((update) => !update.earlierMention)
+            .map((update) => update.task.id),
     );
-    const exactMatches = data.matches.filter(
-        (match) => !match.ambiguous,
-    ).length;
-    const newTasks = data.proposals.filter(
-        (proposal) => !ambiguousKeys.has(reviewEvidenceKey(proposal)),
-    ).length;
-    const actionableUpdates = data.updates.filter(
-        (update) => !update.earlierMention,
-    ).length;
-    return actionableUpdates + exactMatches + ambiguousKeys.size + newTasks;
+    const earlierMentions = new Set(
+        data.updates
+            .filter((update) => update.earlierMention)
+            .map((update) => update.task.id),
+    );
+    const matchOnly = new Set(
+        data.matches
+            .filter(
+                (match) =>
+                    !followUps.has(match.candidate.id) &&
+                    !earlierMentions.has(match.candidate.id),
+            )
+            .map((match) => match.candidate.id),
+    );
+    const proposals = new Set(data.proposals.map((proposal) => proposal.id));
+    return proposals.size + matchOnly.size + followUps.size;
 }
 
 /** One recording's tasks and the writes on them, shared by its views. */
@@ -245,6 +235,7 @@ export function useRecordingTasks(
                       }
                     : current,
             );
+            announceTasksChanged();
             return true;
         } catch (error) {
             await failure(error);

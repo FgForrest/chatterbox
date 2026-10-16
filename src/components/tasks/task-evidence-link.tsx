@@ -20,10 +20,12 @@ export function TaskEvidenceLink({
     evidence,
     quote,
     onPlay,
+    onNavigate,
 }: {
     evidence: TaskEvidence;
     quote?: string | null;
     onPlay?: (startMs: number) => void;
+    onNavigate?: () => void;
 }) {
     const i18n = useExtracted();
     const label =
@@ -63,6 +65,7 @@ export function TaskEvidenceLink({
             className={className}
             title={quote ?? undefined}
             aria-label={label}
+            onClick={onNavigate}
         >
             {evidence.itemKind === "mail" ? (
                 <Mail className="size-3" aria-hidden="true" />

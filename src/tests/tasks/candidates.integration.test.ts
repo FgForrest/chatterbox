@@ -486,6 +486,61 @@ describeWithDatabase("task candidates in an item's folder scope", () => {
         expect(result.nextOffset).toBeNull();
     });
 
+    it("finds accepted tasks from the same item without returning the source or proposals", async () => {
+        await candidate({
+            id: "same-item-source",
+            itemId: TARGET,
+            userId: OWNER,
+            text: "Source task",
+            view: "private",
+        });
+        await candidate({
+            id: "same-item-target",
+            itemId: TARGET,
+            userId: OWNER,
+            text: "Consolidate the launch notes",
+            view: "private",
+        });
+        await db()
+            .insert(recordingTasks)
+            .values({
+                id: "same-item-proposal",
+                itemId: TARGET,
+                userId: OWNER,
+                status: "proposed",
+                text: encryptText("Consolidate the launch notes proposal"),
+                source: "riffado",
+            });
+        await db()
+            .insert(taskMentions)
+            .values({
+                id: "same-item-proposal-mention",
+                taskId: "same-item-proposal",
+                itemId: TARGET,
+                userId: OWNER,
+                view: "private",
+                statementAt: new Date("2026-10-01T00:00:00.000Z"),
+                matchDecision: "home",
+            });
+
+        const result = await searchMergeCandidates(reviewer, TARGET, {
+            text: "consolidate launch notes",
+            sourceTaskId: "same-item-source",
+            offset: 0,
+            limit: 20,
+        });
+
+        expect(result.candidates.map((row) => row.id)).toContain(
+            "same-item-target",
+        );
+        expect(result.candidates.map((row) => row.id)).not.toContain(
+            "same-item-source",
+        );
+        expect(result.candidates.map((row) => row.id)).not.toContain(
+            "same-item-proposal",
+        );
+    });
+
     it("finds a matching task outside the summary's top 40 and paginates", async () => {
         await item("search-many-source", OWNER, "mail");
         await db().insert(recordingFolderAssignments).values({

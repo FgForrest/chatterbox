@@ -75,7 +75,6 @@ import type {
 } from "@/lib/tasks/summary-items";
 import {
     resolveOfferedTaskReference,
-    shouldPreselectTaskOutcome,
     speakerLabelOf,
 } from "@/lib/tasks/summary-items";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
@@ -158,6 +157,7 @@ async function scopedCandidates(
     recording: Pick<RecordingRow, "id">,
     reviewer: TaskViewer,
     scopeFolderIds: readonly string[],
+    excludeCurrentItem = true,
 ): Promise<CandidateTask[]> {
     const [assigned, pending] = await Promise.all([
         db
@@ -212,7 +212,9 @@ async function scopedCandidates(
         .where(
             and(
                 eq(recordingTasks.status, "open"),
-                ne(recordingTasks.itemId, recording.id),
+                ...(excludeCurrentItem
+                    ? [ne(recordingTasks.itemId, recording.id)]
+                    : []),
                 isNull(candidateHomeItem.deletedAt),
                 taskVisible(reviewer, {
                     id: candidateHomeItem.id,
@@ -721,7 +723,9 @@ export async function searchMergeCandidates(
     if (scopeFolderIds.length === 0) {
         return { candidates: [], nextOffset: null };
     }
-    const eligible = (await scopedCandidates(item, reviewer, scopeFolderIds))
+    const eligible = (
+        await scopedCandidates(item, reviewer, scopeFolderIds, false)
+    )
         .filter((candidate) => candidate.id !== query.sourceTaskId)
         .filter((candidate) => {
             if (!source || source.status === "proposed") return true;
@@ -1098,11 +1102,6 @@ export async function resolveTaskProposals({
                 taskId,
                 quote: update.quote,
                 ...located,
-                ticked: shouldPreselectTaskOutcome(
-                    "match",
-                    1,
-                    located.evidenceProvenance,
-                ),
             });
             continue;
         }

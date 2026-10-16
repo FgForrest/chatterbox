@@ -20,6 +20,7 @@ import {
 import {
     aiEnhancements,
     chatterItems,
+    itemProcessing,
     mailMessages,
     people,
     recordingFolders,
@@ -191,7 +192,6 @@ function match(
         taskId,
         quote: null,
         evidenceStartMs: null,
-        ticked: true,
         ...extra,
     };
 }
@@ -645,7 +645,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(field?.id).not.toBe(mention?.id);
     });
 
-    it("accepts a preselected pure match on Apply", async () => {
+    it("stores a pure match unticked and accepts it only after review", async () => {
         const task = await addTask(alice, REC, {
             text: "Send the partner email",
             status: "open",
@@ -657,7 +657,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         const listed = await review(alice, LATER);
         expect(listed.matches).toEqual([
             expect.objectContaining({
-                ticked: true,
+                ticked: false,
                 ambiguous: false,
                 evidenceProvenance: null,
                 candidate: expect.objectContaining({
@@ -667,6 +667,16 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 }),
             }),
         ]);
+
+        const [suggestion] = listed.matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
 
         await acceptReview(alice, LATER);
         const [mention] = await db()
@@ -762,7 +772,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             matches: [
                 match(task.id, {
                     evidenceProvenance: "quoted",
-                    ticked: false,
                 }),
             ],
             updates: [
@@ -802,6 +811,15 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             status: "open",
         });
         await summarize(LATER, [], { matches: [match(task.id)] });
+        const [suggestion] = (await review(alice, LATER)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
         await updateTask(alice, task.id, {
             version: task.version,
             status: "done",
@@ -1013,7 +1031,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             matches: [
                 match(target.id, {
                     evidenceProvenance: "unverified",
-                    ticked: false,
                 }),
             ],
         });
@@ -1143,6 +1160,15 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             status: "open",
         });
         await summarize(LATER, [], { matches: [match(target.id)] });
+        const [suggestion] = (await review(alice, LATER)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            LATER,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
         await acceptReview(alice, LATER);
         await share(REC);
         await share(LATER);
@@ -1278,6 +1304,69 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 taskFingerprint("Share the pricing page draft"),
             ].sort(),
         );
+    });
+
+    it("requests workflow advancement after proposal merges and review-item merges", async () => {
+        await summarize(REC, [
+            proposal("Draft the pricing page"),
+            proposal("Share the pricing page draft"),
+        ]);
+        const beforeProposalMerge = (
+            await db()
+                .select({ generation: itemProcessing.requestedGeneration })
+                .from(itemProcessing)
+                .where(
+                    and(
+                        eq(itemProcessing.itemId, REC),
+                        eq(itemProcessing.userId, ALICE),
+                        eq(itemProcessing.view, "private"),
+                    ),
+                )
+        )[0]?.generation;
+        const proposals = (await review(alice)).proposals;
+        const merged = await mergeProposals(
+            alice,
+            REC,
+            proposals.map((row) => row.id),
+        );
+        expect(
+            (
+                await db()
+                    .select({ generation: itemProcessing.requestedGeneration })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, REC),
+                            eq(itemProcessing.userId, ALICE),
+                            eq(itemProcessing.view, "private"),
+                        ),
+                    )
+            )[0]?.generation,
+        ).toBe((beforeProposalMerge ?? 0) + 1);
+
+        const target = await addTask(alice, LATER, {
+            text: "Publish the pricing page",
+            status: "open",
+        });
+        await mergeTaskIntoTask(alice, merged.id, target.id, {
+            reviewItemId: REC,
+        });
+
+        expect(
+            (
+                await db()
+                    .select({ generation: itemProcessing.requestedGeneration })
+                    .from(itemProcessing)
+                    .where(
+                        and(
+                            eq(itemProcessing.itemId, REC),
+                            eq(itemProcessing.userId, ALICE),
+                            eq(itemProcessing.view, "private"),
+                        ),
+                    )
+            )[0]?.generation,
+        ).toBe((beforeProposalMerge ?? 0) + 2);
+        expect((await review(alice)).proposals).toEqual([]);
     });
 
     it("moves a mail proposal's quote, text anchor and provenance together", async () => {
@@ -3654,7 +3743,6 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
             matches: [
                 match(task.id, {
                     quote: "this is the same task",
-                    ticked: true,
                 }),
             ],
             updates: [
@@ -3686,7 +3774,7 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         expect(conflictReview.matches).toEqual([
             expect.objectContaining({
                 candidate: expect.objectContaining({ id: task.id }),
-                ticked: true,
+                ticked: false,
             }),
         ]);
         expect(conflictReview.updates.map((update) => update.kind)).toEqual([
@@ -4165,6 +4253,15 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
         await summarize(mailId, [], {
             matches: [match(task.id, { quote: "send the combined follow-up" })],
         });
+        const [suggestion] = (await review(alice, mailId)).matches;
+        if (!suggestion) throw new Error("missing suggested match");
+        await tickUpdateProposal(
+            alice,
+            mailId,
+            suggestion.id,
+            true,
+            suggestion.version,
+        );
         await acceptReview(alice, mailId);
 
         expect(

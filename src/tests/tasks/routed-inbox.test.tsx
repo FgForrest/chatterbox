@@ -26,6 +26,8 @@ const dueProposal = {
     sourceItemId: "mail-1",
     taskId: "task-1",
     taskText: "Send the contract",
+    currentDueDate: "2026-10-20",
+    currentDuePhrase: null,
     dueDate: "2026-10-29",
     duePhrase: null,
     currentAssigneeName: "Ada",
@@ -37,7 +39,7 @@ const dueProposal = {
     evidenceText: { segmentIndex: 1, charStart: 4, charEnd: 28 },
     version: 2,
     sourceItem: { id: "mail-1", kind: "mail" as const, title: "Re: Contract" },
-    attachedBy: null,
+    proposedBy: { id: "user-2", name: "Boris" },
 };
 
 describe("routed proposals inbox", () => {
@@ -68,6 +70,8 @@ describe("routed proposals inbox", () => {
         expect(
             screen.getByRole("link", { name: "Show evidence in mail" }),
         ).toBeTruthy();
+        expect(screen.getByText("Proposed by Boris")).toBeTruthy();
+        expect(screen.getByText("2026-10-20 → 2026-10-29")).toBeTruthy();
     });
 
     it("renders attach_merge as a notice with Dismiss only", async () => {
@@ -77,7 +81,7 @@ describe("routed proposals inbox", () => {
             kind: "attach_merge" as const,
             dueDate: null,
             evidenceText: null,
-            attachedBy: { id: "user-2", name: "Bo" },
+            proposedBy: { id: "user-2", name: "Bo" },
         };
         const fetchMock = vi
             .fn()
@@ -133,6 +137,7 @@ describe("routed proposals inbox", () => {
         expect(await screen.findByText("No longer needed")).toBeTruthy();
         expect(screen.getByText("Handed to someone else")).toBeTruthy();
         expect(screen.getByText("Ada → Dana")).toBeTruthy();
+        expect(screen.getByText("Open → No longer needed")).toBeTruthy();
     });
 
     it("shows the routed-proposal count in the Tasks navigation badge", async () => {

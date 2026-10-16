@@ -18,6 +18,7 @@ import {
     type CategorizeSubmission,
 } from "@/components/pipeline/categorize-panel";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { onTasksChanged } from "@/components/tasks/task-api";
 import { Button } from "@/components/ui/button";
 import {
     Tooltip,
@@ -127,6 +128,14 @@ export function WorkflowIndicator({
         if (initialData !== undefined) return;
         void load(itemId, "audio");
     }, [initialData, itemId, load]);
+
+    useEffect(
+        () =>
+            onTasksChanged(() => {
+                if (data) void load(data.itemId, data.kind);
+            }),
+        [data, load],
+    );
 
     const loadPanel = useCallback(() => {
         if (!data || panelData || panelRequest.current) return;
@@ -440,9 +449,26 @@ export function WorkflowIndicator({
                         </span>
                     ))}
                     {data.legacy ? (
-                        <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
-                            {i18n("Processed before profiles")}
-                        </span>
+                        <>
+                            <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                                {i18n("Processed before profiles")}
+                            </span>
+                            {(data.taskReviewWaiting ?? 0) > 0 && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={onReviewTasks}
+                                >
+                                    <Clock3 className="size-3.5" aria-hidden />
+                                    {i18n("Review tasks ({count})", {
+                                        count: String(
+                                            data.taskReviewWaiting ?? 0,
+                                        ),
+                                    })}
+                                </Button>
+                            )}
+                        </>
                     ) : data.profile ? (
                         <span className="rounded-full border px-2.5 py-1 text-xs">
                             {i18n("Profile")}: {data.profile.name}

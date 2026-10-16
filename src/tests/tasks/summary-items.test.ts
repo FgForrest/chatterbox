@@ -12,7 +12,6 @@ import {
     readTaskItems,
     readTaskUpdates,
     resolveOfferedTaskReference,
-    shouldPreselectTaskOutcome,
     taskItemLine,
 } from "@/lib/tasks/summary-items";
 
@@ -197,22 +196,6 @@ describe("readTaskUpdates", () => {
                 quote: null,
             },
         ]);
-        expect(shouldPreselectTaskOutcome("drop", 1, null)).toBe(false);
-        expect(shouldPreselectTaskOutcome("assignee", 1, null)).toBe(false);
-    });
-});
-
-describe("task outcome preselection", () => {
-    it("preselects only one trustworthy match", () => {
-        expect(shouldPreselectTaskOutcome("match", 1, null)).toBe(true);
-        expect(shouldPreselectTaskOutcome("match", 2, null)).toBe(false);
-        expect(shouldPreselectTaskOutcome("match", 1, "quoted")).toBe(false);
-        expect(shouldPreselectTaskOutcome("match", 1, "unverified")).toBe(
-            false,
-        );
-        expect(shouldPreselectTaskOutcome("done", 1, null)).toBe(false);
-        expect(shouldPreselectTaskOutcome("due", 1, null)).toBe(false);
-        expect(shouldPreselectTaskOutcome("due_phrase", 1, null)).toBe(false);
     });
 });
 

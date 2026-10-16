@@ -18,6 +18,7 @@ import { getOrgUserId } from "@/lib/org/config";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 export interface ProcessingProfileSummary {
     id: string;
@@ -61,6 +62,7 @@ export interface ItemProcessingPresentation {
         learn: boolean;
     };
     processAgain: boolean;
+    taskReviewWaiting?: number;
 }
 
 interface StoredFolder {
@@ -205,6 +207,7 @@ export async function loadPrivateItemProcessing(
         mailContent,
         summaries,
         finishedLearnRuns,
+        taskReviewWaiting,
     ] = await Promise.all([
         getOrgUserId(),
         db
@@ -303,6 +306,9 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.status, "finished"),
                 ),
             ),
+        waitingTaskDecisions(db, itemId, ownerUserId, "private").then(
+            (decisions) => decisions.total,
+        ),
     ]);
     const folderSummaries = await folderPaths(ownerUserId, orgUserId, [
         ...placementRows,
@@ -443,5 +449,6 @@ export async function loadPrivateItemProcessing(
             automatic !== null &&
             Object.values(automatic).some(Boolean) &&
             processAgainPending(item.phases ?? {}),
+        taskReviewWaiting,
     };
 }

@@ -107,10 +107,50 @@ export function TaskReviewLink({
         if (merging && (await state.merge(merging))) setMerging(null);
     };
 
+    const actionableUpdateTaskIds = new Set(
+        data.updates
+            .filter((update) => !update.earlierMention)
+            .map((update) => update.task.id),
+    );
+    const earlierMentionTaskIds = new Set(
+        data.updates
+            .filter((update) => update.earlierMention)
+            .map((update) => update.task.id),
+    );
+    const matchOnlyTaskIds = new Set(
+        data.matches
+            .filter(
+                (match) =>
+                    !actionableUpdateTaskIds.has(match.candidate.id) &&
+                    !earlierMentionTaskIds.has(match.candidate.id),
+            )
+            .map((match) => match.candidate.id),
+    );
+    const tickedFollowUps = [...actionableUpdateTaskIds].filter(
+        (taskId) =>
+            data.updates.some(
+                (update) => update.task.id === taskId && update.ticked,
+            ) ||
+            data.matches.some(
+                (match) => match.candidate.id === taskId && match.ticked,
+            ),
+    ).length;
     const ticked =
-        data.proposals.filter((task) => task.ticked).length +
-        data.updates.filter((update) => update.ticked).length +
-        data.matches.filter((match) => match.ticked).length;
+        new Set(
+            data.proposals.filter((task) => task.ticked).map((task) => task.id),
+        ).size +
+        [...matchOnlyTaskIds].filter((taskId) =>
+            data.matches.some(
+                (match) => match.candidate.id === taskId && match.ticked,
+            ),
+        ).length +
+        tickedFollowUps;
+    const updatesByTaskId = new Map<string, TaskUpdateView[]>();
+    for (const update of data.updates) {
+        const updates = updatesByTaskId.get(update.task.id) ?? [];
+        updates.push(update);
+        updatesByTaskId.set(update.task.id, updates);
+    }
     const ambiguous = new Map<
         string,
         { matches: TaskMatchView[]; proposal: TaskView | null }
@@ -139,6 +179,12 @@ export function TaskReviewLink({
     );
     const visibleProposals = data.proposals.filter(
         (proposal) => !pairedProposalIds.has(proposal.id),
+    );
+    const matchedTaskIds = new Set(
+        data.matches.map((match) => match.candidate.id),
+    );
+    const standaloneUpdates = [...updatesByTaskId.entries()].filter(
+        ([taskId]) => !matchedTaskIds.has(taskId),
     );
 
     return (
@@ -199,14 +245,51 @@ export function TaskReviewLink({
                                             <SuggestedMatchRow
                                                 key={match.id}
                                                 match={match}
+                                                updates={
+                                                    updatesByTaskId.get(
+                                                        match.candidate.id,
+                                                    ) ?? []
+                                                }
                                                 itemId={state.itemId}
                                                 onPlay={onPlay}
-                                                onToggle={(ticked) =>
+                                                onNavigate={() =>
+                                                    setOpen(false)
+                                                }
+                                                onToggle={(ticked) => {
                                                     state.tickMatch(
                                                         match,
                                                         ticked,
-                                                    )
-                                                }
+                                                    );
+                                                    if (!ticked) {
+                                                        for (const update of updatesByTaskId.get(
+                                                            match.candidate.id,
+                                                        ) ?? []) {
+                                                            if (
+                                                                !update.earlierMention
+                                                            ) {
+                                                                state.tickUpdate(
+                                                                    update,
+                                                                    false,
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }}
+                                                onToggleUpdate={(
+                                                    update,
+                                                    ticked,
+                                                ) => {
+                                                    if (ticked) {
+                                                        state.tickMatch(
+                                                            match,
+                                                            true,
+                                                        );
+                                                    }
+                                                    state.tickUpdate(
+                                                        update,
+                                                        ticked,
+                                                    );
+                                                }}
                                             />
                                         ))}
                                     {[...ambiguous.entries()].map(
@@ -217,6 +300,12 @@ export function TaskReviewLink({
                                                 proposal={group.proposal}
                                                 itemId={state.itemId}
                                                 onPlay={onPlay}
+                                                onNavigate={() =>
+                                                    setOpen(false)
+                                                }
+                                                updatesByTaskId={
+                                                    updatesByTaskId
+                                                }
                                                 onChoose={(selected) => {
                                                     for (const match of group.matches) {
                                                         state.tickMatch(
@@ -236,6 +325,36 @@ export function TaskReviewLink({
                                                     }
                                                 }}
                                                 onMerge={state.mergeInto}
+                                                onToggleUpdate={(
+                                                    match,
+                                                    update,
+                                                    ticked,
+                                                ) => {
+                                                    if (ticked) {
+                                                        for (const candidate of group.matches) {
+                                                            state.tickMatch(
+                                                                candidate,
+                                                                candidate.id ===
+                                                                    match.id,
+                                                            );
+                                                        }
+                                                        if (group.proposal) {
+                                                            state.update(
+                                                                group.proposal,
+                                                                {
+                                                                    ticked: false,
+                                                                },
+                                                                {
+                                                                    ticked: false,
+                                                                },
+                                                            );
+                                                        }
+                                                    }
+                                                    state.tickUpdate(
+                                                        update,
+                                                        ticked,
+                                                    );
+                                                }}
                                             />
                                         ),
                                     )}
@@ -305,6 +424,7 @@ export function TaskReviewLink({
                                             speakers={speakers}
                                             organizationOnly={organizationOnly}
                                             onPlay={onPlay}
+                                            onNavigate={() => setOpen(false)}
                                             onMerge={(targetTaskId) =>
                                                 state.mergeInto(
                                                     task.id,
@@ -349,24 +469,40 @@ export function TaskReviewLink({
                                 )}
                             </section>
                         )}
-                        {data.updates.length > 0 && (
+                        {standaloneUpdates.length > 0 && (
                             <section className="space-y-2">
                                 <SectionTitle
                                     title={i18n("Heard about earlier tasks")}
-                                    count={data.updates.length}
+                                    count={standaloneUpdates.length}
                                 />
                                 <ul className="space-y-2">
-                                    {data.updates.map((update) => (
-                                        <UpdateRow
-                                            key={update.id}
-                                            update={update}
-                                            itemId={state.itemId}
-                                            onPlay={onPlay}
-                                            onToggle={(next) =>
-                                                state.tickUpdate(update, next)
-                                            }
-                                        />
-                                    ))}
+                                    {standaloneUpdates.map(
+                                        ([taskId, updates]) => (
+                                            <li
+                                                key={taskId}
+                                                data-task-review-card={taskId}
+                                                className="-mx-2 space-y-2 rounded-md border px-3 py-2 text-sm"
+                                            >
+                                                {updates.map((update) => (
+                                                    <UpdateRow
+                                                        key={update.id}
+                                                        update={update}
+                                                        itemId={state.itemId}
+                                                        onPlay={onPlay}
+                                                        onNavigate={() =>
+                                                            setOpen(false)
+                                                        }
+                                                        onToggle={(next) =>
+                                                            state.tickUpdate(
+                                                                update,
+                                                                next,
+                                                            )
+                                                        }
+                                                    />
+                                                ))}
+                                            </li>
+                                        ),
+                                    )}
                                 </ul>
                             </section>
                         )}
@@ -420,6 +556,7 @@ function ProposalRow({
     speakers,
     organizationOnly,
     onPlay,
+    onNavigate,
     selection,
     onChange,
     onMerge,
@@ -428,6 +565,7 @@ function ProposalRow({
     speakers: readonly SpeakerChoice[];
     organizationOnly: boolean;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
     selection: { selected: boolean; onToggle: () => void } | null;
     onChange: TaskRowChange;
     onMerge: (targetTaskId: string) => Promise<boolean>;
@@ -511,6 +649,7 @@ function ProposalRow({
                         }}
                         quote={task.quote}
                         onPlay={onPlay}
+                        onNavigate={onNavigate}
                     />
                     {task.quote && (
                         <span className="min-w-0 truncate text-xs italic text-muted-foreground">
@@ -572,10 +711,12 @@ function MatchEvidence({
     match,
     itemId,
     onPlay,
+    onNavigate,
 }: {
     match: TaskMatchView;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    onNavigate?: () => void;
 }) {
     return (
         <TaskEvidenceLink
@@ -587,37 +728,75 @@ function MatchEvidence({
             }}
             quote={match.quote}
             onPlay={onPlay}
+            onNavigate={onNavigate}
         />
     );
 }
 
 function SuggestedMatchRow({
     match,
+    updates,
     itemId,
     onPlay,
+    onNavigate,
     onToggle,
+    onToggleUpdate,
 }: {
     match: TaskMatchView;
+    updates: readonly TaskUpdateView[];
     itemId: string;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
+    onToggleUpdate: (update: TaskUpdateView, ticked: boolean) => void;
 }) {
     const i18n = useExtracted();
+    const actionable =
+        updates.length === 0 ||
+        updates.some((update) => !update.earlierMention);
     return (
-        <li className="-mx-2 flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-            <input
-                type="checkbox"
-                className="mt-1 size-4 shrink-0"
-                checked={match.ticked}
-                onChange={(event) => onToggle(event.target.checked)}
-                aria-label={i18n("Apply this suggested match")}
-            />
+        <li
+            data-task-review-card={match.candidate.id}
+            className="-mx-2 flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+        >
+            {actionable && (
+                <input
+                    type="checkbox"
+                    className="mt-1 size-4 shrink-0"
+                    checked={match.ticked}
+                    onChange={(event) => onToggle(event.target.checked)}
+                    aria-label={i18n("Apply suggested match to {task}", {
+                        task: match.candidate.text,
+                    })}
+                />
+            )}
             <div className="min-w-0 flex-1 space-y-1">
                 <p className="text-xs font-semibold text-primary">
                     {i18n("Suggested match")}
                 </p>
                 <CandidateDetails match={match} />
-                <MatchEvidence match={match} itemId={itemId} onPlay={onPlay} />
+                <MatchEvidence
+                    match={match}
+                    itemId={itemId}
+                    onPlay={onPlay}
+                    onNavigate={onNavigate}
+                />
+                {updates.length > 0 && (
+                    <div className="mt-2 space-y-2 border-t pt-2">
+                        {updates.map((update) => (
+                            <UpdateRow
+                                key={update.id}
+                                update={update}
+                                itemId={itemId}
+                                onPlay={onPlay}
+                                onNavigate={onNavigate}
+                                onToggle={(ticked) =>
+                                    onToggleUpdate(update, ticked)
+                                }
+                            />
+                        ))}
+                    </div>
+                )}
             </div>
         </li>
     );
@@ -628,15 +807,25 @@ function AmbiguousMatchRow({
     proposal,
     itemId,
     onPlay,
+    onNavigate,
+    updatesByTaskId,
     onChoose,
     onMerge,
+    onToggleUpdate,
 }: {
     matches: readonly TaskMatchView[];
     proposal: TaskView | null;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
+    updatesByTaskId: ReadonlyMap<string, readonly TaskUpdateView[]>;
     onChoose: (selected: string | "new") => void;
     onMerge: (sourceTaskId: string, targetTaskId: string) => Promise<boolean>;
+    onToggleUpdate: (
+        match: TaskMatchView,
+        update: TaskUpdateView,
+        ticked: boolean,
+    ) => void;
 }) {
     const i18n = useExtracted();
     const selected =
@@ -650,19 +839,47 @@ function AmbiguousMatchRow({
                 </legend>
                 <div role="radiogroup" aria-label={i18n("Choose a task match")}>
                     {matches.map((match) => (
-                        <label
+                        <div
                             key={match.id}
-                            className="flex items-start gap-2 py-1"
+                            data-task-review-card={match.candidate.id}
+                            className="space-y-2 py-1"
                         >
-                            <input
-                                type="radio"
-                                name={`match-${matches[0]?.id}`}
-                                checked={selected === match.id}
-                                onChange={() => onChoose(match.id)}
-                                aria-label={match.candidate.text}
-                            />
-                            <CandidateDetails match={match} />
-                        </label>
+                            <label className="flex items-start gap-2">
+                                <input
+                                    type="radio"
+                                    name={`match-${matches[0]?.id}`}
+                                    checked={selected === match.id}
+                                    onChange={() => onChoose(match.id)}
+                                    aria-label={match.candidate.text}
+                                />
+                                <CandidateDetails match={match} />
+                            </label>
+                            {(updatesByTaskId.get(match.candidate.id) ?? [])
+                                .length > 0 && (
+                                <div className="ml-5 space-y-2 border-l pl-3">
+                                    {(
+                                        updatesByTaskId.get(
+                                            match.candidate.id,
+                                        ) ?? []
+                                    ).map((update) => (
+                                        <UpdateRow
+                                            key={update.id}
+                                            update={update}
+                                            itemId={itemId}
+                                            onPlay={onPlay}
+                                            onNavigate={onNavigate}
+                                            onToggle={(ticked) =>
+                                                onToggleUpdate(
+                                                    match,
+                                                    update,
+                                                    ticked,
+                                                )
+                                            }
+                                        />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     ))}
                     {proposal && (
                         <label className="flex items-center gap-2 py-1">
@@ -683,6 +900,7 @@ function AmbiguousMatchRow({
                         match={matches[0]}
                         itemId={itemId}
                         onPlay={onPlay}
+                        onNavigate={onNavigate}
                     />
                 )}
                 {proposal && (
@@ -705,11 +923,13 @@ function UpdateRow({
     update,
     itemId,
     onPlay,
+    onNavigate,
     onToggle,
 }: {
     update: TaskUpdateView;
     itemId: string;
     onPlay?: (startMs: number) => void;
+    onNavigate: () => void;
     onToggle: (ticked: boolean) => void;
 }) {
     const i18n = useExtracted();
@@ -723,11 +943,12 @@ function UpdateRow({
             }}
             quote={update.quote}
             onPlay={onPlay}
+            onNavigate={onNavigate}
         />
     );
     if (update.earlierMention) {
         return (
-            <li className="-mx-2 space-y-1 rounded-md border px-3 py-2 text-sm">
+            <div className="space-y-1 text-sm">
                 <p className="font-medium">{i18n("Earlier mention")}</p>
                 <p>{update.task.text}</p>
                 <p className="text-xs text-muted-foreground">
@@ -736,11 +957,11 @@ function UpdateRow({
                     )}
                 </p>
                 {evidence}
-            </li>
+            </div>
         );
     }
     return (
-        <li className="-mx-2 rounded-md border px-3 py-2 text-sm">
+        <div className="text-sm">
             {update.kind === "done" ? (
                 <label className="flex items-start gap-2">
                     <input
@@ -870,6 +1091,6 @@ function UpdateRow({
                 {evidence}
                 <ProvenanceNote provenance={update.evidenceProvenance} />
             </div>
-        </li>
+        </div>
     );
 }

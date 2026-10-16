@@ -62,7 +62,7 @@ function task(overrides: Partial<TaskView> = {}): TaskView {
 function match(overrides: Partial<TaskMatchView> = {}): TaskMatchView {
     return {
         id: "match-1",
-        ticked: true,
+        ticked: false,
         version: 3,
         ambiguous: false,
         quote: "I will send the revised contract",
@@ -199,7 +199,7 @@ it("confirms undo while explaining that applied task changes stay", async () => 
 });
 
 describe("task review rows", () => {
-    it("shows a preselected suggested match with its candidate and evidence", () => {
+    it("shows an unticked suggested match with its candidate and evidence", () => {
         const onPlay = vi.fn();
         const current = state({
             canEdit: true,
@@ -226,11 +226,42 @@ describe("task review rows", () => {
         expect(screen.getByText(/Contract planning/)).toBeTruthy();
         expect(
             screen.getByRole("checkbox", {
-                name: "Apply this suggested match",
+                name: "Apply suggested match to Send the contract",
             }),
-        ).toHaveProperty("checked", true);
+        ).toHaveProperty("checked", false);
         fireEvent.click(screen.getByRole("button", { name: "Play evidence" }));
         expect(onPlay).toHaveBeenCalledWith(12_500);
+    });
+
+    it("shows one card for a match, its field changes, and earlier evidence", () => {
+        const suggested = match({ ticked: false });
+        const due = update();
+        const earlier = update({
+            id: "earlier-update",
+            kind: "done",
+            earlierMention: true,
+            quote: "It had already been done",
+        });
+        const current = openReview({
+            matches: [suggested],
+            updates: [due, earlier],
+        });
+
+        const cards = document.querySelectorAll(
+            '[data-task-review-card="existing-1"]',
+        );
+        expect(cards).toHaveLength(1);
+        expect(screen.getByText("Suggested match")).toBeTruthy();
+        expect(screen.getByText("Current deadline")).toBeTruthy();
+        expect(screen.getByText("Earlier mention")).toBeTruthy();
+        expect(screen.queryByText("Heard about earlier tasks")).toBeNull();
+        expect(screen.getByText("0 of 1 will be accepted")).toBeTruthy();
+
+        fireEvent.click(
+            screen.getByRole("radio", { name: "Use the proposed deadline" }),
+        );
+        expect(current.tickMatch).toHaveBeenCalledWith(suggested, true);
+        expect(current.tickUpdate).toHaveBeenCalledWith(due, true);
     });
 
     it("offers ambiguous candidates and Keep as new as one choice", () => {
@@ -372,6 +403,10 @@ describe("task review rows", () => {
         ).toBe(
             "/dashboard?recording=source-item&evidenceSegment=2&evidenceStart=8&evidenceEnd=31",
         );
+        fireEvent.click(
+            screen.getByRole("link", { name: "Show evidence in mail" }),
+        );
+        expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("loads merge candidates on open and merges a proposal from the keyboard", async () => {
@@ -418,5 +453,70 @@ describe("task review rows", () => {
                 "target-1",
             ),
         );
+    });
+
+    it("loads every merge-candidate page through a keyboard-reachable row", async () => {
+        const first = {
+            id: "target-1",
+            text: "Routine follow-up 1",
+            assignee: null,
+            dueDate: null,
+            duePhrase: null,
+            homeItem: {
+                id: "earlier-item",
+                kind: "audio" as const,
+                title: "Contract planning",
+            },
+        };
+        const second = { ...first, id: "target-21", text: "Exact result" };
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json({ candidates: [first], nextOffset: 20 }),
+            )
+            .mockResolvedValueOnce(
+                Response.json({ candidates: [second], nextOffset: null }),
+            );
+        vi.stubGlobal("fetch", fetchMock);
+        openReview({ proposals: [task()] });
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Merge into an earlier task" }),
+        );
+        const more = await screen.findByRole("button", {
+            name: "Show more tasks",
+        });
+        more.focus();
+        expect(document.activeElement).toBe(more);
+        fireEvent.click(more);
+
+        expect(await screen.findByText("Exact result")).toBeTruthy();
+        expect(fetchMock).toHaveBeenLastCalledWith(
+            "/api/recordings/source-item/tasks/merge?q=&offset=20&limit=20&sourceTaskId=proposal-1",
+            expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        );
+    });
+
+    it("gives every Stage 4a dialog an accessible description", async () => {
+        const consoleError = vi
+            .spyOn(console, "error")
+            .mockImplementation(() => undefined);
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(
+                Response.json({ candidates: [], nextOffset: null }),
+            );
+        vi.stubGlobal("fetch", fetchMock);
+        openReview({ proposals: [task()] });
+        fireEvent.click(
+            screen.getByRole("button", { name: "Merge into an earlier task" }),
+        );
+        await screen.findByText("Choose the open task that should remain.");
+
+        expect(
+            consoleError.mock.calls.some((call) =>
+                call.some((part) => String(part).includes("Description")),
+            ),
+        ).toBe(false);
     });
 });

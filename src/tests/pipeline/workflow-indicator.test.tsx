@@ -12,6 +12,7 @@ import {
     type ItemProcessingPresentation,
     WorkflowIndicator,
 } from "@/components/pipeline/workflow-indicator";
+import { announceTasksChanged } from "@/components/tasks/task-api";
 
 vi.mock("next-intl", () => ({
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
@@ -372,6 +373,77 @@ describe("workflow indicator", () => {
         );
         expect(screen.getByText("Processed before profiles")).toBeTruthy();
         expect(screen.queryByText("Waiting for you to file it")).toBeNull();
+    });
+
+    it("links legacy items to task review when decisions are waiting", () => {
+        const onReviewTasks = vi.fn();
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    legacy: true,
+                    profile: null,
+                    taskReviewWaiting: 2,
+                })}
+                onReviewTasks={onReviewTasks}
+            />,
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", { name: "Review tasks (2)" }),
+        );
+        expect(onReviewTasks).toHaveBeenCalledOnce();
+    });
+
+    it("refreshes the task-review phase when a task review changes", async () => {
+        const finished = processing({
+            phases: {
+                taskReview: {
+                    state: "done",
+                    reason: "reviewed",
+                    generation: 2,
+                    at: "2026-10-15T00:01:00.000Z",
+                },
+            },
+            outputs: { transcript: true, summary: true, learn: true },
+        });
+        const fetchMock = vi.fn(async () =>
+            Response.json({ processing: finished }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    phases: {
+                        taskReview: {
+                            state: "waiting",
+                            reason: "needs_review",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                    outputs: { transcript: true, summary: true, learn: true },
+                })}
+            />,
+        );
+        expect(
+            screen.getByRole("button", { name: "Review tasks" }),
+        ).toBeTruthy();
+
+        announceTasksChanged();
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(
+                "/api/recordings/item-1?processing=1",
+            ),
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByText("Task review").parentElement?.textContent,
+            ).toContain("Done"),
+        );
+        expect(
+            screen.queryByRole("button", { name: "Review tasks" }),
+        ).toBeNull();
     });
 
     it("offers Process again after filing a legacy item or changing its profile", async () => {

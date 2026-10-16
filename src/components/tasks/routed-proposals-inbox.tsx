@@ -111,7 +111,7 @@ export function RoutedProposalsInbox() {
                                         "{person} attached their task {task} from {item}",
                                         {
                                             person:
-                                                row.attachedBy?.name ??
+                                                row.proposedBy?.name ??
                                                 i18n("Someone"),
                                             task: row.taskText,
                                             item: row.sourceItem.title,
@@ -122,15 +122,21 @@ export function RoutedProposalsInbox() {
                                         "{person} attached their task {task}",
                                         {
                                             person:
-                                                row.attachedBy?.name ??
+                                                row.proposedBy?.name ??
                                                 i18n("Someone"),
                                             task: row.taskText,
                                         },
                                     )
                                 ) : row.kind === "done" ? (
-                                    i18n("Mark done: {task}", {
-                                        task: row.taskText,
-                                    })
+                                    <span>
+                                        <span className="font-medium">
+                                            {i18n("Mark done")}
+                                        </span>
+                                        : {row.taskText}
+                                        <span className="block text-xs text-muted-foreground">
+                                            {i18n("Open")} → {i18n("Done")}
+                                        </span>
+                                    </span>
                                 ) : row.kind === "drop" ? (
                                     <>
                                         <Ban className="mt-0.5 size-3.5 shrink-0" />
@@ -139,6 +145,10 @@ export function RoutedProposalsInbox() {
                                                 {i18n("No longer needed")}
                                             </span>
                                             : {row.taskText}
+                                            <span className="block text-xs text-muted-foreground">
+                                                {i18n("Open")} →{" "}
+                                                {i18n("No longer needed")}
+                                            </span>
                                         </span>
                                     </>
                                 ) : row.kind === "assignee" ? (
@@ -177,18 +187,32 @@ export function RoutedProposalsInbox() {
                                         </span>
                                     </>
                                 ) : (
-                                    i18n(
-                                        "Change the deadline for {task} to {due}",
-                                        {
-                                            task: row.taskText,
-                                            due:
-                                                row.dueDate ??
+                                    <span>
+                                        <span className="font-medium">
+                                            {i18n("Change the deadline")}
+                                        </span>
+                                        : {row.taskText}
+                                        <span className="block text-xs text-muted-foreground">
+                                            {row.currentDueDate ??
+                                                row.currentDuePhrase ??
+                                                i18n("No due date")}{" "}
+                                            →{" "}
+                                            {row.dueDate ??
                                                 row.duePhrase ??
-                                                i18n("No due date"),
-                                        },
-                                    )
+                                                i18n("No due date")}
+                                        </span>
+                                    </span>
                                 )}
                             </p>
+                            {!notice && (
+                                <p className="text-xs text-muted-foreground">
+                                    {i18n("Proposed by {person}", {
+                                        person:
+                                            row.proposedBy?.name ??
+                                            i18n("Someone"),
+                                    })}
+                                </p>
+                            )}
                             {row.sourceItem && (
                                 <TaskEvidenceLink
                                     evidence={{

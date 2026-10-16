@@ -17,7 +17,6 @@ import {
     fieldProposalIsLater,
     plausibleQuotedStatementTime,
 } from "@/lib/tasks/chronology";
-import { shouldPreselectTaskOutcome } from "@/lib/tasks/summary-items";
 
 export { liveFollowUpCondition } from "@/db/queries/tasks";
 
@@ -79,8 +78,6 @@ export interface ProposedTaskMatch {
     evidenceText?: TextEvidence | null;
     evidenceProvenance?: EvidenceProvenance | null;
     quotedAt?: Date | null;
-    /** Derived from the one-candidate, trustworthy-evidence rule. */
-    ticked: boolean;
 }
 
 /** What one summary proposes, ready to store. */
@@ -109,7 +106,7 @@ type ProposedEvidence = Pick<
     | "quotedAt"
 >;
 
-type ProposedMatchEvidence = ProposedEvidence & { ticked: boolean };
+type ProposedMatchEvidence = ProposedEvidence & { ticked: false };
 
 function statementAt(itemOccurredAt: Date, evidence: ProposedEvidence): Date {
     return evidence.evidenceProvenance === "quoted"
@@ -165,25 +162,10 @@ export async function writeTaskProposalsInTx(
                 evidenceText: task.evidenceText,
                 evidenceProvenance: task.evidenceProvenance,
                 quotedAt: task.quotedAt,
-                ticked: shouldPreselectTaskOutcome(
-                    "match",
-                    candidateTaskIds.length,
-                    task.evidenceProvenance,
-                ),
             }),
         );
     });
-    const proposedMatches = [
-        ...(proposals.matches ?? []).map((match) => ({
-            ...match,
-            ticked: shouldPreselectTaskOutcome(
-                "match",
-                1,
-                match.evidenceProvenance,
-            ),
-        })),
-        ...ambiguousMatches,
-    ];
+    const proposedMatches = [...(proposals.matches ?? []), ...ambiguousMatches];
     const targets = [
         ...new Set([
             ...proposedMatches.map((match) => match.taskId),
@@ -450,7 +432,7 @@ export async function writeTaskProposalsInTx(
         }
         mentionByTask.set(match.taskId, {
             ...match,
-            ticked: match.ticked,
+            ticked: false,
         });
     }
     for (const update of proposals.updates) {

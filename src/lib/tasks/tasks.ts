@@ -1731,6 +1731,14 @@ export async function mergeTaskIntoTask(
                         eq(recordingTasks.userId, source.ownerUserId),
                     ),
                 );
+            if (options.reviewItemId) {
+                await requestAdvanceInTx(tx, {
+                    itemId: options.reviewItemId,
+                    userId: source.ownerUserId,
+                    view: source.shared ? "org" : "private",
+                    reason: "task-review",
+                });
+            }
             return {
                 sourceItemId: source.itemId,
                 sourceOwnerUserId: source.ownerUserId,
@@ -1739,6 +1747,7 @@ export async function mergeTaskIntoTask(
             };
         }),
     );
+    if (options.reviewItemId) nudge();
     await tasksChanged(changed.sourceOwnerUserId, changed.sourceItemId);
     if (changed.targetItemId !== changed.sourceItemId) {
         await tasksChanged(changed.targetOwnerUserId, changed.targetItemId);
@@ -1770,7 +1779,7 @@ export async function mergeProposals(
             { field: "taskIds" },
         );
     }
-    const keepId = await db.transaction(async (tx) => {
+    const merged = await db.transaction(async (tx) => {
         const recording = await lockRecordingForEdit(tx, viewer, recordingId);
         const rows = await tx
             .select()
@@ -1846,9 +1855,17 @@ export async function mergeProposals(
                 rest.map((row) => row?.id ?? ""),
             ),
         );
-        return first.id;
+        await requestAdvanceInTx(tx, {
+            itemId: recordingId,
+            userId: recording.ownerUserId,
+            view: recording.shared ? "org" : "private",
+            reason: "task-review",
+        });
+        return { keepId: first.id, ownerUserId: recording.ownerUserId };
     });
-    return requireTaskView(viewer, keepId);
+    nudge();
+    await tasksChanged(merged.ownerUserId, recordingId);
+    return requireTaskView(viewer, merged.keepId);
 }
 
 /** Tick or untick a field proposal or suggested match in the item review. */

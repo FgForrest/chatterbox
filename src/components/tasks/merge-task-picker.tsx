@@ -2,7 +2,7 @@
 
 import { Combine, Loader2, Search } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,51 +44,72 @@ export function MergeTaskPicker({
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [candidates, setCandidates] = useState<MergeCandidateView[]>([]);
+    const [nextOffset, setNextOffset] = useState<number | null>(null);
     const [active, setActive] = useState(0);
     const [selected, setSelected] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [merging, setMerging] = useState(false);
 
+    const loadPage = useCallback(
+        async (offset: number, replace: boolean) => {
+            request.current?.abort();
+            const controller = new AbortController();
+            request.current = controller;
+            const params = new URLSearchParams({
+                q: query,
+                offset: String(offset),
+                limit: "20",
+                sourceTaskId,
+            });
+            setLoading(true);
+            try {
+                const response = await fetch(
+                    `/api/recordings/${encodeURIComponent(itemId)}/tasks/merge?${params.toString()}`,
+                    { signal: controller.signal },
+                );
+                if (!response.ok) throw new Error();
+                const body = (await response.json()) as {
+                    candidates: MergeCandidateView[];
+                    nextOffset: number | null;
+                };
+                setCandidates((current) => {
+                    if (replace) return body.candidates;
+                    const known = new Set(
+                        current.map((candidate) => candidate.id),
+                    );
+                    return [
+                        ...current,
+                        ...body.candidates.filter(
+                            (candidate) => !known.has(candidate.id),
+                        ),
+                    ];
+                });
+                setNextOffset(body.nextOffset ?? null);
+                if (replace) {
+                    setActive(0);
+                    setSelected(null);
+                }
+            } catch (error) {
+                if (
+                    !(
+                        error instanceof DOMException &&
+                        error.name === "AbortError"
+                    )
+                ) {
+                    toast.error(searchErrorRef.current);
+                }
+            } finally {
+                if (request.current === controller) setLoading(false);
+            }
+        },
+        [itemId, query, sourceTaskId],
+    );
+
     useEffect(() => {
         if (!open) return;
         const timer = window.setTimeout(
             () => {
-                request.current?.abort();
-                const controller = new AbortController();
-                request.current = controller;
-                const params = new URLSearchParams({
-                    q: query,
-                    offset: "0",
-                    limit: "20",
-                    sourceTaskId,
-                });
-                setLoading(true);
-                void fetch(
-                    `/api/recordings/${encodeURIComponent(itemId)}/tasks/merge?${params.toString()}`,
-                    { signal: controller.signal },
-                )
-                    .then(async (response) => {
-                        if (!response.ok) throw new Error();
-                        return (await response.json()) as {
-                            candidates: MergeCandidateView[];
-                        };
-                    })
-                    .then((body) => {
-                        setCandidates(body.candidates);
-                        setActive(0);
-                        setSelected(null);
-                    })
-                    .catch((error: unknown) => {
-                        if (
-                            !(
-                                error instanceof DOMException &&
-                                error.name === "AbortError"
-                            )
-                        ) {
-                            toast.error(searchErrorRef.current);
-                        }
-                    })
-                    .finally(() => setLoading(false));
+                void loadPage(0, true);
             },
             query ? 250 : 0,
         );
@@ -96,7 +117,7 @@ export function MergeTaskPicker({
             window.clearTimeout(timer);
             request.current?.abort();
         };
-    }, [itemId, open, query, sourceTaskId]);
+    }, [loadPage, open, query]);
 
     const merge = async () => {
         if (!selected) return;
@@ -231,6 +252,19 @@ export function MergeTaskPicker({
                             </button>
                         ))}
                     </div>
+                    {nextOffset !== null && (
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            className="w-full"
+                            disabled={loading}
+                            onClick={() => void loadPage(nextOffset, false)}
+                        >
+                            {loading
+                                ? i18n("Searching tasks…")
+                                : i18n("Show more tasks")}
+                        </Button>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button

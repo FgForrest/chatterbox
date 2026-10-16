@@ -76,6 +76,7 @@ vi.mock("@/lib/export/document-sidecars", () => ({
     refreshExistingRecordingSidecars: vi.fn(),
 }));
 vi.mock("@/lib/sharing/notify", () => ({ notifyIfShared: vi.fn() }));
+vi.mock("@/lib/jobs/nudge", () => ({ nudge: vi.fn() }));
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -1060,7 +1061,7 @@ describeWithDatabase("task merges", () => {
                     kind: "mail",
                     title: "notice-source-item",
                 },
-                attachedBy: {
+                proposedBy: {
                     id: ALICE,
                     name: `${ALICE}@example.test`,
                 },

@@ -41,16 +41,14 @@ Kliknutím na **Zkontrolovat úkoly** ve shrnutí zkontrolujete nové úkoly, sh
 
 ![Kontrola navržených úkolů](images/task-review.png)
 
-- Nová akce může nabídnout **Navržené shody** s dřívějšími otevřenými úkoly ze stejného rozsahu složek. Jediný jednoznačný kandidát je zaškrtnutý pouze tehdy, když má přímý a ověřený důkaz. Citovaná nebo neověřená formulace není zaškrtnuta nikdy. Změny termínu ani dokončení se automaticky nezaškrtávají.
+- Nová akce může nabídnout **Navržené shody** s dřívějšími otevřenými úkoly ze stejného rozsahu složek. Každá navržená shoda je zpočátku nezaškrtnutá bez ohledu na počet kandidátů nebo původ důkazu. Shodu, kterou chcete přijmout, zaškrtněte. Nezaškrtnuté jsou zpočátku také změny termínu a dokončení.
 - Pokud je možných kandidátů více, vyberte správný, nebo zvolte **Ponechat jako nový**. **Sloučit do dřívějšího úkolu** prohledá všechny otevřené úkoly v rozsahu složek, nejen navržené kandidáty.
 - Změna termínu zobrazuje **Současný termín** i **Navržený termín**. Dokončení je označeno **Vyžaduje potvrzení**. Výrok starší než poslední úprava úkolu se zobrazí jako **Dřívější zmínka** a nevyžaduje rozhodnutí.
 - Shrnutí může také navrhnout **Už není potřeba** nebo **Předáno někomu jinému**. Tyto možnosti nejsou nikdy předem vybrané. Neznámý řešitel se zobrazí ke kontrole a nevytvoří se potají.
 - Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. **Přidat úkol** doplní úkol, který shrnutí opomenulo. **Uložit a pokračovat později** zachová kontrolu bez použití změn.
 
-<!-- TODO verify after 4a-fixB/C -->
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní.
 
-<!-- TODO verify after 4a-fixB/C -->
 Po přijetí shody ji může vlastník položky v jejím seznamu úkolů zrušit; u sdílené položky to mohou provést také kurátoři. Zrušením se tato zmínka oddělí do vlastního úkolu. Změny polí již použité na dřívější úkol zůstanou použité.
 
 Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo použijte **Přidat úkol** pro ruční doplnění. Úkol žije, dokud existuje alespoň jedna zmínka, i když nahradíte shrnutí, které jej původně našlo.

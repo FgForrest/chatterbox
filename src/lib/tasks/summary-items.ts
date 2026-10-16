@@ -5,8 +5,6 @@
  * Pure, so the payload parser and the tests use it without the database.
  */
 
-import type { EvidenceProvenance } from "@/db/schema";
-
 export interface SummaryTaskDue {
     /** The deadline as it was said. */
     phrase: string;
@@ -220,15 +218,6 @@ export function readTaskUpdates(value: unknown): SummaryTaskUpdate[] {
         });
     }
     return updates;
-}
-
-/** Whether one parsed outcome starts selected in task review. */
-export function shouldPreselectTaskOutcome(
-    kind: SummaryTaskUpdate["kind"],
-    candidateCount: number,
-    provenance: EvidenceProvenance | null | undefined,
-): boolean {
-    return kind === "match" && candidateCount === 1 && !provenance;
 }
 
 /** Resolve one model reference only when it was among the visible candidates. */

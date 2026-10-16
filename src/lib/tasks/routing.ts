@@ -58,6 +58,8 @@ export interface RoutedTaskProposalView {
     sourceItemId: string;
     taskId: string;
     taskText: string;
+    currentDueDate: string | null;
+    currentDuePhrase: string | null;
     dueDate: string | null;
     duePhrase: string | null;
     currentAssigneeName: string | null;
@@ -77,7 +79,7 @@ export interface RoutedTaskProposalView {
         kind: "audio" | "mail";
         title: string;
     } | null;
-    attachedBy: { id: string; name: string } | null;
+    proposedBy: { id: string; name: string } | null;
 }
 
 export interface RoutedProposalDecision {
@@ -746,6 +748,8 @@ export async function listRoutedTaskProposals(
             sourceItemId: taskUpdateProposals.itemId,
             taskId: recordingTasks.id,
             taskText: recordingTasks.text,
+            currentDueDate: recordingTasks.dueDate,
+            currentDuePhrase: recordingTasks.duePhrase,
             dueDate: taskUpdateProposals.dueDate,
             duePhrase: taskUpdateProposals.duePhrase,
             currentAssigneeName: routedCurrentAssignee.displayName,
@@ -780,9 +784,9 @@ export async function listRoutedTaskProposals(
                         ),
                     ),
             ),
-            attachedById: routedActor.id,
-            attachedByName: routedActor.name,
-            attachedByEmail: routedActor.email,
+            proposedById: routedActor.id,
+            proposedByName: routedActor.name,
+            proposedByEmail: routedActor.email,
         })
         .from(taskUpdateProposals)
         .innerJoin(
@@ -832,6 +836,9 @@ export async function listRoutedTaskProposals(
     return rows.map((row) => ({
         ...row,
         taskText: decryptText(row.taskText),
+        currentDuePhrase: row.currentDuePhrase
+            ? decryptText(row.currentDuePhrase)
+            : null,
         duePhrase: row.duePhrase ? decryptText(row.duePhrase) : null,
         currentAssigneeName: row.currentAssigneeName
             ? decryptText(row.currentAssigneeName)
@@ -865,13 +872,13 @@ export async function listRoutedTaskProposals(
                       kind: row.sourceItemKind,
                       title: decryptText(row.sourceItemTitle),
                   },
-        attachedBy: row.attachedById
+        proposedBy: row.proposedById
             ? {
-                  id: row.attachedById,
+                  id: row.proposedById,
                   name:
-                      row.attachedByName ??
-                      row.attachedByEmail ??
-                      row.attachedById,
+                      row.proposedByName ??
+                      row.proposedByEmail ??
+                      row.proposedById,
               }
             : null,
     }));
