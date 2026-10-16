@@ -142,3 +142,90 @@ describe("useUploadQueue completion", () => {
         );
     });
 });
+
+describe("useUploadQueue failure reporting", () => {
+    it("reports a direct upload failure", async () => {
+        mocks.response = {
+            status: 500,
+            body: { error: "Upload refused" },
+        };
+        const onUploadStarted = vi.fn();
+        const onUploadFailed = vi.fn();
+        const { result } = renderHook(() =>
+            useUploadQueue({
+                onUploadStarted,
+                onUploadFailed,
+                onUploadComplete: vi.fn(),
+            }),
+        );
+        const file = new File(["audio"], "meeting.m4a", {
+            type: "audio/mp4",
+        });
+
+        act(() => {
+            result.current.handleUpload({
+                target: { files: [file], value: "meeting.m4a" },
+            } as unknown as React.ChangeEvent<HTMLInputElement>);
+        });
+        await act(async () => {
+            await result.current.confirmUpload(null);
+        });
+
+        const uploadId = onUploadStarted.mock.calls[0]?.[0].uploadId;
+        expect(onUploadFailed).toHaveBeenCalledWith(uploadId);
+    });
+
+    describe.each([
+        {
+            failure: "a non-completed conversion job",
+            arrange: () =>
+                mocks.followJob.mockResolvedValue({
+                    status: "failed",
+                    error: "Conversion refused",
+                }),
+        },
+        {
+            failure: "a rejected conversion watcher",
+            arrange: () =>
+                mocks.followJob.mockRejectedValue(new Error("Watcher failed")),
+        },
+    ])("for $failure", ({ arrange }) => {
+        it("reports the failed upload id", async () => {
+            mocks.response = {
+                status: 202,
+                body: {
+                    filename: "meeting",
+                    conversion: true,
+                    jobId: "job-1",
+                },
+            };
+            arrange();
+            const onUploadStarted = vi.fn();
+            const onUploadFailed = vi.fn();
+            const { result } = renderHook(() =>
+                useUploadQueue({
+                    onUploadStarted,
+                    onUploadFailed,
+                    onUploadComplete: vi.fn(),
+                }),
+            );
+            const file = new File(["video"], "meeting.mp4", {
+                type: "video/mp4",
+            });
+
+            act(() => {
+                result.current.handleUpload({
+                    target: { files: [file], value: "meeting.mp4" },
+                } as unknown as React.ChangeEvent<HTMLInputElement>);
+            });
+            await act(async () => {
+                await result.current.confirmUpload(null);
+            });
+
+            const uploadId = onUploadStarted.mock.calls[0]?.[0].uploadId;
+            await waitFor(() =>
+                expect(onUploadFailed).toHaveBeenCalledWith(uploadId),
+            );
+        });
+    });
+});

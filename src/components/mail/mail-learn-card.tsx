@@ -5,6 +5,7 @@ import { useExtracted } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
+    handleLearnReviewFailure,
     LearnEvidence,
     LearnOutcomeLine,
     LearnReviewRow,
@@ -148,8 +149,11 @@ export function MailLearnCard({
                     ),
                 };
             });
-            toast.error(i18n("The review changed; reload it."));
-            await load();
+            await handleLearnReviewFailure(
+                response,
+                i18n("The review changed; reload it."),
+                load,
+            );
             return;
         }
         const { version } = (await response.json()) as { version: number };
@@ -179,11 +183,10 @@ export function MailLearnCard({
                 }),
             });
             if (!response.ok) {
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("The review could not be finished."),
-                    ),
+                await handleLearnReviewFailure(
+                    response,
+                    i18n("The review could not be finished."),
+                    load,
                 );
                 return;
             }

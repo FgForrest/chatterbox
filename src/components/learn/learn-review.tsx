@@ -34,6 +34,7 @@ import {
 } from "@/components/learn/new-record-item";
 import { announceLearnReviewsChanged } from "@/components/learn/review-events";
 import {
+    handleLearnReviewFailure,
     LearnEvidence,
     LearnReviewRow,
     useLearnFinishFooter,
@@ -397,13 +398,11 @@ export function LearnReview({
         }
         if (!response.ok) {
             refused.current++;
-            toast.error(
-                await getApiErrorMessage(
-                    response,
-                    i18n("Could not keep that decision"),
-                ),
+            await handleLearnReviewFailure(
+                response,
+                i18n("Could not keep that decision"),
+                load,
             );
-            await load();
             return;
         }
         const { version } = (await response.json()) as { version: number };
@@ -483,13 +482,11 @@ export function LearnReview({
                 }),
             });
             if (!response.ok) {
-                toast.error(
-                    await getApiErrorMessage(
-                        response,
-                        i18n("Could not finish the review"),
-                    ),
+                await handleLearnReviewFailure(
+                    response,
+                    i18n("Could not finish the review"),
+                    load,
                 );
-                await load();
                 return;
             }
             const result = (await response.json()) as {

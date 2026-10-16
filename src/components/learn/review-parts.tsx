@@ -3,8 +3,10 @@
 import { Loader2 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import type { ReactNode } from "react";
+import { toast } from "sonner";
 import type { WorkflowWidgetFooter } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
+import { getApiErrorMessage } from "@/lib/api-errors";
 import { cn } from "@/lib/utils";
 
 interface LearnReviewRowProps {
@@ -90,6 +92,16 @@ interface LearnFinishFooterOptions {
     total: number;
     busy: boolean;
     onFinish: () => void;
+}
+
+/** Report a rejected Learn review write, then reload its current state. */
+export async function handleLearnReviewFailure(
+    response: Response,
+    fallbackMessage: string,
+    reload: () => Promise<unknown>,
+): Promise<void> {
+    toast.error(await getApiErrorMessage(response, fallbackMessage));
+    await reload();
 }
 
 /** Build the common Learn review status and finish action. */

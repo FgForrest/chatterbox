@@ -181,7 +181,7 @@ export function Workstation({
     // is the Organization's.
     const libraryRecordings = isOrgAccount ? orgRecordings : recordings;
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
-        libraryRecordings[0] ?? orgRecordings[0] ?? null,
+        libraryRecordings[0] ?? null,
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -405,6 +405,10 @@ export function Workstation({
         [refresh],
     );
 
+    const handleUploadFailed = useCallback((uploadId: string) => {
+        uploadSelectionRevisionsRef.current.delete(uploadId);
+    }, []);
+
     const {
         isAutoSyncing,
         lastSyncTime,
@@ -502,6 +506,7 @@ export function Workstation({
         triggerUpload,
     } = useUploadQueue({
         onUploadStarted: handleUploadStarted,
+        onUploadFailed: handleUploadFailed,
         onUploadComplete: handleUploadComplete,
     });
     const uploadFolders = useMemo(

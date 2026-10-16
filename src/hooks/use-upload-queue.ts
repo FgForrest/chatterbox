@@ -32,6 +32,7 @@ export interface UploadCompletionAction {
 
 interface Options {
     onUploadStarted?: (upload: UploadStarted) => void;
+    onUploadFailed?: (uploadId: string) => void;
     onUploadComplete: (
         upload: UploadCompletion,
     ) => UploadCompletionAction | undefined;
@@ -46,7 +47,11 @@ interface Options {
  * resets `e.target.value` after pickup so picking the same file twice
  * in a row still fires a `change` event.
  */
-export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
+export function useUploadQueue({
+    onUploadStarted,
+    onUploadFailed,
+    onUploadComplete,
+}: Options) {
     const [isUploading, setIsUploading] = useState(false);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -76,6 +81,17 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
             );
         },
         [onUploadComplete],
+    );
+
+    const failUpload = useCallback(
+        (uploadId: string, message: string) => {
+            toast.error(message);
+            onUploadFailed?.(uploadId);
+            setPendingUploads((previous) =>
+                previous.filter((upload) => upload.id !== uploadId),
+            );
+        },
+        [onUploadFailed],
     );
 
     const watchConversion = useCallback(
@@ -109,35 +125,34 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                             `Audio from "${filename}" is ready`,
                         );
                     } else {
-                        toast.error(
+                        failUpload(
+                            placeholderId,
                             job?.error ||
                                 `Could not finish converting "${filename}"`,
                         );
                     }
-                    setPendingUploads((previous) =>
-                        previous.filter(
-                            (upload) => upload.id !== placeholderId,
-                        ),
-                    );
+                    if (job?.status === "completed") {
+                        setPendingUploads((previous) =>
+                            previous.filter(
+                                (upload) => upload.id !== placeholderId,
+                            ),
+                        );
+                    }
                 })
                 .catch((error: unknown) => {
                     if (controller.signal.aborted) return;
-                    toast.error(
+                    failUpload(
+                        placeholderId,
                         error instanceof Error
                             ? error.message
                             : `Could not finish converting "${filename}"`,
-                    );
-                    setPendingUploads((previous) =>
-                        previous.filter(
-                            (upload) => upload.id !== placeholderId,
-                        ),
                     );
                 })
                 .finally(() => {
                     followers.current.delete(jobId);
                 });
         },
-        [completeUpload, updatePending],
+        [completeUpload, failUpload, updatePending],
     );
 
     useEffect(() => {
@@ -293,7 +308,8 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                     );
                 }
             } catch (error) {
-                toast.error(
+                failUpload(
+                    placeholderId,
                     error instanceof Error
                         ? error.message
                         : "Failed to upload recording",
@@ -311,6 +327,7 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
             onUploadStarted,
             selectedFile,
             completeUpload,
+            failUpload,
             updatePending,
             watchConversion,
         ],

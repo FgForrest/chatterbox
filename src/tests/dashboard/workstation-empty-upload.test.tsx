@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
             uploadId: string;
             filename: string;
         }) => void;
+        onUploadFailed?: (uploadId: string) => void;
         onUploadComplete: (upload: {
             recordingId: string;
             uploadId: string;
@@ -303,7 +304,7 @@ describe("Workstation empty account", () => {
         expect(screen.queryByText("Start with a folder")).toBeNull();
     });
 
-    it("selects Organization-only content instead of showing two empty panes", () => {
+    it("leaves Organization-only content unselected for a personal account", () => {
         const shared = {
             ...recording("shared-1", "Shared recording"),
             view: "org" as const,
@@ -321,8 +322,25 @@ describe("Workstation empty account", () => {
             />,
         );
 
-        expect(screen.getByText("Selected: Shared recording")).toBeTruthy();
+        expect(screen.getByText("Selected: none")).toBeTruthy();
         expect(screen.queryByText("Start with a folder")).toBeNull();
+    });
+
+    it("selects the newest personal recording on first load", () => {
+        const newest = {
+            ...recording("newest", "Newest personal recording"),
+            startTime: "2026-10-16T11:00:00.000Z",
+        };
+        const older = {
+            ...recording("older", "Older personal recording"),
+            startTime: "2026-10-16T10:00:00.000Z",
+        };
+
+        render(<Workstation {...baseProps} recordings={[newest, older]} />);
+
+        expect(
+            screen.getByText("Selected: Newest personal recording"),
+        ).toBeTruthy();
     });
 });
 
@@ -431,5 +449,30 @@ describe("Workstation upload completion", () => {
         );
 
         expect(screen.getByText("Selected: Upload two")).toBeTruthy();
+    });
+
+    it("clears failed upload selection tracking", () => {
+        const first = recording("first", "First recording");
+        const uploaded = recording("uploaded", "Uploaded recording");
+        const { rerender } = render(
+            <Workstation {...baseProps} recordings={[first]} />,
+        );
+
+        act(() => {
+            mocks.uploadOptions?.onUploadStarted?.({
+                uploadId: "upload-1",
+                filename: "Uploaded recording",
+            });
+            mocks.uploadOptions?.onUploadFailed?.("upload-1");
+            mocks.uploadOptions?.onUploadComplete({
+                recordingId: "uploaded",
+                uploadId: "upload-1",
+                filename: "Uploaded recording",
+                resumed: false,
+            });
+        });
+        rerender(<Workstation {...baseProps} recordings={[uploaded, first]} />);
+
+        expect(screen.getByText("Selected: First recording")).toBeTruthy();
     });
 });
