@@ -17,10 +17,7 @@ import {
 } from "@/db/schema";
 import { decryptText } from "@/lib/encryption/fields";
 import { getOrgUserId } from "@/lib/org/config";
-import {
-    type OutdatedReason,
-    processAgainPending,
-} from "@/lib/pipeline/outdated";
+import { processAgainPending } from "@/lib/pipeline/outdated";
 import {
     type ProcessingRequestOrigin,
     processingStartedBy,
@@ -93,7 +90,7 @@ export interface ItemProcessingPresentation {
         learn: boolean;
     };
     processAgain: boolean;
-    processAgainReason: OutdatedReason | null;
+    processAgainReason: "profile_changed" | null;
     learnFindingsWaiting: number;
     taskReviewWaiting: number;
     jobs: {
@@ -161,25 +158,8 @@ export function processingFailures(
 /** Identify the durable input change behind an explicit Process again state. */
 export function processingOutdatedReason(
     phases: PipelinePhases,
-): OutdatedReason | null {
-    if (!processAgainPending(phases)) return null;
-    for (const phase of [
-        "transcribe",
-        "learn",
-        "summary",
-        "taskReview",
-    ] as const) {
-        const reason = phases[phase]?.reason;
-        if (
-            phases[phase]?.state === "outdated" &&
-            (reason === "content_changed" ||
-                reason === "learn_changed" ||
-                reason === "profile_changed")
-        ) {
-            return reason;
-        }
-    }
-    return null;
+): "profile_changed" | null {
+    return processAgainPending(phases) ? "profile_changed" : null;
 }
 
 /** Count the task decisions shown by the review dialog for one item. */

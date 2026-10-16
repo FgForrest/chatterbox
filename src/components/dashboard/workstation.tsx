@@ -38,6 +38,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
 import {
     type UploadCompletion,
+    type UploadCompletionAction,
     useUploadQueue,
 } from "@/hooks/use-upload-queue";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
@@ -214,18 +215,9 @@ export function Workstation({
     const [firstLevelFolderOpen, setFirstLevelFolderOpen] = useState(false);
     const [resetToRecentKey, setResetToRecentKey] = useState(0);
     const selectionRevisionRef = useRef(0);
-    const recordingIdsRef = useRef(new Set(recordings.map(({ id }) => id)));
-    recordingIdsRef.current = new Set(recordings.map(({ id }) => id));
-    const uploadSelectionRevisionsRef = useRef(
-        new Map<
-            string,
-            { selectionRevision: number; recordingIds: ReadonlySet<string> }
-        >(),
-    );
+    const uploadSelectionRevisionsRef = useRef(new Map<string, number>());
     const [pendingUploadSelection, setPendingUploadSelection] = useState<{
-        recordingId: string | null;
-        filename: string;
-        recordingIds: ReadonlySet<string>;
+        recordingId: string;
         selectionRevision: number;
     } | null>(null);
 
@@ -368,25 +360,9 @@ export function Workstation({
             setPendingUploadSelection(null);
             return;
         }
-        const uploaded = pendingUploadSelection.recordingId
-            ? recordings.find(
-                  (recording) =>
-                      recording.id === pendingUploadSelection.recordingId,
-              )
-            : recordings
-                  .filter(
-                      (recording) =>
-                          !pendingUploadSelection.recordingIds.has(
-                              recording.id,
-                          ) &&
-                          recording.filename ===
-                              pendingUploadSelection.filename,
-                  )
-                  .sort(
-                      (left, right) =>
-                          Date.parse(right.startTime) -
-                          Date.parse(left.startTime),
-                  )[0];
+        const uploaded = recordings.find(
+            (recording) => recording.id === pendingUploadSelection.recordingId,
+        );
         if (!uploaded) return;
         setCurrentRecording(uploaded);
         setMobileView("detail");
@@ -395,24 +371,26 @@ export function Workstation({
 
     const handleUploadStarted = useCallback(
         ({ uploadId }: { uploadId: string }) => {
-            uploadSelectionRevisionsRef.current.set(uploadId, {
-                selectionRevision: selectionRevisionRef.current,
-                recordingIds: new Set(recordingIdsRef.current),
-            });
+            uploadSelectionRevisionsRef.current.set(
+                uploadId,
+                selectionRevisionRef.current,
+            );
         },
         [],
     );
 
     const handleUploadComplete = useCallback(
-        ({ recordingId, uploadId, filename }: UploadCompletion) => {
+        ({
+            recordingId,
+            uploadId,
+        }: UploadCompletion): UploadCompletionAction | undefined => {
             const uploadSelection =
                 uploadSelectionRevisionsRef.current.get(uploadId);
             uploadSelectionRevisionsRef.current.delete(uploadId);
             refresh();
             if (
-                !uploadSelection ||
-                uploadSelection.selectionRevision !==
-                    selectionRevisionRef.current
+                uploadSelection === undefined ||
+                uploadSelection !== selectionRevisionRef.current
             ) {
                 return;
             }
@@ -421,9 +399,7 @@ export function Workstation({
             setResetToRecentKey((key) => key + 1);
             setPendingUploadSelection({
                 recordingId,
-                filename,
-                recordingIds: uploadSelection.recordingIds,
-                selectionRevision: uploadSelection.selectionRevision,
+                selectionRevision: uploadSelection,
             });
         },
         [refresh],

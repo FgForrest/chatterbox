@@ -20,12 +20,21 @@ interface UploadStarted {
 
 /** Identifies an upload after its recording has been saved. */
 export interface UploadCompletion extends UploadStarted {
-    recordingId: string | null;
+    recordingId: string;
+    resumed: boolean;
+}
+
+/** Optional action attached to the queue's upload-success toast. */
+export interface UploadCompletionAction {
+    label: string;
+    onClick: () => void;
 }
 
 interface Options {
     onUploadStarted?: (upload: UploadStarted) => void;
-    onUploadComplete: (upload: UploadCompletion) => void;
+    onUploadComplete: (
+        upload: UploadCompletion,
+    ) => UploadCompletionAction | undefined;
 }
 
 /**
@@ -58,12 +67,24 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
         [],
     );
 
+    const completeUpload = useCallback(
+        (upload: UploadCompletion, message: string) => {
+            const action = onUploadComplete(upload);
+            toast.success(
+                message,
+                action === undefined ? undefined : { action },
+            );
+        },
+        [onUploadComplete],
+    );
+
     const watchConversion = useCallback(
         (
             jobId: string,
             placeholderId: string,
             filename: string,
             savedFilename: string,
+            resumed: boolean,
         ) => {
             if (followers.current.has(jobId)) return;
             const controller = new AbortController();
@@ -78,12 +99,15 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                 .then((job) => {
                     if (controller.signal.aborted) return;
                     if (job?.status === "completed") {
-                        toast.success(`Audio from "${filename}" is ready`);
-                        onUploadComplete({
-                            recordingId: recordingIdFromResult(job.result),
-                            uploadId: placeholderId,
-                            filename: savedFilename,
-                        });
+                        completeUpload(
+                            {
+                                recordingId: recordingIdFromResult(job.result),
+                                uploadId: placeholderId,
+                                filename: savedFilename,
+                                resumed,
+                            },
+                            `Audio from "${filename}" is ready`,
+                        );
                     } else {
                         toast.error(
                             job?.error ||
@@ -96,11 +120,24 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                         ),
                     );
                 })
+                .catch((error: unknown) => {
+                    if (controller.signal.aborted) return;
+                    toast.error(
+                        error instanceof Error
+                            ? error.message
+                            : `Could not finish converting "${filename}"`,
+                    );
+                    setPendingUploads((previous) =>
+                        previous.filter(
+                            (upload) => upload.id !== placeholderId,
+                        ),
+                    );
+                })
                 .finally(() => {
                     followers.current.delete(jobId);
                 });
         },
-        [onUploadComplete, updatePending],
+        [completeUpload, updatePending],
     );
 
     useEffect(() => {
@@ -149,6 +186,7 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                         placeholderId,
                         upload.filename,
                         uploadBasename(upload.filename),
+                        true,
                     );
                 }
             })
@@ -227,7 +265,7 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                     updatePending(placeholderId, { progress });
                 });
 
-                if (data.conversion && data.jobId) {
+                if (data.conversion) {
                     conversionStarted = true;
                     updatePending(placeholderId, {
                         phase: "queued",
@@ -241,14 +279,18 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
                         placeholderId,
                         file.name,
                         data.filename,
+                        false,
                     );
                 } else {
-                    toast.success(`"${data.filename}" uploaded`);
-                    onUploadComplete({
-                        recordingId: data.recordingId ?? null,
-                        uploadId: placeholderId,
-                        filename: data.filename,
-                    });
+                    completeUpload(
+                        {
+                            recordingId: data.recordingId,
+                            uploadId: placeholderId,
+                            filename: data.filename,
+                            resumed: false,
+                        },
+                        `"${data.filename}" uploaded`,
+                    );
                 }
             } catch (error) {
                 toast.error(
@@ -266,9 +308,9 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
             }
         },
         [
-            onUploadComplete,
             onUploadStarted,
             selectedFile,
+            completeUpload,
             updatePending,
             watchConversion,
         ],
@@ -292,12 +334,19 @@ export function useUploadQueue({ onUploadStarted, onUploadComplete }: Options) {
     };
 }
 
-interface UploadResponse {
+interface DirectUploadResponse {
     filename: string;
-    recordingId?: string;
-    conversion?: boolean;
-    jobId?: string;
+    recordingId: string;
+    conversion?: false;
 }
+
+interface ConversionUploadResponse {
+    filename: string;
+    conversion: true;
+    jobId: string;
+}
+
+type UploadResponse = DirectUploadResponse | ConversionUploadResponse;
 
 interface ActiveUpload {
     jobId: string;
@@ -349,10 +398,9 @@ function pendingFromProgress(
     return { phase, progress: percent };
 }
 
-function recordingIdFromResult(
-    result: Record<string, unknown> | null,
-): string | null {
-    return typeof result?.recordingId === "string" ? result.recordingId : null;
+function recordingIdFromResult(result: Record<string, unknown> | null): string {
+    if (typeof result?.recordingId === "string") return result.recordingId;
+    throw new Error("Video conversion completed without a recording id");
 }
 
 function uploadBasename(filename: string): string {
@@ -384,7 +432,13 @@ function sendUpload(
             );
         });
         request.addEventListener("load", () => {
-            let body: { error?: string } & Partial<UploadResponse> = {};
+            let body: {
+                error?: string;
+                filename?: string;
+                recordingId?: string;
+                conversion?: boolean;
+                jobId?: string;
+            } = {};
             try {
                 body = JSON.parse(request.responseText) as typeof body;
             } catch {
@@ -395,15 +449,25 @@ function sendUpload(
                 request.status < 300 &&
                 typeof body.filename === "string"
             ) {
-                resolve({
-                    filename: body.filename,
-                    recordingId:
-                        typeof body.recordingId === "string"
-                            ? body.recordingId
-                            : undefined,
-                    conversion: body.conversion,
-                    jobId: body.jobId,
-                });
+                if (
+                    body.conversion === true &&
+                    typeof body.jobId === "string"
+                ) {
+                    resolve({
+                        filename: body.filename,
+                        conversion: true,
+                        jobId: body.jobId,
+                    });
+                    return;
+                }
+                if (typeof body.recordingId === "string") {
+                    resolve({
+                        filename: body.filename,
+                        recordingId: body.recordingId,
+                    });
+                    return;
+                }
+                reject(new Error("Upload completed without a recording id"));
                 return;
             }
             reject(new Error(body.error || "Upload failed"));

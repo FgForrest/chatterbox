@@ -60,8 +60,6 @@ export type WorkflowMessageCode =
     | "failureSourceUnavailable"
     | "failureAccess"
     | "stepFailed"
-    | "transcriptChanged"
-    | "learnChanged"
     | "profileChanged";
 
 export type WorkflowActionCode =
@@ -394,14 +392,6 @@ function learnReviewMessage(reason: string | undefined): WorkflowMessageCode {
     return "learnReview";
 }
 
-function processAgainMessage(
-    reason: ItemProcessingPresentation["processAgainReason"],
-): WorkflowMessageCode {
-    if (reason === "learn_changed") return "learnChanged";
-    if (reason === "profile_changed") return "profileChanged";
-    return "transcriptChanged";
-}
-
 function queuedMessage(step: WorkflowStepId): WorkflowMessageCode {
     switch (step) {
         case "transcribe":
@@ -506,7 +496,7 @@ function deriveStatus(
     if (data.processAgain) {
         return {
             actor: "yours",
-            message: processAgainMessage(data.processAgainReason),
+            message: "profileChanged",
             action: "processAgain",
         };
     }

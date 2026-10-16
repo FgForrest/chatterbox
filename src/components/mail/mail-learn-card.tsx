@@ -149,6 +149,7 @@ export function MailLearnCard({
                 };
             });
             toast.error(i18n("The review changed; reload it."));
+            await load();
             return;
         }
         const { version } = (await response.json()) as { version: number };

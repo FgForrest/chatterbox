@@ -478,19 +478,19 @@ describe("deriveWorkflowStatus", () => {
         });
     });
 
-    it("maps changed inputs to outdated with Process again", () => {
+    it("maps a changed profile to outdated with Process again", () => {
         const result = deriveWorkflowStatus(
             processing({
                 processAgain: true,
-                processAgainReason: "content_changed",
-                phases: { summary: phase("outdated", "content_changed") },
+                processAgainReason: "profile_changed",
+                phases: { summary: phase("outdated", "profile_changed") },
             }),
             "audio",
         );
         expect(stateOf(result.steps, "summary")).toBe("outdated");
         expect(result.status).toMatchObject({
             actor: "yours",
-            message: "transcriptChanged",
+            message: "profileChanged",
             action: "processAgain",
         });
     });
@@ -694,9 +694,9 @@ describe("deriveWorkflowStatus", () => {
         [
             "outdated",
             {
-                phases: { summary: phase("outdated", "content_changed") },
+                phases: { summary: phase("outdated", "profile_changed") },
                 processAgain: true,
-                processAgainReason: "content_changed",
+                processAgainReason: "profile_changed",
             },
         ],
     ] as const)("is visible while %s", (_name, overrides) => {

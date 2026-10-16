@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
-import { OPEN_WORKFLOW_WIDGET_EVENT } from "@/components/pipeline/workflow-widget";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import type { Recording } from "@/types/recording";
 
 vi.mock("@/hooks/use-transcription-summary", () => ({
@@ -207,9 +207,12 @@ describe("speaker playback navigation", () => {
             expect(element).toBeTruthy();
             return element as HTMLElement;
         });
-        fireEvent(review, new Event(OPEN_WORKFLOW_WIDGET_EVENT));
+        review.scrollIntoView = vi.fn();
+        openWidget(review.id);
         fireEvent.click(
-            screen.getByRole("button", { name: "Play a turn of Speaker 1" }),
+            await screen.findByRole("button", {
+                name: "Play a turn of Speaker 1",
+            }),
         );
         expect(onPlayFromTurn).toHaveBeenLastCalledWith(3000, 4000);
     });

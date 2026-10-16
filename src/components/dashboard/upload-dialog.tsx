@@ -194,7 +194,6 @@ export function UploadDialog({
                             type="button"
                             variant="outline"
                             className="w-full"
-                            disabled={folderParents.length === 0}
                             onClick={() => setNewFolderOpen(true)}
                         >
                             {i18n("New folder")}

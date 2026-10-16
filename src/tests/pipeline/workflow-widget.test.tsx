@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    OPEN_WORKFLOW_WIDGET_EVENT,
     openWidget,
     WorkflowWidget,
     WorkflowWidgetLine,
@@ -43,6 +44,26 @@ function ExampleWidget({ frame }: { frame: WorkflowWidgetFrame }) {
     );
 }
 
+function ReplacingWidget({
+    frame,
+    title,
+}: {
+    frame: WorkflowWidgetFrame;
+    title: string;
+}) {
+    const [open, setOpen] = useState(false);
+    return (
+        <WorkflowWidget
+            id="replacing-widget"
+            frame={frame}
+            tone="review"
+            open={open}
+            onOpenChange={setOpen}
+            title={title}
+        />
+    );
+}
+
 beforeEach(() => {
     HTMLElement.prototype.scrollIntoView = vi.fn();
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -53,6 +74,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
 });
 
@@ -119,6 +141,34 @@ it("renders the close action only in the dialog frame", async () => {
         await screen.findByRole("button", { name: "Save for later" }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("opens after replacing its host without resubscribing on rerender", async () => {
+    const addEventListener = vi.spyOn(window, "addEventListener");
+    const removeEventListener = vi.spyOn(window, "removeEventListener");
+    const view = render(<ReplacingWidget frame="inline" title="First title" />);
+    const openSubscriptions = () =>
+        addEventListener.mock.calls.filter(
+            ([eventName]) => String(eventName) === OPEN_WORKFLOW_WIDGET_EVENT,
+        );
+    const openUnsubscriptions = () =>
+        removeEventListener.mock.calls.filter(
+            ([eventName]) => String(eventName) === OPEN_WORKFLOW_WIDGET_EVENT,
+        );
+
+    expect(openSubscriptions()).toHaveLength(1);
+    view.rerender(<ReplacingWidget frame="inline" title="Second title" />);
+    expect(openSubscriptions()).toHaveLength(1);
+    expect(openUnsubscriptions()).toHaveLength(0);
+
+    const previousHost = document.getElementById("replacing-widget");
+    view.rerender(<ReplacingWidget frame="dialog" title="Dialog title" />);
+    expect(document.getElementById("replacing-widget")).not.toBe(previousHost);
+    openWidget("replacing-widget");
+
+    expect(
+        await screen.findByRole("dialog", { name: "Dialog title" }),
+    ).toBeTruthy();
 });
 
 it("renders a compact line with one accessible expand control", () => {

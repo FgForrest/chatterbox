@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { summaryOptions, transcriptSources, speakerTagMounts } = vi.hoisted(
@@ -59,6 +65,53 @@ vi.mock("@/components/dashboard/markdown-actions", () => ({
 }));
 
 import { TranscriptionPanel } from "@/components/dashboard/transcription-panel";
+import { openWidget } from "@/components/pipeline/workflow-widget";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
+
+function completedProcessing(): ItemProcessingPresentation {
+    const at = "2026-10-16T10:00:00.000Z";
+    return {
+        itemId: "rec-focus",
+        kind: "audio",
+        legacy: false,
+        manualOnly: false,
+        phases: {
+            categorize: { state: "done", generation: 1, at },
+            transcribe: { state: "done", generation: 1, at },
+            learn: { state: "done", generation: 1, at },
+            summary: { state: "done", generation: 1, at },
+            share: { state: "waiting", generation: 1, at },
+        },
+        profile: {
+            id: "profile-1",
+            name: "Meeting notes",
+            scope: "personal",
+            revisionId: "revision-1",
+            automatic: {
+                transcribe: true,
+                learn: true,
+                summary: true,
+            },
+        },
+        placements: [],
+        intents: [
+            {
+                folderId: "folder-1",
+                name: "Team",
+                path: "Organization › Team",
+                confirmationRequired: true,
+                confirmed: false,
+            },
+        ],
+        outputs: { transcript: true, learn: true, summary: true },
+        processAgain: false,
+        processAgainReason: null,
+        learnFindingsWaiting: 0,
+        taskReviewWaiting: 0,
+        jobs: { transcription: null, summary: null },
+        failures: [],
+    };
+}
 
 describe("independent transcript and summary pipelines", () => {
     beforeEach(() => {
@@ -78,6 +131,52 @@ describe("independent transcript and summary pipelines", () => {
     afterEach(() => {
         cleanup();
         vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    describe.each([
+        ["transcript", "recording-transcription-rec-focus", "Transcription"],
+        ["summary", "recording-summary-rec-focus", "Summary"],
+    ] as const)("%s workflow widget", (_name, widgetId, headingName) => {
+        it("focuses its heading when opened", async () => {
+            HTMLElement.prototype.scrollIntoView = vi.fn();
+            vi.stubGlobal(
+                "requestAnimationFrame",
+                (callback: FrameRequestCallback) =>
+                    window.setTimeout(() => callback(0), 0),
+            );
+            render(
+                <TranscriptionPanel
+                    recording={{
+                        id: "rec-focus",
+                        filename: "Meeting.ogg",
+                        duration: 60_000,
+                        filesize: 1024,
+                        startTime: new Date(0).toISOString(),
+                        deviceSn: "local",
+                    }}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: "Custom text",
+                            provider: "openai",
+                            model: "whisper-1",
+                        },
+                    ]}
+                    isTranscribing={false}
+                    onTranscribe={vi.fn()}
+                    processing={completedProcessing()}
+                />,
+            );
+
+            openWidget(widgetId);
+
+            await waitFor(() =>
+                expect(screen.getByRole("heading", { name: headingName })).toBe(
+                    document.activeElement,
+                ),
+            );
+        });
     });
 
     it("switches the summary without changing the visible transcript", () => {

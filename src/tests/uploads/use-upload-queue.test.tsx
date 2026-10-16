@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     followJob: vi.fn(),
+    toastError: vi.fn(),
+    toastSuccess: vi.fn(),
     response: {
         status: 201,
         body: {
@@ -15,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("sonner", () => ({
-    toast: { success: vi.fn(), error: vi.fn() },
+    toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 vi.mock("@/lib/jobs/client", () => ({
@@ -47,6 +49,8 @@ class UploadRequest {
 
 beforeEach(() => {
     mocks.followJob.mockReset();
+    mocks.toastError.mockReset();
+    mocks.toastSuccess.mockReset();
     mocks.response = {
         status: 201,
         body: { filename: "meeting", recordingId: "recording-1" },
@@ -66,7 +70,8 @@ afterEach(() => {
 describe("useUploadQueue completion", () => {
     it("reports the recording id for a direct audio upload", async () => {
         const onUploadStarted = vi.fn();
-        const onUploadComplete = vi.fn();
+        const action = { label: "Open", onClick: vi.fn() };
+        const onUploadComplete = vi.fn(() => action);
         const { result } = renderHook(() =>
             useUploadQueue({ onUploadStarted, onUploadComplete }),
         );
@@ -89,6 +94,10 @@ describe("useUploadQueue completion", () => {
             recordingId: "recording-1",
             uploadId: upload.uploadId,
             filename: "meeting",
+            resumed: false,
+        });
+        expect(mocks.toastSuccess).toHaveBeenCalledWith('"meeting" uploaded', {
+            action,
         });
     });
 
@@ -128,6 +137,7 @@ describe("useUploadQueue completion", () => {
                 recordingId: "recording-2",
                 uploadId: expect.stringMatching(/^pending:/),
                 filename: "meeting",
+                resumed: false,
             }),
         );
     });

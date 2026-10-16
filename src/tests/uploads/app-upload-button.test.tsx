@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     push: vi.fn(),
     uploadOptions: null as null | {
         onUploadComplete: (upload: {
-            recordingId: string | null;
+            recordingId: string;
             uploadId: string;
             filename: string;
-        }) => void;
+            resumed: boolean;
+        }) => { label: string; onClick: () => void } | undefined;
     },
 }));
 
@@ -42,38 +43,62 @@ import { AppUploadButton } from "@/components/app-upload-button";
 
 afterEach(() => {
     cleanup();
-    vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
     mocks.push.mockClear();
     mocks.uploadOptions = null;
-    vi.stubGlobal(
-        "fetch",
-        vi.fn(async () =>
-            Response.json({
-                recordings: [{ id: "recording / 1", filename: "Meeting" }],
-            }),
-        ),
-    );
 });
 
 describe("AppUploadButton", () => {
-    it("navigates a completed cross-page upload to its dashboard URL", async () => {
+    it("navigates a completed cross-page upload while mounted", () => {
         render(<AppUploadButton />);
 
-        await act(async () => {
-            await mocks.uploadOptions?.onUploadComplete({
-                recordingId: null,
+        act(() => {
+            mocks.uploadOptions?.onUploadComplete({
+                recordingId: "recording / 1",
                 uploadId: "upload-1",
                 filename: "Meeting",
+                resumed: false,
             });
         });
 
-        await waitFor(() =>
-            expect(mocks.push).toHaveBeenCalledWith(
-                "/dashboard?recording=recording%20%2F%201",
-            ),
+        expect(mocks.push).toHaveBeenCalledWith(
+            "/dashboard?recording=recording%20%2F%201",
         );
+    });
+
+    it("returns an Open action instead of navigating after unmount", () => {
+        const { unmount } = render(<AppUploadButton />);
+        const complete = mocks.uploadOptions?.onUploadComplete;
+        unmount();
+
+        const action = complete?.({
+            recordingId: "recording-2",
+            uploadId: "upload-2",
+            filename: "Interview",
+            resumed: false,
+        });
+
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(action?.label).toBe("Open");
+        action?.onClick();
+        expect(mocks.push).toHaveBeenCalledWith(
+            "/dashboard?recording=recording-2",
+        );
+    });
+
+    it("returns an Open action for a resumed conversion", () => {
+        render(<AppUploadButton />);
+
+        const action = mocks.uploadOptions?.onUploadComplete({
+            recordingId: "recording-3",
+            uploadId: "conversion:job-3",
+            filename: "Conference",
+            resumed: true,
+        });
+
+        expect(mocks.push).not.toHaveBeenCalled();
+        expect(action?.label).toBe("Open");
     });
 });

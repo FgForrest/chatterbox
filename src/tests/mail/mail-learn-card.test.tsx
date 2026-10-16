@@ -102,11 +102,10 @@ function widget(frame: WorkflowWidgetFrame): WorkflowWidgetState {
     };
 }
 
-function stubFetch(patchOk = true) {
+function stubFetch() {
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
         if (!init?.method) return Response.json(ready);
         if (init.method === "PATCH") {
-            if (!patchOk) return new Response("{}", { status: 409 });
             return Response.json({ version: 1 });
         }
         if (url.endsWith("/finish")) {
@@ -172,14 +171,46 @@ describe.each([
         );
     });
 
-    it("rolls a tick back when saving fails", async () => {
-        stubFetch(false);
+    it("reloads fresh versions after a decision conflict before finishing", async () => {
+        const fresh = {
+            ...ready,
+            items: ready.items.map((item, index) => ({
+                ...item,
+                version: index + 7,
+            })),
+        };
+        let reviewLoads = 0;
+        const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+            if (!init?.method) {
+                reviewLoads += 1;
+                return Response.json(reviewLoads === 1 ? ready : fresh);
+            }
+            if (init.method === "PATCH") {
+                return new Response("{}", { status: 409 });
+            }
+            if (url.endsWith("/finish")) {
+                return Response.json({ applied: 0 });
+            }
+            return new Response("{}", { status: 404 });
+        });
+        vi.stubGlobal("fetch", fetch);
         await renderReview(frame);
         const row = screen.getAllByRole("checkbox", { name: "Apply this" })[0];
         fireEvent.click(row);
-        await waitFor(() =>
-            expect((row as HTMLInputElement).checked).toBe(false),
-        );
+        await waitFor(() => expect(reviewLoads).toBe(2));
+        expect((row as HTMLInputElement).checked).toBe(false);
+
+        fireEvent.click(screen.getByRole("button", { name: "Finish review" }));
+        await waitFor(() => {
+            const finishCall = fetch.mock.calls.find(([url]) =>
+                String(url).endsWith("/finish"),
+            );
+            expect(finishCall?.[1]?.body).toBe(
+                JSON.stringify({
+                    versions: { "record-1": 7, "fact-1": 8 },
+                }),
+            );
+        });
     });
 });
 

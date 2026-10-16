@@ -31,6 +31,7 @@ import {
 import {
     WorkflowWidget,
     WorkflowWidgetLine,
+    workflowWidgetHeadingProps,
 } from "@/components/pipeline/workflow-widget";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
@@ -856,9 +857,12 @@ export function TranscriptionPanel({
                         <CardHeader>
                             <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
                                 <CardTitle
+                                    {...workflowWidgetHeadingProps(
+                                        `recording-transcription-${recording.id}`,
+                                    )}
+                                    role="heading"
+                                    aria-level={2}
                                     className="flex items-center gap-2"
-                                    data-widget-heading
-                                    tabIndex={-1}
                                 >
                                     <FileText className="size-5" />{" "}
                                     {i18n("Transcription")}
@@ -1259,9 +1263,12 @@ export function TranscriptionPanel({
                         <CardHeader>
                             <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
                                 <CardTitle
+                                    {...workflowWidgetHeadingProps(
+                                        `recording-summary-${recording.id}`,
+                                    )}
+                                    role="heading"
+                                    aria-level={2}
                                     className="flex items-center gap-2"
-                                    data-widget-heading
-                                    tabIndex={-1}
                                 >
                                     <ListChecks className="size-5" />{" "}
                                     {i18n("Summary")}

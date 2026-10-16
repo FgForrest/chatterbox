@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
-import { OPEN_WORKFLOW_WIDGET_EVENT } from "@/components/pipeline/workflow-widget";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { RecordingTasks as RecordingTasksList } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
@@ -191,10 +191,10 @@ it("renders pipeline task review inline and reopens a person-started review", as
             showTrigger={false}
         />,
     );
-    fireEvent(
-        document.getElementById("task-review-source-item") as Element,
-        new Event(OPEN_WORKFLOW_WIDGET_EVENT),
-    );
+    const reviewHost = document.getElementById("task-review-source-item");
+    expect(reviewHost).toBeTruthy();
+    (reviewHost as HTMLElement).scrollIntoView = vi.fn();
+    openWidget("task-review-source-item");
     await waitFor(() =>
         expect(
             screen.getByRole("dialog", { name: /Task review/ }),

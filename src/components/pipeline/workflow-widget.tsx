@@ -79,22 +79,35 @@ export interface WorkflowWidgetLineProps {
     onOpen?: () => void;
 }
 
+/** Return the shared attributes used to identify a workflow widget heading. */
+export function workflowWidgetHeadingProps(id: string | undefined) {
+    return {
+        "data-workflow-widget-heading": id,
+        tabIndex: -1,
+    } as const;
+}
+
 function focusWidgetHeading(id: string): void {
-    const dialogHeading = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-widget-id]"),
-    ).find((candidate) => candidate.dataset.widgetId === id);
-    const heading = document.getElementById(`${id}-heading`) ?? dialogHeading;
-    heading?.focus({ preventScroll: true });
+    for (const heading of document.querySelectorAll<HTMLElement>(
+        "[data-workflow-widget-heading]",
+    )) {
+        if (heading.dataset.workflowWidgetHeading === id) {
+            heading.focus({ preventScroll: true });
+            return;
+        }
+    }
 }
 
 /** Scroll to a workflow widget and ask its shared frame to open and focus. */
 export function openWidget(id: string): void {
     const target = document.getElementById(id);
     target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    target?.dispatchEvent(new Event(OPEN_WORKFLOW_WIDGET_EVENT));
+    window.dispatchEvent(
+        new CustomEvent(OPEN_WORKFLOW_WIDGET_EVENT, { detail: { id } }),
+    );
 }
 
-/** Listen for the single workflow-widget open event on one widget host. */
+/** Listen for the shared workflow-widget open event for one widget id. */
 export function useWorkflowWidgetOpen(
     id: string | undefined,
     onOpen?: () => void,
@@ -103,16 +116,16 @@ export function useWorkflowWidgetOpen(
     openRef.current = onOpen;
     useEffect(() => {
         if (!id) return;
-        const host = document.getElementById(id);
-        if (!host) return;
-        const handleOpen = () => {
+        const handleOpen = (event: Event) => {
+            const detail = (event as CustomEvent<{ id?: unknown }>).detail;
+            if (detail?.id !== id) return;
             openRef.current?.();
             window.requestAnimationFrame(() => focusWidgetHeading(id));
         };
-        host.addEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
+        window.addEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
         return () =>
-            host.removeEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
-    });
+            window.removeEventListener(OPEN_WORKFLOW_WIDGET_EVENT, handleOpen);
+    }, [id]);
 }
 
 function WidgetHeader({
@@ -136,10 +149,8 @@ function WidgetHeader({
     if (frame === "dialog") {
         titleNode = (
             <DialogTitle
+                {...workflowWidgetHeadingProps(id)}
                 className="flex min-w-0 items-center gap-2 text-base"
-                data-widget-heading
-                data-widget-id={id}
-                tabIndex={-1}
             >
                 {heading}
             </DialogTitle>
@@ -147,11 +158,8 @@ function WidgetHeader({
     } else {
         titleNode = (
             <h2
-                id={`${id}-heading`}
+                {...workflowWidgetHeadingProps(id)}
                 className="flex min-w-0 items-center gap-2 font-semibold"
-                data-widget-heading
-                data-widget-id={id}
-                tabIndex={-1}
             >
                 {heading}
             </h2>
@@ -359,10 +367,8 @@ export function WorkflowWidgetLine({
                 )}
                 <div className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
                     <h2
-                        id={id ? `${id}-heading` : undefined}
+                        {...workflowWidgetHeadingProps(id)}
                         className="shrink-0 font-medium"
-                        data-widget-heading
-                        tabIndex={-1}
                     >
                         {title}
                     </h2>

@@ -437,15 +437,9 @@ export function WorkflowStrip({ workflow, onAction }: WorkflowStripProps) {
                 return i18n(
                     "This step failed. Try again; if it keeps failing, check its provider in Settings.",
                 );
-            case "learnChanged":
-                return i18n("Learn changed after the summary was written.");
             case "profileChanged":
                 return i18n(
                     "The profile changed after this item was processed.",
-                );
-            case "transcriptChanged":
-                return i18n(
-                    "The transcript changed after the summary was written.",
                 );
         }
     };

@@ -21,9 +21,10 @@ const mocks = vi.hoisted(() => ({
             filename: string;
         }) => void;
         onUploadComplete: (upload: {
-            recordingId: string | null;
+            recordingId: string;
             uploadId: string;
             filename: string;
+            resumed: boolean;
         }) => void;
     },
 }));
@@ -342,9 +343,10 @@ describe("Workstation upload completion", () => {
         );
         act(() =>
             mocks.uploadOptions?.onUploadComplete({
-                recordingId: null,
+                recordingId: "uploaded",
                 uploadId: "upload-1",
                 filename: "Uploaded recording",
+                resumed: false,
             }),
         );
         rerender(<Workstation {...baseProps} recordings={[uploaded, first]} />);
@@ -378,6 +380,7 @@ describe("Workstation upload completion", () => {
                 recordingId: "uploaded",
                 uploadId: "upload-1",
                 filename: "Uploaded recording",
+                resumed: false,
             }),
         );
         rerender(
@@ -411,11 +414,13 @@ describe("Workstation upload completion", () => {
                 recordingId: "upload-one",
                 uploadId: "pending-one",
                 filename: "Upload one",
+                resumed: false,
             });
             mocks.uploadOptions?.onUploadComplete({
                 recordingId: "upload-two",
                 uploadId: "pending-two",
                 filename: "Upload two",
+                resumed: false,
             });
         });
         rerender(

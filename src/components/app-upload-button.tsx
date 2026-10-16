@@ -3,7 +3,7 @@
 import { Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useExtracted } from "next-intl";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { UploadDialog } from "@/components/dashboard/upload-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,34 +21,25 @@ import {
 export function AppUploadButton() {
     const i18n = useExtracted();
     const { push } = useRouter();
-    const completionSequenceRef = useRef(0);
+    const mountedRef = useRef(false);
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
     const handleUploadComplete = useCallback(
-        async ({ recordingId, filename }: UploadCompletion) => {
-            const completionSequence = completionSequenceRef.current + 1;
-            completionSequenceRef.current = completionSequence;
-            let selectedId = recordingId;
-            if (!selectedId) {
-                const response = await fetch("/api/recordings").catch(
-                    () => null,
-                );
-                if (response?.ok) {
-                    const body = (await response.json()) as {
-                        recordings?: { id: string; filename: string }[];
-                    };
-                    selectedId =
-                        body.recordings?.find(
-                            (recording) => recording.filename === filename,
-                        )?.id ?? null;
-                }
+        ({ recordingId, resumed }: UploadCompletion) => {
+            const href = `/dashboard?recording=${encodeURIComponent(recordingId)}`;
+            if (!mountedRef.current || resumed) {
+                return {
+                    label: i18n("Open"),
+                    onClick: () => push(href),
+                };
             }
-            if (completionSequence !== completionSequenceRef.current) return;
-            push(
-                selectedId
-                    ? `/dashboard?recording=${encodeURIComponent(selectedId)}`
-                    : "/dashboard",
-            );
+            push(href);
         },
-        [push],
+        [i18n, push],
     );
     const {
         isUploading,
