@@ -94,16 +94,30 @@ export function WorkflowIndicator({
     const [panelLoading, setPanelLoading] = useState(false);
     const [processingAgain, setProcessingAgain] = useState(false);
     const panelRequest = useRef<Promise<void> | null>(null);
+    const taskRefreshTimer = useRef<number | null>(null);
     const activeItemId = data?.itemId;
 
     useEffect(() => setData(initialData ?? null), [initialData]);
 
     useEffect(() => {
+        if (taskRefreshTimer.current !== null) {
+            window.clearTimeout(taskRefreshTimer.current);
+            taskRefreshTimer.current = null;
+        }
         setPanelData((current) =>
             current?.itemId === activeItemId ? current : null,
         );
         panelRequest.current = null;
     }, [activeItemId]);
+
+    useEffect(
+        () => () => {
+            if (taskRefreshTimer.current !== null) {
+                window.clearTimeout(taskRefreshTimer.current);
+            }
+        },
+        [],
+    );
 
     const load = useCallback(
         async (targetId: string | undefined, kind: "audio" | "mail") => {
@@ -124,6 +138,29 @@ export function WorkflowIndicator({
         [],
     );
 
+    const refreshAfterTaskChange = useCallback(
+        (targetId: string, kind: "audio" | "mail") => {
+            if (taskRefreshTimer.current !== null) {
+                window.clearTimeout(taskRefreshTimer.current);
+            }
+            let attempts = 0;
+            const refresh = () => {
+                attempts += 1;
+                void load(targetId, kind);
+                if (attempts < 4) {
+                    taskRefreshTimer.current = window.setTimeout(
+                        refresh,
+                        attempts * 250,
+                    );
+                } else {
+                    taskRefreshTimer.current = null;
+                }
+            };
+            refresh();
+        },
+        [load],
+    );
+
     useEffect(() => {
         if (initialData !== undefined) return;
         void load(itemId, "audio");
@@ -132,9 +169,9 @@ export function WorkflowIndicator({
     useEffect(
         () =>
             onTasksChanged(() => {
-                if (data) void load(data.itemId, data.kind);
+                if (data) refreshAfterTaskChange(data.itemId, data.kind);
             }),
-        [data, load],
+        [data, refreshAfterTaskChange],
     );
 
     const loadPanel = useCallback(() => {

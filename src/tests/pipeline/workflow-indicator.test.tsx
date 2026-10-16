@@ -48,6 +48,7 @@ function processing(
 describe("workflow indicator", () => {
     afterEach(() => {
         cleanup();
+        vi.useRealTimers();
         vi.unstubAllGlobals();
     });
 
@@ -444,6 +445,47 @@ describe("workflow indicator", () => {
         expect(
             screen.queryByRole("button", { name: "Review tasks" }),
         ).toBeNull();
+    });
+
+    it("bounds follow-up refreshes after a task review changes", async () => {
+        vi.useFakeTimers();
+        const finished = processing({
+            phases: {
+                taskReview: {
+                    state: "done",
+                    reason: "reviewed",
+                    generation: 2,
+                    at: "2026-10-15T00:01:00.000Z",
+                },
+            },
+            outputs: { transcript: true, summary: true, learn: true },
+        });
+        const fetchMock = vi.fn(async () =>
+            Response.json({ processing: finished }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        render(
+            <WorkflowIndicator
+                initialData={processing({
+                    phases: {
+                        taskReview: {
+                            state: "waiting",
+                            reason: "needs_review",
+                            generation: 1,
+                            at: "2026-10-15T00:00:00.000Z",
+                        },
+                    },
+                    outputs: { transcript: true, summary: true, learn: true },
+                })}
+            />,
+        );
+
+        announceTasksChanged();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(3_000);
+
+        expect(fetchMock).toHaveBeenCalledTimes(4);
     });
 
     it("offers Process again after filing a legacy item or changing its profile", async () => {

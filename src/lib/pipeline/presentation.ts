@@ -18,6 +18,7 @@ import { getOrgUserId } from "@/lib/org/config";
 import { processAgainPending } from "@/lib/pipeline/outdated";
 import type { PipelinePhases } from "@/lib/pipeline/types";
 import { parseProfileSettings } from "@/lib/profiles/settings";
+import { isRecordingShared } from "@/lib/sharing/shared";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 export interface ProcessingProfileSummary {
@@ -70,6 +71,39 @@ interface StoredFolder {
     userId: string;
     parentId: string | null;
     name: string;
+}
+
+/** Count the task decisions shown by the review dialog for one item. */
+export async function countItemTaskReviewWaiting(
+    itemId: string,
+    ownerUserId: string,
+    orgUserId: string | null,
+): Promise<number> {
+    const shared = orgUserId
+        ? await isRecordingShared(itemId, orgUserId)
+        : false;
+    const view = shared ? "org" : "private";
+    return (await waitingTaskDecisions(db, itemId, ownerUserId, view)).total;
+}
+
+/** Present a settled task review while its durable phase catches up. */
+export function settleTaskReviewPhase(
+    phases: PipelinePhases,
+    taskReviewWaiting: number,
+    summaryCurrent: boolean,
+): PipelinePhases {
+    const taskReview = phases.taskReview;
+    if (
+        !summaryCurrent ||
+        taskReviewWaiting !== 0 ||
+        taskReview?.state !== "waiting"
+    ) {
+        return phases;
+    }
+    return {
+        ...phases,
+        taskReview: { ...taskReview, state: "done", reason: "reviewed" },
+    };
 }
 
 async function folderPaths(
@@ -207,7 +241,6 @@ export async function loadPrivateItemProcessing(
         mailContent,
         summaries,
         finishedLearnRuns,
-        taskReviewWaiting,
     ] = await Promise.all([
         getOrgUserId(),
         db
@@ -306,10 +339,12 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.status, "finished"),
                 ),
             ),
-        waitingTaskDecisions(db, itemId, ownerUserId, "private").then(
-            (decisions) => decisions.total,
-        ),
     ]);
+    const taskReviewWaiting = await countItemTaskReviewWaiting(
+        itemId,
+        ownerUserId,
+        orgUserId,
+    );
     const folderSummaries = await folderPaths(ownerUserId, orgUserId, [
         ...placementRows,
         ...intentRows,
@@ -434,7 +469,11 @@ export async function loadPrivateItemProcessing(
         kind: item.kind,
         legacy,
         manualOnly: item.manualOnly ?? false,
-        phases: item.phases ?? {},
+        phases: settleTaskReviewPhase(
+            item.phases ?? {},
+            taskReviewWaiting,
+            summaryCurrent,
+        ),
         profile,
         placements,
         intents,
