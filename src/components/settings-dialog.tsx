@@ -30,7 +30,6 @@ interface SettingsDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     initialProviders?: Provider[];
-    onReRunOnboarding?: () => void;
     isHosted?: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
@@ -47,7 +46,6 @@ export function SettingsDialog({
     open,
     onOpenChange,
     initialProviders = EMPTY_PROVIDERS,
-    onReRunOnboarding,
     isHosted = false,
     mailEnabled = false,
     accessManagement = false,
@@ -129,7 +127,6 @@ export function SettingsDialog({
                                 <SettingsContent
                                     activeSection={activeSection}
                                     initialProviders={initialProviders}
-                                    onReRunOnboarding={onReRunOnboarding}
                                     isHosted={isHosted}
                                     mailEnabled={mailEnabled}
                                     accessManagement={accessManagement}

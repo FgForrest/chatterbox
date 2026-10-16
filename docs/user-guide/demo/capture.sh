@@ -141,17 +141,19 @@ select_recording() {
 }
 
 section_onboarding() {
-    open "/settings#export"
-    click_button "Re-run Onboarding" 1500
     open "/dashboard"
+    click_button "Account menu"
+    click_text "Run setup again" 1500
     page onboarding-welcome
     click_button "Next"
     page onboarding-plaud
     click_button "Skip"
     page onboarding-ai-provider
-    click_button "Skip"
+    while [[ "$(js "(() => [...document.querySelectorAll('h3')].some((heading) => heading.textContent.trim() === 'Setup complete'))()")" != "true" ]]; do
+        click_button "Skip"
+    done
     page onboarding-done
-    click_button "Get Started" 1500
+    click_button "Get started" 1500
 }
 
 section_dashboard() {

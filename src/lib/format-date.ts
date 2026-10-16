@@ -47,6 +47,37 @@ export function formatDateTime(
     }
 }
 
+/** Short localized relative time for compact status surfaces. */
+export function formatCompactRelativeTime(
+    date: Date,
+    locale = "en",
+    now = Date.now(),
+): string {
+    const difference = date.getTime() - now;
+    const absolute = Math.abs(difference);
+    const sign = difference < 0 ? -1 : 1;
+    let unit: Intl.RelativeTimeFormatUnit = "day";
+    let magnitude = Math.round(absolute / 86_400_000);
+    const seconds = Math.round(absolute / 1000);
+    const minutes = Math.round(absolute / 60_000);
+    const hours = Math.round(absolute / 3_600_000);
+    if (seconds < 60) {
+        unit = "second";
+        magnitude = seconds;
+    } else if (minutes < 60) {
+        unit = "minute";
+        magnitude = minutes;
+    } else if (hours < 24) {
+        unit = "hour";
+        magnitude = hours;
+    }
+    const value = sign * magnitude;
+    return new Intl.RelativeTimeFormat(locale, {
+        numeric: "auto",
+        style: "short",
+    }).format(value, unit);
+}
+
 export interface DateGroupLabels {
     today: string;
     yesterday: string;

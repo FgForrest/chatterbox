@@ -26,7 +26,10 @@ import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { WorkstationHeader } from "@/components/dashboard/workstation-header";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
-import { OnboardingDialog } from "@/components/onboarding-dialog";
+import {
+    OnboardingDialog,
+    type OnboardingStepId,
+} from "@/components/onboarding-dialog";
 import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { useAutoSync } from "@/hooks/use-auto-sync";
@@ -49,6 +52,10 @@ import {
     showNewRecordingNotification,
     showSyncCompleteNotification,
 } from "@/lib/notifications/browser";
+import {
+    type OnboardingCapabilities,
+    shouldOpenOnboarding,
+} from "@/lib/onboarding/capabilities";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -126,6 +133,7 @@ interface WorkstationProps {
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
+    onboardingCapabilities: OnboardingCapabilities;
     /** The viewer manages access at the identity provider. */
     accessManagement?: boolean;
     exportProviders: ExportProvidersAvailability;
@@ -164,6 +172,7 @@ export function Workstation({
     plaudNeedsReconnect,
     isHosted,
     mailEnabled = false,
+    onboardingCapabilities,
     accessManagement = false,
     exportProviders,
     initialFolderOrganization,
@@ -189,9 +198,11 @@ export function Workstation({
     // onboarding yet (server-supplied truth, re-evaluated on every fresh
     // navigation to this page). Everyone must finish onboarding --
     // `mandatory` below keeps it non-dismissible in that case.
-    const [onboardingOpen, setOnboardingOpen] = useState(
-        () => !initialSettings.onboardingCompleted,
+    const [onboardingOpen, setOnboardingOpen] = useState(() =>
+        shouldOpenOnboarding(initialSettings.onboardingCompleted),
     );
+    const [onboardingInitialStep, setOnboardingInitialStep] =
+        useState<OnboardingStepId>("welcome");
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -220,6 +231,15 @@ export function Workstation({
         recordingId: string;
         selectionRevision: number;
     } | null>(null);
+
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("onboarding") !== "google") return;
+        setOnboardingInitialStep("google");
+        setOnboardingOpen(true);
+        url.searchParams.delete("onboarding");
+        window.history.replaceState(window.history.state, "", url);
+    }, []);
 
     const { theme, setTheme } = useTheme(initialSettings.theme);
     const listRef = useRef<RecordingListHandle>(null);
@@ -1076,6 +1096,10 @@ export function Workstation({
                         onOpenPalette={() => setPaletteOpen(true)}
                         onOpenSettings={() => setSettingsOpen(true)}
                         onOpenShortcuts={() => setShortcutsOpen(true)}
+                        onOpenOnboarding={() => {
+                            setOnboardingInitialStep("welcome");
+                            setOnboardingOpen(true);
+                        }}
                     />
 
                     <PlaudReconnectBanner
@@ -1401,10 +1425,6 @@ export function Workstation({
                 isHosted={isHosted}
                 mailEnabled={mailEnabled}
                 accessManagement={accessManagement}
-                onReRunOnboarding={() => {
-                    setSettingsOpen(false);
-                    setOnboardingOpen(true);
-                }}
                 onPlaudReconnected={handleReconnected}
             />
 
@@ -1416,6 +1436,8 @@ export function Workstation({
                     refresh();
                 }}
                 mandatory={!initialSettings.onboardingCompleted}
+                capabilities={onboardingCapabilities}
+                initialStep={onboardingInitialStep}
             />
         </>
     );

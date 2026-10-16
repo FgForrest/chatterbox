@@ -1,15 +1,32 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/env", () => ({
     env: {
+        APP_URL: "https://riffado.example",
         ENCRYPTION_KEY:
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        GOOGLE_CLIENT_ID: "client-id",
+        GOOGLE_CLIENT_SECRET: "client-secret",
+        GOOGLE_WORKSPACE_DOMAINS: ["example.com"],
+        IS_HOSTED: false,
     },
 }));
+vi.mock("@/lib/auth-server", () => ({
+    requireApiSession: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+}));
+vi.mock("@/lib/integrations/google/connection", () => ({
+    getGoogleConnectionStatus: vi.fn(),
+}));
 
+import { GET } from "@/app/api/integrations/google/connect/route";
 import { encryptText } from "@/lib/encryption/fields";
-import type { GoogleIntegrationConfig } from "@/lib/integrations/google/config";
+import {
+    GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+    type GoogleIntegrationConfig,
+} from "@/lib/integrations/google/config";
+import { getGoogleConnectionStatus } from "@/lib/integrations/google/connection";
+import { GOOGLE_MEET_READ_SCOPE } from "@/lib/integrations/google/meet-consent";
 import {
     buildAuthorizationUrl,
     createPkcePair,
@@ -19,6 +36,7 @@ import {
     revokeToken,
 } from "@/lib/integrations/google/oauth";
 import {
+    GOOGLE_OAUTH_COOKIE,
     openGoogleOAuthState,
     safeReturnTo,
     sealGoogleOAuthState,
@@ -37,6 +55,14 @@ function idToken(claims: Record<string, unknown>): string {
     const encode = (value: unknown) =>
         Buffer.from(JSON.stringify(value)).toString("base64url");
     return `${encode({ alg: "RS256" })}.${encode(claims)}.signature`;
+}
+
+function readStateCookie(response: Response) {
+    const cookie = response.headers.get("set-cookie") ?? "";
+    const match = new RegExp(`${GOOGLE_OAUTH_COOKIE}=([^;]+)`).exec(cookie);
+    return openGoogleOAuthState(
+        match?.[1] ? decodeURIComponent(match[1]) : undefined,
+    );
 }
 
 describe("Google OAuth", () => {
@@ -201,6 +227,9 @@ describe("Google OAuth state cookie", () => {
 
     it("returns only to paths on the app itself", () => {
         const app = "https://riffado.example";
+        expect(safeReturnTo("/dashboard?onboarding=google", app)).toBe(
+            "/dashboard?onboarding=google",
+        );
         expect(safeReturnTo("/dashboard?folder=a#x", app)).toBe(
             "/dashboard?folder=a#x",
         );
@@ -214,5 +243,72 @@ describe("Google OAuth state cookie", () => {
         ]) {
             expect(safeReturnTo(hostile, app)).toBe("/dashboard");
         }
+    });
+});
+
+describe("Google OAuth connect route", () => {
+    beforeEach(() => {
+        vi.mocked(getGoogleConnectionStatus).mockReset();
+    });
+
+    it("requests Calendar, Meet, and existing scopes for combined consent", async () => {
+        vi.mocked(getGoogleConnectionStatus).mockResolvedValue({
+            subject: "google-user-1",
+            email: "jane@example.com",
+            hostedDomain: "example.com",
+            status: "active",
+            scopes: [
+                "openid",
+                "email",
+                "https://www.googleapis.com/auth/drive.file",
+            ],
+        });
+
+        const response = await GET(
+            new Request(
+                "https://riffado.example/api/integrations/google/connect?purpose=calendar-meet&returnTo=%2Fdashboard%3Fonboarding%3Dgoogle",
+            ),
+        );
+
+        expect(response.status).toBe(302);
+        const redirect = new URL(response.headers.get("location") ?? "");
+        expect(redirect.searchParams.get("scope")?.split(" ")).toEqual([
+            "openid",
+            "email",
+            "https://www.googleapis.com/auth/drive.file",
+            GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+            GOOGLE_MEET_READ_SCOPE,
+        ]);
+        expect(redirect.searchParams.get("login_hint")).toBe(
+            "jane@example.com",
+        );
+        expect(readStateCookie(response)).toMatchObject({
+            userId: "user-1",
+            returnTo: "/dashboard?onboarding=google",
+            purpose: "calendar-meet",
+        });
+    });
+
+    it("starts combined consent without an existing connection", async () => {
+        vi.mocked(getGoogleConnectionStatus).mockResolvedValue(null);
+
+        const response = await GET(
+            new Request(
+                "https://riffado.example/api/integrations/google/connect?purpose=calendar-meet",
+            ),
+        );
+
+        expect(response.status).toBe(302);
+        const redirect = new URL(response.headers.get("location") ?? "");
+        expect(redirect.searchParams.get("scope")?.split(" ")).toEqual([
+            "openid",
+            "email",
+            GOOGLE_CALENDAR_EVENTS_READONLY_SCOPE,
+            GOOGLE_MEET_READ_SCOPE,
+        ]);
+        expect(readStateCookie(response)).toMatchObject({
+            userId: "user-1",
+            purpose: "calendar-meet",
+        });
     });
 });
