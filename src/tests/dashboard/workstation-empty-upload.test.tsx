@@ -213,6 +213,12 @@ const baseProps: ComponentProps<typeof WorkstationComponent> = {
     initialSettings: settings,
     plaudNeedsReconnect: false,
     isHosted: false,
+    onboardingCapabilities: {
+        googleConfigured: false,
+        mailAvailable: false,
+        mcpConnectorUrl: null,
+        recorderStoreUrl: "https://store.example/recorder",
+    },
     exportProviders: { filesystem: false, googleDrive: false, mail: false },
     initialFolderOrganization: {
         folders: [rootFolder],
