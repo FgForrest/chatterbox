@@ -109,16 +109,6 @@ open() {
 
 click_text() { ab find text "$1" click >/dev/null; ab wait "${2:-900}" >/dev/null; }
 click_button() { ab find role button click --name "$1" >/dev/null; ab wait "${2:-900}" >/dev/null; }
-click_button_prefix() {
-    js "(() => {
-        const button = [...document.querySelectorAll('button')]
-            .find((candidate) => candidate.textContent.trim().startsWith('$1'));
-        if (!button) throw new Error('No button starts with $1');
-        button.click();
-        return 'ok';
-    })()" >/dev/null
-    ab wait "${2:-900}" >/dev/null
-}
 # Click the element holding the text `$1` from script, which no overlay
 # can intercept.
 click_js() {
@@ -177,8 +167,12 @@ section_recording() {
     click_button "Erase recording artifacts"
     crop erase-menu "css:[role=menu]" "css:button[aria-label='Erase recording artifacts']"
     escape
-    click_button "Change folders"
-    dialog add-to-folder
+    click_button "Add to folder"
+    crop add-to-folder "css:[data-testid='processing-folder-row']" "css:[role=menu]"
+    escape
+    ab click "[data-testid='profile-chip']" >/dev/null
+    ab wait 1500 >/dev/null
+    crop profile-chip-menu "css:[data-testid='processing-folder-row']" "css:[role=menu]"
     escape
     click_text "Estimated AI spend"
     tag title "Weekly product sync" "h1"
@@ -188,18 +182,19 @@ section_recording() {
 
 section_filing() {
     select_recording "Ideas for the Q1 roadmap"
-    click_button "File it" 1500
-    dialog filing-panel
-    escape
+    tag categorize "Categorize recording" "section"
+    scroll_to categorize
+    crop categorize-card categorize
 }
 
 section_workflow() {
     select_recording "Weekly product sync"
-    shot "css:section[aria-label='Workflow']" workflow-indicator
+    shot "css:section[aria-label='Workflow']" workflow-strip
 }
 
 section_transcript() {
     select_recording "Weekly product sync"
+    click_button "View transcript" 1200
     tag guesses "Speaker guesses" "[aria-label='Speaker guesses']"
     tag transcript "Transcription" ".bg-card"
     scroll_to guesses
@@ -227,13 +222,14 @@ section_transcript() {
 
 section_learn() {
     select_recording "Weekly product sync"
-    click_button "Review (5)" 1500
+    click_button "Review Learn" 1500
     dialog learn-review
     escape
 }
 
 section_summary() {
     select_recording "Weekly product sync"
+    click_button "View summary" 1200
     tag summary "Summary" ".bg-card"
     scroll_to summary
     tag summary-title "Summary"
@@ -258,12 +254,19 @@ section_summary() {
 }
 
 section_task_review() {
+    ab set viewport 1440 1700 >/dev/null
     select_recording "Weekly product sync"
-    click_button_prefix "Review tasks (" 1500
-    dialog task-review
-    tag candidate "Keep as new"
+    tag task-review "Task review" "[data-workflow-widget]"
+    js "(() => {
+        document.querySelector('[data-shot=\"task-review\"]')
+            .scrollIntoView({ block: 'start' });
+        return 'ok';
+    })()" >/dev/null
+    crop task-review task-review
+    ab set viewport 1440 900 >/dev/null
+    tag candidate "Keep as new" "li"
     scroll_to candidate
-    dialog task-review-changes
+    crop task-review-changes candidate
     js "(() => {
         const button = [...document.querySelectorAll('button')]
             .find((candidate) => candidate.textContent.trim() === 'Merge into an earlier task');
@@ -280,7 +283,6 @@ section_task_review() {
         return 'ok';
     })()" >/dev/null
     crop task-merge-earlier merge-earlier
-    escape
     escape
 }
 
@@ -412,7 +414,7 @@ section_palette() {
 # Last: finishing the review changes the demo data.
 section_learn_finish() {
     select_recording "Weekly product sync"
-    click_button "Review (5)" 1500
+    click_button "Review Learn" 1500
     js "(() => {
         for (const group of ['Speakers', 'New facts']) {
             let e = [...document.querySelectorAll('[role=dialog] *')].find((el) =>
@@ -425,12 +427,7 @@ section_learn_finish() {
     })()" >/dev/null
     ab wait 500 >/dev/null
     click_button "Finish review" 3000
-    js "(() => {
-        [...document.querySelectorAll('button')]
-            .find((b) => b.textContent.trim().startsWith('Learned')).click();
-        return 'ok';
-    })()" >/dev/null
-    ab wait 1500 >/dev/null
+    click_button "View results" 1500
     dialog learn-results
     escape
 }

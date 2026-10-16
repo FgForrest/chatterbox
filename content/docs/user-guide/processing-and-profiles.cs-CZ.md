@@ -7,15 +7,17 @@ Nové nahrávky a pošta čekají na zařazení, než Chatterbox spustí placen�
 
 ## Zařazení nové položky
 
-Otevřete položku a v záhlaví klikněte na **Zařadit**. Panel zařazení zobrazí stromy složek **Soukromé** a **Organizace**. Vyberte jednu či více složek, nebo klikněte na **Nová složka** a vytvořte ji bez opuštění panelu. Potom zvolte navržený profil, jiný profil, nebo **Bez automatického zpracování**, a klikněte na **Zařadit**.
+Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zařadit nahrávku** nebo **Zařadit e-mail**. V poli **Složka** vyberte jednu složku, nebo pomocí **Nová složka…** vytvořte složku první úrovně v části **Soukromé** či **Organizace**. V poli **Profil** zvolte navržený či jiný profil, nebo **Bez automatického zpracování**.
 
-![Zařazení položky a výběr profilu zpracování](images/filing-panel.png)
+![Zařazení nahrávky a výběr profilu zpracování](images/categorize-card.png)
+
+Karta ukazuje popis profilu a větu popisující, co se spustí samo, například **Po zařazení se samy spustí: přepis, Učení, shrnutí, název a témata.** Při volbě **Bez automatického zpracování** uvádí **Nic se nespustí automaticky. Každý krok spustíte sami.** Volbu uložte tlačítkem **Zařadit nahrávku** nebo **Zařadit e-mail**. U zvuku je k dispozici také **Přepsat nyní**, pokud potřebujete přepis ještě před zařazením.
 
 Položku můžete také přetáhnout na složku ve stromu. Položky adresované nebo nahrané přímo do složky toto čekání přeskočí. Patří sem pošta poslaná na adresu složky a relace Meeting Recorderu nebo nahrávání, u kterých jste vybrali složku.
 
-Pokud nahrávku potřebujete ihned, můžete ještě před zařazením kliknout na **Přepsat**. Ostatní automatické zpracování stále čeká na složku a profil.
+Po zařazení se v řádku pod názvem zobrazí štítky složek, **Přidat do složky**, zamýšlené složky Organizace a vpravo štítek profilu. Jeho nabídka umožňuje změnit profil nebo zvolit **Bez automatického zpracování**.
 
-Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Chatterbox ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích, Učení a úkolů. Zamýšlená složka Organizace se v záhlaví zobrazí s textem **sdílí se po kontrole**.
+Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůstane během zpracování soukromá. Chatterbox ji automaticky nasdílí, jakmile projde kontrolami přepisu, mluvčích, Učení a úkolů. Při volbě **Bez automatického zpracování** místo toho čeká: zamýšlená složka v řádku nabízí **Sdílet nyní** a tlačítko pro zrušení.
 
 <span id="profiles-are-processing-recipes" />
 
@@ -47,26 +49,33 @@ Otevřete nastavení složky a zvolte **Výchozí profily**. Nahrávky a pošta 
 - Výběrem profilu přiřadíte položkám zařazeným do složky tento recept.
 - **Bez automatického zpracování** přiřadí běžný výchozí profil, ale vypne všechny automatické kroky. Kroky můžete stále spouštět ručně.
 
-Pokud položku zařadíte do složek s rozdílnými výchozími profily, panel zařazení Vás požádá o výběr profilu. Složky Organizace používají profily Organizace.
+Pokud složky položky navrhují rozdílné výchozí profily, vložená karta **Zařazení** Vás požádá o výběr profilu. Složky Organizace používají profily Organizace.
 
 <span id="the-workflow-indicator" />
 
-## Ukazatel pracovního postupu
+## Pruh pracovního postupu
 
-Ukazatel v záhlaví položky zobrazuje stav zpracování a potřebné zásahy:
+Pruh pod názvem položky zobrazuje všechny kroky v jednom řádku a potřebné zásahy:
 
-![Ukazatel pracovního postupu u položky čekající na kontrolu](images/workflow-indicator.png)
+![Pruh pracovního postupu u položky čekající na kontrolu](images/workflow-strip.png)
 
 | Fáze | Co dělá |
 | --- | --- |
-| **Zařadit** | Čeká na složky a určí profil. |
+| **Nahrávka** nebo **Přijato** | Ukazuje, že nahrávka nebo e-mail dorazily. |
+| **Zařazení** | Čeká na složky a určí profil. |
 | **Přepis** | Vytvoří přepis nahrávky. U pošty se tato fáze nezobrazuje. |
 | **Učení** | Najde jména, opravy a fakta ke kontrole. |
-| **Shrnutí** | Vytvoří název, shrnutí a témata zvolená profilem. |
+| **Shrnout** | Vytvoří název, shrnutí a témata zvolená profilem. |
 | **Kontrola úkolů** | Čeká na kontrolu navržených úkolů a jejich změn. |
 | **Sdílet** | Po splnění kontrol nasdílí zamýšlené umístění v Organizaci. |
 
-Stav vedle fáze uvádí **Čeká**, **Probíhá**, **Hotovo**, **Přeskočeno**, **Ručně** nebo **Zastaralé**. **Ručně** znamená, že profil tento krok nespouští automaticky. **Zastaralé** znamená, že se po vytvoření výsledku změnil vstup; použijte akci vedle fáze a krok spusťte znovu. Neúspěšný krok uvádí **Selhalo** a nabídne dostupnou akci pro opakování.
+U každého kroku je stav **Hotovo**, **Další**, **Ke kontrole**, **Běží**, **Ve frontě**, **Čeká**, **Selhalo**, **Zastaralé**, **Ručně** nebo **Přeskočeno**. **Ručně** znamená, že profil tento krok nespouští automaticky. **Zastaralé** znamená, že se po vytvoření výsledku změnil vstup. Na úzké obrazovce zůstane jeden řádek kroužků a pod ním se pojmenuje jen aktuální krok.
+
+Věta pod kroky začíná **Na vás.**, **Pracuje se.**, **Ve frontě.**, **Problém.** nebo **Čeká na ostatní.** Vysvětluje, co bude následovat, a nabízí jedinou očekávanou akci, například **Zkontrolovat Learn**, **Zkontrolovat úkoly** nebo **Sdílet nyní**.
+
+S postupem práce se v tomto pořadí otevírají prvky **Přepis**, kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce složí do jednoho řádku. Po dokončení pruh zmizí a položka vypadá jako dříve. Krok, který potom spustíte sami, například **Učení**, **Znovu shrnout** (u pošty **Shrnout znovu**), **Přepsat znovu** nebo **Rozpoznat témata**, se otevře v okně se stejným obsahem. Akce v pruhu přeskočí k vloženému prvku nebo toto okno znovu otevře.
+
+U položky s volbou **Bez automatického zpracování** končí pracovní postup po kroku **Zařazení** a pruh zmizí. Výjimkou je zamýšlené umístění v Organizaci: pruh zůstane, dokud nepoužijete **Sdílet nyní** nebo umístění nezrušíte.
 
 Pokud novější revize profilu nebo změněný vstup vyžaduje opakování automatické práce, tlačítko **Zpracovat znovu** spustí čekající kroky. Staré položky z doby před profily uvádějí **Zpracováno před zavedením profilů**, místo aby předstíraly použití receptu. Znovu se nespustí, dokud nezměníte jejich obsah nebo o to nepožádáte.
 

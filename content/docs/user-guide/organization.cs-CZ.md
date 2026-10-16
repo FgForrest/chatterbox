@@ -9,9 +9,9 @@ Jakmile to Váš administrátor nastaví, všichni v instanci sdílejí **Organi
 
 ## Sdílení položky
 
-Při zařazení položky zvolte složku Organizace. Můžete ji přetáhnout na složku, nebo ji otevřít a kliknout na **Zařadit** či **Změnit složky**.
+Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Zařadit e-mail**. Po zařazení můžete přidat další umístění v Organizaci pomocí **Přidat do složky** v řádku složek. Položku lze také přetáhnout na složku.
 
-![Panel zařazení se složkami Organizace](images/add-to-folder.png)
+![Řádek složek a nabídka Přidat do složky se složkami Organizace](images/add-to-folder.png)
 
 Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Chatterbox ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
 
@@ -20,7 +20,9 @@ Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstan
 - žádná kontrola [Učení](learn.md) nečeká,
 - [navržené úkoly](summaries-and-tasks.md#tasks-across-items) jsou zkontrolovány.
 
-Záhlaví označí zamýšlenou složku textem **sdílí se po kontrole** a ukazatel pracovního postupu zobrazí čekající kontrolu. Kontrola Učení blokuje sdílení i po třídenním vypršení čekání na shrnutí.
+Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Kontrola Učení blokuje sdílení i po třídenním vypršení čekání na shrnutí.
+
+Položka zařazená s volbou **Bez automatického zpracování** se sama nenasdílí. U zamýšlené složky jsou v řádku akce **Sdílet nyní** a zrušení. Pruh uvádí **Na vás.** a čeká, dokud položku nenasdílíte nebo umístění nezrušíte.
 
 Pošta poslaná přímo na adresu složky Organizace také začíná jako soukromé zamýšlené umístění, prochází stejnými kontrolami a automaticky se nasdílí. Viz [Pošta](mail.md).
 

@@ -18,24 +18,15 @@ Učení je dostupné u přepisů s časovými údaji na instancích s vlastním 
 
 ## Spuštění Učení
 
-Klikněte na **Učit se** nad přepisem. Tlačítko ukazuje průběh:
+U ručního kroku prvek Učení uvádí, že je připravený, a nabízí tlačítko **Učení**. Po spuštění se otevře okno. Zatímco **Learn čte přepis**, můžete okno zavřít a stránku opustit. Po dokončení se v témže okně zobrazí kontrola.
 
-| Tlačítko         | Význam |
-| ---                 | --- |
-| **Probíhá učení…**    | Učení právě čte přepis. Stránku můžete opustit. |
-| **Ke kontrole (5)**   | Čeká na Vás pět návrhů. |
-| **Zkontrolováno (4)** | Přehled jste prošli; čtyři návrhy byly použity. Kliknutím zjistíte výsledek každého z nich. |
-| **Zkontrolováno: nic nového** | Nic k navržení nebylo nalezeno. |
-| **Chyba učení**            | Něco se nepovedlo; klikněte pro důvod a opakování.|
-
-
-Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
+Pokud má profil zpracování položky u Učení zapnuté **Spouštět automaticky**, Učení se spustí po novém přepisu. Jeho kontrola se zobrazí vložená přímo v pracovním postupu. Pruh uvádí **Ke kontrole** a akce **Zkontrolovat Learn** přeskočí ke kontrole. Název, shrnutí a témata čekají na Vaši kontrolu, aby používaly opravený přepis. Po 72 hodinách pokračují bez kontroly, ale kontrola zůstane otevřená a nadále blokuje zamýšlené sdílení s Organizací.
 
 <span id="reviewing" />
 
 ## Kontrola návrhů
 
-Klikněte na **Ke kontrole** pro otevření přehledu:
+Obsah kontroly je stejný, ať je vložená v položce, nebo otevřená v okně běhu, který jste spustili sami. Pokud čekající okno zavřete, akce **Zkontrolovat Learn** v pruhu pracovního postupu je znovu otevře:
 
 ![Přehled návrhů Učení](images/learn-review.png)
 
@@ -54,7 +45,7 @@ Přehled nemusíte otevírat: návrhy se zobrazují i přímo v přepisu. Návrh
 
 ![Co kontrola provedla](images/learn-results.png)
 
-Klikněte na **Zkontrolováno** a zobrazte výsledek každého návrhu: použit, zamítnut, nebo důvod přeskočení. **Učit se znovu** spustí Učení znovu; zaškrtněte **zopakovat i odmítnuté návrhy**, pokud jste si některý rozmysleli.
+Po kontrole se během dalšího zpracování prvek složí na řádek **Učení dokončeno** s akcí **Zobrazit výsledky**. Ve výsledcích zjistíte, zda byl každý návrh použit, zamítnut nebo přeskočen. **Učit se znovu** spustí další běh v okně; pokud jste si některý návrh rozmysleli, zaškrtněte **Učit se znovu: navrhnout znovu i to, co jsem u této nahrávky odmítl(a)**.
 
 Přijaté opravy jsou uchovány vedle původního textu, nikdy ne místo něj, takže je lze vždy vrátit zpět. Viz [Opravená slova](transcripts.md#corrected-words).
 

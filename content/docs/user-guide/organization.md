@@ -9,9 +9,9 @@ When your administrator has set it up, everyone on the instance shares an **Orga
 
 ## Sharing an item
 
-Choose an Organization folder while filing the item. You can drag it onto the folder, or open it and click **File it** or **Change folders**.
+Choose an Organization folder in the inline **Categorize recording** or **Categorize email** card. After categorizing, use **Add to folder** in the folder row to add another Organization placement. You can also drag an item onto a folder.
 
-![The filing panel with Organization folders](images/add-to-folder.png)
+![The folder row and Add to folder menu with Organization folders](images/add-to-folder.png)
 
 This first creates an intended Organization placement. The item remains private while its profile runs. Chatterbox shares it automatically when it is ready for others to read:
 
@@ -20,7 +20,9 @@ This first creates an intended Organization placement. The item remains private 
 - no [Learn](learn.md) review is waiting,
 - the [proposed tasks](summaries-and-tasks.md#tasks-across-items) are reviewed.
 
-The header labels the intended folder **shares after review** and the workflow indicator shows which gate is waiting. A Learn review still blocks sharing after its three-day summary timeout.
+The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. A Learn review still blocks sharing after its three-day summary timeout.
+
+An item categorized with **Nothing automatic** is not shared by itself. Its intended folder offers **Share now** and a cancel button in the folder row. The strip says **Your turn.** and waits until you share or cancel it.
 
 Mail sent directly to an Organization folder address also starts as a private intended placement, runs the same gates, and shares automatically. See [Mail](mail.md).
 

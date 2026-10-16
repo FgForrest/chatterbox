@@ -25,7 +25,9 @@ Seznam vlevo v části **Nahrávky** zobrazuje Vaše nejnovější nahrávky jak
 Nahrávky přibývají dvěma způsoby:
 
 - **Z Vašeho záznamníku.** Chatterbox stahuje nové nahrávky z cloudu Vašeho záznamníku podle plánu, při otevření aplikace a pokaždé, když kliknete na **Synchronizovat zařízení**. Nastavení → Synchronizace určuje četnost.
-- **Nahráním souboru.** Klikněte na **Nahrát** a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky čeká, až ji zařadíte. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+- **Nahráním souboru.** Klikněte na **Nahrát** v Nahrávkách, Úkolech, Almanachu nebo Nastavení a vyberte zvukový nebo video soubor. Před nahráním můžete zvolit složku; taková nahrávka přeskočí čekání na zařazení a použije výchozí profil složky. Bez složky se otevře u kroku **Zařazení**. Nová nahrávka bude vybraná vpravo a pracovní postup bude na začátku. U videa si Chatterbox ponechá pouze zvuk: soubor se nahraje, zvuk se na pozadí oddělí a dostanete zprávu, až bude připravený. Jedno video se převádí vždy pouze jedno najednou.
+
+Účet bez nahrávek přesto zobrazuje panel složek vlevo. Pomocí **Nová složka** tak můžete knihovnu uspořádat ještě před první synchronizací nebo nahráním.
 
 Pořizujete záznam schůzky v prohlížeči na Linuxu? Váš administrátor Vám může poskytnout **meetrec**, malý program z příkazového řádku, který zaznamená Vás i ostatní účastníky do jednoho souboru vhodného pro nahrání. Viz [Pro administrátory](administrators.md#meeting-recorder-meetrec).
 
@@ -42,10 +44,13 @@ Nahoře naleznete:
 - **Název.** Kliknutím na tužku vedle názvu jej můžete přejmenovat. Vlastnoručně zadaný název nebude nikdy přepsán automaticky generovaným.
 - **Kdy, jak dlouhá, jak velká.**
 - **Odhadovaná spotřeba AI** (viz níže).
-- [Ukazatel pracovního postupu](processing-and-profiles.md#the-workflow-indicator), včetně akcí **Zařadit** nebo **Změnit složky**, profilu a zamýšleného umístění v Organizaci.
+- [Pruh pracovního postupu](processing-and-profiles.md#the-workflow-indicator). Dokud zbývá práce, ukazuje aktuální krok, kdo je na řadě, a jednu očekávanou akci.
+- Před výběrem první složky vloženou kartu **Zařadit nahrávku**. Potom řádek složek se štítky, akcí **Přidat do složky**, zamýšlenými složkami Organizace a štítkem profilu vpravo. Nabídka štítku umožňuje profil změnit.
 - **Vymazat** vpravo (viz níže).
 
-Pod tím jsou přehrávač, [přepis](transcripts.md) a [souhrn](summaries-and-tasks.md).
+![Změna profilu z řádku složek](images/profile-chip-menu.png)
+
+Pod tím jsou přehrávač a prvky pracovního postupu. [Přepis](transcripts.md), kontrola Učení, [Shrnutí](summaries-and-tasks.md) a Kontrola úkolů se zobrazují v tomto pořadí, jak k nim postup dospěje. Hotové prvky se během další práce složí do jednoho řádku.
 
 <span id="the-player" />
 
@@ -88,11 +93,11 @@ Klikněte na **Organizovat** nad seznamem pro zobrazení svých složek.
 - **Soukromé** obsahují Vaše vlastní složky. Každá nahrávka je vždy ve složce Soukromé, bez ohledu na to, kde jinde se nachází.
 - **Organizace** obsahuje složky sdílené s kolegy. Zobrazí se pouze, když má Vaše instance nastavenou Organizaci. Viz [Organizace](organization.md).
 
-Nahrávku zařadíte do složky tak, že ji přetáhnete na příslušnou složku, nebo přímo v detailu nahrávky použijete **Zařadit** či **Změnit složky**:
+První složku vyberte na vložené kartě **Zařadit nahrávku**, nebo přetáhněte řádek nahrávky na složku. Po zařazení přidáte další umístění pomocí **Přidat do složky** v řádku složek:
 
-![Panel zařazení](images/add-to-folder.png)
+![Řádek složek s nabídkou Přidat do složky](images/add-to-folder.png)
 
-Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky.
+Jedna nahrávka může být ve více složkách najednou. Kliknutím na **×** u štítku složky ji odeberete z konkrétní složky. Zobrazuje se tu také zamýšlená složka Organizace; položka s volbou **Bez automatického zpracování** u ní nabízí **Sdílet nyní**, dokud ji nenasdílíte nebo umístění nezrušíte.
 
 Pro správu složek použijte nabídku **⋯** vedle složky: **Nová podsložka**, **Přejmenovat**, **Přesunout do…** a **Odstranit**. Můžete také složky přetahovat pro změnu pořadí nebo vnoření. Smazáním složky nesmažete nahrávky v ní obsažené.
 

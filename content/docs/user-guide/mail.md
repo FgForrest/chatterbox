@@ -11,7 +11,7 @@ Mail needs single sign-on: you get addresses once you sign in with your organiza
 
 **Settings → Mail** lists them.
 
-- Your **mailbox** (`jan@…`) puts mail in your pile, unfiled. It waits for you to click **File it** before any paid AI step runs.
+- Your **mailbox** (`jan@…`) puts mail in your pile, unfiled. Its workflow strip starts with **Receive** as **Done** and **Categorize** as **Next**. The inline **Categorize email** card asks for **Folder** and **Profile**, or **Nothing automatic**. No paid AI step runs until you click **Categorize email**.
 - Every folder has an address (`jan+weekly@…`) that files mail straight into it. The mail skips the wait and uses the folder's default mail profile.
 
 Only mail you send yourself, from the account you sign in with, is accepted on these addresses: forward a mail to one, or put it in **To**, **Cc** or **Bcc** when you write. Chatterbox checks the mail's signature, so nobody can send in your name.
@@ -24,7 +24,7 @@ Deleting a folder stops its addresses, and its subfolders', for good. Chatterbox
 
 ## Organization folders
 
-Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn and task reviews pass.
+Organization folders have addresses that start with the organization's name (`acme-weekly@…`). Any colleague may send to them, in **To** or **Cc** (not **Bcc**). The mail stays private at first, with that folder as its intended Organization placement. Its Organization profile runs in the private view, and Chatterbox shares the mail automatically after its Learn and task reviews pass. With **Nothing automatic**, the folder row offers **Share now** instead and the workflow strip waits for you.
 
 You can also share any of your mail by filing it into an Organization folder. Colleagues read a shared mail, its attachments and its formatted version; only you delete it or download the original message.
 
@@ -44,6 +44,8 @@ Automatic forwarding keeps the original sender, so it needs a secret address.
 ## Reading mail
 
 A mail shows who sent it, with **Verified** when the sender's domain signed it, the recipients and the date. Quoted and forwarded messages are folded under their author. **Show formatted** shows the mail as it was designed, with nothing loaded from the internet. Attachments download only.
+
+As processing advances, the Learn review, **Summary**, and **Task review** widgets appear inline in that order. Finished widgets fold to one line while work continues. A step you start yourself after the workflow opens in a window with the same contents.
 
 Mail sent by machines (auto-replies, mailing lists, notices) is kept but marked **Not processed**. No AI step runs for it.
 

@@ -33,7 +33,7 @@ docs/user-guide/demo/capture.sh
 docs/user-guide/demo/capture.sh transcript settings
 ```
 
-The sections are `onboarding dashboard recording filing workflow transcript learn summary task_review tasks folders organization almanac profiles settings help palette learn_finish routed_inbox`. The focused sections capture the filing panel, workflow indicator, task-review cards and earlier-task chooser, processing-profile list and editor, folder defaults, and the routed-proposals inbox. `learn_finish` finishes a Learn review and so changes the data: seed again before retaking `learn` or the review shots. `routed_inbox` signs in as Priya and is last for that reason.
+The sections are `onboarding dashboard recording filing workflow transcript learn summary task_review tasks folders organization almanac profiles settings help palette learn_finish routed_inbox`. The focused sections capture the folder row and profile menu, inline Categorize card, workflow strip, Learn review window, inline Task review and earlier-task chooser, processing-profile list and editor, folder defaults, and the routed-proposals inbox. `learn_finish` finishes a Learn review and so changes the data: seed again before retaking `learn` or the review shots. `routed_inbox` signs in as Priya and is last for that reason.
 
 Stop the stack with `docker compose -p riffado-user-guide ... stop`, which keeps the data, or `down -v` to remove it.
 

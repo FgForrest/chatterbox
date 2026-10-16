@@ -5,14 +5,14 @@ description: Summaries, processing profiles, and tasks followed across recording
 
 ## Summaries
 
-Once a recording has a transcript, the **Summary** card below it can summarize it. Mail has the same summary card.
+Once a recording has a transcript and the workflow reaches **Summarize**, the **Summary** widget appears below it. Mail has the same widget. During the workflow it is inline; finished earlier widgets fold to one line. Once the workflow is done, the item looks as before.
 
 ![A summary with tasks waiting for review](images/summary.png)
 
 1. Pick a processing profile in the drop-down next to the button. It starts on the item's profile. If you choose a different one, Chatterbox remembers that choice in this browser for other items with the same assigned profile.
-2. Click **Summarize**, or **Re-summarize** to replace an existing summary.
+2. Click **Summarize**, or **Re-summarize** to replace an existing recording summary. Mail says **Summarize again**.
 
-The manual picker can use any available profile for that kind of item. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
+The manual picker can use any available profile for that kind of item. Starting a summary yourself opens it in a window; the workflow strip reopens that window if it needs attention. The profile supplies the summary instructions, output language and format, provider, task detection, and multi-pass settings. See [Processing and profiles](processing-and-profiles.md).
 
 ![Choosing the processing profile for a manual summary](images/summary-profile-picker.png)
 
@@ -20,7 +20,7 @@ While it runs, the card shows how long it has taken and, for a multi-pass summar
 
 Summaries are written in Markdown, so headings, lists and tables show as such. **Key Points** follow the text. The two icons copy the summary or download it as a Markdown file.
 
-If you correct names in the transcript after the summary was written, the summary shows **May contain stale names or terms** with a **Regenerate** link. The workflow indicator also marks work made from older inputs as **Outdated**.
+If you correct names in the transcript after the summary was written, the summary shows **May contain stale names or terms** with a **Regenerate** link. The workflow strip also marks work made from older inputs as **Outdated**.
 
 ### Summary instructions and multi-pass
 
@@ -39,7 +39,7 @@ A profile can run a summary 2 to 5 times and merge the results, so a point only 
 
 A summary looks for things someone agreed to do. A task no longer belongs to one summary: it collects mentions from recordings and mail filed in its folder scope. **Where it was said** opens the audio passage or highlights the relevant mail text. **Earlier mention** shows older evidence without changing the task.
 
-Click **Review tasks** on the summary to review new tasks, matches, and changes:
+When task changes are ready, the inline **Task review** widget opens after the summary. The workflow strip says **Review needed** and **Review tasks** jumps to it. If the tasks came from a summary you started yourself after the workflow, the same review opens in a window.
 
 ![Reviewing proposed tasks](images/task-review.png)
 
@@ -47,7 +47,7 @@ Click **Review tasks** on the summary to review new tasks, matches, and changes:
 - When several candidates are plausible, choose the right one or **Keep as new**. **Merge into an earlier task** searches all open tasks in the folder scope, not only the suggested candidates.
 - A deadline change shows the **Current deadline** and **Proposed deadline**. A completion is marked **Needs confirmation**. An older statement than the task's latest edit appears as **Earlier mention** and needs no decision.
 - A summary can also propose **No longer needed** or **Handed to someone else**. These are never preselected. An unknown assignee is shown for checking, not silently created.
-- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. **Add task** adds one the summary missed. **Save and continue later** preserves the review without applying it.
+- Untick a new task that is not real. Correct its text, assignee, or deadline before accepting it. **Add task** adds one the summary missed. **Apply selected changes** applies everything still ticked; **Save and continue later** preserves the review without applying it.
 
 The review shows one card per task. A match is the main decision; deadline, completion, **No longer needed**, and **Handed to someone else** changes for that task appear beneath it.
 

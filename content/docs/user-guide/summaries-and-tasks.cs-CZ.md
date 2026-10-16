@@ -5,14 +5,14 @@ description: Shrnutí, profily zpracování a úkoly sledované napříč nahrá
 
 ## Shrnutí
 
-Jakmile má nahrávka přepis, karta **Shrnutí** pod ním jej může shrnout. Stejnou kartu shrnutí má i pošta.
+Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, objeví se pod přepisem prvek **Shrnutí**. Stejný prvek má i pošta. Během pracovního postupu je vložený v položce a hotové předchozí prvky se skládají do jednoho řádku. Po dokončení vypadá položka jako dříve.
 
 ![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
 
 1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Chatterbox si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
-2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí.
+2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**.
 
-Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
+Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, otevře se v okně; pruh pracovního postupu toto okno znovu otevře, pokud vyžaduje pozornost. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
 
 ![Výběr profilu zpracování pro ruční shrnutí](images/summary-profile-picker.png)
 
@@ -20,7 +20,7 @@ Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Ví
 
 Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. Za textem následují **Klíčové body**. Dvě ikony umožňují shrnutí zkopírovat nebo stáhnout jako Markdown soubor.
 
-Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Ukazatel pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
+Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 
 ### Instrukce shrnutí a Vícenásobné shrnování
 
@@ -39,7 +39,7 @@ Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i b
 
 Shrnutí hledá věci, které někdo slíbil udělat. Úkol již nepatří jednomu shrnutí: shromažďuje zmínky z nahrávek a pošty zařazených do jeho rozsahu složek. **Kde bylo řečeno** otevře zvukovou pasáž nebo zvýrazní odpovídající text pošty. **Dřívější zmínka** ukazuje starší důkaz bez změny úkolu.
 
-Kliknutím na **Zkontrolovat úkoly** ve shrnutí zkontrolujete nové úkoly, shody a změny:
+Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, stejná kontrola se otevře v okně.
 
 ![Kontrola navržených úkolů](images/task-review.png)
 
@@ -47,7 +47,7 @@ Kliknutím na **Zkontrolovat úkoly** ve shrnutí zkontrolujete nové úkoly, sh
 - Pokud je možných kandidátů více, vyberte správný, nebo zvolte **Ponechat jako nový**. **Sloučit do dřívějšího úkolu** prohledá všechny otevřené úkoly v rozsahu složek, nejen navržené kandidáty.
 - Změna termínu zobrazuje **Současný termín** i **Navržený termín**. Dokončení je označeno **Vyžaduje potvrzení**. Výrok starší než poslední úprava úkolu se zobrazí jako **Dřívější zmínka** a nevyžaduje rozhodnutí.
 - Shrnutí může také navrhnout **Už není potřeba** nebo **Předáno někomu jinému**. Tyto možnosti nejsou nikdy předem vybrané. Neznámý řešitel se zobrazí ke kontrole a nevytvoří se potají.
-- Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. **Přidat úkol** doplní úkol, který shrnutí opomenulo. **Uložit a pokračovat později** zachová kontrolu bez použití změn.
+- Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. **Přidat úkol** doplní úkol, který shrnutí opomenulo. **Použít vybrané změny** použije vše, co zůstalo zaškrtnuté; **Uložit a pokračovat později** zachová kontrolu bez použití změn.
 
 Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní.
 
