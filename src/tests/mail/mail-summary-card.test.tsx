@@ -61,16 +61,15 @@ function widget(
 }
 
 function stubSummary(summary: string | null) {
-    vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue(
-            Response.json({
-                summary,
-                keyPoints: [],
-                actionItems: [],
-            }),
-        ),
+    const fetch = vi.fn(async () =>
+        Response.json({
+            summary,
+            keyPoints: [],
+            actionItems: [],
+        }),
     );
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
 }
 
 function renderSummary({
@@ -123,6 +122,25 @@ describe("mail summary workflow presentation", () => {
 
         expect(await screen.findByText("Proposal summary")).toBeTruthy();
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("starts a first summary from the compact line in one click", async () => {
+        const fetch = stubSummary(null);
+        renderSummary({
+            state: widget({ collapsed: true }),
+            workflowVisible: true,
+        });
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Summarize" }),
+        );
+
+        await waitFor(() =>
+            expect(fetch).toHaveBeenCalledWith(
+                "/api/recordings/mail-1/summary",
+                expect.objectContaining({ method: "POST" }),
+            ),
+        );
     });
 
     it.each([

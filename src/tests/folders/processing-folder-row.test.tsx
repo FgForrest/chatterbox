@@ -14,6 +14,7 @@ import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { RecordingFolder } from "@/types/folder";
 
 vi.mock("next-intl", () => ({
+    useLocale: () => "en",
     useExtracted:
         () =>
         (
@@ -121,6 +122,20 @@ const panel: CategorizationPanelPresentation = {
     canCreateOrganizationFolders: false,
 };
 
+const needsProfile: ItemProcessingPresentation = {
+    ...processing,
+    manualOnly: false,
+    phases: {
+        categorize: {
+            state: "waiting",
+            reason: "needs_profile",
+            generation: 1,
+            at: "2026-10-16T08:00:00.000Z",
+        },
+    },
+    intents: [],
+};
+
 function renderWorkflow(
     props: Partial<React.ComponentProps<typeof ItemWorkflow>> = {},
 ) {
@@ -141,6 +156,14 @@ function renderWorkflow(
 
 describe("processing folder row", () => {
     beforeEach(() => {
+        HTMLElement.prototype.scrollIntoView = vi.fn();
+        vi.stubGlobal(
+            "requestAnimationFrame",
+            (callback: FrameRequestCallback) => {
+                callback(0);
+                return 1;
+            },
+        );
         vi.stubGlobal(
             "ResizeObserver",
             class {
@@ -219,6 +242,43 @@ describe("processing folder row", () => {
 
         fireEvent.click(screen.getByRole("button", { name: "Transcribe" }));
         expect(onTranscribe).toHaveBeenCalledOnce();
+    });
+
+    it("focuses the profile control after a cold filing panel load", async () => {
+        let resolvePanel: ((response: Response) => void) | undefined;
+        const fetchMock = vi.fn(
+            () =>
+                new Promise<Response>((resolve) => {
+                    resolvePanel = resolve;
+                }),
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        renderWorkflow({ initialData: needsProfile });
+
+        fireEvent.click(screen.getByRole("button", { name: "Choose profile" }));
+        expect(screen.queryByRole("combobox", { name: "Profile" })).toBeNull();
+        resolvePanel?.(Response.json(panel));
+
+        const profile = await screen.findByRole("combobox", {
+            name: "Profile",
+        });
+        await waitFor(() => expect(document.activeElement).toBe(profile));
+    });
+
+    it("focuses the profile control at once when the panel is warm", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => Response.json(panel)),
+        );
+        renderWorkflow({ initialData: needsProfile });
+        const profile = await screen.findByRole("combobox", {
+            name: "Profile",
+        });
+        profile.blur();
+
+        fireEvent.click(screen.getByRole("button", { name: "Choose profile" }));
+
+        expect(document.activeElement).toBe(profile);
     });
 
     it("confirms intended Organization placements from Share now", async () => {

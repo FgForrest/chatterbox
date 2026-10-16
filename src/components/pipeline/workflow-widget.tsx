@@ -79,6 +79,23 @@ export interface WorkflowWidgetLineProps {
     onOpen?: () => void;
 }
 
+/** Content and controls for a compact workflow step that is ready to start. */
+export interface WorkflowWidgetRunLineProps
+    extends Omit<
+        WorkflowWidgetLineProps,
+        | "working"
+        | "action"
+        | "expanded"
+        | "onExpand"
+        | "expandLabel"
+        | "collapseLabel"
+        | "onOpen"
+    > {
+    runLabel: ReactNode;
+    onRun: () => void;
+    disabled?: boolean;
+}
+
 /** Return the shared attributes used to identify a workflow widget heading. */
 export function workflowWidgetHeadingProps(id: string | undefined) {
     return {
@@ -381,5 +398,31 @@ export function WorkflowWidgetLine({
                 {control}
             </div>
         </Card>
+    );
+}
+
+/** Render a compact ready step with one action that starts and opens it. */
+export function WorkflowWidgetRunLine({
+    runLabel,
+    onRun,
+    disabled = false,
+    ...lineProps
+}: WorkflowWidgetRunLineProps) {
+    return (
+        <WorkflowWidgetLine
+            {...lineProps}
+            action={
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={disabled}
+                    onClick={onRun}
+                >
+                    {runLabel}
+                </Button>
+            }
+            onOpen={onRun}
+        />
     );
 }

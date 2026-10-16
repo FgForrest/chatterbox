@@ -97,6 +97,15 @@ function learnAction(
     hasOutput: boolean,
 ): WorkflowWidgetState["action"] {
     if (step?.state === "review") return "review";
+    return manualRunAction(step, manual, hasOutput);
+}
+
+function manualRunAction(
+    step: WorkflowStep | undefined,
+    manual: boolean,
+    hasOutput: boolean,
+): WorkflowWidgetState["action"] {
+    if (step?.state === "working" || step?.state === "queued") return null;
     if (manual && !hasOutput) return "run";
     return null;
 }
@@ -178,7 +187,7 @@ export function deriveWorkflowWidgets(
             summaryStep,
             summaryVisible,
             manualSummaryRun ? "dialog" : "inline",
-            summaryManual && !data.outputs.summary ? "run" : null,
+            manualRunAction(summaryStep, summaryManual, data.outputs.summary),
         ),
         taskReview: stateFor(
             workflow.visible,

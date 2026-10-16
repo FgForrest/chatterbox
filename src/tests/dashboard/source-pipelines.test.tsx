@@ -113,6 +113,44 @@ function completedProcessing(): ItemProcessingPresentation {
     };
 }
 
+function activeProcessing(
+    widget: "transcript" | "summary",
+): ItemProcessingPresentation {
+    const processing = completedProcessing();
+    if (widget === "transcript") {
+        return {
+            ...processing,
+            phases: {
+                categorize: processing.phases.categorize,
+                transcribe: {
+                    state: "running",
+                    generation: 1,
+                    at: "2026-10-16T10:00:00.000Z",
+                },
+            },
+            outputs: { transcript: false, learn: false, summary: false },
+            jobs: { transcription: "running", summary: null },
+            intents: [],
+        };
+    }
+    return {
+        ...processing,
+        phases: {
+            categorize: processing.phases.categorize,
+            transcribe: processing.phases.transcribe,
+            learn: processing.phases.learn,
+            summary: {
+                state: "running",
+                generation: 1,
+                at: "2026-10-16T10:00:00.000Z",
+            },
+        },
+        outputs: { transcript: true, learn: true, summary: false },
+        jobs: { transcription: null, summary: "running" },
+        intents: [],
+    };
+}
+
 describe("independent transcript and summary pipelines", () => {
     beforeEach(() => {
         summaryOptions.length = 0;
@@ -137,8 +175,8 @@ describe("independent transcript and summary pipelines", () => {
     describe.each([
         ["transcript", "recording-transcription-rec-focus", "Transcription"],
         ["summary", "recording-summary-rec-focus", "Summary"],
-    ] as const)("%s workflow widget", (_name, widgetId, headingName) => {
-        it("focuses its heading when opened", async () => {
+    ] as const)("%s workflow widget", (name, widgetId, headingName) => {
+        it("focuses its collapsed-line heading when opened", async () => {
             HTMLElement.prototype.scrollIntoView = vi.fn();
             vi.stubGlobal(
                 "requestAnimationFrame",
@@ -166,6 +204,46 @@ describe("independent transcript and summary pipelines", () => {
                     isTranscribing={false}
                     onTranscribe={vi.fn()}
                     processing={completedProcessing()}
+                />,
+            );
+
+            openWidget(widgetId);
+
+            await waitFor(() =>
+                expect(screen.getByRole("heading", { name: headingName })).toBe(
+                    document.activeElement,
+                ),
+            );
+        });
+
+        it("focuses its active full-card heading when opened", async () => {
+            HTMLElement.prototype.scrollIntoView = vi.fn();
+            vi.stubGlobal(
+                "requestAnimationFrame",
+                (callback: FrameRequestCallback) =>
+                    window.setTimeout(() => callback(0), 0),
+            );
+            render(
+                <TranscriptionPanel
+                    recording={{
+                        id: "rec-focus",
+                        filename: "Meeting.ogg",
+                        duration: 60_000,
+                        filesize: 1024,
+                        startTime: new Date(0).toISOString(),
+                        deviceSn: "local",
+                    }}
+                    transcripts={[
+                        {
+                            source: "riffado",
+                            text: "Custom text",
+                            provider: "openai",
+                            model: "whisper-1",
+                        },
+                    ]}
+                    isTranscribing={name === "transcript"}
+                    onTranscribe={vi.fn()}
+                    processing={activeProcessing(name)}
                 />,
             );
 

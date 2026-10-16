@@ -14,6 +14,7 @@ import {
 import {
     WorkflowWidget,
     WorkflowWidgetLine,
+    WorkflowWidgetRunLine,
 } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api-errors";
@@ -403,23 +404,15 @@ export function MailLearnCard({
 
     if (!ready && status !== "finished" && status !== "failed" && !learning) {
         return (
-            <WorkflowWidgetLine
+            <WorkflowWidgetRunLine
                 id={widgetId}
                 title={i18n("Learn")}
                 facts={i18n("Ready when you are")}
                 icon={<GraduationCap className="size-4" />}
                 tone={tone}
-                action={
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => void start()}
-                    >
-                        {i18n("Learn")}
-                    </Button>
-                }
-                onOpen={() => void start()}
+                runLabel={i18n("Learn")}
+                disabled={busy}
+                onRun={() => void start()}
             />
         );
     }

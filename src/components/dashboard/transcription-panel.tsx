@@ -29,6 +29,7 @@ import {
     type TranscriptSpeakerTag,
 } from "@/components/people/speaker-tags";
 import {
+    useWorkflowWidgetOpen,
     WorkflowWidget,
     WorkflowWidgetLine,
     workflowWidgetHeadingProps,
@@ -295,6 +296,7 @@ export function TranscriptionPanel({
     const transcriptLine =
         transcriptQuiet ||
         Boolean(isTranscribing && widgets?.transcript.frame === "dialog");
+    const transcriptWidgetId = `recording-transcription-${recording.id}`;
     let transcriptSourceLabel = "Riffado";
     if (activeTranscript?.source === "plaud") transcriptSourceLabel = "Plaud";
     if (activeTranscript?.source === "mixed") {
@@ -650,6 +652,7 @@ export function TranscriptionPanel({
         working: isSummarizing,
         frame: widgets?.summary.frame ?? "inline",
     });
+    const summaryWidgetId = `recording-summary-${recording.id}`;
     let summaryLineFacts =
         processing?.profile?.name ??
         summaryProfileOptions.find((profile) => profile.id === summaryProfileId)
@@ -786,6 +789,19 @@ export function TranscriptionPanel({
         );
     }, [summaryData, summarySpeakerTags]);
 
+    useWorkflowWidgetOpen(
+        (!widgets || widgets.transcript.visible) && !transcriptLine
+            ? transcriptWidgetId
+            : undefined,
+    );
+    useWorkflowWidgetOpen(
+        activeTranscript?.text &&
+            (!widgets || widgets.summary.visible) &&
+            !summaryLine
+            ? summaryWidgetId
+            : undefined,
+    );
+
     return (
         <div className="flex flex-col gap-4">
             {correcting && (
@@ -817,7 +833,7 @@ export function TranscriptionPanel({
             {(!widgets || widgets.transcript.visible) &&
                 (transcriptLine ? (
                     <WorkflowWidgetLine
-                        id={`recording-transcription-${recording.id}`}
+                        id={transcriptWidgetId}
                         title={i18n("Transcription")}
                         facts={
                             isTranscribing
@@ -844,7 +860,7 @@ export function TranscriptionPanel({
                     />
                 ) : (
                     <Card
-                        id={`recording-transcription-${recording.id}`}
+                        id={transcriptWidgetId}
                         className={
                             widgets?.transcript.active
                                 ? widgets.transcript.tone === "review"
@@ -858,7 +874,7 @@ export function TranscriptionPanel({
                             <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
                                 <CardTitle
                                     {...workflowWidgetHeadingProps(
-                                        `recording-transcription-${recording.id}`,
+                                        transcriptWidgetId,
                                     )}
                                     role="heading"
                                     aria-level={2}
@@ -1226,7 +1242,7 @@ export function TranscriptionPanel({
                 (!widgets || widgets.summary.visible) &&
                 (summaryLine ? (
                     <WorkflowWidgetLine
-                        id={`recording-summary-${recording.id}`}
+                        id={summaryWidgetId}
                         title={i18n("Summary")}
                         facts={
                             isSummarizing
@@ -1252,7 +1268,7 @@ export function TranscriptionPanel({
                     />
                 ) : (
                     <Card
-                        id={`recording-summary-${recording.id}`}
+                        id={summaryWidgetId}
                         className={
                             widgets?.summary.active
                                 ? "border-l-2 border-l-primary"
@@ -1264,7 +1280,7 @@ export function TranscriptionPanel({
                             <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-4">
                                 <CardTitle
                                     {...workflowWidgetHeadingProps(
-                                        `recording-summary-${recording.id}`,
+                                        summaryWidgetId,
                                     )}
                                     role="heading"
                                     aria-level={2}

@@ -281,6 +281,7 @@ export function ItemWorkflow({
         useState<CategorizationPanelPresentation | null>(null);
     const panelRequest = useRef<{ itemId: string } | null>(null);
     const filingRef = useRef<HTMLDivElement>(null);
+    const pendingFilingFocus = useRef(false);
 
     useEffect(() => {
         onProcessingChange?.(data);
@@ -291,6 +292,7 @@ export function ItemWorkflow({
             current?.itemId === itemId ? current : null,
         );
         panelRequest.current = null;
+        pendingFilingFocus.current = false;
     }, [itemId]);
 
     const loadPanel = useCallback(() => {
@@ -514,18 +516,29 @@ export function ItemWorkflow({
         [data, panelData, setData],
     );
 
+    const focusFilingControl = useCallback(() => {
+        const profile = filingRef.current?.querySelector<HTMLElement>(
+            "[data-filing-profile]",
+        );
+        if (!profile) return;
+        pendingFilingFocus.current = false;
+        profile.focus();
+    }, []);
+
+    useEffect(() => {
+        if (!panelData || !pendingFilingFocus.current) return;
+        const frame = window.requestAnimationFrame(focusFilingControl);
+        return () => window.cancelAnimationFrame(frame);
+    }, [focusFilingControl, panelData]);
+
     const focusFiling = useCallback(() => {
+        pendingFilingFocus.current = true;
         filingRef.current?.scrollIntoView({
             behavior: "smooth",
             block: "start",
         });
-        window.requestAnimationFrame(() => {
-            const profile = filingRef.current?.querySelector<HTMLElement>(
-                "[data-filing-profile]",
-            );
-            profile?.focus();
-        });
-    }, []);
+        window.requestAnimationFrame(focusFilingControl);
+    }, [focusFilingControl]);
 
     const handleAction = (action: WorkflowActionCode) => {
         switch (action) {

@@ -8,6 +8,7 @@ import { Markdown } from "@/components/markdown";
 import {
     WorkflowWidget,
     WorkflowWidgetLine,
+    WorkflowWidgetRunLine,
 } from "@/components/pipeline/workflow-widget";
 import { RecordingTasks } from "@/components/tasks/recording-tasks";
 import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
@@ -238,28 +239,42 @@ export function MailSummaryCard({
         />
     );
 
-    const renderCompactLine = (id?: string) => (
-        <WorkflowWidgetLine
-            id={id}
-            title={i18n("Summary")}
-            facts={working ? i18n("Generating the summary") : profileName}
-            icon={<ListChecks className="size-4" />}
-            tone={tone}
-            working={working}
-            expanded={working ? undefined : false}
-            onExpand={
-                working ? undefined : () => setWorkflowSummaryExpanded(true)
-            }
-            expandLabel={working ? undefined : i18n("View summary")}
-            onOpen={() => {
-                if (working && widgetFrame === "dialog") {
-                    setDialogOpen(true);
-                    return;
+    const renderCompactLine = (id?: string) => {
+        const lineProps = {
+            id,
+            title: i18n("Summary"),
+            facts: working ? i18n("Generating the summary") : profileName,
+            icon: <ListChecks className="size-4" />,
+            tone,
+        };
+        if (loaded && canChange && !working && !hasSummary) {
+            return (
+                <WorkflowWidgetRunLine
+                    {...lineProps}
+                    runLabel={i18n("Summarize")}
+                    onRun={runSummary}
+                />
+            );
+        }
+        return (
+            <WorkflowWidgetLine
+                {...lineProps}
+                working={working}
+                expanded={working ? undefined : false}
+                onExpand={
+                    working ? undefined : () => setWorkflowSummaryExpanded(true)
                 }
-                setWorkflowSummaryExpanded(true);
-            }}
-        />
-    );
+                expandLabel={working ? undefined : i18n("View summary")}
+                onOpen={() => {
+                    if (working && widgetFrame === "dialog") {
+                        setDialogOpen(true);
+                        return;
+                    }
+                    setWorkflowSummaryExpanded(true);
+                }}
+            />
+        );
+    };
 
     if (summaryLine && !dialogOpen) {
         return (

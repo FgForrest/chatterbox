@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { PhaseRecord, PhaseState } from "@/lib/pipeline/types";
+import * as workflowStatus from "@/lib/pipeline/workflow-status";
 import {
     deriveWorkflowWidgets,
     isWorkflowWidgetLineVisible,
@@ -55,6 +56,10 @@ function phase(state: PhaseState, reason?: string): PhaseRecord {
         at: "2026-10-16T00:00:00.000Z",
     };
 }
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 
 describe("workflow widgets", () => {
     it("hides future widgets and expands the active pipeline widget", () => {
@@ -310,6 +315,51 @@ describe("workflow widgets", () => {
         });
         expect(widgets.summary.visible).toBe(false);
         expect(widgets.taskReview.visible).toBe(false);
+    });
+});
+
+describe.each([
+    { name: "Learn", widget: "learn", step: "learn" },
+    { name: "Summary", widget: "summary", step: "summary" },
+] as const)("manual $name widget", ({ widget, step }) => {
+    function deriveManualWidget(state: "working" | "queued" | "manual") {
+        vi.spyOn(workflowStatus, "deriveWorkflowStatus").mockReturnValue({
+            visible: true,
+            steps: [{ id: step, state, current: true }],
+            status: null,
+        });
+        return deriveWorkflowWidgets(
+            presentation({
+                manualOnly: true,
+                phases: {
+                    categorize: phase("done"),
+                    transcribe: phase("done"),
+                    ...(widget === "summary" ? { learn: phase("done") } : {}),
+                },
+                outputs: {
+                    transcript: true,
+                    learn: widget === "summary",
+                    summary: false,
+                },
+            }),
+        )[widget];
+    }
+
+    it.each([
+        "working",
+        "queued",
+    ] as const)("offers no run action and keeps the working tone while %s", (state) => {
+        expect(deriveManualWidget(state)).toMatchObject({
+            action: null,
+            tone: "working",
+        });
+    });
+
+    it("offers run once settled without output", () => {
+        expect(deriveManualWidget("manual")).toMatchObject({
+            action: "run",
+            tone: "next",
+        });
     });
 });
 
