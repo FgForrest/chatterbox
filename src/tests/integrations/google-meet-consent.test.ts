@@ -199,6 +199,30 @@ describe("Meet incremental Google consent", () => {
         expect(saveMeetGrant).not.toHaveBeenCalled();
     });
 
+    it("stores both grants for a first-time combined connection", async () => {
+        vi.mocked(getGoogleConnectionStatus).mockResolvedValue(null);
+        const scopes = calendarAndMeetConsentScopes([], calendarScope);
+        const fetchImpl = vi
+            .fn<typeof fetch>()
+            .mockResolvedValue(tokenResponse(existing.subject, scopes));
+
+        await expect(finishCalendarMeet(fetchImpl)).resolves.toEqual({
+            outcome: "connected",
+            returnTo: "/dashboard?onboarding=google",
+        });
+        expect(saveGoogleConnection).toHaveBeenCalledWith(
+            calendarMeetState.userId,
+            expect.objectContaining({ subject: existing.subject }),
+            expect.objectContaining({
+                scopes: expect.arrayContaining([
+                    calendarScope,
+                    GOOGLE_MEET_READ_SCOPE,
+                ]),
+            }),
+        );
+        expect(saveMeetGrant).not.toHaveBeenCalled();
+    });
+
     it("rejects combined consent without the Calendar scope", async () => {
         await expect(
             finishCalendarMeet(

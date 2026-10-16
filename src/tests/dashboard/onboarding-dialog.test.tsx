@@ -2,10 +2,26 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { OnboardingDialog } from "@/components/onboarding-dialog";
-import { OnboardingStepMail } from "@/components/onboarding-steps";
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+    OnboardingDialog,
+    type OnboardingStepId,
+} from "@/components/onboarding-dialog";
+import {
+    OnboardingStepComplete,
+    OnboardingStepGoogle,
+    OnboardingStepMail,
+    type OnboardingSummaryItem,
+} from "@/components/onboarding-steps";
+import { useGoogleConnection } from "@/hooks/use-google-connection";
+import type { OnboardingCapabilities } from "@/lib/onboarding/capabilities";
 import { shouldOpenOnboarding } from "@/lib/onboarding/capabilities";
 
 vi.mock("next-intl", () => ({
@@ -22,6 +38,9 @@ vi.mock("next/navigation", () => ({
     useRouter: () => ({ push: vi.fn() }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("@/hooks/use-google-connection", () => ({
+    useGoogleConnection: vi.fn(),
+}));
 vi.mock("@/lib/recorder-extension/client", () => ({
     browserRecorderExtensionClient: () => ({
         detect: vi.fn().mockResolvedValue({ kind: "not-installed" }),
@@ -29,6 +48,21 @@ vi.mock("@/lib/recorder-extension/client", () => ({
         onPresence: vi.fn(() => vi.fn()),
     }),
 }));
+
+const baseCapabilities: OnboardingCapabilities = {
+    googleConfigured: false,
+    mailAvailable: false,
+    mcpConnectorUrl: null,
+    recorderStoreUrl: "https://store.example/recorder",
+};
+
+beforeEach(() => {
+    vi.mocked(useGoogleConnection).mockReturnValue({
+        state: null,
+        loading: false,
+        refresh: vi.fn(),
+    });
+});
 
 afterEach(() => {
     cleanup();
@@ -81,6 +115,147 @@ describe("onboarding mail loading", () => {
     });
 });
 
+describe("Google onboarding state", () => {
+    it.each([
+        [
+            "Calendar and Meet",
+            {
+                available: true,
+                connection: {
+                    email: "person@example.com",
+                    hostedDomain: null,
+                    status: "active" as const,
+                    calendarGranted: true,
+                    meetGranted: true,
+                },
+            },
+            "calendar-meet",
+        ],
+        [
+            "Calendar only",
+            {
+                available: true,
+                connection: {
+                    email: "person@example.com",
+                    hostedDomain: null,
+                    status: "active" as const,
+                    calendarGranted: true,
+                    meetGranted: false,
+                },
+            },
+            "calendar-only",
+        ],
+        [
+            "not connected",
+            { available: true, connection: null },
+            "not-connected",
+        ],
+    ] as const)("reports %s from the Google step", async (_label, state, expected) => {
+        vi.mocked(useGoogleConnection).mockReturnValue({
+            state,
+            loading: false,
+            refresh: vi.fn(),
+        });
+        const onConnectionChange = vi.fn();
+
+        render(
+            <OnboardingStepGoogle onConnectionChange={onConnectionChange} />,
+        );
+
+        await waitFor(() =>
+            expect(onConnectionChange).toHaveBeenLastCalledWith(expected),
+        );
+    });
+
+    it.each([
+        ["connected", "Google: Connected", true],
+        ["calendar-only", "Google: Calendar only", true],
+        ["skipped", "Google: Skipped · Settings → Google Account", false],
+    ] as const)("shows the %s state in the finish summary", (status, text, ready) => {
+        const item: OnboardingSummaryItem = {
+            id: "google",
+            label: "Google",
+            status,
+            location: "Settings → Google Account",
+        };
+
+        render(<OnboardingStepComplete items={[item]} />);
+
+        const line = screen.getByText(text).closest("li");
+        expect(line?.className.includes("led-active")).toBe(ready);
+    });
+});
+
+describe("capability-gated onboarding steps", () => {
+    it.each([
+        [
+            "google",
+            { googleConfigured: true },
+            "Connect Google Calendar and Meet",
+            "Step 4 of 6",
+        ],
+        [
+            "mail",
+            { mailAvailable: true },
+            "Send email to Chatterbox",
+            "Step 5 of 6",
+        ],
+        [
+            "claude",
+            { mcpConnectorUrl: "https://example.com/mcp" },
+            "Connect Claude",
+            "Step 5 of 6",
+        ],
+        ["recorder", {}, "Connect Meeting Recorder", "Step 4 of 5"],
+    ] as const)("shows the %s step and renumbers progress when available", async (initialStep, enabled, heading, progress) => {
+        if (initialStep === "mail") {
+            vi.stubGlobal(
+                "fetch",
+                vi.fn().mockResolvedValue(Response.json({ addresses: [] })),
+            );
+        }
+        render(
+            <OnboardingDialog
+                open
+                onOpenChange={vi.fn()}
+                onComplete={vi.fn()}
+                capabilities={{ ...baseCapabilities, ...enabled }}
+                initialStep={initialStep}
+            />,
+        );
+
+        expect(
+            await screen.findByRole("heading", { level: 3, name: heading }),
+        ).toBeTruthy();
+        expect(screen.getByText(progress)).toBeTruthy();
+    });
+
+    it.each([
+        ["google", "Connect Google Calendar and Meet"],
+        ["mail", "Send email to Chatterbox"],
+        ["claude", "Connect Claude"],
+    ] as const)("hides the %s step and excludes it from progress when unavailable", (initialStep, heading) => {
+        render(
+            <OnboardingDialog
+                open
+                onOpenChange={vi.fn()}
+                onComplete={vi.fn()}
+                capabilities={baseCapabilities}
+                initialStep={initialStep as OnboardingStepId}
+            />,
+        );
+
+        expect(
+            screen.getByRole("heading", {
+                level: 3,
+                name: "Set up Chatterbox",
+            }),
+        ).toBeTruthy();
+        expect(screen.queryByText(heading)).toBeNull();
+        expect(screen.getByText("Step 1 of 5")).toBeTruthy();
+    });
+});
+
 describe("re-run onboarding", () => {
     it("does not open automatically after completion", () => {
         expect(shouldOpenOnboarding(true)).toBe(false);
@@ -95,12 +270,7 @@ describe("re-run onboarding", () => {
                 onOpenChange={onOpenChange}
                 onComplete={vi.fn()}
                 mandatory={false}
-                capabilities={{
-                    googleConfigured: false,
-                    mailAvailable: false,
-                    mcpConnectorUrl: null,
-                    recorderStoreUrl: "https://store.example/recorder",
-                }}
+                capabilities={baseCapabilities}
                 initialStep="welcome"
             />,
         );
@@ -148,12 +318,7 @@ describe("re-run onboarding", () => {
                 open
                 onOpenChange={vi.fn()}
                 onComplete={vi.fn()}
-                capabilities={{
-                    googleConfigured: false,
-                    mailAvailable: false,
-                    mcpConnectorUrl: null,
-                    recorderStoreUrl: "https://store.example/recorder",
-                }}
+                capabilities={baseCapabilities}
             />,
         );
 

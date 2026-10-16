@@ -13,6 +13,7 @@ import {
     DialogTitle,
 } from "@/components/onboarding-dialog-base";
 import {
+    type OnboardingGoogleState,
     OnboardingStepAiProvider,
     OnboardingStepClaude,
     OnboardingStepComplete,
@@ -44,8 +45,8 @@ interface StepContext {
     setHasPlaudConnection: (connected: boolean) => void;
     hasOwnProvider: boolean;
     hasIncludedProvider: boolean;
-    googleConnected: boolean;
-    setGoogleConnected: (connected: boolean) => void;
+    googleConnection: OnboardingGoogleState;
+    setGoogleConnection: (state: OnboardingGoogleState) => void;
     recorderConnected: boolean;
     setRecorderConnected: (connected: boolean) => void;
     mailReady: boolean;
@@ -91,7 +92,9 @@ function renderAiProvider(context: StepContext) {
 
 function renderGoogle(context: StepContext) {
     return (
-        <OnboardingStepGoogle onConnectionChange={context.setGoogleConnected} />
+        <OnboardingStepGoogle
+            onConnectionChange={context.setGoogleConnection}
+        />
     );
 }
 
@@ -204,7 +207,8 @@ export function OnboardingDialog({
     const [hasPlaudConnection, setHasPlaudConnection] = useState(false);
     const [hasOwnProvider, setHasOwnProvider] = useState(false);
     const [hasIncludedProvider, setHasIncludedProvider] = useState(false);
-    const [googleConnected, setGoogleConnected] = useState(false);
+    const [googleConnection, setGoogleConnection] =
+        useState<OnboardingGoogleState>("not-connected");
     const [recorderConnected, setRecorderConnected] = useState(false);
     const [mailReady, setMailReady] = useState(false);
 
@@ -248,7 +252,7 @@ export function OnboardingDialog({
         setHasPlaudConnection(false);
         setHasOwnProvider(false);
         setHasIncludedProvider(false);
-        setGoogleConnected(false);
+        setGoogleConnection("not-connected");
         setRecorderConnected(false);
         setMailReady(false);
     }, [open]);
@@ -286,35 +290,43 @@ export function OnboardingDialog({
         {
             id: "plaud",
             label: i18n("Plaud"),
-            connected: hasPlaudConnection,
+            status: hasPlaudConnection ? "connected" : "skipped",
             location: i18n("Settings → Plaud Account"),
         },
         {
             id: "ai-provider",
             label: i18n("AI provider"),
-            connected: hasOwnProvider || hasIncludedProvider,
+            status:
+                hasOwnProvider || hasIncludedProvider ? "connected" : "skipped",
             location: i18n("Settings → Providers"),
         },
     ];
     if (capabilities.googleConfigured) {
+        let googleStatus: OnboardingSummaryItem["status"] = "skipped";
+        if (googleConnection === "calendar-meet") {
+            googleStatus = "connected";
+        }
+        if (googleConnection === "calendar-only") {
+            googleStatus = "calendar-only";
+        }
         summaryItems.push({
             id: "google",
             label: i18n("Google"),
-            connected: googleConnected,
+            status: googleStatus,
             location: i18n("Settings → Google Account"),
         });
     }
     summaryItems.push({
         id: "recorder",
         label: i18n("Recorder"),
-        connected: recorderConnected,
+        status: recorderConnected ? "connected" : "skipped",
         location: i18n("Settings → Meeting Recorder"),
     });
     if (capabilities.mailAvailable) {
         summaryItems.push({
             id: "mail",
             label: i18n("Mail"),
-            connected: mailReady,
+            status: mailReady ? "connected" : "skipped",
             location: i18n("Settings → Mail"),
         });
     }
@@ -322,7 +334,7 @@ export function OnboardingDialog({
         summaryItems.push({
             id: "claude",
             label: i18n("Claude"),
-            connected: false,
+            status: "skipped",
             location: i18n("Menu → Run setup again"),
         });
     }
@@ -333,8 +345,8 @@ export function OnboardingDialog({
         setHasPlaudConnection,
         hasOwnProvider,
         hasIncludedProvider,
-        googleConnected,
-        setGoogleConnected,
+        googleConnection,
+        setGoogleConnection,
         recorderConnected,
         setRecorderConnected,
         mailReady,

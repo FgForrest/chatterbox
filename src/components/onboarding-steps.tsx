@@ -150,26 +150,31 @@ export function OnboardingStepAiProvider({
     );
 }
 
+/** Google access selected during onboarding. */
+export type OnboardingGoogleState =
+    | "calendar-meet"
+    | "calendar-only"
+    | "not-connected";
+
 /** Google Calendar and Meet step for the setup wizard. */
 export function OnboardingStepGoogle({
     onConnectionChange,
 }: {
-    onConnectionChange: (connected: boolean) => void;
+    onConnectionChange: (state: OnboardingGoogleState) => void;
 }) {
     const i18n = useExtracted();
     const { state } = useGoogleConnection();
     const calendarGranted = state?.connection?.calendarGranted === true;
     const meetGranted = state?.connection?.meetGranted === true;
-    const connected =
-        state?.connection?.status === "active" &&
-        calendarGranted &&
-        meetGranted;
+    let connectionState: OnboardingGoogleState = "not-connected";
+    if (state?.connection?.status === "active" && calendarGranted) {
+        connectionState = meetGranted ? "calendar-meet" : "calendar-only";
+    }
+    const connected = connectionState === "calendar-meet";
 
     useEffect(() => {
-        onConnectionChange(
-            state?.connection?.status === "active" && calendarGranted,
-        );
-    }, [calendarGranted, onConnectionChange, state?.connection?.status]);
+        onConnectionChange(connectionState);
+    }, [connectionState, onConnectionChange]);
 
     const connect = useCallback((purpose: "calendar" | "calendar-meet") => {
         const returnTo = "/dashboard?onboarding=google";
@@ -432,7 +437,7 @@ export function OnboardingStepClaude({
 export interface OnboardingSummaryItem {
     id: string;
     label: string;
-    connected: boolean;
+    status: "connected" | "calendar-only" | "skipped";
     location: string;
 }
 
@@ -453,32 +458,41 @@ export function OnboardingStepComplete({
                 )}
             />
             <ul className="mx-auto w-fit space-y-2 text-left text-xs sm:text-sm">
-                {items.map((item) => (
-                    <li
-                        key={item.id}
-                        className={
-                            item.connected
-                                ? "led-active flex items-center gap-2"
-                                : "flex items-center gap-2 text-muted-foreground"
-                        }
-                    >
-                        {item.connected ? (
-                            <CircleCheck className="size-4 shrink-0" />
-                        ) : (
-                            <Minus className="size-4 shrink-0" />
-                        )}
-                        <span>
-                            {item.connected
-                                ? i18n("{step}: Connected", {
-                                      step: item.label,
-                                  })
-                                : i18n("{step}: Skipped · {location}", {
-                                      step: item.label,
-                                      location: item.location,
-                                  })}
-                        </span>
-                    </li>
-                ))}
+                {items.map((item) => {
+                    const ready = item.status !== "skipped";
+                    return (
+                        <li
+                            key={item.id}
+                            className={
+                                ready
+                                    ? "led-active flex items-center gap-2"
+                                    : "flex items-center gap-2 text-muted-foreground"
+                            }
+                        >
+                            {ready ? (
+                                <CircleCheck className="size-4 shrink-0" />
+                            ) : (
+                                <Minus className="size-4 shrink-0" />
+                            )}
+                            <span>
+                                {item.status === "connected" &&
+                                    i18n("{step}: Connected", {
+                                        step: item.label,
+                                    })}
+                                {item.status === "calendar-only" && (
+                                    <>
+                                        {item.label}: {i18n("Calendar only")}
+                                    </>
+                                )}
+                                {item.status === "skipped" &&
+                                    i18n("{step}: Skipped · {location}", {
+                                        step: item.label,
+                                        location: item.location,
+                                    })}
+                            </span>
+                        </li>
+                    );
+                })}
             </ul>
         </div>
     );

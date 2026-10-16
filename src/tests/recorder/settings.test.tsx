@@ -57,10 +57,12 @@ interface RecorderStatusFixture {
     }[];
     server_url: string;
     extension_id: string;
+    encrypted_recording_protocol: number;
     defaults: {
         auto_record_platforms: string[];
         auto_stop_quiet_seconds: number;
         notice_text: string;
+        notice_text_is_default: boolean;
         lock_defaults: boolean;
     };
     platforms: { id: string; name: string }[];
@@ -99,10 +101,12 @@ const status: RecorderStatusFixture = {
     pending_captures: [],
     server_url: "https://chatterbox.example.com",
     extension_id: DEFAULT_RECORDER_EXTENSION_ID,
+    encrypted_recording_protocol: 1,
     defaults: {
         auto_record_platforms: [],
         auto_stop_quiet_seconds: 240,
         notice_text: "",
+        notice_text_is_default: true,
         lock_defaults: false,
     },
     platforms: [],
@@ -112,11 +116,19 @@ function stubRecorderStatus(nextStatus: RecorderStatusFixture) {
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
         const path = String(input);
         if (path === "/api/settings/recorder/pair") {
-            return Response.json({
-                ...nextStatus,
-                key_id: "key-1",
-                api_key: "op_recorder",
-            });
+            return Response.json(
+                {
+                    key_id: "key-1",
+                    api_key: "op_recorder",
+                    extension_id: nextStatus.extension_id,
+                    server_url: nextStatus.server_url,
+                    encrypted_recording_protocol:
+                        nextStatus.encrypted_recording_protocol,
+                    defaults: nextStatus.defaults,
+                    platforms: nextStatus.platforms,
+                },
+                { status: 201 },
+            );
         }
         if (
             init?.method === "DELETE" ||
@@ -219,6 +231,52 @@ describe.each([
         expect(
             screen.getByRole("button", { name: "Generate recorder key" }),
         ).toBeTruthy();
+    });
+
+    it("reloads status after generating a manual recorder key", async () => {
+        const nextStatus = {
+            ...status,
+            keys: [
+                {
+                    id: "key-desk",
+                    name: "Desk recorder",
+                    key_prefix: "op_rec_desk",
+                    created_at: "2026-10-01T10:00:00.000Z",
+                    last_used_at: "2026-10-15T10:00:00.000Z",
+                },
+            ],
+            pending_captures: [
+                {
+                    client_recording_id: "capture-1",
+                    api_key_id: "key-desk",
+                    created_at: "2026-10-16T10:00:00.000Z",
+                    expires_at: "2026-10-17T10:00:00.000Z",
+                },
+            ],
+        };
+        const fetchMock = stubRecorderStatus(nextStatus);
+        render(view(mode));
+        fireEvent.click(await screen.findByText("Connect manually"));
+        fireEvent.click(
+            screen.getByRole("button", { name: "Generate recorder key" }),
+        );
+
+        expect(await screen.findByText("op_recorder")).toBeTruthy();
+        await waitFor(() => {
+            const statusRequests = fetchMock.mock.calls.filter(
+                ([input]) => String(input) === "/api/settings/recorder/status",
+            );
+            expect(statusRequests).toHaveLength(2);
+        });
+
+        if (mode === "settings") {
+            fireEvent.click(screen.getByText("Connected recorders"));
+            expect(screen.getByText("Desk recorder")).toBeTruthy();
+            fireEvent.click(screen.getByText("Recover unfinished recordings"));
+            expect(
+                screen.getByRole("combobox", { name: "New recorder key" }),
+            ).toBeTruthy();
+        }
     });
 });
 
@@ -419,6 +477,7 @@ describe("Meeting Recorder Settings details", () => {
                 auto_record_platforms: ["google-meet", "teams"],
                 auto_stop_quiet_seconds: 45,
                 notice_text: "",
+                notice_text_is_default: true,
                 lock_defaults: true,
             },
             platforms: [

@@ -27,7 +27,21 @@ interface RecorderKey {
     last_used_at: string | null;
 }
 
-interface RecorderStatus {
+interface RecorderConfigResponse {
+    extension_id: string;
+    server_url: string | null;
+    encrypted_recording_protocol: number;
+    defaults: {
+        auto_record_platforms: string[];
+        auto_stop_quiet_seconds: number;
+        notice_text: string;
+        notice_text_is_default: boolean;
+        lock_defaults: boolean;
+    };
+    platforms: { id: string; name: string }[];
+}
+
+interface RecorderStatus extends RecorderConfigResponse {
     keys: RecorderKey[];
     pending_captures: {
         client_recording_id: string;
@@ -35,17 +49,12 @@ interface RecorderStatus {
         created_at: string;
         expires_at: string;
     }[];
-    server_url: string | null;
-    defaults: {
-        auto_record_platforms: string[];
-        auto_stop_quiet_seconds: number;
-        notice_text: string;
-        lock_defaults: boolean;
-    };
-    platforms: { id: string; name: string }[];
 }
 
-type PairResponse = RecorderStatus & { key_id: string; api_key: string };
+interface PairResponse extends RecorderConfigResponse {
+    key_id: string;
+    api_key: string;
+}
 
 interface MeetingRecorderSetupProps {
     storeUrl: string;
@@ -221,7 +230,7 @@ export function MeetingRecorderSetup({
         try {
             const minted = await mintKey();
             setManualKey(minted.api_key);
-            setStatus(minted);
+            await loadStatus();
         } catch (error) {
             toast.error(
                 error instanceof Error
@@ -231,7 +240,7 @@ export function MeetingRecorderSetup({
         } finally {
             setBusy(false);
         }
-    }, [i18n, mintKey]);
+    }, [i18n, loadStatus, mintKey]);
 
     const copy = useCallback(async (kind: "key" | "url", value: string) => {
         await navigator.clipboard.writeText(value);
