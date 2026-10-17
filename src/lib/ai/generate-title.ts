@@ -1,21 +1,15 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { OpenAI } from "openai";
 import { db } from "@/db";
-import { apiCredentials, userSettings } from "@/db/schema";
+import { transcriptions, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import {
-    enhancementChatModel,
-    pickEnhancementCredential,
-} from "@/lib/ai/enhancement-provider";
-import { titleProviderId } from "@/lib/ai/title-provider";
-import { decrypt } from "@/lib/encryption";
-import { decryptJsonField } from "@/lib/encryption/fields";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
+import { resolveTitlePrompt } from "@/lib/profiles/prompts";
+import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import type { ProfileSettings } from "@/lib/profiles/settings";
+import type { RecordingView } from "@/lib/sharing/view";
 import { buildChatCompletionParams } from "./chat-completion-params";
-import {
-    normalizeTitlePromptConfig,
-    TITLE_TEMPLATE_KIND,
-} from "./prompt-presets";
-import { resolveTemplate } from "./prompt-templates";
 import { getAiOutputLanguageDirective } from "./summary-presets";
 import { recordChatCompletionUsage } from "./usage-cost";
 
@@ -25,53 +19,61 @@ export async function generateTitleFromTranscription(
     transcriptionText: string,
     source: "summary" | "transcript" = "transcript",
     ownerUserId = userId,
+    view: RecordingView = "private",
 ): Promise<string | null> {
+    const profile = await resolveItemProfile(
+        recordingId,
+        view,
+        ownerUserId,
+        userId,
+    );
+    const settings = profile.settings as ProfileSettings;
+    const [transcript] = await db
+        .select({ detectedLanguage: transcriptions.detectedLanguage })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, recordingId),
+                eq(transcriptions.userId, ownerUserId),
+                eq(transcriptions.source, "riffado"),
+            ),
+        )
+        .limit(1);
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ownerUserId))
+        .limit(1);
+    const promptTemplate = resolveTitlePrompt({
+        settings: settings.steps.title,
+        outputLanguage: settings.steps.summary.outputLanguage,
+        contentLanguage: transcript?.detectedLanguage ?? null,
+        uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
+    }).text;
+    let resolved: Awaited<ReturnType<typeof resolveStepProvider>>;
     try {
-        // Get user's prompt configuration
-        const [userSettingsRow] = await db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, userId))
-            .limit(1);
-
-        // `titleGenerationPrompt` is jsonb-envelope encrypted at rest;
-        // legacy plaintext rows pass through verbatim. A missing value reads
-        // as the seeded built-ins.
-        const promptConfig = normalizeTitlePromptConfig(
-            userSettingsRow?.titleGenerationPrompt
-                ? decryptJsonField(userSettingsRow.titleGenerationPrompt)
-                : null,
-        );
-        const { prompt: promptTemplate } = resolveTemplate(
-            promptConfig,
-            promptConfig.selectedPrompt,
-            TITLE_TEMPLATE_KIND,
-        );
-
-        const configuredCredentials = await db
-            .select()
-            .from(apiCredentials)
-            .where(eq(apiCredentials.userId, userId))
-            .orderBy(apiCredentials.createdAt, apiCredentials.id);
-
-        const selectedId = titleProviderId(userSettingsRow?.defaultProviders);
-        const credentials =
-            configuredCredentials.find(
-                (candidate) => candidate.id === selectedId,
-            ) ?? pickEnhancementCredential(configuredCredentials);
-
-        if (!credentials) {
-            console.warn("No AI provider found for title generation");
-            return null;
-        }
-
-        // Decrypt API key
-        const apiKey = decrypt(credentials.apiKey);
+        resolved = await resolveStepProvider({
+            step: "title",
+            pin: settings.steps.title.provider,
+            actorUserId: userId,
+        });
+    } catch (error) {
+        if (settings.steps.title.provider) throw error;
+        console.error("Error resolving title provider:", error);
+        return null;
+    }
+    if (resolved.kind !== "credential") {
+        console.warn("No AI provider found for title generation");
+        return null;
+    }
+    try {
+        const credentials = resolved.credential;
 
         // Create OpenAI client
         const openai = new OpenAI({
-            apiKey,
+            apiKey: credentials.apiKey,
             baseURL: credentials.baseUrl || undefined,
+            maxRetries: resolved.organizationCredential ? 0 : undefined,
         });
 
         // Use a lightweight model for title generation
@@ -90,7 +92,7 @@ export async function generateTitleFromTranscription(
         // message rather than the user prompt, so it doesn't compete with
         // the title-format rules in the user prompt.
         const languageDirective = getAiOutputLanguageDirective(
-            userSettingsRow?.aiOutputLanguage ?? null,
+            settings.steps.summary.outputLanguage,
         );
 
         // Replacement function so `$` sequences in the transcript are
@@ -103,10 +105,11 @@ export async function generateTitleFromTranscription(
 
         const baseSystem =
             source === "summary"
-                ? "You are a helpful assistant that generates concise, descriptive titles for audio recordings. The supplied text is a summary of the complete recording; title the recording by its main subject. Always follow the rules strictly."
-                : "You are a helpful assistant that generates concise, descriptive titles for audio recordings based on transcriptions. Always follow the rules strictly.";
+                ? "You are a helpful assistant that generates concise, descriptive titles. The supplied text is a summary of the complete item; title it by its main subject. Always follow the rules strictly."
+                : "You are a helpful assistant that generates concise, descriptive titles from supplied content. Always follow the rules strictly.";
         const systemContent = `${baseSystem} ${CONTENT_IS_DATA_DIRECTIVE} ${languageDirective}`;
 
+        await resolved.reserveCall();
         const response = await openai.chat.completions.create(
             buildChatCompletionParams({
                 model,
@@ -128,7 +131,8 @@ export async function generateTitleFromTranscription(
             {
                 recordingId,
                 ownerUserId,
-                payerUserId: userId,
+                actorUserId: userId,
+                payerUserId: resolved.payerUserId,
                 operation: "title",
                 provider: credentials.provider,
                 model,

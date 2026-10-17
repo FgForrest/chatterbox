@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
     accounts,
     apiCredentials,
+    itemProcessing,
     knowledgeFactEvidence,
     knowledgeFacts,
     learnReviewItems,
@@ -25,8 +26,8 @@ import {
     mailParticipants,
     people,
     personEmails,
+    recordingFolderAssignments,
     recordingFolders,
-    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -129,6 +130,10 @@ import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
 import { deleteMail } from "@/lib/mail/manage";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { requireRecordingView } from "@/lib/sharing/access";
 import {
     rawMessage,
@@ -167,6 +172,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
     let acmeId = "";
     let firstMail = "";
     let orgUserId = "";
+    let categoryFolderId = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -236,6 +242,89 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
         return { runId, result };
     }
 
+    const runAdvance = async (itemId: string) => {
+        const profile = await resolveDefaultProfile("u-jan", "mail");
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: "u-jan",
+                itemId,
+                folderId: categoryFolderId,
+            })
+            .onConflictDoNothing();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: "u-jan",
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .onConflictDoUpdate({
+                target: [itemProcessing.itemId, itemProcessing.view],
+                set: {
+                    profileId: profile.profile.id,
+                    profileRevisionId: profile.revisionId,
+                },
+            });
+        const [processing] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, "u-jan"),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, itemId, "private", "u-jan", "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.generation ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
+        return pipelineAdvanceJobHandler.run({
+            jobId: `pipeline-${itemId}`,
+            userId: "u-jan",
+            payload: { itemId, view: "private", reason: "arrival" },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: () => undefined,
+        });
+    };
+
+    async function setAutomaticLearn(automatic: boolean): Promise<void> {
+        const resolved = await resolveDefaultProfile("u-jan", "mail");
+        const settings = resolved.settings;
+        if ("transcribe" in settings.steps) throw new Error("mail profile");
+        await updateProfile({
+            ownerUserId: "u-jan",
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: "u-jan",
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    learn: { ...settings.steps.learn, automatic },
+                },
+            },
+        });
+    }
+
     beforeAll(async () => {
         storageDir = mkdtempSync(join(tmpdir(), "riffado-mail-learn-"));
         mockEnv.LOCAL_STORAGE_PATH = storageDir;
@@ -257,6 +346,17 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             providerId: "oidc",
         });
         await ensureRootFolders("u-jan");
+        const [privateRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, "u-jan"));
+        categoryFolderId = (
+            await createFolder({
+                userId: "u-jan",
+                parentId: privateRoot?.id ?? "",
+                name: "Categorized",
+            })
+        ).id;
         await ensureMailbox("u-jan");
         // No automatic processing: the runs here are started by hand.
         await db()
@@ -268,6 +368,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
                 defaultModel: "gpt-4o-mini",
                 isDefaultEnhancement: true,
             });
+        await setAutomaticLearn(false);
         knowledgeStore().invalidateAll();
         await seedCoreVocabulary();
         acmeId = (
@@ -284,7 +385,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
         rmSync(storageDir, { recursive: true, force: true });
     }, 30_000);
 
-    it("reads a mail in parts and stores review items at their place in its text", async () => {
+    it("runs manual Learn when automatic Learn is off", async () => {
         const itemId = await deliver("Pilot", BODY);
         createCompletion.mockReset();
         createCompletion
@@ -536,6 +637,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: root?.id ?? "",
             name: "Pilots",
+            canCurate: true,
         });
         await addRecordingToFolder({
             userId: "u-jan",
@@ -662,15 +764,10 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
     });
 
     it("starts Learn by itself on a new mail when automatic Learn is on", async () => {
-        await db()
-            .insert(userSettings)
-            .values({ userId: "u-jan", autoLearn: true })
-            .onConflictDoUpdate({
-                target: userSettings.userId,
-                set: { autoLearn: true },
-            });
+        await setAutomaticLearn(true);
         try {
             const itemId = await deliver("Automatic", "Please call Petra.");
+            await runAdvance(itemId);
             const [run] = await db()
                 .select({
                     trigger: learnRuns.trigger,
@@ -680,10 +777,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
                 .where(eq(learnRuns.itemId, itemId));
             expect(run).toMatchObject({ trigger: "auto", status: "queued" });
         } finally {
-            await db()
-                .update(userSettings)
-                .set({ autoLearn: false })
-                .where(eq(userSettings.userId, "u-jan"));
+            await setAutomaticLearn(false);
         }
     });
 

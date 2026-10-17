@@ -6,9 +6,10 @@ import {
     recordings,
     transcriptions,
     userSettings,
+    users,
 } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
+import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
     localizedSummaryPrompt,
@@ -18,11 +19,23 @@ import {
     SUMMARY_SPEAKER_DIRECTIVE,
     SUMMARY_TEMPLATE_KIND,
 } from "@/lib/ai/summary-presets";
-import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
+import { decryptJsonField } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { modelInput } from "@/lib/learn/llm-input";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { captureServerEvent } from "@/lib/posthog-server";
+import {
+    BUILTIN_PROMPTS_VERSION,
+    resolveSummaryPrompt,
+} from "@/lib/profiles/prompts";
+import {
+    loadSelectedProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -32,6 +45,7 @@ import {
 } from "@/lib/sharing/writer";
 import { taskViewerById } from "@/lib/tasks/access";
 import {
+    buildPlaudActionItemHints,
     SUMMARY_TASKS_DIRECTIVE,
     SUMMARY_TASKS_MERGE_DIRECTIVE,
 } from "@/lib/tasks/directive";
@@ -42,6 +56,8 @@ import {
 import { upsertEnhancement } from "@/lib/transcription/persist";
 import { generateMailSummary } from "./generate-mail-summary";
 import type { MultiPassProgress } from "./multi-pass";
+import { resolveMultiPass } from "./multi-pass-resolution";
+import { readPlaudActionItems } from "./read-summary";
 import { runSummary, summaryModelFor } from "./summary-model";
 
 export interface GenerateSummaryOptions {
@@ -51,6 +67,8 @@ export interface GenerateSummaryOptions {
      * user's saved preset (which itself falls back to "general").
      */
     presetId?: string;
+    /** Exact immutable profile revision selected for this manual run. */
+    profileRevisionId?: string;
     /** Analytics `trigger` property on the `summary_generated` event. */
     trigger?: "manual" | "auto";
     /**
@@ -81,6 +99,10 @@ export interface GenerateSummaryResult {
     actionItems: string[];
     provider: string;
     model: string;
+    /** False when commit fencing discarded output made from old inputs. */
+    committed?: boolean;
+    /** Inputs captured before the title model may run after this summary. */
+    titleFence?: TitleInputFence;
     /** Prompt id actually used. Can differ from the requested preset. */
     promptId: string;
     /**
@@ -243,23 +265,70 @@ export async function generateSummaryForRecording(
         );
     }
 
+    const input = await modelInput(transcription);
+    const transcriptText = input.text;
+
+    const profile = opts.presetId
+        ? null
+        : opts.profileRevisionId
+          ? await loadSelectedProfileRevision({
+                revisionId: opts.profileRevisionId,
+                actorUserId: ctx.actorUserId,
+                channel: "audio",
+                view: ctx.view,
+            })
+          : await ((opts.trigger ?? "manual") === "manual"
+                ? resolveManualItemProfile
+                : resolveItemProfile)(
+                recordingId,
+                ctx.view,
+                ctx.ownerUserId,
+                ctx.actorUserId,
+            );
+    const profileSettings = profile?.settings as
+        | AudioProfileSettings
+        | undefined;
+    const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
+    const itemProfileRevisionId =
+        opts.profileRevisionId ??
+        (profile?.assigned ? profile.revisionId : null);
+    const titleFence: TitleInputFence = {
+        contentId: transcription.id,
+        contentSourceId: transcription.source,
+        contentRevision: transcription.revision,
+        profileRevisionId: itemProfileRevisionId,
+    };
+
     // What the summary is told about tasks: the recording's date, the tasks
     // already decided on it, and open tasks its reviewer may close. Tasks
     // never cost the summary: without them it is made as before.
-    const tasksContext = await loadTasksPromptContext({
-        recording,
-        transcriptionId: transcription.id,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-    }).catch((error: unknown) => {
-        console.error("[summary] task context unavailable:", error);
-        return { text: "", refs: new Map<string, string>() };
-    });
-
-    // Content settings (prompts, language, merge prompt) follow the view;
-    // the engine settings (multi-pass rounds) follow the actor, who pays.
+    const tasksContext = tasksEnabled
+        ? await loadTasksPromptContext({
+              recording,
+              transcriptionId: transcription.id,
+              language: transcription.detectedLanguage,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              itemText: transcriptText,
+          }).catch(async (error: unknown) => {
+              console.error("[summary] task context unavailable:", error);
+              return {
+                  text: "",
+                  refs: new Map<string, string>(),
+                  scopeFingerprint: await itemScopeFingerprint(
+                      recordingId,
+                      ctx.view,
+                      ctx.ownerUserId,
+                  ),
+              };
+          })
+        : {
+              text: "",
+              refs: new Map<string, string>(),
+              scopeFingerprint: null,
+          };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -273,50 +342,75 @@ export async function generateSummaryForRecording(
                   .from(userSettings)
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
+        .limit(1);
 
-    // `summaryPrompt` is jsonb-envelope encrypted at rest; legacy
-    // plaintext rows pass through verbatim. A missing value reads as the
-    // seeded built-ins.
     const promptConfig = normalizeSummaryPromptConfig(
         userSettingsRow?.summaryPrompt
             ? decryptJsonField(userSettingsRow.summaryPrompt)
             : null,
     );
-
-    // Template resolution: explicit override > user default > built-in.
-    // `usedPromptId` is the template actually used, which differs from the
-    // requested one when that template was since deleted. It is returned to
-    // the caller so it can warn instead of silently generating with a
-    // different template than the one requested.
     const requestedPromptId = opts.presetId || promptConfig.selectedPrompt;
-    const { id: usedPromptId, prompt: promptTemplate } = resolveTemplate(
-        promptConfig,
-        requestedPromptId,
-        SUMMARY_TEMPLATE_KIND,
+    const legacyPrompt = profile
+        ? null
+        : resolveTemplate(
+              promptConfig,
+              requestedPromptId,
+              SUMMARY_TEMPLATE_KIND,
+          );
+    const usedPromptId =
+        profileSettings?.steps.summary.preset ?? legacyPrompt?.id;
+    if (!usedPromptId) throw new Error("Summary prompt resolution failed");
+
+    const contentLanguage =
+        transcription.detectedLanguage ??
+        userSettingsRow?.defaultTranscriptionLanguage;
+    const outputLanguage = profileSettings
+        ? resolveAiOutputLanguage(
+              profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+          )
+        : resolveAiOutputLanguage(
+              userSettingsRow?.aiOutputLanguage,
+              transcription.detectedLanguage ??
+                  userSettingsRow?.defaultTranscriptionLanguage,
+          );
+    const profilePrompt = profileSettings
+        ? resolveSummaryPrompt({
+              settings: profileSettings.steps.summary,
+              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+              uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
+          })
+        : null;
+    const promptTemplate = profilePrompt?.text ?? legacyPrompt?.prompt;
+    if (!promptTemplate) throw new Error("Summary prompt resolution failed");
+    const selectedTemplate = profile
+        ? undefined
+        : promptConfig.templates.find(
+              (template) => template.id === usedPromptId,
+          );
+    const builtinPromptsVersion = profilePrompt
+        ? profilePrompt.builtinVersion
+        : isPresetId(SUMMARY_TEMPLATE_KIND, usedPromptId) &&
+            selectedTemplate?.prompt === null
+          ? BUILTIN_PROMPTS_VERSION
+          : null;
+
+    const summaryModel = await summaryModelFor(
+        ctx.actorUserId,
+        profileSettings?.steps.summary.provider ?? null,
     );
-
-    // Credentials: prefer the user's enhancement-default provider, fall
-    // back to any configured provider that can actually summarize.
-    const summaryModel = await summaryModelFor(ctx.actorUserId);
     const { credentials, model } = summaryModel;
-
-    // Decrypt the transcript before sending it to the LLM. Plaintext is
-    // the LLM's input contract; ciphertext lives only in the DB. Its
-    // corrections applied, and the fingerprint of that kept, so the summary
-    // can tell when they moved on.
-    const input = await modelInput(transcription);
-    const transcriptText = input.text;
 
     // Apply the AI output language directive via the system message rather
     // than the user prompt. This separates concerns: the user prompt carries
     // the JSON-shape contract (English keys), the system message carries the
     // output language. Smaller models tend to honor this split more reliably
     // than a combined prompt where language and JSON-shape rules compete.
-    const outputLanguage = resolveAiOutputLanguage(
-        userSettingsRow?.aiOutputLanguage,
-        transcription.detectedLanguage ??
-            userSettingsRow?.defaultTranscriptionLanguage,
-    );
     const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     // The merge never sees the transcript, so under `auto` it has to take
     // the language from the passes instead.
@@ -332,18 +426,30 @@ export async function generateSummaryForRecording(
     // `String.prototype.replace` special patterns.
     // The task lists are data the user's recordings hold, so they go with
     // the user's message rather than the instructions.
-    const selectedTemplate = promptConfig.templates.find(
-        (template) => template.id === usedPromptId,
-    );
-    const localizedTemplate = localizedSummaryPrompt(
-        usedPromptId,
-        promptTemplate,
-        outputLanguage,
-        selectedTemplate?.prompt === null,
-    );
+    const localizedTemplate = profile
+        ? promptTemplate
+        : localizedSummaryPrompt(
+              usedPromptId,
+              promptTemplate,
+              outputLanguage,
+              selectedTemplate?.prompt === null,
+          );
+    const plaudActionItems = tasksEnabled
+        ? await readPlaudActionItems(ctx.ownerUserId, recordingId).catch(
+              (error: unknown) => {
+                  console.error(
+                      "[summary] Plaud task hints unavailable:",
+                      error,
+                  );
+                  return [];
+              },
+          )
+        : [];
+    const plaudHints = buildPlaudActionItemHints(plaudActionItems);
     const prompt = [
         localizedTemplate.replaceAll("{transcription}", () => transcriptText),
         tasksContext.text,
+        plaudHints,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -355,7 +461,7 @@ export async function generateSummaryForRecording(
         CONTENT_IS_DATA_DIRECTIVE,
         SUMMARY_MARKDOWN_DIRECTIVE,
         SUMMARY_SPEAKER_DIRECTIVE,
-        SUMMARY_TASKS_DIRECTIVE,
+        tasksEnabled ? SUMMARY_TASKS_DIRECTIVE : "",
         languageDirective,
     ]
         .filter(Boolean)
@@ -364,16 +470,20 @@ export async function generateSummaryForRecording(
     // Multi-pass applies to the auto path only if separately enabled: a manual
     // summary is one recording the user is waiting on, while a sync can fire a
     // dozen, and each one multiplies by `rounds`.
-    const multiPassOn =
-        actorSettingsRow?.summaryMultiPass === true &&
-        (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
-
+    const multiPassResolution = resolveMultiPass({
+        profileSummary: profileSettings?.steps.summary ?? null,
+        hasProfile: profile !== null,
+        actorSettings: actorSettingsRow,
+        settings: userSettingsRow,
+        trigger: opts.trigger,
+    });
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
             itemId: recordingId,
             ownerUserId: ctx.ownerUserId,
-            payerUserId: ctx.actorUserId,
+            actorUserId: ctx.actorUserId,
+            payerUserId: summaryModel.payerUserId,
         },
         systemContent,
         prompt,
@@ -383,39 +493,37 @@ export async function generateSummaryForRecording(
                 CONTENT_IS_DATA_DIRECTIVE,
                 SUMMARY_MARKDOWN_DIRECTIVE,
                 SUMMARY_SPEAKER_DIRECTIVE,
-                SUMMARY_TASKS_MERGE_DIRECTIVE,
+                tasksEnabled ? SUMMARY_TASKS_MERGE_DIRECTIVE : "",
                 mergeLanguageDirective,
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassOn
-            ? {
-                  rounds: actorSettingsRow?.summaryMultiPassRounds ?? null,
-                  // User-authored, so encrypted at rest like the summary prompts.
-                  mergePrompt: userSettingsRow?.summaryMergePrompt
-                      ? decryptText(userSettingsRow.summaryMergePrompt)
-                      : null,
-              }
-            : null,
+        multiPass: multiPassResolution.config,
         onProgress: opts.onProgress,
+        tasksEnabled,
     });
 
     const { summary, keyPoints, actionItems } = payload;
-    const tasks = await resolveTaskProposals({
-        source: "riffado",
-        items: payload.taskItems,
-        updates: payload.taskUpdates,
-        refs: tasksContext.refs,
-        ownerUserId: ctx.ownerUserId,
-        transcriptionId: transcription.id,
-        turns: input.turns,
-        language: transcription.detectedLanguage,
-        orgView,
-        summaryText: summary,
-    }).catch((error: unknown) => {
-        console.error("[summary] task proposals unavailable:", error);
-        return undefined;
-    });
+    const tasks = tasksEnabled
+        ? await resolveTaskProposals({
+              source: "riffado",
+              items: payload.taskItems,
+              updates: payload.taskUpdates,
+              refs: tasksContext.refs,
+              ownerUserId: ctx.ownerUserId,
+              transcriptionId: transcription.id,
+              turns: input.turns,
+              language: transcription.detectedLanguage,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              summaryText: summary,
+          }).catch((error: unknown) => {
+              console.error("[summary] task proposals unavailable:", error);
+              return undefined;
+          })
+        : null;
 
     const { committed, reason } = await upsertEnhancement({
         userId,
@@ -429,14 +537,47 @@ export async function generateSummaryForRecording(
         model,
         multiPass,
         inputFingerprint: input.fingerprint,
+        profileRevisionId: profile?.revisionId ?? null,
+        builtinPromptsVersion,
+        outputLanguage,
+        outputFormatLocale: profilePrompt?.formatLocale ?? null,
+        payerUserId: summaryModel.payerUserId,
+        inputs: {
+            contentId: transcription.id,
+            contentSourceId: transcription.source,
+            contentRevision: transcription.revision,
+            itemProfileRevisionId,
+            ...(tasksContext.scopeFingerprint
+                ? { scopeFingerprint: tasksContext.scopeFingerprint }
+                : {}),
+            multiPass: multiPassResolution.source,
+        },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
+        view: ctx.view,
         tasks,
     });
 
     if (!committed) {
+        if (reason === "outdated") {
+            return {
+                ownerUserId: ctx.ownerUserId,
+                summary,
+                keyPoints,
+                actionItems,
+                provider: credentials.provider,
+                model,
+                promptId: usedPromptId,
+                promptFallback: profile
+                    ? false
+                    : usedPromptId !== requestedPromptId,
+                multiPass,
+                committed: false,
+                titleFence,
+            };
+        }
         if (reason === "cancelled") {
             throw new AppError(
                 ErrorCode.NOT_FOUND,
@@ -481,7 +622,9 @@ export async function generateSummaryForRecording(
         provider: credentials.provider,
         model,
         promptId: usedPromptId,
-        promptFallback: usedPromptId !== requestedPromptId,
+        promptFallback: profile ? false : usedPromptId !== requestedPromptId,
         multiPass,
+        committed: true,
+        titleFence,
     };
 }

@@ -3,6 +3,10 @@
 import { Loader2, RefreshCw, Sparkles, Tag } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import {
+    WorkflowWidget,
+    WorkflowWidgetLine,
+} from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -29,6 +33,8 @@ interface TranscriptTopicsMenuProps {
     onSelect: (index: number) => void;
     /** Playback position, to mark the topic being played. */
     getPlaybackMs?: () => number;
+    personStarted?: boolean;
+    widgetId: string;
 }
 
 /**
@@ -44,9 +50,12 @@ export function TranscriptTopicsMenu({
     onDetect,
     onSelect,
     getPlaybackMs,
+    personStarted = false,
+    widgetId,
 }: TranscriptTopicsMenuProps) {
     const i18n = useExtracted();
     const [open, setOpen] = useState(false);
+    const [runOpen, setRunOpen] = useState(false);
     const [active, setActive] = useState(-1);
     // A ref, so a parent passing a fresh function each render does not
     // restart the timer below.
@@ -66,6 +75,91 @@ export function TranscriptTopicsMenu({
         return () => clearInterval(timer);
     }, [open, topics]);
 
+    useEffect(() => {
+        if (detecting && personStarted) setRunOpen(true);
+    }, [detecting, personStarted]);
+
+    const runDetect = () => {
+        setRunOpen(true);
+        onDetect();
+    };
+    let runTitle = i18n("Topic detection");
+    let runDescription = i18n("No topics were found.");
+    if (detecting) {
+        runTitle = i18n("Detecting topics…");
+        runDescription = i18n(
+            "Topic detection continues in the background; you can close this window.",
+        );
+    } else if (topics?.length) {
+        runTitle = i18n("Topics detected");
+        runDescription = i18n("Review the topics found in this transcript.");
+    }
+    let runBody = (
+        <p className="text-sm text-muted-foreground">
+            {i18n("No topics were found.")}
+        </p>
+    );
+    if (detecting) {
+        runBody = (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                {i18n("Detecting topics…")}
+            </p>
+        );
+    } else if (topics?.length) {
+        runBody = (
+            <ol className="space-y-2">
+                {topics.map((topic, index) => (
+                    <li key={`${topic.fromMs}-${topic.title}`}>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            className="h-auto w-full justify-start gap-3 whitespace-normal text-left"
+                            onClick={() => {
+                                setRunOpen(false);
+                                onSelect(index);
+                            }}
+                        >
+                            <span className="w-5 shrink-0 text-right font-semibold tabular-nums text-primary">
+                                {index + 1}.
+                            </span>
+                            <span className="min-w-0 flex-1 break-words">
+                                {topic.title}
+                            </span>
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                                {formatClock(topic.fromMs)}
+                            </span>
+                        </Button>
+                    </li>
+                ))}
+            </ol>
+        );
+    }
+    const runDialog = (
+        <WorkflowWidget
+            id={widgetId}
+            frame="dialog"
+            tone={detecting ? "working" : "quiet"}
+            open={runOpen}
+            onOpenChange={setRunOpen}
+            title={runTitle}
+            description={runDescription}
+            dialogWidth="lg"
+            dialogLine={
+                personStarted && detecting ? (
+                    <WorkflowWidgetLine
+                        title={i18n("Topics")}
+                        facts={i18n("Detecting topics…")}
+                        tone="working"
+                        working
+                    />
+                ) : undefined
+            }
+        >
+            {runBody}
+        </WorkflowWidget>
+    );
+
     if (!topics?.length) {
         if (!canDetect) return null;
         if (waitingForReview && !detecting) {
@@ -77,21 +171,26 @@ export function TranscriptTopicsMenu({
             );
         }
         return (
-            <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary"
-                onClick={onDetect}
-                disabled={detecting}
-            >
-                {detecting ? (
-                    <Loader2 className="size-4 animate-spin" />
-                ) : (
-                    <Sparkles className="size-4" />
-                )}
-                {detecting ? i18n("Detecting topics…") : i18n("Detect topics")}
-            </Button>
+            <>
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-auto px-1.5 py-0.5 text-sm font-medium text-muted-foreground hover:text-primary"
+                    onClick={runDetect}
+                    disabled={detecting}
+                >
+                    {detecting ? (
+                        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                    ) : (
+                        <Sparkles className="size-4" />
+                    )}
+                    {detecting
+                        ? i18n("Detecting topics…")
+                        : i18n("Detect topics")}
+                </Button>
+                {runDialog}
+            </>
         );
     }
 
@@ -138,7 +237,7 @@ export function TranscriptTopicsMenu({
                         <>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                                onSelect={onDetect}
+                                onSelect={runDetect}
                                 disabled={detecting}
                                 className="text-muted-foreground"
                             >
@@ -155,6 +254,7 @@ export function TranscriptTopicsMenu({
                     {i18n("Detecting topics…")}
                 </span>
             )}
+            {runDialog}
         </div>
     );
 }

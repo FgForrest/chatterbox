@@ -438,6 +438,35 @@ describeWithDatabase("async_jobs queue (PostgreSQL)", () => {
             expect(await claimDueJobs("summary", 2)).toHaveLength(2);
             expect(await claimDueJobs("summary", 0)).toHaveLength(0);
         });
+
+        it("fairly claims pipeline drivers across users", async () => {
+            for (let index = 0; index < 50; index += 1) {
+                await queue({
+                    kind: "pipeline.advance",
+                    subjectId: `user-a-${index}`,
+                    payload: {
+                        itemId: `user-a-${index}`,
+                        view: "private",
+                    },
+                });
+            }
+            await queue({
+                userId: OTHER_USER,
+                kind: "pipeline.advance",
+                subjectId: "user-b-only",
+                payload: { itemId: "user-b-only", view: "private" },
+            });
+
+            const claimed = await claimDueJobs("pipeline.advance", 2);
+
+            expect(claimed).toHaveLength(2);
+            expect(new Set(claimed.map((job) => job.userId))).toEqual(
+                new Set([USER, OTHER_USER]),
+            );
+            await expect(claimDueJobs("pipeline.advance", 2)).resolves.toEqual(
+                [],
+            );
+        });
     });
 
     describe("heartbeatJob", () => {

@@ -25,6 +25,8 @@ Sign in to Chatterbox itself once, in your browser. Claude cannot connect for so
 
 ## Connecting Claude
 
+If Chatterbox offers Claude during first-run setup, that step shows the connector address and the same instructions below.
+
 **If your organization uses Claude Team or Enterprise**, your administrator has added Chatterbox for everyone:
 
 1. In Claude, open **Customize → Connectors**.

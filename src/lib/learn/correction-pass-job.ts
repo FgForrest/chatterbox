@@ -17,6 +17,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+    learnRuns,
     transcriptCorrectionPasses,
     transcriptCorrections,
     transcriptions,
@@ -26,6 +27,8 @@ import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptText } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
+import { nudge } from "@/lib/jobs/nudge";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import {
     InvalidJobPayloadError,
@@ -43,7 +46,7 @@ import { lockTranscriptForChange } from "@/lib/knowledge/transcript-lock";
 import { releaseAutoLearnHold } from "@/lib/learn/auto-learn";
 import { learnChatClients } from "@/lib/learn/chat-clients";
 import {
-    type AlmanacRecord,
+    almanacRecordsFor,
     planFixes,
     runCorrectionPass,
     type StandingCorrection,
@@ -57,11 +60,14 @@ import { mayStillRun } from "@/lib/learn/learn-job-handler";
 import { chooseLearnPath } from "@/lib/learn/provider";
 import { issueCorrectionPassToken } from "@/lib/learn/run-token";
 import { refreshSummaryAfterCorrections } from "@/lib/learn/summary-refresh";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import {
+    loadItemProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import { sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
-/** The Almanac records one pass is told of; the bridge looks up others. */
-export const MAX_ALMANAC_RECORDS = 500;
 const HEARD_DOMAIN = "correction-heard";
 
 type PassRow = typeof transcriptCorrectionPasses.$inferSelect;
@@ -77,56 +83,32 @@ async function setStatus(
     status: PassStatus,
     extra: Partial<typeof transcriptCorrectionPasses.$inferInsert> = {},
 ): Promise<void> {
-    await db
-        .update(transcriptCorrectionPasses)
-        .set({ status, updatedAt: new Date(), ...extra })
-        .where(
-            and(
-                eq(transcriptCorrectionPasses.id, passId),
-                eq(transcriptCorrectionPasses.status, "running"),
-            ),
-        );
-}
-
-/**
- * The Almanac records a pass is told of, at most `limit`: those this
- * transcript names (speakers, corrections) first, then those transcription
- * misheard before, then by name.
- */
-export function almanacRecordsFor(
-    items: Awaited<ReturnType<typeof knowledgeView>>["items"],
-    named: ReadonlySet<string>,
-    limit = MAX_ALMANAC_RECORDS,
-): AlmanacRecord[] {
-    const records = items.map((item) => ({
-        id: item.id,
-        kind: item.kind,
-        typeKey: item.typeKey,
-        name: item.name,
-        aliases: [
-            ...new Set(
-                item.names
-                    .filter((name) => name.kind === "alias")
-                    .map((name) => name.text),
-            ),
-        ],
-        heardAs: [
-            ...new Set(
-                item.names
-                    .filter((name) => name.kind === "heard_as")
-                    .map((name) => name.text),
-            ),
-        ],
-    }));
-    return records
-        .sort(
-            (a, b) =>
-                Number(named.has(b.id)) - Number(named.has(a.id)) ||
-                Number(b.heardAs.length > 0) - Number(a.heardAs.length > 0) ||
-                a.name.localeCompare(b.name) ||
-                a.id.localeCompare(b.id),
-        )
-        .slice(0, limit);
+    const advance = await db.transaction(async (tx) => {
+        const [updated] = await tx
+            .update(transcriptCorrectionPasses)
+            .set({ status, updatedAt: new Date(), ...extra })
+            .where(
+                and(
+                    eq(transcriptCorrectionPasses.id, passId),
+                    eq(transcriptCorrectionPasses.status, "running"),
+                ),
+            )
+            .returning({
+                recordingId: transcriptCorrectionPasses.recordingId,
+                userId: transcriptCorrectionPasses.userId,
+                view: transcriptCorrectionPasses.view,
+            });
+        if (!updated || status === "queued" || status === "running") {
+            return null;
+        }
+        return requestAdvanceInTx(tx, {
+            itemId: updated.recordingId,
+            userId: updated.userId,
+            view: updated.view,
+            reason: "correction-finished",
+        });
+    });
+    if (advance) nudge();
 }
 
 async function runPass({
@@ -144,6 +126,37 @@ async function runPass({
     if (pass.status !== "queued" && pass.status !== "running") {
         return { skipped: pass.status, written: 0, pass };
     }
+    if (!pass.learnRunId) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
+    }
+    const [learnRun] = await db
+        .select({ profileRevisionId: learnRuns.profileRevisionId })
+        .from(learnRuns)
+        .where(
+            and(
+                eq(learnRuns.id, pass.learnRunId),
+                eq(learnRuns.userId, pass.userId),
+            ),
+        )
+        .limit(1);
+    if (!learnRun) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Learn run not found", 404);
+    }
+    const actorUserId = pass.actorUserId ?? pass.userId;
+    const profile = learnRun.profileRevisionId
+        ? await loadItemProfileRevision({
+              itemId: pass.recordingId,
+              view: pass.view,
+              ownerUserId: pass.userId,
+              actorUserId,
+              revisionId: learnRun.profileRevisionId,
+          })
+        : await resolveItemProfile(
+              pass.recordingId,
+              pass.view,
+              pass.userId,
+              actorUserId,
+          );
     const claimed = await db
         .update(transcriptCorrectionPasses)
         .set({
@@ -218,7 +231,13 @@ async function runPass({
                 correction.targetPersonId ?? correction.targetEntityId;
             if (target) named.add(target);
         }
-        const almanac = almanacRecordsFor(view.items, named);
+        const almanac = almanacRecordsFor(view.items, named, {
+            scopeUsage: await itemScopeAlmanacUsage(
+                pass.recordingId,
+                pass.view,
+                pass.userId,
+            ),
+        });
         // What already stands, as it reads: the pass leaves it be.
         const corrected: StandingCorrection[] = corrections
             .filter((correction) => anchorMatches(correction, turns))
@@ -233,7 +252,6 @@ async function runPass({
                         : (correction.replacement ?? correction.heard),
             }));
 
-        const actorUserId = pass.actorUserId ?? "";
         const { chat, bridge, provider, baseUrl, model } =
             await learnChatClients({
                 actorUserId,
@@ -242,6 +260,7 @@ async function runPass({
                 operation: "correction",
                 schemaName: "correction_output",
                 signal,
+                pin: profile.settings.steps.learn.provider,
             });
         const path = chooseLearnPath(
             { provider, baseUrl },
@@ -269,11 +288,11 @@ async function runPass({
                 : false;
         const outcome = await db.transaction(async (tx) => {
             await lockOrgPeopleShared(tx);
-            const finish = (
+            const finish = async (
                 status: "finished" | "superseded" | "cancelled",
                 stats: Record<string, number>,
-            ) =>
-                tx
+            ) => {
+                await tx
                     .update(transcriptCorrectionPasses)
                     .set({
                         status,
@@ -287,6 +306,13 @@ async function runPass({
                         updatedAt: new Date(),
                     })
                     .where(eq(transcriptCorrectionPasses.id, pass.id));
+                await requestAdvanceInTx(tx, {
+                    itemId: pass.recordingId,
+                    userId: pass.userId,
+                    view: pass.view,
+                    reason: "correction-finished",
+                });
+            };
             const baseStats = {
                 calls: result.calls,
                 windows: result.windows,
@@ -401,6 +427,7 @@ async function runPass({
             });
             return { status: "finished" as const, written: rows.length };
         });
+        nudge();
         return { ...outcome, pass };
     } catch (caught) {
         // Final as for Learn (no usable answer, lookups spent): no retry.

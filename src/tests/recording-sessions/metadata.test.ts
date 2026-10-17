@@ -37,6 +37,7 @@ describe("parseCreateRecordingSessionBody", () => {
         clientVersion: "1.0.0",
         timezoneOffsetMinutes: 120,
         noticeAcknowledgedAt: "2026-09-18T11:59:00.000Z",
+        folderId: "folder-1",
     };
 
     it("accepts a well-formed body", () => {
@@ -49,6 +50,7 @@ describe("parseCreateRecordingSessionBody", () => {
         expect(parsed.noticeAcknowledgedAt?.toISOString()).toBe(
             "2026-09-18T11:59:00.000Z",
         );
+        expect(parsed.folderId).toBe("folder-1");
     });
 
     it("rejects an unsupported container", () => {
@@ -101,6 +103,14 @@ describe("parseCreateRecordingSessionBody", () => {
         const { noticeAcknowledgedAt: _omit, ...rest } = valid;
         const parsed = parseCreateRecordingSessionBody(rest);
         expect(parsed.noticeAcknowledgedAt).toBeNull();
+    });
+
+    it("allows folderId to be absent and rejects an empty value", () => {
+        const { folderId: _omit, ...rest } = valid;
+        expect(parseCreateRecordingSessionBody(rest).folderId).toBeNull();
+        expect(() =>
+            parseCreateRecordingSessionBody({ ...valid, folderId: "" }),
+        ).toThrowError(AppError);
     });
 });
 

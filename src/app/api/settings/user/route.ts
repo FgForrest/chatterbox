@@ -7,7 +7,7 @@ import {
     isValidSummaryPromptConfig,
     normalizeAiOutputLanguage,
 } from "@/lib/ai/summary-presets";
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSession, requireApiSessionActor } from "@/lib/auth-server";
 import {
     decryptJsonField,
     decryptText,
@@ -18,6 +18,10 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { EXPORT_FORMATS } from "@/lib/export/formats";
 import { isSupportedLocale } from "@/lib/i18n/config";
 import { isAutoLearnOffered } from "@/lib/knowledge/availability";
+import {
+    readLegacySettingsFromProfiles,
+    writeLegacySettingsToProfiles,
+} from "@/lib/profiles/legacy-settings";
 import {
     clampRounds,
     MULTI_PASS_ROUNDS_DEFAULT,
@@ -252,8 +256,12 @@ export const GET = apiHandler(async (request: Request) => {
     const uiLocale = userRow?.uiLocale ?? null;
 
     if (!settings) {
+        const profileSettings = await readLegacySettingsFromProfiles(
+            session.user.id,
+        );
         return NextResponse.json({
             ...DEFAULT_SETTINGS,
+            ...profileSettings,
             titleGenerationPrompt: null,
             topicPrompt: null,
             autoLearnOffered: await isAutoLearnOffered(session.user.id),
@@ -282,6 +290,10 @@ export const GET = apiHandler(async (request: Request) => {
     settingsData.summaryMergePrompt = settings.summaryMergePrompt
         ? decryptText(settings.summaryMergePrompt)
         : null;
+    Object.assign(
+        settingsData,
+        await readLegacySettingsFromProfiles(session.user.id),
+    );
     return NextResponse.json({
         ...settingsData,
         userEmail,
@@ -291,7 +303,7 @@ export const GET = apiHandler(async (request: Request) => {
 });
 
 export const PUT = apiHandler(async (request: Request) => {
-    const session = await requireApiSession(request);
+    const { session, actor } = await requireApiSessionActor(request);
 
     const body = await request.json();
 
@@ -521,6 +533,17 @@ export const PUT = apiHandler(async (request: Request) => {
             .insert(userSettings)
             .values(insertData as typeof userSettings.$inferInsert);
     }
+
+    const storedSettings = {
+        ...(existing ?? insertData),
+        ...(existing ? updateData : insertData),
+    } as typeof userSettings.$inferSelect;
+    await writeLegacySettingsToProfiles({
+        userId: session.user.id,
+        body,
+        stored: storedSettings,
+        actor,
+    });
 
     if (typeof body.marketingEmailConsent === "boolean") {
         await db

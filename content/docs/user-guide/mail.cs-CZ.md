@@ -11,26 +11,26 @@ Pošta vyžaduje jednotné přihlášení: adresy dostanete, jakmile se přihlá
 
 Najdete je v **Nastavení → Pošta**.
 
-- Vaše **schránka** (`jan@…`) ukládá poštu do Klepů, bez složky.
-- Každá složka má adresu (`jan+weekly@…`), která poštu uloží rovnou do ní.
+- Vaše **schránka** (`jan@…`) ukládá poštu do Klepů bez složky. Pruh pracovního postupu začíná krokem **Přijato** ve stavu **Hotovo** a krokem **Zařazení** ve stavu **Další**. Vložená karta **Zařadit e-mail** zobrazuje pole **Složka** a **Profil**, případně volbu **Bez automatického zpracování**. Žádný placený krok AI se nespustí, dokud nekliknete na **Zařadit e-mail**.
+- Každá složka má adresu (`jan+weekly@…`), která poštu uloží rovnou do ní. Pošta přeskočí čekání a použije výchozí profil pošty dané složky.
 
 Na tyto adresy se přijímá jen pošta, kterou posíláte sami z účtu, kterým se přihlašujete: přepošlete na ni e-mail, nebo ji při psaní dejte do **Komu**, **Kopie** nebo **Skrytá kopie**. Chatterbox kontroluje podpis e-mailu, takže nikdo nemůže psát vaším jménem.
 
 ## Adresy složek
 
-Záhlaví složky ukazuje její adresu. Zkopírujte ji, nebo složce dejte vlastní: stará dál funguje jako vedlejší adresa, dokud ji neodeberete. Adresa, která už jednou byla přidělena, se nikdy nepřidělí nikomu jinému.
+Záhlaví složky ukazuje její adresu. Zkopírujte ji, nebo složce dejte vlastní: stará dál funguje jako vedlejší adresa, dokud ji neodeberete. Adresa, která už jednou byla přidělena, se nikdy nepřidělí nikomu jinému. Pošta na kteroukoli z těchto adres se zařadí a může automaticky spustit profil.
 
 Smazání složky natrvalo zastaví její adresy i adresy podsložek. Chatterbox před potvrzením ukáže, kdy na každou naposledy přišla pošta.
 
 ## Složky Organizace
 
-Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává váš: čeká ve vašich Klepech, dokud ho nesdílíte, stejně jako nahrávka, a po sdílení ho Organizace čte.
+Složky Organizace mají adresy začínající jménem organizace (`acme-weekly@…`). Psát na ně může kterýkoli kolega, v **Komu** nebo **Kopie** (ne ve **Skryté kopii**). E-mail zůstává nejprve soukromý a daná složka je jeho zamýšleným umístěním v Organizaci. Profil Organizace proběhne v soukromém pohledu a Chatterbox e-mail automaticky nasdílí po dokončení kontrol Učení a úkolů. Při volbě **Bez automatického zpracování** nabízí řádek složek místo toho **Sdílet nyní** a pruh pracovního postupu čeká na Vás.
 
 Sdílet můžete i jakýkoli jiný svůj e-mail, když ho zařadíte do složky Organizace. Kolegové sdílený e-mail čtou i s přílohami a formátovanou podobou; smazat ho nebo stáhnout původní zprávu můžete jen vy.
 
 ## Tajné adresy
 
-Pro poštu, kterou neposíláte sami, si v **Nastavení → Pošta** vytvořte **tajnou adresu**. Rozšiřuje vaši schránku nebo adresu složky o náhodnou část (`jan.k3x9…@…`) a ukládá poštu stejně, od kohokoli. Psát na ni může každý, kdo ji zná: pojmenujte ji, ať ji poznáte, a když unikne, **vyměňte** ji nebo ji **zastavte**.
+Pro poštu, kterou neposíláte sami, si v **Nastavení → Pošta** vytvořte **tajnou adresu**. Rozšiřuje Vaši schránku nebo adresu složky o náhodnou část (`jan.k3x9…@…`) a ukládá poštu stejně, od kohokoli. Tajná adresa rozšiřující schránku nechá poštu čekat na zařazení; adresa rozšiřující složku čekání přeskočí. Psát na ni může každý, kdo ji zná: pojmenujte ji, ať ji poznáte, a když unikne, **vyměňte** ji nebo ji **zastavte**.
 
 ### Filtry Gmailu a automatické přeposílání
 
@@ -45,7 +45,9 @@ Automatické přeposílání zachovává původního odesílatele, proto potřeb
 
 E-mail ukazuje odesílatele, s označením **Ověřeno**, když ho podepsala doména odesílatele, dále příjemce a datum. Citované a přeposlané zprávy jsou sbalené pod svým autorem. **Zobrazit formátovaně** ukáže e-mail tak, jak byl navržen, aniž by se cokoli načítalo z internetu. Přílohy jdou jen stáhnout.
 
-Pošta odeslaná stroji (automatické odpovědi, konference, oznámení) se uchová, ale nikdy se neshrnuje.
+S postupem zpracování se v tomto pořadí zobrazují vložené prvky kontroly Učení, **Shrnutí** a **Kontrola úkolů**. Hotové prvky se během další práce skládají do jednoho řádku. Krok, který po pracovním postupu spustíte sami, se otevře v okně se stejným obsahem.
+
+Pošta odeslaná stroji (automatické odpovědi, konference, oznámení) se uchová, ale je označena **Nezpracováno**. Nespustí se pro ni žádný krok AI.
 
 ## Záznam doručení
 

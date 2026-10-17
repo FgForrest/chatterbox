@@ -576,6 +576,7 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 userId: MEMBER,
                 parentId: orgRootId,
                 name: "Sales",
+                canCurate: true,
             });
             expect(
                 (
@@ -661,7 +662,8 @@ describeWithDatabase("recording routes by role (PostgreSQL)", () => {
                 method: "DELETE",
             });
             const jobs = await db().select().from(asyncJobs);
-            expect(jobs.map((job) => job.status)).toEqual(["failed", "failed"]);
+            expect(jobs).toHaveLength(4);
+            expect(jobs.every((job) => job.status === "failed")).toBe(true);
         });
 
         it("removes the Organization view with the recording", async () => {

@@ -16,6 +16,7 @@ import {
 import { useExtracted, useLocale } from "next-intl";
 import { useMemo, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
+import { FolderDefaultProfiles } from "@/components/dashboard/folder-default-profiles";
 import { FolderExportActions } from "@/components/dashboard/folder-export-actions";
 import {
     RECORDING_SOURCE_FOLDER_DRAG_TYPE,
@@ -77,6 +78,7 @@ interface FolderRecordingPaneProps {
     isOrgAccount?: boolean;
     /** The instance receives mail: custom folders have addresses. */
     mailEnabled?: boolean;
+    canCurate?: boolean;
 }
 
 export function FolderRecordingPane({
@@ -93,6 +95,7 @@ export function FolderRecordingPane({
     exportProviders,
     isOrgAccount = false,
     mailEnabled = false,
+    canCurate = false,
 }: FolderRecordingPaneProps) {
     const i18n = useExtracted();
     const locale = useLocale();
@@ -105,6 +108,7 @@ export function FolderRecordingPane({
         column: RecordingSortColumn;
         direction: SortDirection;
     }>({ column: "date", direction: "desc" });
+    const canManageFolder = folder.scope !== "org" || canCurate;
 
     const folderRecordings = useMemo(() => {
         const ids = recordingIdsVisibleInFolder(
@@ -280,6 +284,12 @@ export function FolderRecordingPane({
                     )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
+                    {folder.kind === "custom" && (
+                        <FolderDefaultProfiles
+                            key={folder.id}
+                            folderId={folder.id}
+                        />
+                    )}
                     <FolderExportActions
                         folder={folder}
                         providers={exportProviders}
@@ -288,7 +298,7 @@ export function FolderRecordingPane({
                             (isOrgAccount && folder.scope === "org")
                         }
                     />
-                    {folder.kind === "custom" && (
+                    {folder.kind === "custom" && canManageFolder && (
                         <>
                             <Button
                                 type="button"

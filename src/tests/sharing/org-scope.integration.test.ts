@@ -587,18 +587,19 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     folderId: first.id,
                     parentId: orgRoot,
                 }),
-                404,
+                403,
             );
         });
     });
 
     describe("the Organization tree", () => {
-        it("is edited by everyone, with a version check", async () => {
+        it("is edited by curators, with a version check", async () => {
             const root = await orgRootId();
             const folder = await createFolder({
                 userId: BOB,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             expect(folder.scope).toBe("org");
             const [row] = await db()
@@ -613,6 +614,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 folderId: folder.id,
                 name: "Sales EU",
                 version: folder.version,
+                canCurate: true,
             });
             expect(renamed.version).toBe(folder.version + 1);
             await expectStatus(
@@ -621,6 +623,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     folderId: folder.id,
                     name: "Sales US",
                     version: folder.version,
+                    canCurate: true,
                 }),
                 409,
             );
@@ -632,6 +635,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: BOB,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             await db().delete(users).where(eq(users.id, BOB));
             const [row] = await db()
@@ -649,6 +653,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: ALICE,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             const eu = await createFolder({
                 userId: ALICE,
@@ -661,7 +666,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 folderId: eu.id,
             });
 
-            await deleteFolder(BOB, sales.id);
+            await deleteFolder(BOB, sales.id, { canCurate: true });
 
             const assignments = await db()
                 .select()
@@ -682,6 +687,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: ALICE,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             await addRecordingToFolder({
                 userId: ALICE,
@@ -761,7 +767,15 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                     decryptText(row.text),
                 ]),
             ).toEqual([[ALICE, org, "shared transcript"]]);
-            const [job] = await db().select().from(asyncJobs);
+            const [job] = await db()
+                .select()
+                .from(asyncJobs)
+                .where(
+                    and(
+                        eq(asyncJobs.kind, "summary"),
+                        eq(asyncJobs.subjectId, "org:rec-a"),
+                    ),
+                );
             expect(job?.status).toBe("failed");
             expect(await resolveRecordingAccess(BOB, "rec-a")).toBeNull();
         });
@@ -775,6 +789,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: BOB,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             await addRecordingToFolder({
                 userId: ALICE,
@@ -819,6 +834,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: BOB,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             mockEnv.SELF_HOST_MODE = "local";
             await expectStatus(
@@ -838,6 +854,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: BOB,
                 parentId: root,
                 name: "Sales",
+                canCurate: true,
             });
             for (let round = 0; round < 8; round += 1) {
                 await addRecordingToFolder({
@@ -1139,6 +1156,7 @@ describeWithDatabase("Organization scope (PostgreSQL)", () => {
                 userId: BOB,
                 parentId: await orgRootId(),
                 name: "Sales",
+                canCurate: true,
             });
             // A transcript nobody answered for, written around the share.
             await insertTranscript("rec-a", ALICE, {

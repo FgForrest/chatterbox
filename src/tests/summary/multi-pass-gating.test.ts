@@ -15,7 +15,17 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import { defaultTemplateConfig } from "@/lib/ai/prompt-templates";
+import { SUMMARY_TEMPLATE_KIND } from "@/lib/ai/summary-presets";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { loadSelectedProfileRevision } from "@/lib/profiles/resolve";
+import type { LegacyProfileSettings } from "@/lib/profiles/seed";
 import { DEFAULT_MERGE_PROMPT } from "@/lib/summary/multi-pass";
+import {
+    loadTasksPromptContext,
+    resolveTaskProposals,
+} from "@/lib/tasks/proposals";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
@@ -59,8 +69,41 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/env", () => ({
+    env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
+}));
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, plaudActionItems, profileLegacy, tasksEnabled } =
+    vi.hoisted(() => ({
+        createMock: vi.fn(),
+        plaudActionItems: { current: [] as string[] },
+        profileLegacy: {
+            current: {} as Partial<LegacyProfileSettings>,
+        },
+        tasksEnabled: { current: true },
+    }));
+
+vi.mock("@/lib/summary/read-summary", () => ({
+    readPlaudActionItems: vi.fn(async () => plaudActionItems.current),
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    loadSelectedProfileRevision: vi.fn(
+        async ({ revisionId }: { revisionId: string }) => {
+            const profile = resolvedAudioProfile(profileLegacy.current);
+            profile.settings.steps.tasks.enabled = tasksEnabled.current;
+            return { ...profile, revisionId };
+        },
+    ),
+    resolveItemProfile: vi.fn(async () => {
+        const profile = resolvedAudioProfile(profileLegacy.current);
+        profile.settings.steps.tasks.enabled = tasksEnabled.current;
+        return profile;
+    }),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -120,6 +163,7 @@ const tx = {
             return Promise.resolve();
         },
     }),
+    delete: () => ({ where: () => Promise.resolve() }),
     update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
 };
 
@@ -133,12 +177,21 @@ vi.mock("@/db", () => ({
 type Settings = Record<string, unknown>;
 
 function stage(settings: Settings) {
+    profileLegacy.current = settings;
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],
     ]);
     selectResults.set(transcriptions, [
-        [{ recordingId: "rec-1", userId: "user-1", text: "a transcript" }],
+        [
+            {
+                id: "transcription-1",
+                revision: 4,
+                recordingId: "rec-1",
+                userId: "user-1",
+                text: "a transcript",
+            },
+        ],
     ]);
     selectResults.set(userSettings, [
         [{ summaryPrompt: null, aiOutputLanguage: null, ...settings }],
@@ -172,11 +225,17 @@ function stage(settings: Settings) {
     });
 }
 
-async function generate(trigger: "manual" | "auto") {
+async function generate(
+    trigger: "manual" | "auto",
+    profileRevisionId?: string,
+) {
     const { generateSummaryForRecording } = await import(
         "@/lib/summary/generate-summary"
     );
-    return generateSummaryForRecording("user-1", "rec-1", { trigger });
+    return generateSummaryForRecording("user-1", "rec-1", {
+        trigger,
+        profileRevisionId,
+    });
 }
 
 /** The system prompt of every completion call, in order. */
@@ -194,6 +253,11 @@ function systemPrompts(): string[] {
 describe("multi-pass gating", () => {
     beforeEach(() => {
         createMock.mockReset();
+        vi.mocked(loadSelectedProfileRevision).mockClear();
+        vi.mocked(loadTasksPromptContext).mockClear();
+        vi.mocked(resolveTaskProposals).mockClear();
+        plaudActionItems.current = [];
+        tasksEnabled.current = true;
         selectResults.clear();
         written.length = 0;
     });
@@ -267,6 +331,56 @@ describe("multi-pass gating", () => {
         expect(row.multiPassRounds).toBe(3);
         expect(row.multiPassUsed).toBe(3);
         expect(row.multiPassMerged).toBe(true);
+        expect(row.inputs).toMatchObject({ multiPass: "person" });
+    });
+
+    it("persists the profile, prompt version, payer, and content inputs", async () => {
+        stage({ summaryMultiPass: false });
+        await generate("manual");
+
+        expect(written.at(-1)).toMatchObject({
+            profileRevisionId: "seeded-profile-revision",
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: "user-1",
+            inputs: {
+                contentId: "transcription-1",
+                contentRevision: 4,
+                multiPass: "off",
+            },
+            outputLanguage: null,
+            outputFormatLocale: "en",
+        });
+    });
+
+    it("records no built-in prompt version for a full custom prompt", async () => {
+        const summaryPrompt = defaultTemplateConfig(SUMMARY_TEMPLATE_KIND);
+        summaryPrompt.selectedPrompt = "custom-summary";
+        summaryPrompt.templates.push({
+            id: "custom-summary",
+            name: "Custom",
+            prompt: "Summarize this: {transcription}",
+            createdAt: "2026-10-15T00:00:00.000Z",
+        });
+        stage({ summaryPrompt });
+
+        await generate("manual");
+
+        expect(written.at(-1)).toMatchObject({ builtinPromptsVersion: null });
+    });
+
+    it("persists the explicitly selected immutable profile revision", async () => {
+        stage({ summaryMultiPass: false });
+        await generate("manual", "selected-profile-revision");
+
+        expect(loadSelectedProfileRevision).toHaveBeenCalledWith({
+            revisionId: "selected-profile-revision",
+            actorUserId: "user-1",
+            channel: "audio",
+            view: "private",
+        });
+        expect(written.at(-1)).toMatchObject({
+            profileRevisionId: "selected-profile-revision",
+        });
     });
 
     it("clears provenance when a multi-pass summary is regenerated single-pass", async () => {
@@ -292,5 +406,128 @@ describe("multi-pass gating", () => {
         const mergeSystem = systemPrompts().at(-1) ?? "";
         expect(mergeSystem).toContain("Merge them my way.");
         expect(mergeSystem).not.toContain(DEFAULT_MERGE_PROMPT);
+    });
+
+    it("passes Plaud action items after the transcript as suggestions", async () => {
+        stage({ summaryMultiPass: false });
+        plaudActionItems.current = ["Call Alice", "Send the report"];
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: [],
+                            actionItems: [{ text: "Send the report" }],
+                            taskUpdates: [],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        await generate("manual");
+
+        const userPrompt = (
+            createMock.mock.calls[0]?.[0] as {
+                messages: { role: string; content: string }[];
+            }
+        ).messages.find((message) => message.role === "user")?.content;
+        expect(userPrompt).toContain("Plaud's action-item suggestions");
+        expect(userPrompt).toContain("- Call Alice");
+        expect(userPrompt).toContain("- Send the report");
+        expect(userPrompt?.indexOf("a transcript")).toBeLessThan(
+            userPrompt?.indexOf("Plaud's action-item suggestions") ?? -1,
+        );
+        expect(resolveTaskProposals).toHaveBeenCalledWith(
+            expect.objectContaining({
+                source: "riffado",
+                items: [expect.objectContaining({ text: "Send the report" })],
+            }),
+        );
+    });
+
+    it("[E] drops every task outcome and prompt context when Tasks are off", async () => {
+        stage({ summaryMultiPass: false });
+        tasksEnabled.current = false;
+        plaudActionItems.current = ["Do not pass this hint"];
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: ["k"],
+                            actionItems: [{ text: "Ignored task" }],
+                            taskUpdates: [
+                                { ref: "T1", kind: "drop", quote: "cancelled" },
+                                {
+                                    ref: "T2",
+                                    kind: "assignee",
+                                    assignee: "Dana",
+                                },
+                            ],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        const result = await generate("manual");
+
+        expect(result.actionItems).toEqual([]);
+        expect(loadTasksPromptContext).not.toHaveBeenCalled();
+        expect(resolveTaskProposals).not.toHaveBeenCalled();
+        expect(systemPrompts()[0]).not.toContain("ACTION ITEMS:");
+        const userPrompt = (
+            createMock.mock.calls[0]?.[0] as {
+                messages: { role: string; content: string }[];
+            }
+        ).messages.find((message) => message.role === "user")?.content;
+        expect(userPrompt).not.toContain("Plaud's action-item suggestions");
+    });
+
+    it("[E] removes drop and assignee data from a Tasks-off multi-pass merge", async () => {
+        stage({ summaryMultiPass: true, summaryMultiPassRounds: 2 });
+        tasksEnabled.current = false;
+        createMock.mockResolvedValue({
+            choices: [
+                {
+                    message: {
+                        content: JSON.stringify({
+                            summary: "s",
+                            keyPoints: ["k"],
+                            actionItems: [{ text: "Ignored task" }],
+                            taskUpdates: [
+                                { ref: "T1", kind: "drop" },
+                                {
+                                    ref: "T2",
+                                    kind: "assignee",
+                                    assignee: "Dana",
+                                },
+                            ],
+                        }),
+                    },
+                },
+            ],
+        });
+
+        const result = await generate("manual");
+
+        const mergeCall = createMock.mock.calls.at(-1)?.[0] as {
+            messages: { role: string; content: string }[];
+        };
+        const mergeSystem = mergeCall.messages.find(
+            (message) => message.role === "system",
+        )?.content;
+        const mergeInput = mergeCall.messages.find(
+            (message) => message.role === "user",
+        )?.content;
+        expect(result.actionItems).toEqual([]);
+        expect(mergeSystem).not.toContain("ACTION ITEMS:");
+        expect(mergeSystem).not.toContain("taskUpdates");
+        expect(mergeInput).not.toContain("actionItems");
+        expect(mergeInput).not.toContain("taskUpdates");
+        expect(resolveTaskProposals).not.toHaveBeenCalled();
     });
 });

@@ -7,8 +7,12 @@ export interface StoredTopics {
     topics: TranscriptTopic[];
     provider: string;
     model: string;
+    profileRevisionId: string | null;
     /** Template the topics were detected with. */
     templateId: string;
+    /** Fully resolved prompt before transcript interpolation. */
+    promptTemplate: string;
+    outputLanguage: string;
     generatedAt: string;
 }
 

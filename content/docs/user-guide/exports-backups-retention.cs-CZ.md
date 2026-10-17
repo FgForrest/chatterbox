@@ -58,6 +58,8 @@ V **Nastavení → Export/Záloha** si můžete vzít svá data s sebou:
 - **Vytvořit úplnou zálohu** vytvoří jeden archiv obsahující vše: audio, přepisy, souhrny, Váš Almanac, Learn recenze a úkoly. Velké knihovny mohou zabrat pár minut; jakmile je záloha připravena, přijde vám e-mail a objeví se tlačítko **Stáhnout**.
 - **Frekvence zálohování** vytváří archiv denně, týdně nebo měsíčně – bez nutnosti si na to vzpomenout.
 
+Mezipaměti odvozené z obsahu, včetně vektorů obsahu úkolů, jsou odvozená data a do záloh se nezahrnují.
+
 Každý archiv zůstává ke stažení po dobu sedmi dnů. Záloha obsahuje vaše vlastní nahrávky, včetně sdílených, ale bez toho, co do nich přidali kolegové. Záloha účtu organizace obsahuje všechny sdílené nahrávky, včetně jejich vlastníka.
 
 <span id="deleting-old-data-automatically" />

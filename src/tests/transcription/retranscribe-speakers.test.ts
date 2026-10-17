@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/db", () => ({
     db: {
@@ -92,6 +93,10 @@ vi.mock("@/lib/transcription/persist", () => ({
     upsertTranscription: vi.fn().mockResolvedValue({ committed: true }),
 }));
 
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
+
 import { db } from "@/db";
 import { transcriptSpeakers } from "@/db/schema";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
@@ -129,6 +134,7 @@ function stubLookups(existingTranscript: Record<string, unknown> | null) {
                     userId,
                     title: "meeting.mp3",
                     storagePath: "meeting.mp3",
+                    fileMd5: "a".repeat(32),
                     deletedAt: null,
                     audioReapedAt: null,
                 },
@@ -209,6 +215,17 @@ describe("forced re-transcribe and speaker attributions", () => {
         // write as the text.
         expect(upsertTranscription).toHaveBeenCalledWith(
             expect.objectContaining({ dropSummaryOnReplace: "riffado" }),
+        );
+        expect(upsertTranscription).toHaveBeenCalledWith(
+            expect.objectContaining({
+                profileRevisionId: "seeded-profile-revision",
+                builtinPromptsVersion: null,
+                payerUserId: userId,
+                inputs: {
+                    contentId: recordingId,
+                    contentRevision: "a".repeat(32),
+                },
+            }),
         );
     });
 

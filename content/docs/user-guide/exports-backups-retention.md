@@ -48,6 +48,8 @@ First connect your Google account in **Settings → Google Account**. Then click
 - **Create full backup** builds one archive with everything: audio, transcripts, summaries, your Almanac, Learn reviews and tasks. Large libraries take a few minutes; you get an email when it is ready, and a **Download** button appears.
 - **Backup frequency** builds the archive daily, weekly or monthly without you having to remember.
 
+Content-derived caches, including task content vectors, are derived data and are not included in backups.
+
 Each archive stays downloadable for seven days. A backup holds your own recordings, the shared ones included, without what colleagues added to them. The organization account's backup holds every shared recording, with its owner.
 
 ## Deleting old data automatically

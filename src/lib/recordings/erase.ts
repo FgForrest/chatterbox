@@ -10,6 +10,7 @@ import {
     transcriptions,
 } from "@/db/schema";
 import { sniffAudio } from "@/lib/audio/sniff";
+import { retryOnDeadlock } from "@/lib/deadlock-retry";
 import { AppError, ErrorCode } from "@/lib/errors";
 import {
     lockOrgTree,
@@ -34,6 +35,11 @@ import {
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
 import type { StorageProvider } from "@/lib/storage/types";
+import {
+    deleteItemTaskDataInTx,
+    deleteItemTaskVectorsInTx,
+    lockItemTaskGraphInTx,
+} from "@/lib/tasks/mentions";
 import { dropTasksWithoutSummaryInTx } from "@/lib/tasks/store";
 
 export type LocalEraseScope = "audio" | "transcript" | "summary";
@@ -122,7 +128,8 @@ async function cancelArtifactJobs(
 }
 
 /**
- * Erase one kind of a recording's local data.
+ * Erase one kind of a recording's local artifact. When this removes the last
+ * artifact, its derived task data is removed too.
  *
  * A shared recording is the organization account's to change, so its
  * owner's erase takes it out of the Organization first: refused (409)
@@ -159,185 +166,236 @@ export async function eraseLocalArtifact(
     // connection while it looks the account up.
     const orgUserId = await sharingOrgUserId();
     let withdrew = false;
-    await db.transaction(async (tx) => {
-        const now = new Date();
-        // The knowledge scopes the withdrawal and the erasure reach, moved
-        // once at the end.
-        const scopes = new Set<string>();
-        // Before the recording lock, as withdrawing takes them.
-        if (orgUserId && options.withdraw) await lockOrgTree(tx);
-        const [locked] = await tx
-            .select({ deletedAt: recordings.deletedAt })
-            .from(recordings)
-            .where(
-                and(
-                    eq(recordings.id, recordingId),
-                    eq(recordings.userId, userId),
-                ),
-            )
-            .for("update")
-            .limit(1);
-        if (!locked || locked.deletedAt) {
-            throw new AppError(
-                ErrorCode.RECORDING_NOT_FOUND,
-                "Recording not found",
-                404,
-            );
-        }
-        if (
-            orgUserId &&
-            (await isRecordingShared(recordingId, orgUserId, tx))
-        ) {
-            if (!options.withdraw) throw recordingShared();
-            for (const scope of await withdrawRecordingInTx(
-                tx,
-                orgUserId,
-                recordingId,
-            )) {
-                scopes.add(scope);
-            }
-            withdrew = true;
-        }
-
-        if (scope === "audio") {
-            await cancelArtifactJobs(
-                tx,
-                userId,
-                recordingId,
-                ["transcription"],
-                now,
-            );
-            // Without audio the Organization view cannot be transcribed
-            // either; its queued run would only fail after being claimed.
-            await tx
-                .update(asyncJobs)
-                .set({
-                    status: "failed",
-                    completedAt: now,
-                    updatedAt: now,
-                    heartbeatAt: null,
-                    claimToken: null,
-                    errorCode: ErrorCode.RECORDING_DATA_REAPED,
-                    lastError:
-                        "Cancelled because the recording audio was erased",
+    await retryOnDeadlock(() =>
+        db.transaction(async (tx) => {
+            const now = new Date();
+            // The knowledge scopes the withdrawal and the erasure reach, moved
+            // once at the end.
+            const scopes = new Set<string>();
+            // Before the recording lock, as withdrawing takes them.
+            if (orgUserId && options.withdraw) await lockOrgTree(tx);
+            await lockItemTaskGraphInTx(tx, {
+                itemId: recordingId,
+                ownerUserId: userId,
+            });
+            const [locked] = await tx
+                .select({
+                    deletedAt: recordings.deletedAt,
+                    audioReapedAt: recordings.audioReapedAt,
+                    contentReapedAt: chatterItems.contentReapedAt,
+                    summaryReapedAt: chatterItems.summaryReapedAt,
                 })
-                .where(
-                    and(
-                        eq(
-                            asyncJobs.subjectId,
-                            recordingJobSubject(recordingId, "org"),
-                        ),
-                        eq(asyncJobs.kind, "transcription"),
-                        inArray(asyncJobs.status, ["pending", "processing"]),
-                    ),
-                );
-            await tx
-                .update(recordings)
-                .set({
-                    audioReapedAt: now,
-                    waveformPeaks: null,
-                    updatedAt: now,
-                })
+                .from(recordings)
+                .innerJoin(chatterItems, eq(chatterItems.id, recordings.id))
                 .where(
                     and(
                         eq(recordings.id, recordingId),
                         eq(recordings.userId, userId),
                     ),
+                )
+                .for("update")
+                .limit(1);
+            if (!locked || locked.deletedAt) {
+                throw new AppError(
+                    ErrorCode.RECORDING_NOT_FOUND,
+                    "Recording not found",
+                    404,
                 );
-        } else if (scope === "transcript") {
-            await cancelArtifactJobs(
-                tx,
-                userId,
-                recordingId,
-                [
-                    "transcription",
-                    "summary",
-                    "topics",
-                    "learn.run",
-                    "title.generate",
-                    "learn.release",
-                    "learn.correct",
-                ],
-                now,
-            );
-            // A Learn run or correction pass on the Organization view
-            // reads the same transcript, whoever started it.
-            await tx
-                .update(asyncJobs)
-                .set({
-                    status: "failed",
-                    completedAt: now,
-                    updatedAt: now,
-                    heartbeatAt: null,
-                    claimToken: null,
-                    errorCode: ErrorCode.RECORDING_DATA_REAPED,
-                    lastError:
-                        "Cancelled because the recording artifact was erased",
-                })
-                .where(
-                    and(
-                        eq(
-                            asyncJobs.subjectId,
-                            recordingJobSubject(recordingId, "org"),
+            }
+            if (
+                orgUserId &&
+                (await isRecordingShared(recordingId, orgUserId, tx))
+            ) {
+                if (!options.withdraw) throw recordingShared();
+                for (const scope of await withdrawRecordingInTx(
+                    tx,
+                    orgUserId,
+                    recordingId,
+                    userId,
+                )) {
+                    scopes.add(scope);
+                }
+                withdrew = true;
+            }
+
+            const erasedAsWhole =
+                (scope === "audio" || locked.audioReapedAt !== null) &&
+                (scope === "transcript" || locked.contentReapedAt !== null) &&
+                (scope === "summary" || locked.summaryReapedAt !== null);
+            if (erasedAsWhole) {
+                await deleteItemTaskDataInTx(tx, {
+                    itemId: recordingId,
+                    ownerUserId: userId,
+                    actorUserId: userId,
+                    orgUserId,
+                    reason: "erased",
+                });
+            }
+
+            if (scope === "audio") {
+                await cancelArtifactJobs(
+                    tx,
+                    userId,
+                    recordingId,
+                    ["transcription"],
+                    now,
+                );
+                // Without audio the Organization view cannot be transcribed
+                // either; its queued run would only fail after being claimed.
+                await tx
+                    .update(asyncJobs)
+                    .set({
+                        status: "failed",
+                        completedAt: now,
+                        updatedAt: now,
+                        heartbeatAt: null,
+                        claimToken: null,
+                        errorCode: ErrorCode.RECORDING_DATA_REAPED,
+                        lastError:
+                            "Cancelled because the recording audio was erased",
+                    })
+                    .where(
+                        and(
+                            eq(
+                                asyncJobs.subjectId,
+                                recordingJobSubject(recordingId, "org"),
+                            ),
+                            eq(asyncJobs.kind, "transcription"),
+                            inArray(asyncJobs.status, [
+                                "pending",
+                                "processing",
+                            ]),
                         ),
-                        inArray(asyncJobs.kind, ["learn.run", "learn.correct"]),
-                        inArray(asyncJobs.status, ["pending", "processing"]),
-                    ),
+                    );
+                await tx
+                    .update(recordings)
+                    .set({
+                        audioReapedAt: now,
+                        waveformPeaks: null,
+                        updatedAt: now,
+                    })
+                    .where(
+                        and(
+                            eq(recordings.id, recordingId),
+                            eq(recordings.userId, userId),
+                        ),
+                    );
+            } else if (scope === "transcript") {
+                if (!erasedAsWhole) {
+                    await deleteItemTaskVectorsInTx(tx, {
+                        itemId: recordingId,
+                        ownerUserId: userId,
+                    });
+                }
+                await cancelArtifactJobs(
+                    tx,
+                    userId,
+                    recordingId,
+                    [
+                        "transcription",
+                        "summary",
+                        "topics",
+                        "learn.run",
+                        "title.generate",
+                        "learn.release",
+                        "learn.correct",
+                    ],
+                    now,
                 );
-            // Facts said only here go with the transcript.
-            const knowledge = await knowledgeOnRecordingInTx(tx, recordingId);
-            await tx
-                .delete(transcriptions)
-                .where(
-                    and(
-                        eq(transcriptions.recordingId, recordingId),
-                        eq(transcriptions.userId, userId),
-                    ),
+                // A Learn run or correction pass on the Organization view
+                // reads the same transcript, whoever started it.
+                await tx
+                    .update(asyncJobs)
+                    .set({
+                        status: "failed",
+                        completedAt: now,
+                        updatedAt: now,
+                        heartbeatAt: null,
+                        claimToken: null,
+                        errorCode: ErrorCode.RECORDING_DATA_REAPED,
+                        lastError:
+                            "Cancelled because the recording artifact was erased",
+                    })
+                    .where(
+                        and(
+                            eq(
+                                asyncJobs.subjectId,
+                                recordingJobSubject(recordingId, "org"),
+                            ),
+                            inArray(asyncJobs.kind, [
+                                "learn.run",
+                                "learn.correct",
+                            ]),
+                            inArray(asyncJobs.status, [
+                                "pending",
+                                "processing",
+                            ]),
+                        ),
+                    );
+                // Facts said only here go with the transcript.
+                const knowledge = await knowledgeOnRecordingInTx(
+                    tx,
+                    recordingId,
                 );
-            await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
-            await touchRecording(tx, recordingId, userId, now);
-            await tx
-                .update(chatterItems)
-                // No transcript left for what waited for Learn.
-                .set({
-                    contentReapedAt: now,
-                    updatedAt: now,
-                    summaryDueAt: null,
-                })
-                .where(
-                    and(
-                        eq(chatterItems.id, recordingId),
-                        eq(chatterItems.userId, userId),
-                    ),
+                await tx
+                    .delete(transcriptions)
+                    .where(
+                        and(
+                            eq(transcriptions.recordingId, recordingId),
+                            eq(transcriptions.userId, userId),
+                        ),
+                    );
+                await pruneUnsupportedFactsInTx(tx, knowledge.factIds);
+                await touchRecording(tx, recordingId, userId, now);
+                await tx
+                    .update(chatterItems)
+                    // No transcript left for what waited for Learn.
+                    .set({
+                        contentReapedAt: now,
+                        updatedAt: now,
+                        summaryDueAt: null,
+                    })
+                    .where(
+                        and(
+                            eq(chatterItems.id, recordingId),
+                            eq(chatterItems.userId, userId),
+                        ),
+                    );
+                for (const scope of knowledge.scopes) scopes.add(scope);
+            } else {
+                await cancelArtifactJobs(
+                    tx,
+                    userId,
+                    recordingId,
+                    ["summary"],
+                    now,
                 );
-            for (const scope of knowledge.scopes) scopes.add(scope);
-        } else {
-            await cancelArtifactJobs(tx, userId, recordingId, ["summary"], now);
-            await tx
-                .delete(aiEnhancements)
-                .where(
-                    and(
-                        eq(aiEnhancements.itemId, recordingId),
-                        eq(aiEnhancements.userId, userId),
-                    ),
-                );
-            await dropTasksWithoutSummaryInTx(tx, {
-                recordingId,
-                ownerUserId: userId,
-            });
-            await touchRecording(tx, recordingId, userId, now);
-            await tx
-                .update(chatterItems)
-                .set({ summaryReapedAt: now, updatedAt: now })
-                .where(
-                    and(
-                        eq(chatterItems.id, recordingId),
-                        eq(chatterItems.userId, userId),
-                    ),
-                );
-        }
-        await bumpScopeInTx(tx, scopes);
-    });
+                await tx
+                    .delete(aiEnhancements)
+                    .where(
+                        and(
+                            eq(aiEnhancements.itemId, recordingId),
+                            eq(aiEnhancements.userId, userId),
+                        ),
+                    );
+                await dropTasksWithoutSummaryInTx(tx, {
+                    recordingId,
+                    ownerUserId: userId,
+                });
+                await touchRecording(tx, recordingId, userId, now);
+                await tx
+                    .update(chatterItems)
+                    .set({ summaryReapedAt: now, updatedAt: now })
+                    .where(
+                        and(
+                            eq(chatterItems.id, recordingId),
+                            eq(chatterItems.userId, userId),
+                        ),
+                    );
+            }
+            await bumpScopeInTx(tx, scopes);
+        }),
+    );
 
     if (withdrew) await orgTreeChanged();
 

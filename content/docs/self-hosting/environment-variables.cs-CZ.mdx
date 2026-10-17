@@ -37,6 +37,7 @@ nezávisel na produkčních tajemstvích.
 | `ORG_ACCOUNT_EMAIL`                 | nenastaveno                          | Při `ORG_ACCOUNT_PASSWORD` povolí úroveň Organization: sdílenou stromovou strukturu složek a jeden účet organizace, který ji spravuje. Nesmí odpovídat e-mailu žádného stávajícího uživatele. |
 | `ORG_ACCOUNT_PASSWORD`              | nenastaveno                          | Heslo účtu organizace (alespoň 12 znaků). Při každém startu se opětovně nastavuje. Volitelné při jednotném přihlašování, kde účet nemá interaktivní přihlášení. |
 | `ORG_ACCOUNT_NAME`                  | `Organization`                     | Zobrazované jméno účtu organizace.                                                                                |
+| `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` | `60`                         | Nejvyšší počet volání, která může jeden člen provést u každého poskytovatele AI Organizace v jednom hodinovém okně. Ostatní členové mají samostatné limity. |
 | `RIFFADO_VERSION`                 | `latest`                           | Čte pouze Docker Compose, ne aplikace. Určuje, které image tagy Compose stahuje.                                  |
 | `WEBHOOKS_REQUIRE_PUBLIC_TARGETS`   | `false`                            | Při `true` musí být webhook URL v HTTPS a řešit na veřejné IP adresy. Užitečné, když Vaše instance je přístupná ostatním. |
 | `RATE_LIMIT_TRUST_PROXY_HEADERS`    | `false`                            | Při hodnotě `true` věřit `X-Forwarded-For` pro bucketování rate-limitů. Bezpečné jen za reverzní proxy, která záhlaví přepisuje. |
@@ -46,6 +47,11 @@ Nastavení `RATE_LIMIT_TRUST_PROXY_HEADERS=true` bez proxy,
 která přepisuje forwarding záhlaví, umožní klientům falšovat vlastní IP adresy
 a zcela obejít rate limiting. Pokud si nejste jistí, že Vaše proxy tato záhlaví
 přepisuje/maže, ponechte nenastaveno.
+
+Chcete-li změnit `ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR`, musí jej produkční
+soubor Compose předat službě aplikace. Do jejího bloku `environment:` přidejte
+`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: ${ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:-}`
+a nastavte hodnotu v `.env`. Prázdná nebo chybějící hodnota zachová výchozích 60.
 
 <span id="storage" />
 

@@ -14,6 +14,7 @@ import { MailSection } from "./settings-sections/mail-section";
 import { NotificationsSection } from "./settings-sections/notifications-section";
 import { PlaudAccountSection } from "./settings-sections/plaud-account-section";
 import { PlaybackSection } from "./settings-sections/playback-section";
+import { ProfilesSection } from "./settings-sections/profiles-section";
 import { ProvidersSection } from "./settings-sections/providers-section";
 import { StorageSection } from "./settings-sections/storage-section";
 import { SummarySection } from "./settings-sections/summary-section";
@@ -35,7 +36,6 @@ const EMPTY_PROVIDERS: Provider[] = [];
 interface SettingsContentProps {
     activeSection: SettingsSection;
     initialProviders?: Provider[];
-    onReRunOnboarding?: () => void;
     isHosted?: boolean;
     mailEnabled?: boolean;
     accessManagement?: boolean;
@@ -46,7 +46,6 @@ interface SettingsContentProps {
 export function SettingsContent({
     activeSection,
     initialProviders = EMPTY_PROVIDERS,
-    onReRunOnboarding,
     isHosted = false,
     mailEnabled = false,
     accessManagement = false,
@@ -74,6 +73,8 @@ export function SettingsContent({
             return <TranscriptionSection mode="learning" />;
         case "summary":
             return <SummarySection />;
+        case "profiles":
+            return <ProfilesSection />;
         case "sync":
             return <SyncSection />;
         case "plaud-account":
@@ -85,7 +86,7 @@ export function SettingsContent({
         case "notifications":
             return <NotificationsSection />;
         case "export":
-            return <ExportSection onReRunOnboarding={onReRunOnboarding} />;
+            return <ExportSection />;
         case "storage":
             return <StorageSection isHosted={isHosted} />;
         case "billing":

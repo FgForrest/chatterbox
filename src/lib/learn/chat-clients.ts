@@ -6,25 +6,20 @@
  * (retried). Every response records its usage for the recording.
  */
 
-import { eq } from "drizzle-orm";
 import { OpenAI } from "openai";
-import { db } from "@/db";
-import { apiCredentials } from "@/db/schema";
 import { buildChatCompletionParams } from "@/lib/ai/chat-completion-params";
-import {
-    enhancementChatModel,
-    pickLearnCredential,
-} from "@/lib/ai/enhancement-provider";
+import { enhancementChatModel } from "@/lib/ai/enhancement-provider";
 import {
     type AiOperation,
     recordChatCompletionUsage,
 } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { retryWithBackoff } from "@/lib/jobs/backoff";
 import { isRetryableError } from "@/lib/jobs/retryable";
 import type { LearnBridgeChat } from "@/lib/learn/run-bridge";
 import type { LearnChat } from "@/lib/learn/run-fallback";
+import { resolveStepProvider } from "@/lib/profiles/providers";
+import type { ProviderPin } from "@/lib/profiles/settings";
 
 const CALL_RETRY_ATTEMPTS = 3;
 /** A call through the bridge, tools and all; the jobs allow 20 min. */
@@ -36,6 +31,7 @@ export interface LearnChatClients {
     provider: string;
     baseUrl: string | null;
     model: string;
+    payerUserId: string;
 }
 
 /**
@@ -51,27 +47,30 @@ export async function learnChatClients(input: {
     /** The name the bridge's JSON Schema answer goes by. */
     schemaName: string;
     signal: AbortSignal;
+    pin?: ProviderPin | null;
 }): Promise<LearnChatClients> {
     const { actorUserId, signal } = input;
-    const configured = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, actorUserId));
-    const credentials = pickLearnCredential(configured);
-    if (!credentials) {
+    const resolved = await resolveStepProvider({
+        step: "learn",
+        pin: input.pin ?? null,
+        actorUserId,
+    });
+    if (resolved.kind !== "credential") {
         throw new AppError(
             ErrorCode.AI_PROVIDER_NOT_CONFIGURED,
             "No AI provider configured",
             400,
         );
     }
+    const credentials = resolved.credential;
     const openai = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
+        maxRetries: resolved.organizationCredential ? 0 : undefined,
     });
     const model = enhancementChatModel(credentials);
     const bridgeClient = new OpenAI({
-        apiKey: decrypt(credentials.apiKey),
+        apiKey: credentials.apiKey,
         baseURL: credentials.baseUrl || undefined,
         maxRetries: 0,
         timeout: BRIDGE_CALL_TIMEOUT_MS,
@@ -79,7 +78,8 @@ export async function learnChatClients(input: {
     const usage = {
         recordingId: input.recordingId,
         ownerUserId: input.ownerUserId,
-        payerUserId: actorUserId,
+        actorUserId,
+        payerUserId: resolved.payerUserId,
         operation: input.operation,
         provider: credentials.provider,
         model,
@@ -90,6 +90,7 @@ export async function learnChatClients(input: {
         provider: credentials.provider,
         baseUrl: credentials.baseUrl,
         model,
+        payerUserId: resolved.payerUserId,
         // Path 1: the agent bridge's extension (`agent-bridge/README.md`):
         // the answer's JSON Schema, and the run's token for Riffado's
         // tools. Unknown fields travel in the body as they are.
@@ -101,6 +102,7 @@ export async function learnChatClients(input: {
         bridge: {
             complete: async ({ system, user, schema, mcp, maxTokens }) => {
                 signal.throwIfAborted();
+                await resolved.reserveCall();
                 const response = await bridgeClient.chat.completions.create(
                     {
                         ...buildChatCompletionParams({
@@ -136,6 +138,7 @@ export async function learnChatClients(input: {
                     isRetryable: isRetryableError,
                     run: async () => {
                         signal.throwIfAborted();
+                        await resolved.reserveCall();
                         const response = await openai.chat.completions.create(
                             buildChatCompletionParams({
                                 model,

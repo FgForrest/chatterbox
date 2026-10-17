@@ -4,7 +4,6 @@ import {
     learnRuns,
     mailPendingShares,
     recordingFolderAssignments,
-    recordingTasks,
 } from "@/db/schema";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { bumpScopeInTx } from "@/lib/knowledge/scope-generation";
@@ -13,40 +12,42 @@ import { learnRunOpen } from "@/lib/learn/learn-open";
 import type { ShareGateProblem } from "@/lib/sharing/share-gate";
 import { publishTaskAssigneesInTx } from "@/lib/sharing/share-names";
 import { isRecordingShared } from "@/lib/sharing/shared";
+import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
- * What keeps a mail out of the Organization (D2): a Learn run still open
- * on it, or a task proposal undecided. Empty when it may be shared.
+ * What keeps a mail out of the Organization: an open Learn run or undecided
+ * task proposal. Proposal-state filtering follows specification section 7.8;
+ * Stage 4 narrows both share gates to `awaiting_source_review`.
  */
 export async function mailShareProblems(
     tx: Tx,
     itemId: string,
+    ownerUserId: string,
 ): Promise<ShareGateProblem[]> {
-    const [[openRuns], [proposals]] = await Promise.all([
+    const [[openRuns], taskDecisions] = await Promise.all([
         tx
             .select({ n: count() })
             .from(learnRuns)
-            .where(and(eq(learnRuns.itemId, itemId), learnRunOpen())),
-        tx
-            .select({ n: count() })
-            .from(recordingTasks)
             .where(
                 and(
-                    eq(recordingTasks.itemId, itemId),
-                    eq(recordingTasks.status, "proposed"),
+                    eq(learnRuns.itemId, itemId),
+                    eq(learnRuns.userId, ownerUserId),
+                    learnRunOpen(),
                 ),
             ),
+        waitingTaskDecisions(tx, itemId, ownerUserId),
     ]);
     const problems: ShareGateProblem[] = [];
     if ((openRuns?.n ?? 0) > 0) {
         problems.push({ kind: "learn_unfinished", runs: openRuns?.n ?? 0 });
     }
-    if ((proposals?.n ?? 0) > 0) {
+    const waitingProposals = taskDecisions.total;
+    if (waitingProposals > 0) {
         problems.push({
             kind: "tasks_unreviewed",
-            proposals: proposals?.n ?? 0,
+            proposals: waitingProposals,
         });
     }
     return problems;
@@ -73,7 +74,9 @@ export async function shareMailInTx(
         input.orgUserId,
         tx,
     );
-    const problems = wasShared ? [] : await mailShareProblems(tx, input.itemId);
+    const problems = wasShared
+        ? []
+        : await mailShareProblems(tx, input.itemId, input.ownerUserId);
     if (problems.length > 0) {
         throw new AppError(
             ErrorCode.SHARE_REQUIREMENTS_UNMET,

@@ -19,9 +19,14 @@ import {
     aiEnhancements,
     apiCredentials,
     asyncJobs,
+    itemProcessing,
     mailMessages,
     mailParticipants,
+    recordingFolderAssignments,
+    recordingFolders,
     recordingTasks,
+    taskMentions,
+    taskUpdateProposals,
     userSettings,
     users,
 } from "@/db/schema";
@@ -109,13 +114,19 @@ import { readItemContent } from "@/lib/content/read-item-content";
 import { renderMailForModel } from "@/lib/content/render-mail";
 import { encrypt } from "@/lib/encryption";
 import { decryptText } from "@/lib/encryption/fields";
-import { ensureRootFolders } from "@/lib/folders/folders";
+import { createFolder, ensureRootFolders } from "@/lib/folders/folders";
 import { createPerson } from "@/lib/knowledge/people";
 import { ensureMailbox } from "@/lib/mail/addresses";
 import { collectArchivedMail } from "@/lib/mail/archive";
 import { authenticateMessage } from "@/lib/mail/dkim";
 import { ingestMail, precheckMail } from "@/lib/mail/ingest";
+import { mailShareProblems } from "@/lib/mail/share-gate";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { pipelineAdvanceJobHandler } from "@/lib/pipeline/advance-job";
+import { updatePhaseInTx } from "@/lib/pipeline/state";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
 import { parseSummaryJobPayload } from "@/lib/summary/summary-job";
 import { summaryJobHandler } from "@/lib/summary/summary-job-handler";
@@ -125,10 +136,12 @@ import { taskFingerprint } from "@/lib/tasks/proposals";
 import { writeTaskProposalsInTx } from "@/lib/tasks/store";
 import {
     acceptReview,
+    addTask,
     listRecordingTasks,
     listTasks,
     recordingsAwaitingTaskReview,
 } from "@/lib/tasks/tasks";
+import { insertRecordings } from "@/tests/integration/items";
 import {
     rawMessage,
     signMessage,
@@ -162,6 +175,7 @@ function reply(content: object) {
 describeWithDatabase("summaries of mail (PostgreSQL)", () => {
     let database: TestPostgresDatabase | null = null;
     let storageDir = "";
+    let categoryFolderId = "";
 
     function db() {
         if (!database) throw new Error("test database was not initialized");
@@ -189,6 +203,89 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             .limit(1);
         if (!message) throw new Error("mail not stored");
         return message.id;
+    }
+
+    const runAdvance = async (itemId: string) => {
+        const profile = await resolveDefaultProfile("u-jan", "mail");
+        await db()
+            .insert(recordingFolderAssignments)
+            .values({
+                userId: "u-jan",
+                itemId,
+                folderId: categoryFolderId,
+            })
+            .onConflictDoNothing();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId,
+                userId: "u-jan",
+                view: "private",
+                profileId: profile.profile.id,
+                profileRevisionId: profile.revisionId,
+            })
+            .onConflictDoUpdate({
+                target: [itemProcessing.itemId, itemProcessing.view],
+                set: {
+                    profileId: profile.profile.id,
+                    profileRevisionId: profile.revisionId,
+                },
+            });
+        const [processing] = await db()
+            .select({ generation: itemProcessing.requestedGeneration })
+            .from(itemProcessing)
+            .where(
+                and(
+                    eq(itemProcessing.itemId, itemId),
+                    eq(itemProcessing.userId, "u-jan"),
+                    eq(itemProcessing.view, "private"),
+                ),
+            );
+        await db().transaction((tx) =>
+            updatePhaseInTx(tx, itemId, "private", "u-jan", "categorize", {
+                state: "done",
+                reason: "categorized",
+                generation: processing?.generation ?? 0,
+                at: new Date().toISOString(),
+            }),
+        );
+        return pipelineAdvanceJobHandler.run({
+            jobId: `pipeline-${itemId}`,
+            userId: "u-jan",
+            payload: { itemId, view: "private", reason: "arrival" },
+            attempt: 1,
+            maxAttempts: 10,
+            signal: new AbortController().signal,
+            reportProgress: () => undefined,
+        });
+    };
+
+    async function setAutomaticSummary(automatic: boolean): Promise<void> {
+        const resolved = await resolveDefaultProfile("u-jan", "mail");
+        const settings = resolved.settings;
+        if ("transcribe" in settings.steps) throw new Error("mail profile");
+        await updateProfile({
+            ownerUserId: "u-jan",
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: "u-jan",
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    summary: { ...settings.steps.summary, automatic },
+                },
+            },
+        });
     }
 
     function headers(subject: string, extra: string[] = []) {
@@ -225,6 +322,17 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             providerId: "oidc",
         });
         await ensureRootFolders("u-jan");
+        const [privateRoot] = await db()
+            .select({ id: recordingFolders.id })
+            .from(recordingFolders)
+            .where(eq(recordingFolders.userId, "u-jan"));
+        categoryFolderId = (
+            await createFolder({
+                userId: "u-jan",
+                parentId: privateRoot?.id ?? "",
+                name: "Categorized",
+            })
+        ).id;
         await ensureMailbox("u-jan");
         await db()
             .insert(apiCredentials)
@@ -341,6 +449,38 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        const [eva] = await db()
+            .select({ personId: mailParticipants.personId })
+            .from(mailParticipants)
+            .where(
+                and(
+                    eq(mailParticipants.itemId, itemId),
+                    eq(mailParticipants.ref, "p2"),
+                ),
+            );
+        if (!eva?.personId) throw new Error("Eva was not linked to a person");
+        const audioId = "audio-candidate-for-mail";
+        await insertRecordings(db(), {
+            id: audioId,
+            userId: "u-jan",
+            deviceSn: "MAIL-CANDIDATE",
+            plaudFileId: audioId,
+            filename: encrypt("Candidate audio"),
+            duration: 1,
+            startTime: new Date("2026-10-08T10:00:00Z"),
+            endTime: new Date("2026-10-08T10:00:01Z"),
+            filesize: 1,
+            fileMd5: "1".repeat(32),
+            storageType: "local",
+            storagePath: `u-jan/${audioId}.mp3`,
+            storageFilename: `${audioId}.mp3`,
+            plaudVersion: "1",
+        });
+        await addTask(await taskViewerById("u-jan"), audioId, {
+            text: "Review the audio contract",
+            assigneePersonId: eva.personId,
+            status: "open",
+        });
         createCompletion.mockReset();
         createCompletion.mockResolvedValueOnce(
             reply({
@@ -386,6 +526,8 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(user?.content).not.toContain("jan@company.example");
         expect(user?.content).not.toContain("eva@client.example");
         expect(user?.content).toContain("The mail was sent on");
+        expect(user?.content).toContain("Review the audio contract");
+        expect(user?.content).toContain("T1 (p2)");
 
         const [stored] = await db()
             .select()
@@ -397,6 +539,17 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 ),
             );
         expect(stored?.transcriptionId).toBeNull();
+        expect(stored).toMatchObject({
+            profileRevisionId: expect.any(String),
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: "u-jan",
+            inputs: {
+                contentId: expect.any(String),
+                contentRevision: expect.any(Number),
+            },
+            outputLanguage: null,
+            outputFormatLocale: "en",
+        });
         expect(decryptText(stored?.summary ?? "")).toBe(
             "Jan asks Eva for the signed contract by Friday.",
         );
@@ -434,6 +587,50 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                 samples?.evidenceCharEnd ?? 0,
             ),
         ).toBe("deliver the samples to your warehouse next week");
+    });
+
+    it("uses the account language for a profile mail summary when detection returned none", async () => {
+        await db()
+            .insert(userSettings)
+            .values({
+                userId: "u-jan",
+                defaultTranscriptionLanguage: "cs",
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultTranscriptionLanguage: "cs" },
+            });
+        const itemId = await deliver(
+            await signMessage(
+                rawMessage(
+                    headers("Czech language"),
+                    "Prosím potvrďte termín.",
+                ),
+                company,
+            ),
+            ["jan@klepna.example"],
+        );
+        createCompletion.mockReset();
+        createCompletion.mockResolvedValueOnce(
+            reply({
+                summary: "Jan žádá o potvrzení termínu.",
+                keyPoints: [],
+                actionItems: [],
+                taskUpdates: [],
+            }),
+        );
+
+        await generateSummaryForRecording("u-jan", itemId);
+
+        const request = createCompletion.mock.calls[0]?.[0] as {
+            messages: { role: string; content: string }[];
+        };
+        const system = request.messages.find(
+            (message) => message.role === "system",
+        );
+        expect(system?.content).toContain(
+            "Write all natural-language output in Czech",
+        );
     });
 
     it("reviews a mail's tasks like a recording's, and backs them up with its summary", async () => {
@@ -538,7 +735,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         }
     });
 
-    it("keeps where a follow-up was read in a mail, and how far to trust it", async () => {
+    it("keeps an earlier quoted follow-up as a mention without a field proposal", async () => {
         const viewer = await taskViewerById("u-jan");
         const [contract] = (
             await db()
@@ -578,8 +775,10 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
                                 charEnd: 10,
                             },
                             evidenceProvenance: "quoted",
+                            quotedAt: new Date("2026-10-08T17:40:00.000Z"),
                         },
                     ],
+                    reviewer: viewer,
                     fingerprintOf: taskFingerprint,
                 },
             });
@@ -588,9 +787,57 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
         expect(listed?.updates).toEqual([
             expect.objectContaining({
                 kind: "done",
-                evidenceProvenance: "quoted",
+                earlierMention: true,
+                ticked: false,
             }),
         ]);
+        expect(await recordingsAwaitingTaskReview(viewer)).not.toContainEqual(
+            expect.objectContaining({ recordingId: itemId }),
+        );
+        const mailProblems = await db().transaction((tx) =>
+            mailShareProblems(tx, itemId, "u-jan"),
+        );
+        expect(
+            mailProblems.some((problem) => problem.kind === "tasks_unreviewed"),
+        ).toBe(false);
+        const [proposal] = await db()
+            .select({
+                state: taskUpdateProposals.state,
+                obsoleteReason: taskUpdateProposals.obsoleteReason,
+                decidedByUserId: taskUpdateProposals.decidedByUserId,
+                ticked: taskUpdateProposals.ticked,
+            })
+            .from(taskUpdateProposals)
+            .where(
+                and(
+                    eq(taskUpdateProposals.itemId, itemId),
+                    eq(taskUpdateProposals.taskId, contract?.id ?? ""),
+                ),
+            );
+        expect(proposal).toEqual({
+            state: "obsolete",
+            obsoleteReason: "earlier_statement",
+            decidedByUserId: null,
+            ticked: false,
+        });
+        const [mention] = await db()
+            .select({
+                provenance: taskMentions.provenance,
+                statementAt: taskMentions.statementAt,
+                decision: taskMentions.matchDecision,
+            })
+            .from(taskMentions)
+            .where(
+                and(
+                    eq(taskMentions.itemId, itemId),
+                    eq(taskMentions.taskId, contract?.id ?? ""),
+                ),
+            );
+        expect(mention).toEqual({
+            provenance: "quoted",
+            statementAt: new Date("2026-10-08T17:40:00.000Z"),
+            decision: "suggested",
+        });
     });
 
     it("queues a summary of new mail, unless machine-sent or switched off", async () => {
@@ -617,6 +864,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(plain);
         expect(await queued(plain)).toHaveLength(1);
         const machine = await deliver(
             await signMessage(
@@ -625,14 +873,9 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(machine);
         expect(await queued(machine)).toHaveLength(0);
-        await db()
-            .insert(userSettings)
-            .values({ userId: "u-jan", mailAutoProcess: false })
-            .onConflictDoUpdate({
-                target: userSettings.userId,
-                set: { mailAutoProcess: false },
-            });
+        await setAutomaticSummary(false);
         const off = await deliver(
             await signMessage(
                 rawMessage(headers("Later"), "Not now."),
@@ -640,14 +883,12 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(off);
         expect(await queued(off)).toHaveLength(0);
     });
 
     it("runs a queued mail summary on the worker's path", async () => {
-        await db()
-            .update(userSettings)
-            .set({ mailAutoProcess: true })
-            .where(eq(userSettings.userId, "u-jan"));
+        await setAutomaticSummary(true);
         const itemId = await deliver(
             await signMessage(
                 rawMessage(headers("Worker"), "Please confirm the date."),
@@ -655,6 +896,7 @@ describeWithDatabase("summaries of mail (PostgreSQL)", () => {
             ),
             ["jan@klepna.example"],
         );
+        await runAdvance(itemId);
         const [job] = (
             await db()
                 .select()

@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import { useExtracted } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     RecordingPlayer,
     type RecordingPlayerHandle,
@@ -13,10 +13,13 @@ import {
     TranscriptionPanel,
     type TranscriptOption,
 } from "@/components/dashboard/transcription-panel";
+import { ItemWorkflow } from "@/components/pipeline/item-workflow";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
+import { openWidget } from "@/components/pipeline/workflow-widget";
 import { EraseRecordingMenu } from "@/components/recordings/erase-recording-menu";
-import { RecordingFolderTags } from "@/components/recordings/recording-folder-tags";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 import { cn } from "@/lib/utils";
 import type {
@@ -46,6 +49,7 @@ interface Props {
     onTranscribeComplete?: () => void;
     /** Reload the page's transcripts; see `TranscriptionPanel`. */
     onTranscriptStale?: () => void;
+    onFolderCreated?: (folder: CreatedFolder) => void;
     /** The transcript is not the viewer's to change; see `TranscriptionPanel`. */
     transcriptReadOnly?: boolean;
     /** Whether the recording is in the Organization: erasing it withdraws it. */
@@ -101,6 +105,7 @@ export function WorkstationDetailPane({
     onTranscribe,
     onTranscribeComplete,
     onTranscriptStale,
+    onFolderCreated,
     transcriptReadOnly,
     recordingShared = false,
     onSelectRecording,
@@ -124,6 +129,22 @@ export function WorkstationDetailPane({
     const i18n = useExtracted();
     const playerRef = useRef<RecordingPlayerHandle>(null);
     const playedLink = useRef<string | null>(null);
+    const [processingState, setProcessingState] = useState<{
+        itemId: string;
+        data: ItemProcessingPresentation | null;
+    } | null>(null);
+    const currentRecordingId = currentRecording?.id;
+    const processing =
+        processingState && processingState.itemId === currentRecordingId
+            ? processingState.data
+            : null;
+    const handleProcessingChange = useCallback(
+        (data: ItemProcessingPresentation | null) => {
+            if (!currentRecordingId) return;
+            setProcessingState({ itemId: currentRecordingId, data });
+        },
+        [currentRecordingId],
+    );
     useEffect(() => {
         if (
             !currentRecording ||
@@ -200,23 +221,48 @@ export function WorkstationDetailPane({
                             )
                         }
                     />
-                    <RecordingFolderTags
-                        recordingId={currentRecording.id}
+                    <ItemWorkflow
+                        itemId={currentRecording.id}
+                        kind="audio"
                         folders={folders}
-                        assignments={folderAssignments}
+                        folderAssignments={folderAssignments}
                         onSelectFolder={onSelectFolder}
-                        onAdd={onAddToFolder}
-                        onRemove={onRemoveFromFolder}
+                        onAddToFolder={onAddToFolder}
+                        onRemoveFromFolder={onRemoveFromFolder}
                         isOwn={currentRecording.isOwn !== false}
-                        // On the Organization view the organization account
-                        // may take it out, as its owner may.
                         canWithdraw={
                             currentRecording.isOwn !== false ||
                             (currentRecording.view === "org" &&
                                 transcriptReadOnly === false)
                         }
-                        organizationOnly={currentRecording.view === "org"}
-                        onMove={onMoveBetweenFolders}
+                        view={
+                            currentRecording.view === "org" ? "org" : "private"
+                        }
+                        onMoveBetweenFolders={onMoveBetweenFolders}
+                        onChanged={onArtifactsChanged}
+                        onFolderCreated={onFolderCreated}
+                        onTranscribe={() => onTranscribe()}
+                        onLearn={() =>
+                            openWidget(
+                                `recording-learn-review-${currentRecording.id}`,
+                            )
+                        }
+                        onSummary={() =>
+                            openWidget(
+                                `recording-summary-${currentRecording.id}`,
+                            )
+                        }
+                        onReviewLearn={() =>
+                            openWidget(
+                                `recording-learn-review-${currentRecording.id}`,
+                            )
+                        }
+                        onReviewTasks={() =>
+                            openWidget(
+                                `recording-task-review-${currentRecording.id}`,
+                            )
+                        }
+                        onProcessingChange={handleProcessingChange}
                     />
                     {!currentRecording.audioReaped && (
                         <RecordingPlayer
@@ -253,6 +299,7 @@ export function WorkstationDetailPane({
                             onTranscribeComplete={onTranscribeComplete}
                             onTranscriptStale={onTranscriptStale}
                             readOnly={transcriptReadOnly}
+                            processing={processing}
                             onSeekToTurn={
                                 currentRecording.audioReaped
                                     ? undefined

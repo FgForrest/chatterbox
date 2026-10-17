@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
+import { readProcessing } from "@/lib/pipeline/state";
 import { enqueueRecordingSessionFinalize } from "@/lib/recording-sessions/finalize-job";
 import { parseCompleteRecordingSessionBody } from "@/lib/recording-sessions/metadata";
 import { gateRecordingSessionRequest } from "@/lib/recording-sessions/route-gate";
@@ -46,7 +47,16 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
     // session, hand back its current state rather than erroring.
     if (session.status !== "open") {
         const chunks = await listRecordingSessionChunks(session.id);
-        return NextResponse.json(serializeRecordingSession(session, chunks));
+        const processing = session.recordingId
+            ? await readProcessing(
+                  session.recordingId,
+                  "private",
+                  authn.user.id,
+              )
+            : null;
+        return NextResponse.json(
+            serializeRecordingSession(session, chunks, processing?.phases),
+        );
     }
 
     const allChunks = await listRecordingSessionChunks(session.id);
@@ -92,7 +102,16 @@ export const POST = apiHandler<IdContext>(async (request, context) => {
                 404,
             );
         }
-        return NextResponse.json(serializeRecordingSession(current, chunks));
+        const processing = current.recordingId
+            ? await readProcessing(
+                  current.recordingId,
+                  "private",
+                  authn.user.id,
+              )
+            : null;
+        return NextResponse.json(
+            serializeRecordingSession(current, chunks, processing?.phases),
+        );
     }
 
     const enqueued = await enqueueRecordingSessionFinalize({

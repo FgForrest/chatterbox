@@ -73,6 +73,15 @@ export interface TemplateListProps {
     disabled?: boolean;
 }
 
+interface LegacyTemplateListProps {
+    kind: TemplateKind;
+    presetCopy: Record<string, PresetCopy>;
+    config: TemplateConfiguration;
+    heading: string;
+    copyingId: string | null;
+    onCopy: (template: PromptTemplate) => void;
+}
+
 /**
  * One kind of prompt template -- summary or title -- as a paginated list
  * with roles, plus the dialog that creates and edits them.
@@ -509,6 +518,66 @@ export function TemplateList({
                     </DialogContent>
                 </Dialog>
             )}
+        </div>
+    );
+}
+
+/** Read-only prompt templates retained so they can be copied into profiles. */
+export function LegacyTemplateList({
+    kind,
+    presetCopy,
+    config,
+    heading,
+    copyingId,
+    onCopy,
+}: LegacyTemplateListProps) {
+    const i18n = useExtracted();
+    return (
+        <div className="space-y-3">
+            <h3 className="text-base font-medium">{heading}</h3>
+            <ul className="divide-y rounded-lg border">
+                {config.templates.map((template) => {
+                    const name =
+                        template.name ??
+                        presetCopy[template.id]?.name ??
+                        template.id;
+                    const builtin = isPresetId(kind, template.id);
+                    const edited =
+                        template.name !== null || template.prompt !== null;
+                    const origin = !builtin
+                        ? i18n("Custom")
+                        : edited
+                          ? i18n("Built-in, edited")
+                          : i18n("Built-in");
+                    return (
+                        <li
+                            key={template.id}
+                            className="flex items-center gap-3 px-4 py-3"
+                        >
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium">{name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {origin}
+                                </p>
+                            </div>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                aria-label={i18n("Copy {name} into a profile", {
+                                    name,
+                                })}
+                                disabled={copyingId !== null}
+                                onClick={() => onCopy(template)}
+                            >
+                                {copyingId === template.id
+                                    ? i18n("Copying…")
+                                    : i18n("Copy into a profile")}
+                            </Button>
+                        </li>
+                    );
+                })}
+            </ul>
         </div>
     );
 }

@@ -8,11 +8,7 @@
 import { eq } from "drizzle-orm";
 import type { db } from "@/db";
 import { enqueueJobInTx } from "@/db/queries/async-jobs";
-import {
-    type learnRuns,
-    transcriptCorrectionPasses,
-    userSettings,
-} from "@/db/schema";
+import { type learnRuns, transcriptCorrectionPasses } from "@/db/schema";
 import { recordingJobSubject } from "@/lib/sharing/view";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -38,14 +34,10 @@ export async function queueCorrectionPassInTx(
         | "view"
         | "actorUserId"
     > & { transcriptionId: string },
+    correctAfterLearn: boolean,
 ): Promise<boolean> {
     if (!run.actorUserId) return false;
-    const [settings] = await tx
-        .select({ correctAfterLearn: userSettings.correctAfterLearn })
-        .from(userSettings)
-        .where(eq(userSettings.userId, run.actorUserId))
-        .limit(1);
-    if (settings && !settings.correctAfterLearn) return false;
+    if (!correctAfterLearn) return false;
     const [pass] = await tx
         .insert(transcriptCorrectionPasses)
         .values({

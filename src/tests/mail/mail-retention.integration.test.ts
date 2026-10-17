@@ -26,6 +26,7 @@ import {
     mailParticipants,
     recordingFolders,
     recordingTasks,
+    taskContentVectors,
     userSettings,
     users,
 } from "@/db/schema";
@@ -330,6 +331,20 @@ describeWithDatabase("mail retention (PostgreSQL)", () => {
             "Petra Mala is our CFO now. Please send the contract.",
         );
         await summarize(itemId);
+        await db()
+            .insert(taskContentVectors)
+            .values({
+                id: `mail-retention-vector-${itemId}`,
+                userId: "u-jan",
+                itemId,
+                contentSourceId: "mail",
+                contentRevision: 0,
+                vectorGeneration: "mail-retention-model",
+                chunkIndex: 0,
+                dim: 2,
+                vector: "encrypted-vector",
+                inputHmac: "0".repeat(64),
+            });
         const factId = await mailFact(itemId);
         // A signature Learn read in this mail.
         await db()
@@ -371,6 +386,12 @@ describeWithDatabase("mail retention (PostgreSQL)", () => {
                 .select()
                 .from(mailContents)
                 .where(eq(mailContents.itemId, itemId)),
+        ).toEqual([]);
+        expect(
+            await db()
+                .select()
+                .from(taskContentVectors)
+                .where(eq(taskContentVectors.itemId, itemId)),
         ).toEqual([]);
         // D5: the fact said only here goes with its text.
         expect(

@@ -1,0 +1,1 @@
+CREATE INDEX "recording_sessions_folder_id_idx" ON "recording_sessions" USING btree ("folder_id") WHERE "recording_sessions"."folder_id" is not null;

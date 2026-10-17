@@ -14,15 +14,18 @@ import {
     renderHook,
     screen,
     waitFor,
+    within,
 } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { IntlProvider } from "use-intl/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TranscriptTopicsMenu } from "@/components/dashboard/transcript-topics-menu";
+import type * as JobClient from "@/lib/jobs/client";
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast: toastMock }));
 vi.mock("@/lib/jobs/client", async (importOriginal) => {
-    const actual = await importOriginal<typeof import("@/lib/jobs/client")>();
+    const actual = await importOriginal<typeof JobClient>();
     // Polls a few milliseconds apart instead of seconds.
     return {
         ...actual,
@@ -269,7 +272,6 @@ describe("transcript topics", () => {
     });
 
     it("detects topics on demand and shows them", async () => {
-        renderPanel(PLAUD);
         fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
             url.includes("/topics") && init?.method === "POST"
                 ? new Response(JSON.stringify({ topics: TOPICS }), {
@@ -279,15 +281,43 @@ describe("transcript topics", () => {
                       status: 200,
                   }),
         );
+        renderPanel(PLAUD);
 
         fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
 
+        expect(
+            screen.getByRole("dialog", {
+                name: /Detecting topics|Topics detected/,
+            }),
+        ).toBeTruthy();
+        const dialog = await screen.findByRole("dialog", {
+            name: "Topics detected",
+        });
+        expect(within(dialog).getByText("Objednání jízdenky")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
         await screen.findByRole("button", { name: "Topics (2)" });
         expect(fetchMock).toHaveBeenCalledWith(
             "/api/recordings/rec-1/topics?source=plaud",
             expect.objectContaining({ method: "POST" }),
         );
-        expect(screen.getByText("Objednání jízdenky")).toBeTruthy();
+    });
+
+    it("reopens a person-started topic run after reload", async () => {
+        render(
+            <TranscriptTopicsMenu
+                widgetId="recording-topics-rec-1"
+                topics={null}
+                canDetect
+                detecting
+                onDetect={vi.fn()}
+                onSelect={vi.fn()}
+                personStarted
+            />,
+        );
+
+        expect(
+            await screen.findByRole("dialog", { name: "Detecting topics…" }),
+        ).toBeTruthy();
     });
 
     it("picks up a job already running when the page opens", async () => {
@@ -302,6 +332,50 @@ describe("transcript topics", () => {
             ).toHaveProperty("disabled", true),
         );
         settle();
+        await screen.findByRole("button", { name: "Topics (2)" });
+        expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
+    });
+
+    it("follows the pipeline driver until its automatic topics job appears", async () => {
+        let topicReads = 0;
+        fetchMock.mockImplementation(async (url: string) => {
+            if (url === "/api/jobs/pipeline-job-1") {
+                return json({
+                    id: "pipeline-job-1",
+                    kind: "pipeline.advance",
+                    status: "completed",
+                });
+            }
+            if (url === "/api/jobs/topics-job-1") {
+                return json({
+                    id: "topics-job-1",
+                    kind: "topics",
+                    status: "completed",
+                });
+            }
+            if (url.includes("/topics")) {
+                topicReads++;
+                if (topicReads === 1) {
+                    return json({
+                        topics: null,
+                        jobId: "pipeline-job-1",
+                        jobKind: "pipeline.advance",
+                    });
+                }
+                if (topicReads === 2) {
+                    return json({
+                        topics: null,
+                        jobId: "topics-job-1",
+                        jobKind: "topics",
+                    });
+                }
+                return json({ topics: TOPICS, jobId: null });
+            }
+            return json({ speakers: [] });
+        });
+
+        renderPanel({ ...PLAUD, source: "riffado" });
+
         await screen.findByRole("button", { name: "Topics (2)" });
         expect(toastMock.success).toHaveBeenCalledWith("Topics detected");
     });
@@ -360,7 +434,6 @@ describe("transcript topics", () => {
     });
 
     it("says why detection failed", async () => {
-        renderPanel(PLAUD);
         fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
             url.includes("/topics") && init?.method === "POST"
                 ? new Response(
@@ -374,9 +447,12 @@ describe("transcript topics", () => {
                       status: 200,
                   }),
         );
+        renderPanel(PLAUD);
 
         fireEvent.click(screen.getByRole("button", { name: "Detect topics" }));
 
+        await screen.findByRole("dialog", { name: "Topic detection" });
+        fireEvent.click(screen.getByRole("button", { name: "Close" }));
         await waitFor(() =>
             expect(
                 screen.getByRole("button", { name: "Detect topics" }),

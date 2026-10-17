@@ -22,6 +22,7 @@ import { describeJobError, isRetryableError } from "@/lib/jobs/retryable";
 import type { JobHandler, JobResult } from "@/lib/jobs/types";
 import { isHeldForLearn } from "@/lib/learn/hold";
 import { summaryRefreshDue } from "@/lib/learn/summary-refresh";
+import { markSummaryStepFailed } from "@/lib/pipeline/state";
 import { allowManualArtifactGeneration } from "@/lib/recordings/erase";
 import { updateTitleAfterSummary } from "@/lib/recordings/title-after-summary";
 import { admitRateLimitedAutoSummary } from "@/lib/summary/auto-summary";
@@ -49,6 +50,17 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
     // provider rate limit or an outage, and neither clears in twenty seconds.
     backoff: { baseMs: 30_000, maxMs: 10 * 60_000, jitter: 0.3 },
     parsePayload: parseSummaryJobPayload,
+
+    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
+        if (payload.trigger === "manual") return;
+        await markSummaryStepFailed({
+            itemId: payload.recordingId,
+            userId,
+            view: payload.view ?? "private",
+            step: "summary",
+            errorCode,
+        });
+    },
 
     async run({
         payload,
@@ -91,12 +103,14 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
             const generate = (presetId: string | undefined) =>
                 generateSummaryForRecording(userId, payload.recordingId, {
                     presetId,
+                    profileRevisionId: payload.profileRevisionId,
                     trigger: payload.trigger,
                     onProgress: (progress) => reportProgress(progress),
                     view: payload.view,
                     jobId,
                 });
             let result = await generate(payload.presetId);
+            if (result.committed === false) return { skipped: "outdated" };
             // Corrections that changed while it ran (a review finished
             // meanwhile) found no summary to refresh, and the hold's release
             // found this job running: made again, once, from the reading as
@@ -108,7 +122,12 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     view: "private",
                 });
                 if (due)
-                    result = await generate(payload.presetId ?? due.presetId);
+                    result = await generate(
+                        payload.profileRevisionId
+                            ? undefined
+                            : (payload.presetId ?? due.presetId),
+                    );
+                if (result.committed === false) return { skipped: "outdated" };
             }
 
             if (!orgView) {
@@ -117,6 +136,7 @@ export const summaryJobHandler: JobHandler<SummaryJobPayload> = {
                     recordingId: payload.recordingId,
                     summary: result.summary,
                     keyPoints: result.keyPoints,
+                    fence: result.titleFence,
                 }).catch((error: unknown) => {
                     console.error(
                         "Failed to update title from summary:",

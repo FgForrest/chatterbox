@@ -22,6 +22,14 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
@@ -59,6 +67,12 @@ vi.mock("@/lib/org/config", () => ({
     assertOrgScopeWritable: () => {},
     isOrgAccount: async () => false,
     assertNotOrgAccount: async () => {},
+}));
+vi.mock("@/lib/env", () => ({
+    env: {
+        IS_HOSTED: false,
+        ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60,
+    },
 }));
 
 vi.mock("@/lib/posthog-server", () => ({

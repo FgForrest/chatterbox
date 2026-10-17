@@ -6,6 +6,7 @@ import posthog from "posthog-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CommandPalette } from "@/components/dashboard/command-palette";
+import { FirstLevelFolderDialog } from "@/components/dashboard/first-level-folder-dialog";
 import { FolderRecordingPane } from "@/components/dashboard/folder-recording-pane";
 import { FolderTree } from "@/components/dashboard/folder-tree";
 import { PlaudReconnectBanner } from "@/components/dashboard/plaud-reconnect-banner";
@@ -16,11 +17,20 @@ import {
 import { ShortcutsDialog } from "@/components/dashboard/shortcuts-dialog";
 import type { TranscriptOption } from "@/components/dashboard/transcription-panel";
 import { TrialBanner } from "@/components/dashboard/trial-banner";
+import {
+    UploadDialog,
+    uploadFolderOptions,
+    uploadFolderParents,
+} from "@/components/dashboard/upload-dialog";
 import { WorkstationDetailPane } from "@/components/dashboard/workstation-detail-pane";
 import { WorkstationEmptyState } from "@/components/dashboard/workstation-empty-state";
 import { WorkstationHeader } from "@/components/dashboard/workstation-header";
 import { MailDetailPane } from "@/components/mail/mail-detail-pane";
-import { OnboardingDialog } from "@/components/onboarding-dialog";
+import {
+    OnboardingDialog,
+    type OnboardingStepId,
+} from "@/components/onboarding-dialog";
+import type { CreatedFolder } from "@/components/pipeline/new-folder-form";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { useAutoSync } from "@/hooks/use-auto-sync";
 import { useGoogleConnectOutcome } from "@/hooks/use-google-connection";
@@ -29,7 +39,11 @@ import { useOrgEvents } from "@/hooks/use-org-events";
 import { useShareRefusal } from "@/hooks/use-share-refusal";
 import { useTheme } from "@/hooks/use-theme";
 import { useTranscribeQueue } from "@/hooks/use-transcribe-queue";
-import { useUploadQueue } from "@/hooks/use-upload-queue";
+import {
+    type UploadCompletion,
+    type UploadCompletionAction,
+    useUploadQueue,
+} from "@/hooks/use-upload-queue";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 import type { ExportProvidersAvailability } from "@/lib/folder-exports/types";
 import { sharedRecordingIds } from "@/lib/folders/hierarchy";
@@ -38,6 +52,10 @@ import {
     showNewRecordingNotification,
     showSyncCompleteNotification,
 } from "@/lib/notifications/browser";
+import {
+    type OnboardingCapabilities,
+    shouldOpenOnboarding,
+} from "@/lib/onboarding/capabilities";
 import {
     applyFilenameOverrides,
     reconcileFilenameOverrides,
@@ -115,6 +133,7 @@ interface WorkstationProps {
     isHosted: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
+    onboardingCapabilities: OnboardingCapabilities;
     /** The viewer manages access at the identity provider. */
     accessManagement?: boolean;
     exportProviders: ExportProvidersAvailability;
@@ -153,6 +172,7 @@ export function Workstation({
     plaudNeedsReconnect,
     isHosted,
     mailEnabled = false,
+    onboardingCapabilities,
     accessManagement = false,
     exportProviders,
     initialFolderOrganization,
@@ -170,7 +190,7 @@ export function Workstation({
     // is the Organization's.
     const libraryRecordings = isOrgAccount ? orgRecordings : recordings;
     const [currentRecording, setCurrentRecording] = useState<Recording | null>(
-        libraryRecordings.length > 0 ? libraryRecordings[0] : null,
+        libraryRecordings[0] ?? null,
     );
     const [orgContentRevision, setOrgContentRevision] = useState(0);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -178,9 +198,11 @@ export function Workstation({
     // onboarding yet (server-supplied truth, re-evaluated on every fresh
     // navigation to this page). Everyone must finish onboarding --
     // `mandatory` below keeps it non-dismissible in that case.
-    const [onboardingOpen, setOnboardingOpen] = useState(
-        () => !initialSettings.onboardingCompleted,
+    const [onboardingOpen, setOnboardingOpen] = useState(() =>
+        shouldOpenOnboarding(initialSettings.onboardingCompleted),
     );
+    const [onboardingInitialStep, setOnboardingInitialStep] =
+        useState<OnboardingStepId>("welcome");
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
     const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
@@ -201,6 +223,23 @@ export function Workstation({
     const [selectedFolderId, setSelectedFolderId] = useState<string | null>(
         null,
     );
+    const [firstLevelFolderOpen, setFirstLevelFolderOpen] = useState(false);
+    const [resetToRecentKey, setResetToRecentKey] = useState(0);
+    const selectionRevisionRef = useRef(0);
+    const uploadSelectionRevisionsRef = useRef(new Map<string, number>());
+    const [pendingUploadSelection, setPendingUploadSelection] = useState<{
+        recordingId: string;
+        selectionRevision: number;
+    } | null>(null);
+
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("onboarding") !== "google") return;
+        setOnboardingInitialStep("google");
+        setOnboardingOpen(true);
+        url.searchParams.delete("onboarding");
+        window.history.replaceState(window.history.state, "", url);
+    }, []);
 
     const { theme, setTheme } = useTheme(initialSettings.theme);
     const listRef = useRef<RecordingListHandle>(null);
@@ -332,6 +371,76 @@ export function Workstation({
         );
     }, [isOrgAccount, recordings, orgRecordings]);
 
+    useEffect(() => {
+        if (!pendingUploadSelection) return;
+        if (
+            pendingUploadSelection.selectionRevision !==
+            selectionRevisionRef.current
+        ) {
+            setPendingUploadSelection(null);
+            return;
+        }
+        const uploaded = recordings.find(
+            (recording) => recording.id === pendingUploadSelection.recordingId,
+        );
+        if (!uploaded) return;
+        setCurrentRecording(uploaded);
+        setMobileView("detail");
+        setPendingUploadSelection(null);
+    }, [pendingUploadSelection, recordings]);
+
+    const handleUploadStarted = useCallback(
+        ({ uploadId }: { uploadId: string }) => {
+            uploadSelectionRevisionsRef.current.set(
+                uploadId,
+                selectionRevisionRef.current,
+            );
+        },
+        [],
+    );
+
+    const handleUploadComplete = useCallback(
+        ({
+            recordingId,
+            uploadId,
+            resumed,
+        }: UploadCompletion): UploadCompletionAction | undefined => {
+            const uploadSelection =
+                uploadSelectionRevisionsRef.current.get(uploadId);
+            uploadSelectionRevisionsRef.current.delete(uploadId);
+            refresh();
+            const selectUploadedRecording = (selectionRevision: number) => {
+                setLibraryMode("recent");
+                setSelectedFolderId(null);
+                setResetToRecentKey((key) => key + 1);
+                setPendingUploadSelection({
+                    recordingId,
+                    selectionRevision,
+                });
+            };
+            if (resumed) {
+                return {
+                    label: i18n("Open"),
+                    onClick: () => {
+                        selectUploadedRecording(selectionRevisionRef.current);
+                    },
+                };
+            }
+            if (
+                uploadSelection === undefined ||
+                uploadSelection !== selectionRevisionRef.current
+            ) {
+                return;
+            }
+            selectUploadedRecording(uploadSelection);
+        },
+        [i18n, refresh],
+    );
+
+    const handleUploadFailed = useCallback((uploadId: string) => {
+        uploadSelectionRevisionsRef.current.delete(uploadId);
+    }, []);
+
     const {
         isAutoSyncing,
         lastSyncTime,
@@ -348,7 +457,10 @@ export function Workstation({
             if (initialSettings.syncNotifications !== false) {
                 if (newRecordings > 0) {
                     toast.success(
-                        `Synced ${newRecordings} new recording${newRecordings !== 1 ? i18n("s") : ""}`,
+                        i18n(
+                            "Synced {count, plural, one {# new recording} other {# new recordings}}",
+                            { count: newRecordings },
+                        ),
                     );
                 } else {
                     toast.success(i18n("Sync complete - no new recordings"));
@@ -420,8 +532,47 @@ export function Workstation({
         pendingUploads,
         uploadInputRef,
         handleUpload,
+        selectedFile,
+        confirmUpload,
+        cancelUpload,
         triggerUpload,
-    } = useUploadQueue({ onUploadComplete: refresh });
+    } = useUploadQueue({
+        onUploadStarted: handleUploadStarted,
+        onUploadFailed: handleUploadFailed,
+        onUploadComplete: handleUploadComplete,
+    });
+    const uploadFolders = useMemo(
+        () =>
+            uploadFolderOptions(
+                folderOrganization.folders,
+                organizationLibrary !== null,
+            ),
+        [folderOrganization.folders, organizationLibrary],
+    );
+    const uploadFolderParentOptions = useMemo(
+        () => uploadFolderParents(folderOrganization.folders, canCurate),
+        [canCurate, folderOrganization.folders],
+    );
+    const hasFilingFolder = uploadFolders.length > 0;
+
+    const handleFolderCreated = useCallback((folder: CreatedFolder) => {
+        setFolderOrganization((current) => {
+            if (current.folders.some((item) => item.id === folder.id)) {
+                return current;
+            }
+            return {
+                ...current,
+                folders: [...current.folders, folder],
+            };
+        });
+    }, []);
+
+    const selectRecordingByUser = useCallback((recording: Recording) => {
+        selectionRevisionRef.current += 1;
+        setPendingUploadSelection(null);
+        setCurrentRecording(recording);
+        setMobileView("detail");
+    }, []);
 
     const { inFlightActions, observeTranscriptionById, transcribeById } =
         useTranscribeQueue({ onTranscribeComplete: refresh });
@@ -580,13 +731,10 @@ export function Workstation({
             const { folder } = (await response.json()) as {
                 folder: RecordingFolder;
             };
-            setFolderOrganization((current) => ({
-                ...current,
-                folders: [...current.folders, folder],
-            }));
+            handleFolderCreated(folder);
             toast.success(i18n("Folder created"));
         },
-        [i18n],
+        [handleFolderCreated, i18n],
     );
 
     const handleRenameFolder = useCallback(
@@ -842,9 +990,8 @@ export function Workstation({
                             ? {
                                   label: i18n("Open recording"),
                                   onClick: () => {
-                                      setCurrentRecording(recording);
+                                      selectRecordingByUser(recording);
                                       setSelectedFolderId(null);
-                                      setMobileView("detail");
                                   },
                               }
                             : undefined,
@@ -877,6 +1024,7 @@ export function Workstation({
             recordings,
             refresh,
             shareRefusal,
+            selectRecordingByUser,
         ],
     );
 
@@ -960,6 +1108,10 @@ export function Workstation({
                         onOpenPalette={() => setPaletteOpen(true)}
                         onOpenSettings={() => setSettingsOpen(true)}
                         onOpenShortcuts={() => setShortcutsOpen(true)}
+                        onOpenOnboarding={() => {
+                            setOnboardingInitialStep("welcome");
+                            setOnboardingOpen(true);
+                        }}
                     />
 
                     <PlaudReconnectBanner
@@ -967,17 +1119,8 @@ export function Workstation({
                         onReconnected={handleReconnected}
                     />
 
-                    {visibleRecordings.length === 0 &&
-                    visibleOrgRecordings.length === 0 &&
-                    pendingUploads.length === 0 ? (
-                        <WorkstationEmptyState
-                            isSyncing={isAutoSyncing}
-                            onSync={handleSync}
-                            onUpload={triggerUpload}
-                        />
-                    ) : (
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                            {/*
+                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                        {/*
                               Mobile master/detail: on <lg, only one
                               pane renders at a time. `mobileView ===
                               "detail"` hides the list (via `hidden`)
@@ -987,235 +1130,253 @@ export function Workstation({
                               The `lg:block` override brings the list
                               back on desktop where both panes coexist.
                             */}
-                            <div
-                                className={cn(
-                                    "lg:col-span-1 lg:block",
-                                    mobileView === "detail" && "hidden",
-                                )}
-                            >
-                                {libraryMode === "recent" ? (
-                                    <RecordingList
-                                        ref={listRef}
-                                        searchView={
-                                            isOrgAccount ? "org" : "private"
-                                        }
-                                        recordings={visibleRecordings}
-                                        transcriptions={libraryTranscriptions}
-                                        currentRecording={currentRecording}
-                                        pendingUploads={pendingUploads}
-                                        inFlightActions={libraryInFlightActions}
-                                        onSelect={(r) => {
-                                            setCurrentRecording(r);
-                                            setMobileView("detail");
-                                        }}
-                                        onDelete={handleDelete}
-                                        onOrganize={() => {
-                                            setLibraryMode("organize");
-                                            setSelectedFolderId(null);
-                                        }}
-                                        initialDateTimeFormat={
-                                            initialSettings.dateTimeFormat
-                                        }
-                                        initialSortOrder={
-                                            initialSettings.recordingListSortOrder
-                                        }
-                                        initialKindFilter={
-                                            initialSettings.chatterKindFilter
-                                        }
-                                        initialChunkSize={
-                                            initialSettings.itemsPerPage
-                                        }
-                                    />
-                                ) : (
-                                    <FolderTree
-                                        folders={folderOrganization.folders}
-                                        assignments={
-                                            folderOrganization.assignments
-                                        }
-                                        recordings={treeRecordings}
-                                        selectedFolderId={selectedFolderId}
-                                        onRecent={() => {
-                                            setLibraryMode("recent");
-                                            setSelectedFolderId(null);
-                                            setCurrentRecording(
-                                                visibleRecordings[0] ?? null,
-                                            );
-                                            setMobileView("list");
-                                        }}
-                                        onSelectFolder={(folder) => {
-                                            setSelectedFolderId(folder.id);
-                                            setMobileView("detail");
-                                        }}
-                                        onCreateFolder={handleCreateFolder}
-                                        onRenameFolder={handleRenameFolder}
-                                        onMoveFolder={handleMoveFolder}
-                                        onDeleteFolder={handleDeleteFolder}
-                                        onAssignRecording={(
-                                            recordingId,
-                                            folderId,
-                                        ) =>
-                                            handleFolderAssignment(
-                                                recordingId,
-                                                folderId,
-                                                true,
-                                            )
-                                        }
-                                        onMoveRecording={
-                                            handleMoveBetweenFolders
-                                        }
-                                        mailEnabled={mailEnabled}
-                                    />
-                                )}
-                            </div>
-
-                            {libraryMode === "organize" && selectedFolder ? (
-                                <FolderRecordingPane
-                                    folder={selectedFolder}
-                                    folders={folderOrganization.folders}
-                                    assignments={folderOrganization.assignments}
-                                    recordings={
-                                        selectedFolder.scope === "org"
-                                            ? visibleOrgRecordings
-                                            : visibleRecordings
+                        <div
+                            className={cn(
+                                "lg:col-span-1 lg:block",
+                                mobileView === "detail" && "hidden",
+                            )}
+                        >
+                            {libraryMode === "recent" ? (
+                                <RecordingList
+                                    ref={listRef}
+                                    searchView={
+                                        isOrgAccount ? "org" : "private"
                                     }
-                                    dateTimeFormat={
-                                        initialSettings.dateTimeFormat
-                                    }
-                                    onSelectRecording={(recording) => {
-                                        setCurrentRecording(recording);
+                                    recordings={visibleRecordings}
+                                    transcriptions={libraryTranscriptions}
+                                    currentRecording={currentRecording}
+                                    pendingUploads={pendingUploads}
+                                    inFlightActions={libraryInFlightActions}
+                                    onSelect={selectRecordingByUser}
+                                    onDelete={handleDelete}
+                                    onOrganize={() => {
+                                        setLibraryMode("organize");
                                         setSelectedFolderId(null);
                                     }}
-                                    onRenameFolder={handleRenameFolder}
-                                    onDeleteFolder={handleDeleteFolder}
-                                    hiddenOnMobile={mobileView === "list"}
-                                    onBackToFolders={() =>
-                                        setMobileView("list")
-                                    }
-                                    exportProviders={exportProviders}
-                                    isOrgAccount={isOrgAccount}
-                                    mailEnabled={mailEnabled}
-                                />
-                            ) : selectedRecording?.kind === "mail" ? (
-                                <MailDetailPane
-                                    mail={selectedRecording}
-                                    dateTimeFormat={
+                                    initialDateTimeFormat={
                                         initialSettings.dateTimeFormat
                                     }
-                                    onBackToList={() => setMobileView("list")}
-                                    hiddenOnMobile={mobileView === "list"}
-                                    onChanged={refresh}
-                                    folders={folderOrganization.folders}
-                                    folderAssignments={
-                                        folderOrganization.assignments
+                                    initialSortOrder={
+                                        initialSettings.recordingListSortOrder
                                     }
-                                    onSelectFolder={(folder) => {
-                                        setLibraryMode("organize");
-                                        setSelectedFolderId(folder.id);
-                                    }}
-                                    onAddToFolder={(itemId, folderId) =>
-                                        handleFolderAssignment(
-                                            itemId,
-                                            folderId,
-                                            true,
-                                        )
+                                    initialKindFilter={
+                                        initialSettings.chatterKindFilter
                                     }
-                                    onRemoveFromFolder={(
-                                        itemId,
-                                        folderId,
-                                        withdraw,
-                                    ) =>
-                                        handleFolderAssignment(
-                                            itemId,
-                                            folderId,
-                                            false,
-                                            withdraw,
-                                        )
+                                    initialChunkSize={
+                                        initialSettings.itemsPerPage
                                     }
-                                    onMoveBetweenFolders={
-                                        handleMoveBetweenFolders
+                                    resetToRecentKey={resetToRecentKey}
+                                    emptyState={
+                                        visibleRecordings.length === 0 &&
+                                        visibleOrgRecordings.length === 0 &&
+                                        pendingUploads.length === 0 ? (
+                                            <div className="mt-4 lg:hidden">
+                                                <WorkstationEmptyState
+                                                    compact
+                                                    isSyncing={isAutoSyncing}
+                                                    onSync={handleSync}
+                                                    onUpload={triggerUpload}
+                                                    hasFilingFolder={
+                                                        hasFilingFolder
+                                                    }
+                                                    onNewFolder={() =>
+                                                        setFirstLevelFolderOpen(
+                                                            true,
+                                                        )
+                                                    }
+                                                />
+                                            </div>
+                                        ) : undefined
                                     }
-                                    isOrgAccount={isOrgAccount}
-                                    canCurate={canCurate}
                                 />
                             ) : (
-                                <WorkstationDetailPane
-                                    currentRecording={selectedRecording}
-                                    currentTranscription={currentTranscription}
-                                    transcripts={currentTranscriptVariants}
-                                    isCurrentTranscribing={
-                                        isCurrentTranscribing
-                                    }
-                                    visibleRecordings={
-                                        currentIsOrgView
-                                            ? visibleOrgRecordings
-                                            : visibleRecordings
-                                    }
-                                    onTranscribe={handleTranscribe}
-                                    onTranscribeComplete={refresh}
-                                    onTranscriptStale={refresh}
-                                    transcriptReadOnly={
-                                        selectedTranscriptReadOnly
-                                    }
-                                    recordingShared={
-                                        selectedRecording
-                                            ? sharedIds.has(
-                                                  selectedRecording.id,
-                                              )
-                                            : false
-                                    }
-                                    onSelectRecording={setCurrentRecording}
-                                    onRenamed={handleRenamed}
-                                    onDelete={handleDelete}
-                                    onArtifactsChanged={refresh}
-                                    onBackToList={() => setMobileView("list")}
-                                    hiddenOnMobile={mobileView === "list"}
-                                    initialPlaybackSpeed={
-                                        initialSettings.defaultPlaybackSpeed
-                                    }
-                                    initialVolume={
-                                        initialSettings.defaultVolume
-                                    }
-                                    initialAutoPlayNext={
-                                        initialSettings.autoPlayNext
-                                    }
-                                    scrubberStyle={
-                                        initialSettings.playerScrubber
-                                    }
+                                <FolderTree
                                     folders={folderOrganization.folders}
-                                    folderAssignments={
-                                        folderOrganization.assignments
-                                    }
-                                    onSelectFolder={(folder) => {
-                                        setLibraryMode("organize");
-                                        setSelectedFolderId(folder.id);
+                                    assignments={folderOrganization.assignments}
+                                    recordings={treeRecordings}
+                                    selectedFolderId={selectedFolderId}
+                                    onRecent={() => {
+                                        setLibraryMode("recent");
+                                        setSelectedFolderId(null);
+                                        selectionRevisionRef.current += 1;
+                                        setPendingUploadSelection(null);
+                                        setCurrentRecording(
+                                            visibleRecordings[0] ?? null,
+                                        );
+                                        setMobileView("list");
                                     }}
-                                    onAddToFolder={(recordingId, folderId) =>
+                                    onSelectFolder={(folder) => {
+                                        setSelectedFolderId(folder.id);
+                                        setMobileView("detail");
+                                    }}
+                                    onCreateFolder={handleCreateFolder}
+                                    onRenameFolder={handleRenameFolder}
+                                    onMoveFolder={handleMoveFolder}
+                                    onDeleteFolder={handleDeleteFolder}
+                                    onNewFolder={() =>
+                                        setFirstLevelFolderOpen(true)
+                                    }
+                                    onAssignRecording={(
+                                        recordingId,
+                                        folderId,
+                                    ) =>
                                         handleFolderAssignment(
                                             recordingId,
                                             folderId,
                                             true,
                                         )
                                     }
-                                    onRemoveFromFolder={(
-                                        recordingId,
-                                        folderId,
-                                        withdraw,
-                                    ) =>
-                                        handleFolderAssignment(
-                                            recordingId,
-                                            folderId,
-                                            false,
-                                            withdraw,
-                                        )
-                                    }
-                                    onMoveBetweenFolders={
-                                        handleMoveBetweenFolders
-                                    }
-                                    contentRevision={orgContentRevision}
+                                    onMoveRecording={handleMoveBetweenFolders}
+                                    mailEnabled={mailEnabled}
+                                    canCurate={canCurate}
                                 />
                             )}
                         </div>
-                    )}
+
+                        {libraryMode === "organize" && selectedFolder ? (
+                            <FolderRecordingPane
+                                folder={selectedFolder}
+                                folders={folderOrganization.folders}
+                                assignments={folderOrganization.assignments}
+                                recordings={
+                                    selectedFolder.scope === "org"
+                                        ? visibleOrgRecordings
+                                        : visibleRecordings
+                                }
+                                dateTimeFormat={initialSettings.dateTimeFormat}
+                                onSelectRecording={(recording) => {
+                                    selectRecordingByUser(recording);
+                                    setSelectedFolderId(null);
+                                }}
+                                onRenameFolder={handleRenameFolder}
+                                onDeleteFolder={handleDeleteFolder}
+                                hiddenOnMobile={mobileView === "list"}
+                                onBackToFolders={() => setMobileView("list")}
+                                exportProviders={exportProviders}
+                                isOrgAccount={isOrgAccount}
+                                mailEnabled={mailEnabled}
+                                canCurate={canCurate}
+                            />
+                        ) : visibleRecordings.length === 0 &&
+                          visibleOrgRecordings.length === 0 &&
+                          pendingUploads.length === 0 ? (
+                            <div className="hidden lg:col-span-2 lg:block lg:self-start">
+                                <WorkstationEmptyState
+                                    isSyncing={isAutoSyncing}
+                                    onSync={handleSync}
+                                    onUpload={triggerUpload}
+                                    hasFilingFolder={hasFilingFolder}
+                                    onNewFolder={() =>
+                                        setFirstLevelFolderOpen(true)
+                                    }
+                                />
+                            </div>
+                        ) : selectedRecording?.kind === "mail" ? (
+                            <MailDetailPane
+                                mail={selectedRecording}
+                                dateTimeFormat={initialSettings.dateTimeFormat}
+                                onBackToList={() => setMobileView("list")}
+                                hiddenOnMobile={mobileView === "list"}
+                                onChanged={refresh}
+                                onFolderCreated={handleFolderCreated}
+                                folders={folderOrganization.folders}
+                                folderAssignments={
+                                    folderOrganization.assignments
+                                }
+                                onSelectFolder={(folder) => {
+                                    setLibraryMode("organize");
+                                    setSelectedFolderId(folder.id);
+                                }}
+                                onAddToFolder={(itemId, folderId) =>
+                                    handleFolderAssignment(
+                                        itemId,
+                                        folderId,
+                                        true,
+                                    )
+                                }
+                                onRemoveFromFolder={(
+                                    itemId,
+                                    folderId,
+                                    withdraw,
+                                ) =>
+                                    handleFolderAssignment(
+                                        itemId,
+                                        folderId,
+                                        false,
+                                        withdraw,
+                                    )
+                                }
+                                onMoveBetweenFolders={handleMoveBetweenFolders}
+                                isOrgAccount={isOrgAccount}
+                                canCurate={canCurate}
+                            />
+                        ) : (
+                            <WorkstationDetailPane
+                                currentRecording={selectedRecording}
+                                currentTranscription={currentTranscription}
+                                transcripts={currentTranscriptVariants}
+                                isCurrentTranscribing={isCurrentTranscribing}
+                                visibleRecordings={
+                                    currentIsOrgView
+                                        ? visibleOrgRecordings
+                                        : visibleRecordings
+                                }
+                                onTranscribe={handleTranscribe}
+                                onTranscribeComplete={refresh}
+                                onTranscriptStale={refresh}
+                                onFolderCreated={handleFolderCreated}
+                                transcriptReadOnly={selectedTranscriptReadOnly}
+                                recordingShared={
+                                    selectedRecording
+                                        ? sharedIds.has(selectedRecording.id)
+                                        : false
+                                }
+                                onSelectRecording={selectRecordingByUser}
+                                onRenamed={handleRenamed}
+                                onDelete={handleDelete}
+                                onArtifactsChanged={refresh}
+                                onBackToList={() => setMobileView("list")}
+                                hiddenOnMobile={mobileView === "list"}
+                                initialPlaybackSpeed={
+                                    initialSettings.defaultPlaybackSpeed
+                                }
+                                initialVolume={initialSettings.defaultVolume}
+                                initialAutoPlayNext={
+                                    initialSettings.autoPlayNext
+                                }
+                                scrubberStyle={initialSettings.playerScrubber}
+                                folders={folderOrganization.folders}
+                                folderAssignments={
+                                    folderOrganization.assignments
+                                }
+                                onSelectFolder={(folder) => {
+                                    setLibraryMode("organize");
+                                    setSelectedFolderId(folder.id);
+                                }}
+                                onAddToFolder={(recordingId, folderId) =>
+                                    handleFolderAssignment(
+                                        recordingId,
+                                        folderId,
+                                        true,
+                                    )
+                                }
+                                onRemoveFromFolder={(
+                                    recordingId,
+                                    folderId,
+                                    withdraw,
+                                ) =>
+                                    handleFolderAssignment(
+                                        recordingId,
+                                        folderId,
+                                        false,
+                                        withdraw,
+                                    )
+                                }
+                                onMoveBetweenFolders={handleMoveBetweenFolders}
+                                contentRevision={orgContentRevision}
+                            />
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -1228,10 +1389,7 @@ export function Workstation({
                 inFlightActions={libraryInFlightActions}
                 currentTheme={theme}
                 dateTimeFormat={initialSettings.dateTimeFormat}
-                onSelectRecording={(r) => {
-                    setCurrentRecording(r);
-                    setMobileView("detail");
-                }}
+                onSelectRecording={selectRecordingByUser}
                 onSync={handleSync}
                 onUpload={triggerUpload}
                 onOpenSettings={() => setSettingsOpen(true)}
@@ -1253,6 +1411,27 @@ export function Workstation({
                 onOpenChange={setShortcutsOpen}
             />
 
+            <UploadDialog
+                file={selectedFile}
+                folders={uploadFolders}
+                folderParents={uploadFolderParentOptions}
+                onFolderCreated={handleFolderCreated}
+                open={selectedFile !== null}
+                onOpenChange={(open) => {
+                    if (!open) cancelUpload();
+                }}
+                onUpload={(folderId) => void confirmUpload(folderId)}
+                selectedFolderId={selectedFolderId}
+            />
+
+            <FirstLevelFolderDialog
+                folders={folderOrganization.folders}
+                includeOrganization={canCurate}
+                open={firstLevelFolderOpen}
+                onOpenChange={setFirstLevelFolderOpen}
+                onCreated={handleFolderCreated}
+            />
+
             <SettingsDialog
                 open={settingsOpen}
                 onOpenChange={setSettingsOpen}
@@ -1260,10 +1439,6 @@ export function Workstation({
                 isHosted={isHosted}
                 mailEnabled={mailEnabled}
                 accessManagement={accessManagement}
-                onReRunOnboarding={() => {
-                    setSettingsOpen(false);
-                    setOnboardingOpen(true);
-                }}
                 onPlaudReconnected={handleReconnected}
             />
 
@@ -1275,6 +1450,8 @@ export function Workstation({
                     refresh();
                 }}
                 mandatory={!initialSettings.onboardingCompleted}
+                capabilities={onboardingCapabilities}
+                initialStep={onboardingInitialStep}
             />
         </>
     );

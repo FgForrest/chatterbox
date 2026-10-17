@@ -1,60 +1,73 @@
 ---
 title: Organizace
-description: Sdílení nahrávek s Vašimi kolegy.
+description: Sdílení položek, profilů, poskytovatelů a práv k úkolům s kolegy.
 ---
 
-Jakmile to Váš administrátor nastaví, všichni v instanci sdílejí **Organizaci**: strom složek vedle Vaší **Soukromé**, kde se nahrávky sdílí se všemi kolegy. Nic se nekopíruje. Sdílená nahrávka zůstává Vaše; Organizace ji pouze zpřístupňuje.
+Jakmile to Váš administrátor nastaví, všichni v instanci sdílejí **Organizaci**: strom složek vedle Vaší části **Soukromé**, kde lze sdílet nahrávky a poštu s kolegy. Nic se nekopíruje. Sdílená položka zůstává ve vlastnictví osoby, která ji přinesla; Organizace čte jeden sdílený pohled.
 
 ![Strom složek Organizace a sdílená nahrávka](images/organization-folder.png)
 
-<span id="sharing-a-recording" />
+## Sdílení položky
 
-## Sdílení nahrávky
+Složku Organizace vyberte na vložené kartě **Zařadit nahrávku** nebo **Zařadit e-mail**. Po zařazení můžete přidat další umístění v Organizaci pomocí **Přidat do složky** v řádku složek. Položku lze také přetáhnout na složku.
 
-Zařaďte nahrávku do složky Organizace: přetáhněte ji na složku, nebo ji otevřete a vyberte složku pod **Sdílet s Organizací** v **Přidat do složky**.
+![Řádek složek a nabídka Přidat do složky se složkami Organizace](images/add-to-folder.png)
 
-![Přidat do složky, se složkami Organizace](images/add-to-folder.png)
+Tím nejprve vytvoříte zamýšlené umístění v Organizaci. Položka zůstane během zpracování podle profilu soukromá. Chatterbox ji automaticky nasdílí, jakmile je připravena ke čtení ostatními:
 
-Než je možné nahrávku sdílet, musí být připravena pro čtení ostatními:
-
-- obsahuje přepis,
+- u nahrávky existuje přepis,
 - každý mluvčí je pojmenovaný nebo označený jako neznámý,
-- žádná [Learn](learn.md) revize nečeká,
-- [navržené úkoly](summaries-and-tasks.md#tasks-from-a-summary) jsou zkontrolovány.
+- žádná kontrola [Učení](learn.md) nečeká,
+- [navržené úkoly](summaries-and-tasks.md#tasks-across-items) jsou zkontrolovány.
 
-Pokud něco chybí, Chatterbox Vás na to upozorní.
+Řádek složek ukazuje zamýšlenou složku Organizace a pruh pracovního postupu přidá krok **Sdílet**, na kterém je vidět čekající kontrola. Kontrola Učení blokuje sdílení i po třídenním vypršení čekání na shrnutí.
 
-<span id="a-shared-recording" />
+Položka zařazená s volbou **Bez automatického zpracování** se sama nenasdílí. U zamýšlené složky jsou v řádku akce **Sdílet nyní** a zrušení. Pruh uvádí **Na vás.** a čeká, dokud položku nenasdílíte nebo umístění nezrušíte.
 
-## Sdílená nahrávka
+Pošta poslaná přímo na adresu složky Organizace také začíná jako soukromé zamýšlené umístění, prochází stejnými kontrolami a automaticky se nasdílí. Viz [Pošta](mail.md).
+
+## Sdílená položka
 
 ![Nahrávka sdílená kolegou](images/organization-recording.png)
 
-Každý může otevřít, přehrát i stáhnout sdílenou nahrávku a zařadit ji do dalších složek Organizace. V záhlaví je uvedeno, kdo ji sdílel, a u mluvčích je uvedeno **Spravuje Organizace**.
+Každý může sdílenou položku otevřít a číst, přehrát nebo stáhnout sdílený zvuk a zařadit položku do dalších složek Organizace. V záhlaví je uvedeno, kdo ji sdílel, a u mluvčích nahrávky je uvedeno **Spravuje Organizace**.
 
-Během sdílení nahrávky ji mění pouze **organizační účet**: název, přepis, mluvčí, souhrn a témata. Tím se udržuje jedna verze, kterou mají všichni k dispozici. Vaše vlastní kopie zůstává, jaká byla ve chvíli sdílení.
+Během sdílení mění název, přepis, mluvčí, shrnutí, témata a kontrolu Učení kurátoři Organizace. Tím se udržuje jedna verze, kterou mají všichni k dispozici. Vlastník položku před soukromou změnou tohoto sdíleného obsahu odebere z Organizace.
 
-Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, viditelnými pro všechny v [Almanachu](almanac.md). Organizační účet se o ně stará: přejmenovává je, slučuje i smaže pro všechny. Stále si k osobám Organizace můžete vést soukromé poznámky a přiřadit jim své vlastní přezdívky.
+Úkoly jsou výjimka. Vlastník domovské položky a kurátoři mohou sdílený úkol upravit, zrušit, uzavřít a sloučit. Jeho řešitel jej může také uzavřít nebo znovu otevřít. Úkol může shromažďovat zmínky z několika sdílených nahrávek a zpráv; viz [Úkoly napříč položkami](summaries-and-tasks.md#tasks-across-items).
 
-<span id="taking-a-recording-back" />
+Osoby uvedené ve sdílených nahrávkách se stávají **osobami Organizace**, viditelnými pro všechny v [Almanachu](almanac.md). Kurátoři se o ně starají: přejmenovávají je, slučují a mažou pro všechny. Stále si k osobám Organizace můžete vést soukromé poznámky a přiřadit jim vlastní přezdívky.
 
-## Vzetí nahrávky zpět
+## Vzetí položky zpět
 
-Chcete-li nahrávku odebrat z Organizace, odeberte ji z poslední složky Organizace (ikona **×** na štítku složky). Chatterbox Vás nejprve požádá o potvrzení a sdělí, co se s nahrávkou stane podle retenčních pravidel. Poté bude nahrávka opět pouze Vaše a její verze v Organizaci zmizí pro všechny.
+Chcete-li položku odebrat z Organizace, odeberte ji z poslední složky Organizace. Chatterbox Vás nejprve požádá o potvrzení a sdělí, co se stane podle retenčních pravidel. Sdílený pohled potom kolegům zmizí a položka bude opět soukromá.
 
-Smazání sdílené nahrávky nebo její části ji nejprve odebere z Organizace.
+Odebráním domovské položky úkolu z Organizace se domov přesune na nejnovější zbývající sdílenou zmínku. Pokud žádná nezůstane, úkol se stane soukromým spolu s odebranou položkou. Vymazání sdílené položky nebo její části ji nejprve odebere z Organizace.
 
-<span id="the-organization-account" />
+## Profily Organizace
 
-## Organizační účet
+Profily Organizace jsou sdílené recepty zpracování pro složky Organizace. Členové je mohou používat a duplikovat do osobního profilu. Kurátoři mohou profily Organizace vytvářet, upravovat, archivovat, obnovovat a volit jako výchozí. Viz [Zpracování a profily](processing-and-profiles.md#profiles-are-processing-recipes).
 
-Organizační účet je sdílený přístup, který drží Váš administrátor. Po přihlášení jako organizační účet uvidíte místo soukromé knihovny knihovnu Organizace, a můžete:
+<span id="organization-providers" />
 
-- upravovat sdílené nahrávky (název, přepis, mluvčí, souhrn, témata),
-- spravovat osoby a prvky Organizace a rozhodovat o vztazích, které navrhnou členové (Almanach → Slovník),
+## Poskytovatelé Organizace
+
+**Nastavení → Poskytovatelé → Poskytovatelé organizace** uvádí sdílené přihlašovací údaje AI, které mohou používat profily Organizace. Členové vidí poskytovatele, model, adresu, cenu a stav zakázání jen pro čtení; API klíče se nikdy nezobrazují.
+
+Pouze osoby s oprávněním `access.manage` mohou poskytovatele Organizace přidávat, upravovat, povolovat, zakazovat nebo mazat. Vidí také **Využití podle členů**, včetně počtu volání a odhadované ceny. Každá správcovská změna se zapíše do auditního protokolu administrátora.
+
+Ve výchozím nastavení může každý člen provést 60 volání za hodinu u každého poskytovatele Organizace. Po dosažení limitu se další volání daného člena odmítne až do obnovení hodinového okna, aniž by využilo limit jiného člena. Administrátor může limit instance změnit.
+
+## Kurátoři a organizační účet
+
+Při autorizaci přes poskytovatele identity jsou osoby s oprávněním `org.curate` kurátory a osoby s oprávněním `access.manage` spravují přístup a poskytovatele Organizace. V místní instalaci tyto povinnosti drží organizační účet. Kurátoři mohou:
+
+- upravovat sdílené nahrávky a poštu,
+- kontrolovat sdílené výsledky Učení a úkoly,
+- spravovat profily, osoby, věci a navržené vztahy Organizace,
 - nastavit export složek Organizace,
-- zálohovat celou Organizaci, přičemž vlastník každé nahrávky je evidován.
+- zálohovat Organizaci s evidencí vlastníka každé položky.
 
-Nastavení retence se vztahuje na sdílené nahrávky po dobu jejich sdílení.
+Nastavení retence Organizace se vztahuje na sdílené položky po dobu jejich sdílení.
 
-Další: [Pošta](mail.md)
+Dále: [Pošta](mail.md)

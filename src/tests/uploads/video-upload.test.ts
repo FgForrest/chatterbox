@@ -46,7 +46,20 @@ describe("video extraction job payload", () => {
             sourceStorageKey: "user-1/video-uploads/upload-1",
             encryptedFilename: "encrypted",
             sourceSize: 123,
+            folderId: null,
         });
+    });
+
+    it("preserves a selected folder", () => {
+        expect(
+            parseVideoExtractionJobPayload({
+                uploadId: "upload-1",
+                sourceStorageKey: "user-1/video-uploads/upload-1",
+                encryptedFilename: "encrypted",
+                sourceSize: 123,
+                folderId: "folder-1",
+            }).folderId,
+        ).toBe("folder-1");
     });
 
     it("rejects malformed payloads", () => {

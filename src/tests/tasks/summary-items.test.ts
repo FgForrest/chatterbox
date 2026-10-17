@@ -1,15 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseSummaryPayload } from "@/lib/summary/payload";
 import {
+    buildPlaudActionItemHints,
     buildTasksContext,
     localDay,
     recordingOffsetMinutes,
+    SUMMARY_TASKS_DIRECTIVE,
 } from "@/lib/tasks/directive";
 import { locateQuote, normalizeTaskText } from "@/lib/tasks/quote";
 import {
     isoDateOrNull,
     readTaskItems,
     readTaskUpdates,
+    resolveOfferedTaskReference,
     taskItemLine,
 } from "@/lib/tasks/summary-items";
 
@@ -30,6 +33,7 @@ describe("readTaskItems", () => {
             assignee: null,
             due: { phrase: "by next Friday", date: "2026-10-16" },
             quote: "I'll have a draft by next Friday",
+            candidates: null,
         });
     });
 
@@ -74,6 +78,17 @@ describe("readTaskItems", () => {
         expect(soon?.due).toEqual({ phrase: "soon", date: null });
         expect(impossible?.due).toEqual({ phrase: "the 31st", date: null });
     });
+
+    it("keeps unique candidate references for an ambiguous commitment", () => {
+        const [item] = readTaskItems([
+            {
+                text: "Send the contract",
+                candidates: ["T2", "T1", "T2", "not-a-ref"],
+            },
+        ]);
+
+        expect(item?.candidates).toEqual(["T2", "T1"]);
+    });
 });
 
 describe("readTaskUpdates", () => {
@@ -104,6 +119,98 @@ describe("readTaskUpdates", () => {
             },
         ]);
     });
+
+    it("keeps matches and vague deadlines separate from field changes", () => {
+        expect(
+            readTaskUpdates([
+                {
+                    ref: "T1",
+                    kind: "match",
+                    quote: "same commitment",
+                    due: { phrase: "must not leak", date: "2026-10-20" },
+                },
+                { ref: "T1", kind: "match", quote: "duplicate match" },
+                {
+                    ref: "T1",
+                    kind: "due_phrase",
+                    due: { phrase: "později", date: null },
+                },
+                { ref: "T1", kind: "done", quote: "hotovo" },
+            ]),
+        ).toEqual([
+            {
+                ref: "T1",
+                kind: "match",
+                due: null,
+                quote: "same commitment",
+            },
+            {
+                ref: "T1",
+                kind: "due_phrase",
+                due: { phrase: "později", date: null },
+                quote: null,
+            },
+            { ref: "T1", kind: "done", due: null, quote: "hotovo" },
+        ]);
+    });
+
+    it("[A, B] reads drop and reassignment outcomes with their evidence", () => {
+        expect(
+            readTaskUpdates([
+                {
+                    ref: "T1",
+                    kind: "drop",
+                    quote: "we no longer need the launch deck",
+                },
+                {
+                    ref: "T2",
+                    kind: "assignee",
+                    assignee: "speaker_3",
+                    quote: "I handed the report to Dana",
+                },
+                {
+                    ref: "T3",
+                    kind: "assignee",
+                    assignee: "Dana Nováková",
+                },
+            ]),
+        ).toEqual([
+            {
+                ref: "T1",
+                kind: "drop",
+                due: null,
+                assignee: null,
+                quote: "we no longer need the launch deck",
+            },
+            {
+                ref: "T2",
+                kind: "assignee",
+                due: null,
+                assignee: "speaker_3",
+                quote: "I handed the report to Dana",
+            },
+            {
+                ref: "T3",
+                kind: "assignee",
+                due: null,
+                assignee: "Dana Nováková",
+                quote: null,
+            },
+        ]);
+    });
+});
+
+describe("resolveOfferedTaskReference", () => {
+    it("drops a reference that was not offered with a warning", () => {
+        const warning = vi.fn();
+        const refs = new Map([["T1", "task-one"]]);
+
+        expect(resolveOfferedTaskReference("T1", refs, warning)).toBe(
+            "task-one",
+        );
+        expect(resolveOfferedTaskReference("T9", refs, warning)).toBeNull();
+        expect(warning).toHaveBeenCalledOnce();
+    });
 });
 
 describe("taskItemLine", () => {
@@ -115,6 +222,7 @@ describe("taskItemLine", () => {
                 assignee: null,
                 due: { phrase: "by Friday", date: null },
                 quote: null,
+                candidates: null,
             }),
         ).toBe("[Speaker 1](#speaker-1): Draft the pricing page (by Friday)");
         expect(
@@ -124,6 +232,7 @@ describe("taskItemLine", () => {
                 assignee: "Carol",
                 due: null,
                 quote: null,
+                candidates: null,
             }),
         ).toBe("Carol: Write the press release");
     });
@@ -135,13 +244,51 @@ describe("parseSummaryPayload", () => {
             JSON.stringify({
                 summary: "s",
                 keyPoints: [],
-                actionItems: [{ text: "Book the venue", assignee: "Carol" }],
-                taskUpdates: [{ ref: "T1", kind: "done" }],
+                actionItems: [
+                    {
+                        text: "Book the venue",
+                        assignee: "Carol",
+                        candidates: ["T1", "T2"],
+                    },
+                ],
+                taskUpdates: [
+                    { ref: "T1", kind: "match", quote: "the same venue" },
+                    {
+                        ref: "T1",
+                        kind: "due_phrase",
+                        due: { phrase: "later", date: null },
+                    },
+                    { ref: "T1", kind: "done" },
+                ],
             }),
         );
         expect(payload.actionItems).toEqual(["Carol: Book the venue"]);
         expect(payload.taskItems[0]?.assignee).toBe("Carol");
-        expect(payload.taskUpdates).toHaveLength(1);
+        expect(payload.taskItems[0]?.candidates).toEqual(["T1", "T2"]);
+        expect(payload.taskUpdates.map((update) => update.kind)).toEqual([
+            "match",
+            "due_phrase",
+            "done",
+        ]);
+    });
+
+    it("[E] removes every task outcome when the profile has Tasks off", () => {
+        const payload = parseSummaryPayload(
+            JSON.stringify({
+                summary: "s",
+                keyPoints: [],
+                actionItems: [{ text: "New task" }],
+                taskUpdates: [
+                    { ref: "T1", kind: "drop" },
+                    { ref: "T2", kind: "assignee", assignee: "Dana" },
+                ],
+            }),
+            { tasksEnabled: false },
+        );
+
+        expect(payload.actionItems).toEqual([]);
+        expect(payload.taskItems).toEqual([]);
+        expect(payload.taskUpdates).toEqual([]);
     });
 });
 
@@ -190,6 +337,67 @@ describe("buildTasksContext", () => {
         );
     });
 
+    it("keeps English and Czech candidate text as data under the new outcome directive", () => {
+        const text = buildTasksContext({
+            recordedAt: new Date("2026-10-06T10:00:00Z"),
+            offsetMinutes: 0,
+            decided: [],
+            open: [
+                {
+                    ref: "T1",
+                    text: "Send the signed contract",
+                    speaker: null,
+                    dueDate: null,
+                },
+                {
+                    ref: "T2",
+                    text: "Poslat podepsanou smlouvu",
+                    speaker: null,
+                    dueDate: null,
+                },
+            ],
+        });
+
+        expect(text).toContain("- T1: Send the signed contract");
+        expect(text).toContain("- T2: Poslat podepsanou smlouvu");
+        expect(text).toContain('"kind": "match"');
+        expect(text).toContain('"kind": "due_phrase"');
+        expect(text).toContain('"kind": "drop"');
+        expect(text).toContain('"kind": "assignee"');
+        expect(text).not.toContain("reopen");
+        expect(SUMMARY_TASKS_DIRECTIVE).toContain('"candidates"');
+    });
+
+    it("adds the approved Czech drop and mail-assignee outcomes without changing candidate data", () => {
+        const text = buildTasksContext({
+            noun: "mail",
+            language: "cs-CZ",
+            recordedAt: new Date("2026-10-06T10:00:00Z"),
+            offsetMinutes: 0,
+            decided: [],
+            open: [
+                {
+                    ref: "T1",
+                    text: "Poslat podepsanou smlouvu",
+                    speaker: null,
+                    assigneeName: "Eva",
+                    dueDate: null,
+                },
+            ],
+        });
+
+        expect(text).toContain(
+            "Pokud je úkol výslovně zrušený, už není potřeba nebo ho nahradil jiný úkol",
+        );
+        expect(text).toContain('"kind": "assignee", "assignee": "pN" | string');
+        expect(text).toContain(
+            "Pokud je tato osoba účastníkem e-mailu, použijte její označení účastníka",
+        );
+        expect(text).toContain(
+            "- T1 (assigned to Eva): Poslat podepsanou smlouvu",
+        );
+    });
+
     it("says nothing of tasks when there are none", () => {
         const text = buildTasksContext({
             recordedAt: new Date("2026-10-06T10:00:00Z"),
@@ -199,6 +407,15 @@ describe("buildTasksContext", () => {
         });
         expect(text).not.toContain("Already decided");
         expect(text).not.toContain("Open tasks");
+    });
+});
+
+describe("buildPlaudActionItemHints", () => {
+    it("truncates on Unicode code points", () => {
+        const hint = buildPlaudActionItemHints([`${"a".repeat(499)}😀x`]);
+
+        expect(hint.split("\n").at(-1)).toBe(`- ${"a".repeat(499)}😀`);
+        expect(hint).not.toContain("�");
     });
 });
 

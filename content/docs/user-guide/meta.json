@@ -2,6 +2,7 @@
     "title": "User guide",
     "pages": [
         "getting-started",
+        "processing-and-profiles",
         "recordings",
         "transcripts",
         "summaries-and-tasks",

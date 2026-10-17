@@ -14,16 +14,18 @@ Každý obrázek ukazuje stejný smyšlený tým: **Alex Morgan**, vedoucí prod
 ## Kapitoly
 
 1. [Začínáme](getting-started.md): přihlášení, úvodní průvodce a orientace v aplikaci.
-2. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
-3. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
-4. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, šablony, vícekrokové zpracování a úkoly nalezené ve shrnutí.
-5. [Almanach](almanac.md): osoby a věci, které Chatterbox zná, jejich přezdívky a fakta.
-6. [Učení](learn.md): nechte Chatterbox navrhnout jména mluvčích, opravy a fakta, a zkontrolujte je.
-7. [Organizace](organization.md): sdílení nahrávek s kolegy.
-8. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
-9. [Nastavení](settings.md): poskytovatelé AI a ceny, přepis, témata, Učení, shrnutí, jazyk a další.
-10. [Chatterbox v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
-11. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
+2. [Zpracování a profily](processing-and-profiles.md): zařazení nových položek, volba receptu zpracování a čtení pracovního postupu.
+3. [Nahrávky](recordings.md): seznam nahrávek, přehrávač, nahrávání, složky, mazání a ceny za AI.
+4. [Přepisy](transcripts.md): mluvčí, témata, přehrávání věty, opravená slova, kopírování a stahování.
+5. [Shrnutí a úkoly](summaries-and-tasks.md): shrnutí, profily, Vícenásobné shrnování a úkoly napříč nahrávkami a poštou.
+6. [Almanach](almanac.md): osoby a věci, které Chatterbox zná, jejich přezdívky a fakta.
+7. [Učení](learn.md): nechte Chatterbox navrhnout jména mluvčích, opravy a fakta a zkontrolujte je.
+8. [Organizace](organization.md): sdílení nahrávek s kolegy.
+9. [Pošta](mail.md): posílání pošty do Chatterboxu a její zařazení ke zpracování.
+10. [Exporty, zálohy a uchovávání](exports-backups-retention.md): export složek na disk nebo do Google Drive, zálohy a automatické mazání starých dat.
+11. [Nastavení](settings.md): profily, poskytovatelé AI a ceny, jazyk a další výchozí hodnoty účtu.
+12. [Chatterbox v Claude](claude.md): dotazy na nahrávky, lidi a úkoly z Claude nebo Claude Code.
+13. [Pro administrátory](administrators.md): co je třeba zapnout u každé funkce na instanci s vlastním hostingem.
 
 <span id="where-a-feature-comes-from" />
 

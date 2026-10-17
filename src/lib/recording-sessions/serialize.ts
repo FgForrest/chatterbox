@@ -1,3 +1,5 @@
+import { serializeProcessing } from "@/lib/pipeline/serialize";
+import type { PipelinePhases } from "@/lib/pipeline/types";
 import type { RecordingSessionChunkRow, RecordingSessionRow } from "./store";
 
 /**
@@ -10,6 +12,7 @@ import type { RecordingSessionChunkRow, RecordingSessionRow } from "./store";
 export function serializeRecordingSession(
     session: RecordingSessionRow,
     chunks: Pick<RecordingSessionChunkRow, "index" | "size">[],
+    phases?: PipelinePhases | null,
 ) {
     const indices = chunks.map((chunk) => chunk.index).sort((a, b) => a - b);
     const receivedBytes = chunks.reduce((sum, chunk) => sum + chunk.size, 0);
@@ -26,10 +29,14 @@ export function serializeRecordingSession(
         truncated_at_chunk: session.truncatedAtChunk,
         received_chunks: indices,
         received_bytes: receivedBytes,
+        folder_id: session.folderId,
         recording_id: session.recordingId,
         job_id: session.jobId,
         error: session.lastError,
         terminal_code: session.terminalCode,
+        processing: session.recordingId
+            ? serializeProcessing(phases)
+            : { phase: "categorize" as const, state: "pending" as const },
         created_at: session.createdAt,
         updated_at: session.updatedAt,
         links: {

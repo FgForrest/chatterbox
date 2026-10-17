@@ -12,30 +12,47 @@ import {
     recordings,
     transcriptions,
     userSettings,
+    users,
 } from "@/db/schema";
 import { ErrorCode } from "@/lib/errors";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored turns as they are.
 vi.mock("@/lib/learn/llm-input", () => ({
     modelInput: vi.fn(async (transcript: { text: string }) => ({
         text: transcript.text,
         turns: null,
-        fingerprint: null,
+        fingerprint: "input-fingerprint",
     })),
 }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile,
+}));
+vi.mock("@/lib/env", () => ({
+    env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
+}));
 
-const { createMock, curatesNow, runAsCurator } = vi.hoisted(() => ({
+const {
+    createMock,
+    curatesNow,
+    markSummaryStepDoneInTx,
+    resolveItemProfile,
+    runAsCurator,
+} = vi.hoisted(() => ({
     createMock: vi.fn(),
     curatesNow: vi.fn(),
+    markSummaryStepDoneInTx: vi.fn(),
+    resolveItemProfile: vi.fn(),
     runAsCurator: { value: false },
 }));
 vi.mock("@/lib/authz/curator", () => ({
     userCuratesOrganizationNow: curatesNow,
 }));
+vi.mock("@/lib/pipeline/state", () => ({ markSummaryStepDoneInTx }));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -68,6 +85,8 @@ function selectChain() {
         },
         where: () => c,
         limit: () => Promise.resolve(next()),
+        for: () =>
+            Promise.resolve(table === recordings ? [{ id: "rec-1" }] : next()),
         // biome-ignore lint/suspicious/noThenProperty: mocks a thenable query builder
         then: (resolve: (value: unknown[]) => unknown) =>
             Promise.resolve(next()).then(resolve),
@@ -86,13 +105,7 @@ vi.mock("@/db", () => {
             }),
         }),
     });
-    // The recording lock the write takes.
-    const lockChain = {
-        from: () => lockChain,
-        where: () => lockChain,
-        for: () => Promise.resolve([{ id: "rec-1" }]),
-    };
-    const tx = { select: () => lockChain, update };
+    const tx = { select: () => selectChain(), update };
     return {
         db: {
             select: () => selectChain(),
@@ -148,13 +161,25 @@ const TURNS = [
     },
 ];
 
-function stage(turns: unknown = TURNS) {
+function stage(
+    turns: unknown = TURNS,
+    stored?: { topics: unknown; topicsInputFingerprint: string | null },
+) {
+    const transcript = {
+        id: "tr-1",
+        revision: 7,
+        text: "ciphertext",
+        turns,
+        detectedLanguage: "cs",
+        topics: stored?.topics ?? null,
+        topicsInputFingerprint: stored?.topicsInputFingerprint ?? null,
+    };
     selectResults.set(recordings, [[{ id: "rec-1" }]]);
-    selectResults.set(transcriptions, [
-        [{ id: "tr-1", text: "ciphertext", turns }],
-    ]);
+    selectResults.set(transcriptions, [[transcript], [transcript]]);
+    selectResults.set(users, [[{ uiLocale: "cs-CZ" }]]);
     selectResults.set(userSettings, [
         [{ topicPrompt: null, aiOutputLanguage: null }],
+        [{ defaultProviders: null }],
     ]);
     selectResults.set(apiCredentials, [
         [
@@ -177,6 +202,10 @@ const run = () =>
     generateTopicsForTranscript("user-1", "rec-1", "plaud", {
         trigger: "manual",
     });
+const runAutomatic = () =>
+    generateTopicsForTranscript("user-1", "rec-1", "plaud", {
+        trigger: "auto",
+    });
 
 describe("generateTopicsForTranscript", () => {
     beforeEach(() => {
@@ -185,12 +214,16 @@ describe("generateTopicsForTranscript", () => {
         writeMatches = true;
         runAsCurator.value = false;
         curatesNow.mockReset().mockResolvedValue(true);
+        markSummaryStepDoneInTx.mockReset();
+        const profile = resolvedAudioProfile();
+        profile.settings.steps.topics.automatic = false;
+        resolveItemProfile.mockReset().mockResolvedValue(profile);
     });
     afterEach(() => {
         createMock.mockReset();
     });
 
-    it("shows the model timed lines and stores its topics snapped to them", async () => {
+    it("runs manual topics when automatic topics are off", async () => {
         stage();
         reply(
             JSON.stringify({
@@ -219,8 +252,125 @@ describe("generateTopicsForTranscript", () => {
         ]);
         expect(writes).toHaveLength(1);
         expect(writes[0].set.topics).toMatchObject({
-            encrypted: { topics: result.topics, templateId: "default" },
+            encrypted: {
+                topics: result.topics,
+                templateId: "default",
+                profileRevisionId: "seeded-profile-revision",
+                outputLanguage: "auto",
+                promptTemplate: expect.any(String),
+            },
         });
+        expect(writes[0].set).not.toHaveProperty("profileRevisionId");
+        expect(writes[0].set).not.toHaveProperty("builtinPromptsVersion");
+        expect(writes[0].set).not.toHaveProperty("payerUserId");
+        expect(writes[0].set).not.toHaveProperty("inputs");
+        expect(markSummaryStepDoneInTx).not.toHaveBeenCalled();
+        expect(createMock.mock.calls[0]?.[0].messages[0].content).toContain(
+            "the language the transcription is predominantly spoken in",
+        );
+    });
+
+    it("reuses a matching manual run for the automatic topics step", async () => {
+        stage();
+        reply(
+            JSON.stringify({
+                topics: [{ start: "00:18", title: "Objednání jízdenky" }],
+            }),
+        );
+        const manual = await run();
+        const stored = writes[0]?.set.topics as {
+            encrypted: unknown;
+        };
+
+        stage(TURNS, {
+            topics: stored.encrypted,
+            topicsInputFingerprint: "input-fingerprint",
+        });
+        const automatic = await runAutomatic();
+
+        expect(automatic.topics).toEqual(manual.topics);
+        expect(createMock).toHaveBeenCalledOnce();
+        expect(markSummaryStepDoneInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                itemId: "rec-1",
+                step: "topics",
+            }),
+        );
+    });
+
+    it("does not reuse a manual run made with another profile", async () => {
+        const manualProfile = resolvedAudioProfile();
+        manualProfile.revisionId = "manual-profile-revision";
+        const automaticProfile = resolvedAudioProfile();
+        resolveItemProfile
+            .mockResolvedValueOnce(manualProfile)
+            .mockResolvedValueOnce(automaticProfile);
+        stage();
+        reply(JSON.stringify({ topics: [{ start: "00:18", title: "A" }] }));
+        await run();
+        const stored = writes[0]?.set.topics as {
+            encrypted: unknown;
+        };
+
+        stage(TURNS, {
+            topics: stored.encrypted,
+            topicsInputFingerprint: "input-fingerprint",
+        });
+        reply(JSON.stringify({ topics: [{ start: "00:18", title: "B" }] }));
+        await runAutomatic();
+
+        expect(createMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not reuse a legacy topics payload without recipe fields", async () => {
+        stage(TURNS, {
+            topics: {
+                topics: [
+                    {
+                        title: "Old topic",
+                        fromMs: 18_000,
+                        toMs: 300_000,
+                    },
+                ],
+                provider: "openai",
+                model: "gpt-4o-mini",
+                templateId: "default",
+                generatedAt: new Date(0).toISOString(),
+            },
+            topicsInputFingerprint: "input-fingerprint",
+        });
+        reply(JSON.stringify({ topics: [{ start: "00:18", title: "New" }] }));
+
+        await runAutomatic();
+
+        expect(createMock).toHaveBeenCalledOnce();
+    });
+
+    it("marks an automatic topics step done with its committed input", async () => {
+        stage();
+        reply(
+            JSON.stringify({
+                topics: [{ start: "00:18", title: "Objednání jízdenky" }],
+            }),
+        );
+
+        await runAutomatic();
+
+        expect(markSummaryStepDoneInTx).toHaveBeenCalledWith(
+            expect.anything(),
+            {
+                itemId: "rec-1",
+                userId: "user-1",
+                view: "private",
+                step: "topics",
+                content: {
+                    contentId: "tr-1",
+                    contentSourceId: "plaud",
+                    contentRevision: 7,
+                },
+            },
+        );
     });
 
     it("rechecks curation after the model finishes and refuses a revoked curator", async () => {

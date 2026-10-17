@@ -17,7 +17,15 @@ import {
     it,
     vi,
 } from "vitest";
-import { people, transcriptions, transcriptSpeakers, users } from "@/db/schema";
+import { almanacScopeUsage } from "@/db/queries/almanac-usage";
+import {
+    people,
+    recordingFolderAssignments,
+    recordingFolders,
+    transcriptions,
+    transcriptSpeakers,
+    users,
+} from "@/db/schema";
 import {
     createMigratedTestDatabase,
     getTestDatabaseUrl,
@@ -71,9 +79,11 @@ vi.mock("@/lib/folder-exports/jobs", () => ({
 }));
 
 import { encryptText } from "@/lib/encryption/fields";
+import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import { addAlias } from "@/lib/knowledge/aliases";
 import { createEntity } from "@/lib/knowledge/entities";
 import { knowledgeStore } from "@/lib/knowledge/knowledge-loader";
+import { lookupHash } from "@/lib/knowledge/lookup-hash";
 import { createPerson } from "@/lib/knowledge/people";
 import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { ensureOrgAccount } from "@/lib/org/account";
@@ -98,10 +108,11 @@ describeWithDatabase("Almanac terms for transcription (PostgreSQL)", () => {
     async function transcriptNaming(
         id: string,
         named: { label: string; personId: string; status?: "rejected" }[],
+        userId = ALICE,
     ): Promise<void> {
         await insertRecordings(db(), {
             id,
-            userId: ALICE,
+            userId,
             deviceSn: "SN-1",
             plaudFileId: `plaud-${id}`,
             filename: encryptText("Weekly"),
@@ -111,14 +122,14 @@ describeWithDatabase("Almanac terms for transcription (PostgreSQL)", () => {
             filesize: 11,
             fileMd5: "0".repeat(32),
             storageType: "local",
-            storagePath: `${ALICE}/${id}.mp3`,
+            storagePath: `${userId}/${id}.mp3`,
             plaudVersion: "1",
         });
         const [transcript] = await db()
             .insert(transcriptions)
             .values({
                 recordingId: id,
-                userId: ALICE,
+                userId,
                 text: encryptText("speaker_0: Hello."),
                 detectedLanguage: "cs",
                 provider: "ElevenLabs",
@@ -130,7 +141,7 @@ describeWithDatabase("Almanac terms for transcription (PostgreSQL)", () => {
             await db()
                 .insert(transcriptSpeakers)
                 .values({
-                    userId: ALICE,
+                    userId,
                     transcriptionId: transcript?.id ?? "",
                     label: speaker.label,
                     personId: speaker.personId,
@@ -229,5 +240,173 @@ describeWithDatabase("Almanac terms for transcription (PostgreSQL)", () => {
                 language: null,
             }),
         ).toEqual([]);
+    });
+
+    it("ranks names used by other items in the folder scope first", async () => {
+        const scoped = await createPerson({
+            userId: ALICE,
+            displayName: "Zora Scoped",
+        });
+        const accountWide = await createPerson({
+            userId: ALICE,
+            displayName: "Ada Account",
+        });
+        await transcriptNaming("rec-current", [
+            { label: "speaker_0", personId: accountWide.id },
+        ]);
+        await transcriptNaming("rec-scoped", [
+            { label: "speaker_0", personId: scoped.id },
+        ]);
+        await transcriptNaming("rec-outside", [
+            { label: "speaker_0", personId: accountWide.id },
+        ]);
+        await db()
+            .insert(recordingFolders)
+            .values([
+                {
+                    id: "scope-root",
+                    userId: ALICE,
+                    parentId: null,
+                    name: encryptText("Private"),
+                    nameHash: lookupHash("Private"),
+                    kind: "private",
+                },
+                {
+                    id: "scope-parent",
+                    userId: ALICE,
+                    parentId: "scope-root",
+                    name: encryptText("Work"),
+                    nameHash: lookupHash("Work"),
+                    kind: "custom",
+                },
+                {
+                    id: "scope-child",
+                    userId: ALICE,
+                    parentId: "scope-parent",
+                    name: encryptText("Project"),
+                    nameHash: lookupHash("Project"),
+                    kind: "custom",
+                },
+            ]);
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                {
+                    userId: ALICE,
+                    itemId: "rec-current",
+                    folderId: "scope-parent",
+                },
+                {
+                    userId: ALICE,
+                    itemId: "rec-scoped",
+                    folderId: "scope-child",
+                },
+            ]);
+        const scopeFolderIds = await itemScopeFolderIds(
+            "rec-current",
+            "private",
+            ALICE,
+        );
+        const scopeUsage = await almanacScopeUsage({
+            ownerUserId: ALICE,
+            orgUserId,
+            itemId: "rec-current",
+            view: "private",
+            scopeFolderIds,
+            recentSince: new Date("2026-01-01T00:00:00Z"),
+        });
+
+        const terms = await almanacTermsFor({
+            ownerUserId: ALICE,
+            shared: false,
+            language: "cs",
+            itemId: "rec-current",
+            scopeFolderIds,
+        });
+
+        expect(terms.map((term) => term.text)).toEqual([
+            "Zora Scoped",
+            "Ada Account",
+        ]);
+        expect(scopeUsage).toMatchObject([
+            { personId: scoped.id, recent: 1, total: 1 },
+        ]);
+    });
+
+    it("uses all items placed in the Organization scope on its view", async () => {
+        const [scoped, current] = await db()
+            .insert(people)
+            .values([
+                {
+                    userId: orgUserId,
+                    displayName: encryptText("Zora Organization Scope"),
+                },
+                {
+                    userId: orgUserId,
+                    displayName: encryptText("Ada Current Item"),
+                },
+            ])
+            .returning({ id: people.id });
+        await transcriptNaming("org-current", [
+            { label: "speaker_0", personId: current?.id ?? "" },
+        ]);
+        await transcriptNaming(
+            "org-other-owner",
+            [{ label: "speaker_0", personId: scoped?.id ?? "" }],
+            BOB,
+        );
+        const orgFolders = await db()
+            .select({
+                id: recordingFolders.id,
+                userId: recordingFolders.userId,
+                parentId: recordingFolders.parentId,
+            })
+            .from(recordingFolders);
+        const orgRoot = orgFolders.find(
+            (folder) => folder.userId === orgUserId && folder.parentId === null,
+        );
+        expect(orgRoot).toBeDefined();
+        await db()
+            .insert(recordingFolders)
+            .values({
+                id: "org-scope-folder",
+                userId: orgUserId,
+                parentId: orgRoot?.id ?? "",
+                name: encryptText("Customers"),
+                nameHash: lookupHash("Customers"),
+                kind: "custom",
+            });
+        await db()
+            .insert(recordingFolderAssignments)
+            .values([
+                {
+                    userId: ALICE,
+                    itemId: "org-current",
+                    folderId: "org-scope-folder",
+                },
+                {
+                    userId: BOB,
+                    itemId: "org-other-owner",
+                    folderId: "org-scope-folder",
+                },
+            ]);
+        const scopeFolderIds = await itemScopeFolderIds(
+            "org-current",
+            "org",
+            ALICE,
+        );
+
+        const terms = await almanacTermsFor({
+            ownerUserId: ALICE,
+            shared: true,
+            language: "cs",
+            itemId: "org-current",
+            scopeFolderIds,
+        });
+
+        expect(terms.map((term) => term.text)).toEqual([
+            "Zora Organization Scope",
+            "Ada Current Item",
+        ]);
     });
 });

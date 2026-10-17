@@ -6,6 +6,7 @@ import {
     type PickedRecord,
     RecordPicker,
 } from "@/components/almanac/record-picker";
+import { LearnEvidence, LearnReviewRow } from "@/components/learn/review-parts";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -57,14 +58,15 @@ export function newRecordAs(
     payload: NewRecordView,
     choice: Record<string, unknown> | null,
 ): { name: string; typeKey: string | null } {
+    let typeKey = payload.typeKey;
+    if (payload.kind === "person") {
+        typeKey = null;
+    } else if (typeof choice?.typeKey === "string") {
+        typeKey = choice.typeKey;
+    }
     return {
         name: typeof choice?.name === "string" ? choice.name : payload.name,
-        typeKey:
-            payload.kind === "person"
-                ? null
-                : typeof choice?.typeKey === "string"
-                  ? choice.typeKey
-                  : payload.typeKey,
+        typeKey,
     };
 }
 
@@ -109,8 +111,6 @@ export function NewRecordItem({
     const i18n = useExtracted();
     const current = newRecordAs(payload, choice);
     const [name, setName] = useState(current.name);
-    // The type as last chosen, ahead of its save: a name saved meanwhile
-    // keeps it rather than the type the server still has.
     const [typeKey, setTypeKey] = useState(current.typeKey);
     useEffect(() => setTypeKey(current.typeKey), [current.typeKey]);
     const [picking, setPicking] = useState(false);
@@ -131,25 +131,21 @@ export function NewRecordItem({
     };
 
     return (
-        <div className="flex items-start gap-2 text-sm">
-            <input
-                type="checkbox"
-                className="mt-2 size-4 shrink-0"
-                checked={ticked}
-                disabled={disabled}
-                aria-label={i18n("Add {name} to the Almanac", {
-                    name: current.name,
-                })}
-                onChange={(event) =>
-                    void onDecide(
-                        // Unticked is the default: not proposed again
-                        // here. Only "Never propose it" is for good.
-                        event.target.checked ? "accepted" : null,
-                        (choice as NewRecordChoice | null) ?? null,
-                    )
-                }
-            />
-            <div className="min-w-0 flex-1 space-y-1">
+        <LearnReviewRow
+            kind="new_record"
+            checked={ticked}
+            disabled={disabled}
+            checkboxLabel={i18n("Add {name} to the Almanac", {
+                name: current.name,
+            })}
+            onCheckedChange={(checked) =>
+                void onDecide(
+                    checked ? "accepted" : null,
+                    (choice as NewRecordChoice | null) ?? null,
+                )
+            }
+        >
+            <div className="space-y-1">
                 {linked ? (
                     <div className="flex flex-wrap items-center gap-2 py-1">
                         <span>
@@ -269,19 +265,21 @@ export function NewRecordItem({
                             {i18n("Only a first name: add the surname.")}
                         </div>
                     )}
-                <div className="text-xs text-muted-foreground">
-                    {payload.kind === "person"
-                        ? i18n("Person")
-                        : typeLabel(current.typeKey)}
-                    {payload.speakerLabel &&
-                        ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}
-                    {payload.reason && ` · ${payload.reason}`}{" "}
-                    {payload.evidenceMs.map((ms) => (
-                        <span key={ms} className="mr-1">
-                            {seek(ms)}
-                        </span>
-                    ))}
-                </div>
+                <LearnEvidence>
+                    <div className="text-xs text-muted-foreground">
+                        {payload.kind === "person"
+                            ? i18n("Person")
+                            : typeLabel(current.typeKey)}
+                        {payload.speakerLabel &&
+                            ` · ${i18n("speaks as {label}", { label: payload.speakerLabel })}`}
+                        {payload.reason && ` · ${payload.reason}`}{" "}
+                        {payload.evidenceMs.map((ms) => (
+                            <span key={ms} className="mr-1">
+                                {seek(ms)}
+                            </span>
+                        ))}
+                    </div>
+                </LearnEvidence>
             </div>
             <Dialog open={picking} onOpenChange={setPicking}>
                 <DialogContent className="sm:max-w-md">
@@ -306,6 +304,6 @@ export function NewRecordItem({
                     />
                 </DialogContent>
             </Dialog>
-        </div>
+        </LearnReviewRow>
     );
 }

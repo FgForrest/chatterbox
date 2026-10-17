@@ -16,6 +16,7 @@ import {
     Play,
     RefreshCw,
     ShieldCheck,
+    SlidersHorizontal,
     Video,
     Webhook,
     Wrench,
@@ -45,6 +46,7 @@ const baseSettingsNavGroups: { label: string; items: NavItem[] }[] = [
             { name: "Topics", id: "topics", icon: ListTree },
             { name: "Learning", id: "learning", icon: GraduationCap },
             { name: "Summary", id: "summary", icon: ListChecks },
+            { name: "Profiles", id: "profiles", icon: SlidersHorizontal },
         ],
     },
     {

@@ -30,6 +30,11 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+const { resolveDefaultProfile } = vi.hoisted(() => ({
+    resolveDefaultProfile: vi.fn(),
+}));
+vi.mock("@/lib/profiles/resolve", () => ({ resolveDefaultProfile }));
+
 vi.mock("@/lib/audio/ingest-waveform", () => ({
     generateIngestWaveform: vi.fn().mockResolvedValue([0.25, 1]),
 }));
@@ -39,6 +44,10 @@ vi.mock("@/lib/storage/factory", () => ({
         uploadFile: vi.fn().mockResolvedValue(undefined),
         downloadFile: vi.fn().mockResolvedValue(Buffer.from("audio-data")),
     }),
+}));
+
+vi.mock("@/lib/recordings/storage-reconciliation-job", () => ({
+    enqueueStorageReconciliationJob: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/notifications/bark", () => ({
@@ -56,11 +65,6 @@ vi.mock("@/lib/transcription/transcription-job", () => ({
     }),
 }));
 
-vi.mock("@/lib/sync/untranscribed", () => ({
-    AUTO_TRANSCRIBE_RETRY_LIMIT: 5,
-    listUntranscribedRecordingIds: vi.fn().mockResolvedValue([]),
-}));
-
 vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
@@ -69,16 +73,21 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerEvent: vi.fn(),
     captureServerException: vi.fn(),
 }));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue({
+        requestedGeneration: 1,
+        enqueued: true,
+    }),
+}));
 
 import { db } from "@/db";
 import { chatterItems } from "@/db/schema";
 import { generateIngestWaveform } from "@/lib/audio/ingest-waveform";
 import { decryptText } from "@/lib/encryption/fields";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { captureServerException } from "@/lib/posthog-server";
-import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
-import { listUntranscribedRecordingIds } from "@/lib/sync/untranscribed";
 import { enqueueTranscriptionJob } from "@/lib/transcription/transcription-job";
 
 /** The existing-recording lookup: the recording, joined to its item's markers. */
@@ -101,7 +110,6 @@ describe("Sync", () => {
     const mockUserId = "user-123";
 
     beforeEach(() => {
-        resetAutoTranscribeStateForTests();
         vi.clearAllMocks();
     });
 
@@ -201,7 +209,7 @@ describe("Sync", () => {
             expect(result.updatedRecordings).toBe(0);
         });
 
-        it("retries already-synced recordings that still have no transcript when auto-transcribe is on", async () => {
+        it("does not retry transcription directly for already-synced recordings", async () => {
             const mockConnection = {
                 id: "conn-1",
                 userId: mockUserId,
@@ -237,9 +245,6 @@ describe("Sync", () => {
                     .mockResolvedValue(Buffer.from("audio")),
             };
             (createPlaudClient as Mock).mockResolvedValue(mockPlaudClient);
-            (listUntranscribedRecordingIds as Mock).mockResolvedValueOnce([
-                "local-rec-1",
-            ]);
             (db.update as Mock).mockReturnValue({
                 set: vi.fn().mockReturnValue({
                     where: vi.fn().mockResolvedValue(undefined),
@@ -259,7 +264,7 @@ describe("Sync", () => {
                         where: vi.fn().mockReturnValue({
                             limit: vi
                                 .fn()
-                                .mockResolvedValue([{ autoTranscribe: true }]),
+                                .mockResolvedValue([{ id: "settings-1" }]),
                         }),
                     }),
                 })
@@ -280,25 +285,10 @@ describe("Sync", () => {
 
             await syncRecordingsForUser(mockUserId);
 
-            expect(listUntranscribedRecordingIds).toHaveBeenCalledWith(
-                mockUserId,
-                {
-                    transcriptMode: "plaud_only",
-                    excludeIds: [],
-                    // No Organization in this deployment.
-                    excludeSharedWith: null,
-                },
-            );
-            await vi.waitFor(() => {
-                expect(enqueueTranscriptionJob).toHaveBeenCalledWith({
-                    userId: mockUserId,
-                    recordingId: "local-rec-1",
-                    trigger: "sync",
-                });
-            });
+            expect(enqueueTranscriptionJob).not.toHaveBeenCalled();
         });
 
-        it("asks the retry lookup for missing Riffado transcripts in keep_both mode", async () => {
+        it("leaves keep-both transcription scheduling to the pipeline", async () => {
             const mockPlaudClient = {
                 getRecordings: vi.fn().mockResolvedValue({
                     data_file_list: [],
@@ -327,12 +317,9 @@ describe("Sync", () => {
                 .mockReturnValueOnce({
                     from: vi.fn().mockReturnValue({
                         where: vi.fn().mockReturnValue({
-                            limit: vi.fn().mockResolvedValue([
-                                {
-                                    autoTranscribe: true,
-                                    transcriptMode: "keep_both",
-                                },
-                            ]),
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([{ id: "settings-1" }]),
                         }),
                     }),
                 })
@@ -350,15 +337,116 @@ describe("Sync", () => {
 
             await syncRecordingsForUser(mockUserId);
 
-            expect(listUntranscribedRecordingIds).toHaveBeenCalledWith(
-                mockUserId,
+            expect(enqueueTranscriptionJob).not.toHaveBeenCalled();
+        });
+
+        it("imports recordings without resolving processing profiles in sync", async () => {
+            const mockConnection = {
+                id: "conn-1",
+                userId: mockUserId,
+                bearerToken: "encrypted-token",
+            };
+            const mockPlaudRecordings = [
                 {
-                    transcriptMode: "keep_both",
-                    excludeIds: [],
-                    // No Organization in this deployment.
-                    excludeSharedWith: null,
+                    id: "plaud-1",
+                    filename: "Recording 1.mp3",
+                    duration: 60000,
+                    start_time: "2024-01-01T10:00:00Z",
+                    end_time: "2024-01-01T10:01:00Z",
+                    filesize: 1024000,
+                    file_md5: "abc123",
+                    serial_number: "SN123",
+                    version_ms: 1000,
+                    timezone: 0,
+                    zonemins: 0,
+                    scene: 0,
+                    is_trash: false,
                 },
+            ];
+
+            (createPlaudClient as Mock).mockResolvedValue({
+                getRecordings: vi.fn().mockResolvedValue({
+                    data_file_list: mockPlaudRecordings,
+                }),
+                downloadRecording: vi
+                    .fn()
+                    .mockResolvedValue(Buffer.from("audio")),
+            });
+            (db.update as Mock).mockReturnValue({
+                set: vi.fn().mockReturnValue({
+                    where: vi.fn().mockResolvedValue(undefined),
+                }),
+            });
+            (db.transaction as Mock).mockImplementation(
+                async (callback: (tx: unknown) => Promise<unknown>) =>
+                    callback({
+                        insert: vi.fn().mockReturnValue({
+                            values: vi.fn().mockResolvedValue(undefined),
+                        }),
+                    }),
             );
+
+            (db.select as Mock)
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi.fn().mockResolvedValue([mockConnection]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([{ id: "settings-1" }]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        where: vi.fn().mockReturnValue({
+                            limit: vi
+                                .fn()
+                                .mockResolvedValue([
+                                    { email: "test@example.com" },
+                                ]),
+                        }),
+                    }),
+                })
+                .mockReturnValueOnce({
+                    from: vi.fn().mockReturnValue({
+                        innerJoin: vi.fn().mockReturnValue({
+                            where: vi.fn().mockReturnValue({
+                                limit: vi.fn().mockResolvedValue([]),
+                            }),
+                        }),
+                    }),
+                });
+
+            const consoleError = vi
+                .spyOn(console, "error")
+                .mockImplementation(() => undefined);
+            try {
+                const result = await syncRecordingsForUser(mockUserId);
+
+                expect(result.newRecordings).toBe(1);
+                expect(result.errors).toEqual([]);
+                expect(enqueueTranscriptionJob).not.toHaveBeenCalled();
+                expect(resolveDefaultProfile).not.toHaveBeenCalled();
+                expect(consoleError).not.toHaveBeenCalled();
+                expect(captureServerException).not.toHaveBeenCalled();
+                expect(requestAdvanceInTx).toHaveBeenCalledWith(
+                    expect.anything(),
+                    expect.objectContaining({
+                        userId: mockUserId,
+                        view: "private",
+                        reason: "arrival",
+                    }),
+                );
+            } finally {
+                consoleError.mockRestore();
+            }
         });
 
         /**

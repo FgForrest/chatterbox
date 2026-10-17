@@ -83,7 +83,11 @@ export function useTranscriptTopics(
 
     /** Reads back the topics a completed job stored, and shows them. */
     const showStored = useCallback(
-        async (topicSource: TopicSource, signal: AbortSignal) => {
+        async (
+            topicSource: TopicSource,
+            signal: AbortSignal,
+            announce: boolean,
+        ): Promise<{ jobId: string; jobKind?: string | null } | null> => {
             const response = await fetch(
                 withRecordingView(
                     `/api/recordings/${recordingId}/topics?source=${topicSource}`,
@@ -98,12 +102,20 @@ export function useTranscriptTopics(
                         messagesRef.current.failed,
                     ),
                 );
-                return;
+                return null;
             }
-            const next: TranscriptTopic[] =
-                (await response.json()).topics ?? [];
+            const body = (await response.json()) as {
+                jobId?: string | null;
+                jobKind?: string | null;
+                topics?: TranscriptTopic[] | null;
+            };
+            if (body.jobId) {
+                return { jobId: body.jobId, jobKind: body.jobKind };
+            }
+            const next: TranscriptTopic[] = body.topics ?? [];
             setDetected((current) => ({ ...current, [topicSource]: next }));
-            toast.success(messagesRef.current.detected);
+            if (announce) toast.success(messagesRef.current.detected);
+            return null;
         },
         [recordingId, view],
     );
@@ -114,30 +126,44 @@ export function useTranscriptTopics(
             topicSource: TopicSource,
             jobId: string,
             signal: AbortSignal,
+            jobKind?: string | null,
         ) => {
             const deadline = new AbortController();
             const stop = () => deadline.abort();
             signal.addEventListener("abort", stop);
             const timer = setTimeout(stop, POLL_LIMIT_MS);
             try {
-                const job = await followJob(jobId, {
-                    pollMs: POLL_MS,
-                    signal: deadline.signal,
-                });
-                if (signal.aborted) return;
-                if (!job) {
-                    // Null is a timeout or a job gone from the queue; only
-                    // the first says anything worth telling.
-                    if (deadline.signal.aborted) {
-                        toast.error(messagesRef.current.slow);
+                let currentJobId = jobId;
+                let currentJobKind = jobKind;
+                while (!signal.aborted) {
+                    const job = await followJob(currentJobId, {
+                        pollMs: POLL_MS,
+                        signal: deadline.signal,
+                    });
+                    if (signal.aborted) return;
+                    if (!job) {
+                        if (deadline.signal.aborted) {
+                            toast.error(messagesRef.current.slow);
+                        }
+                        return;
                     }
-                    return;
+                    if (job.status === "failed") {
+                        if (currentJobKind !== "pipeline.advance") {
+                            toast.error(
+                                job.error || messagesRef.current.failed,
+                            );
+                        }
+                        return;
+                    }
+                    const next = await showStored(
+                        topicSource,
+                        signal,
+                        currentJobKind !== "pipeline.advance",
+                    );
+                    if (!next || next.jobId === currentJobId) return;
+                    currentJobId = next.jobId;
+                    currentJobKind = next.jobKind;
                 }
-                if (job.status === "failed") {
-                    toast.error(job.error || messagesRef.current.failed);
-                    return;
-                }
-                await showStored(topicSource, signal);
             } finally {
                 clearTimeout(timer);
                 signal.removeEventListener("abort", stop);
@@ -161,8 +187,13 @@ export function useTranscriptTopics(
                 { signal: probe.signal },
             );
             if (!response.ok || probe.signal.aborted) return;
-            const { jobId, topics: saved } = (await response.json()) as {
+            const {
+                jobId,
+                jobKind,
+                topics: saved,
+            } = (await response.json()) as {
                 jobId?: string | null;
+                jobKind?: string | null;
                 topics?: TranscriptTopic[] | null;
             };
             // A click that came first owns the job already.
@@ -180,7 +211,7 @@ export function useTranscriptTopics(
             }
             following = restart(topicSource);
             try {
-                await settle(topicSource, jobId, following.signal);
+                await settle(topicSource, jobId, following.signal, jobKind);
             } finally {
                 release(following);
             }

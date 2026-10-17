@@ -1,6 +1,7 @@
-import { requireApiSession } from "@/lib/auth-server";
+import { requireApiSessionActor } from "@/lib/auth-server";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { readBoundedJson } from "@/lib/http/bounded-json";
+import { consumeRateLimitBucket } from "@/lib/rate-limit";
 import { type TaskViewer, taskViewer } from "@/lib/tasks/access";
 
 /** A task change is a few short fields; nothing near this. */
@@ -8,8 +9,11 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 /** The signed-in caller, as tasks see them. */
 export async function requireTaskViewer(request: Request): Promise<TaskViewer> {
-    const session = await requireApiSession(request);
-    return taskViewer({ id: session.user.id, email: session.user.email });
+    const { session, actor } = await requireApiSessionActor(request);
+    return taskViewer(
+        { id: session.user.id, email: session.user.email },
+        actor,
+    );
 }
 
 /** The request's JSON object, or a 400/413. */
@@ -53,4 +57,43 @@ export function optionalNullableString(
     if (value === undefined) return undefined;
     if (value === null || typeof value === "string") return value;
     throw invalid(`${field} must be a string or null`, field);
+}
+
+/** Bound repeated full-scope merge searches for one signed-in user. */
+export async function enforceTaskMergeSearchRateLimit(
+    viewer: TaskViewer,
+): Promise<void> {
+    const result = await consumeRateLimitBucket(
+        `tasks:merge-search:user:${viewer.userId}`,
+        { limit: 60, windowMs: 60_000 },
+    );
+    if (result.allowed) return;
+    const retryAfter = Math.max(
+        1,
+        Math.ceil((result.resetAt.getTime() - Date.now()) / 1_000),
+    );
+    throw new AppError(
+        ErrorCode.RATE_LIMITED,
+        "Too many task merge searches",
+        429,
+        { retryAfter },
+    );
+}
+
+/** Bound task mutations for one signed-in user. */
+export async function enforceTaskWriteRateLimit(
+    viewer: TaskViewer,
+): Promise<void> {
+    const result = await consumeRateLimitBucket(
+        `tasks:write:user:${viewer.userId}`,
+        { limit: 120, windowMs: 60_000 },
+    );
+    if (result.allowed) return;
+    const retryAfter = Math.max(
+        1,
+        Math.ceil((result.resetAt.getTime() - Date.now()) / 1_000),
+    );
+    throw new AppError(ErrorCode.RATE_LIMITED, "Too many task changes", 429, {
+        retryAfter,
+    });
 }

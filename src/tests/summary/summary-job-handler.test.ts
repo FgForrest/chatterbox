@@ -145,7 +145,7 @@ describe("summaryJobHandler", () => {
         });
     });
 
-    it("forwards the preset and trigger it was queued with", async () => {
+    it("forwards the preset, profile revision, and trigger it was queued with", async () => {
         (generateSummaryForRecording as Mock).mockResolvedValue(generated);
 
         await summaryJobHandler.run(
@@ -153,6 +153,7 @@ describe("summaryJobHandler", () => {
                 payload: {
                     recordingId: "rec-9",
                     presetId: "meeting-notes",
+                    profileRevisionId: "revision-9",
                     trigger: "auto",
                 },
             }),
@@ -163,6 +164,7 @@ describe("summaryJobHandler", () => {
             "rec-9",
             expect.objectContaining({
                 presetId: "meeting-notes",
+                profileRevisionId: "revision-9",
                 trigger: "auto",
             }),
         );

@@ -111,3 +111,20 @@ describe("localized email content", () => {
         expect(email("test")).toBe("Testovací e-mail z Riffado");
     });
 });
+
+describe("localized plural content", () => {
+    it("uses Czech one, few, and many recording forms", () => {
+        const source =
+            "{count, plural, one {# recording} other {# recordings}}";
+
+        expect(translatedSourceMessage("cs-CZ", source, { count: 1 })).toBe(
+            "1 nahrávka",
+        );
+        expect(translatedSourceMessage("cs-CZ", source, { count: 2 })).toBe(
+            "2 nahrávky",
+        );
+        expect(translatedSourceMessage("cs-CZ", source, { count: 5 })).toBe(
+            "5 nahrávek",
+        );
+    });
+});

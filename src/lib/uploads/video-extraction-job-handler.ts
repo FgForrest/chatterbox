@@ -231,6 +231,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
 
         async run({
             payload,
+            jobId,
             userId,
             attempt,
             maxAttempts,
@@ -260,7 +261,7 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
 
             if (existing) {
                 await deleteSource(storage, payload.sourceStorageKey);
-                return { converted: true };
+                return { converted: true, recordingId: existing.id };
             }
 
             let temporaryDirectory: string | null = null;
@@ -317,11 +318,17 @@ export const videoExtractionJobHandler: JobHandler<VideoExtractionJobPayload> =
                     storage,
                     sourceExtension,
                     convertedFromVideo: true,
+                    folderId: payload.folderId,
+                    deferredFolderFallback: {
+                        kind: "video extraction job",
+                        id: jobId,
+                    },
                 });
 
                 await deleteSource(storage, payload.sourceStorageKey);
                 return {
                     converted: true,
+                    recordingId: saved.recordingId,
                     durationMs: saved.durationMs,
                     filesize: saved.filesize,
                 };

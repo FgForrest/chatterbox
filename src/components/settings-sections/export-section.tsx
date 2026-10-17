@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, RefreshCw } from "lucide-react";
+import { Download } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -59,11 +59,7 @@ function formatBytes(bytes: number): string {
     return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
-interface ExportSectionProps {
-    onReRunOnboarding?: () => void;
-}
-
-export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
+export function ExportSection() {
     const i18n = useExtracted();
     const exportFormatOptions = EXPORT_FORMATS.map((value) => ({
         value,
@@ -380,34 +376,6 @@ export function ExportSection({ onReRunOnboarding }: ExportSectionProps) {
                     <Label className="text-base">
                         {i18n("Manual Actions")}
                     </Label>
-                    <Button
-                        onClick={async () => {
-                            try {
-                                await fetch("/api/settings/user", {
-                                    method: "PUT",
-                                    headers: {
-                                        "Content-Type": "application/json",
-                                    },
-                                    body: JSON.stringify({
-                                        onboardingCompleted: false,
-                                    }),
-                                });
-                                onReRunOnboarding?.();
-                            } catch {
-                                toast.error(i18n("Failed to reset onboarding"));
-                            }
-                        }}
-                        variant="outline"
-                        className="w-full"
-                    >
-                        <RefreshCw className="size-4 mr-2" />{" "}
-                        {i18n("Re-run Onboarding")}
-                    </Button>
-                    <p className="text-xs text-muted-foreground">
-                        {i18n(
-                            "Reset onboarding to see it again on your next visit",
-                        )}
-                    </p>
                     <div className="flex gap-2 pt-2">
                         <Button
                             onClick={handleExport}

@@ -1,9 +1,9 @@
 ---
 title: Public API
-description: The /api/v1/* read surface — authentication, endpoints, errors, rate limits.
+description: The /api/v1/* surface — authentication, endpoints, errors, and rate limits.
 ---
 
-The `/api/v1/*` surface is Chatterbox's public, stable, read-only API.
+The `/api/v1/*` surface is Chatterbox's public, stable API.
 Personal API keys authenticate it; integrations like Zapier, n8n, and
 your own scripts call into it.
 
@@ -24,8 +24,8 @@ Send your personal API key as a Bearer token:
 Authorization: Bearer op_K7vR8x...
 ```
 
-Keys are 27 characters: `op_` + 24 URL-safe random characters. Keys
-carry read-only scope today. Revoked or expired keys are rejected with
+Keys are 27 characters: `op_` + 24 URL-safe random characters. Standard keys
+carry read scope; paired recorder keys also carry `recordings:write`. Revoked or expired keys are rejected with
 `401 UNAUTHORIZED`. Tokens are HMAC-hashed at rest.
 
 ## Rate limits
@@ -127,8 +127,9 @@ Response:
       "filesize_bytes": 1234567,
       "device": { "serial_number": "...", "name": "Plaud Note", "model": "..." },
       "has_transcription": true,
-      "has_summary": false,
+      "has_summary": true,
       "audio_reaped": false,
+      "processing": { "phase": "summary", "state": "done" },
       "links": {
         "self": "/api/v1/recordings/...",
         "transcript": "/api/v1/recordings/.../transcript",
@@ -144,6 +145,16 @@ Response:
 `audio_reaped` is `true` when the owner's retention policy has deleted
 the audio. The recording and its metadata remain; `links.audio` answers
 `410 Gone`. Check this flag rather than treating a 410 as an error.
+
+`processing` reports the recording's current workflow phase and that phase's
+state. Recordings processed before the workflow report their last settled
+phase, or `{ "phase": "categorize", "state": "skipped" }` when they have no
+processing row. They do not wait unless new content arrives after the workflow
+is enabled.
+
+`phase` is one of `categorize`, `transcribe`, `learn`, `summary`, `taskReview`,
+or `share`. `state` is one of `pending`, `waiting`, `running`, `done`, `skipped`,
+`failed`, `outdated`, or `not_processed`.
 
 Pagination is **cursor-based, descending by `updated_at`**. When
 `has_more` is `true`, pass `next_cursor` back in the next request.
@@ -266,7 +277,11 @@ extension, which uploads audio in chunks as it is captured. The flow is:
 1. `POST /api/v1/recording-sessions` — open a session. Body includes
    `mimeType` (`audio/webm` or `audio/ogg`), `channelLayout`, `startedAt`,
    and optional `platformHint`, `clientVersion`, `timezoneOffsetMinutes`,
-   `noticeAcknowledgedAt`. Returns the session `id`.
+   `noticeAcknowledgedAt`, and `folderId`. The folder must be a non-root
+   personal folder or a writable Organization folder. A root folder returns
+   `400 INVALID_INPUT`; an unknown or inaccessible folder returns the same code
+   with `details.field` set to `folderId`. The `201` response is the full session representation, including
+   `folder_id`, `processing`, the one-time `encryption` key, and upload `limits`.
 2. `PUT /api/v1/recording-sessions/{id}/chunks/{index}` — upload one chunk as
    the raw request body, with an `X-Chunk-SHA256` header. Indices start at 0
    and must be contiguous. Re-sending an index with the same bytes is a no-op;
@@ -276,7 +291,10 @@ extension, which uploads audio in chunks as it is captured. The flow is:
    every chunk arrived, then assembles and remuxes them into a recording. The
    response carries a `job_id`; follow `GET /api/jobs/{job_id}` for progress.
 4. `GET /api/v1/recording-sessions/{id}` — status and the list of received
-   chunk indices, used to resume after an interruption.
+   chunk indices, used to resume after an interruption. Session reads include
+   `folder_id` and `processing: { phase, state }`. Before a recording exists,
+   processing is `{ "phase": "categorize", "state": "pending" }`; after
+   finalization it matches the recording.
 5. `DELETE /api/v1/recording-sessions/{id}` — abort and delete buffered chunks.
 
 A paired extension also reads its server defaults from
@@ -284,6 +302,31 @@ A paired extension also reads its server defaults from
 automatically, the auto-stop quiet period, the notice text, and whether
 users may override them. These come from the `RECORDER_*` environment
 variables and are inert when unset.
+
+The same recorder key can call `GET /api/v1/recorder/folders`. It returns the
+key holder's non-root personal folders and writable Organization folders:
+
+```json
+{
+  "data": [
+    { "id": "...", "name": "Client A", "path": "Private / Client A", "scope": "personal" },
+    { "id": "...", "name": "Sales", "path": "Organization / Sales", "scope": "org" }
+  ]
+}
+```
+
+Folders are sorted with personal folders first, then by `path`. This endpoint
+uses the recorder-key rate limit: a missing or invalid key returns `401`, a key
+without `recordings:write` returns `403`, and an exhausted bucket returns `429`.
+
+When `folderId` is present, finalization applies that placement before the
+workflow advances. An Organization placement starts as sharing intent; it
+continues automatically once a usable folder profile resolves, or waits in the
+app for a profile choice or curator action.
+When `folderId` is omitted, the recording waits in the app for its owner to file
+it. Consequently, `transcription.completed` and `summary.completed` webhooks for
+such a recording are not sent until the owner files it and processing reaches
+those phases.
 
 There are no other public write endpoints. To push finished audio in through
 the UI instead, use the upload button in the dashboard.

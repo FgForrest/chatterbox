@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 vi.mock("@/db", () => ({
     db: {
@@ -77,8 +78,21 @@ vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
 }));
 
+vi.mock("@/lib/folders/item-scope", () => ({
+    itemScopeFolderIds: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("@/lib/transcription/almanac-terms", () => ({
     almanacTermsFor: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () =>
+        resolvedAudioProfile({ defaultTranscriptionLanguage: "cs" }),
+    ),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
 }));
 
 import { db } from "@/db";

@@ -15,16 +15,20 @@ Pokud vaše organizace používá jednotné přihlašování, na přihlašovací
 
 ## Průvodce prvním spuštěním
 
-Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Jakýkoliv krok můžete přeskočit a vrátit se k němu později v Nastavení.
+Při prvním otevření Chatterbox vám krátký průvodce pomůže nastavit základní věci. Kroky s integracemi jsou nepovinné a zobrazí se jen tehdy, když je správce nastavil.
 
 | Krok | Co dělá |
 | --- | --- |
 | ![Welcome](images/onboarding-welcome.png) | **Vítejte.** Co Chatterbox umí: synchronizuje nahrávky, přepisuje je a pomocí AI je shrnuje. |
 | ![Connect Plaud](images/onboarding-plaud.png) | **Připojte účet nahrávače.** Přihlaste se rozšířením prohlížeče Riffado Connector, pomocí kódu zaslaného e-mailem nebo vložením tokenu. Poté Chatterbox začíná pravidelně stahovat vaše nahrávky. |
 | ![AI provider](images/onboarding-ai-provider.png) | **Nastavte poskytovatele AI.** Otevře Nastavení, kde přidáte službu pro přepisy a shrnutí. Viz [Poskytovatelé AI](settings.md#ai-providers). |
+| Kalendář Google a Meet (pokud jsou nastavené) | **Připojte Kalendář Google a Meet.** Přístup jen pro čtení pomůže rozpoznat schůzky a navrhnout mluvčí podle pozvaných hostů a účastníků Meet. |
+| Nahrávání schůzek | **Nastavte nahrávání schůzek.** Nainstalujte rozšíření pro Chrome a připojte je k této instanci Chatterboxu. |
+| E-mail (pokud je nastavený) | **Posílejte e-maily do Chatterboxu.** Zkopírujte svou osobní adresu a posílejte nebo přeposílejte zprávy do Klepny. |
+| Claude (pokud je nastavený) | **Připojte Claude.** Přidejte Chatterbox jako vlastní konektor do Claude nebo Claude Code. |
 | ![Done](images/onboarding-done.png) | **Vše je připraveno.** Klikněte na **Začít**. |
 
-Pro zobrazení průvodce znovu přejděte do **Nastavení → Export/Záloha** a klikněte na **Znovu spustit úvodní nastavení**.
+Průvodce můžete znovu otevřít z uživatelské nabídky přes **Spustit nastavení znovu**. Dokončené nastavení se tím nevynuluje.
 
 <span id="finding-your-way-around" />
 
@@ -34,15 +38,15 @@ Pro zobrazení průvodce znovu přejděte do **Nastavení → Export/Záloha** a
 
 Horní lišta obsahuje tři sekce:
 
-- **Nahrávky**: vaše knihovna. Vlevo je seznam nahrávek, vpravo detail vybrané nahrávky.
+- **Nahrávky**: vaše knihovna. Vlevo zůstává seznam a panel složek, vpravo je detail vybrané nahrávky. Ještě před první nahrávkou můžete pomocí **Nová složka** knihovnu uspořádat, nebo rovnou synchronizovat či nahrát soubor.
 - **Almanach**: osoby a objekty, o kterých Chatterbox ví. Odznak ukazuje počet recenzí čekajících na vás. Viz [Almanach](almanac.md).
-- **Úkoly**: akční položky nalezené ve vašich nahrávkách. Odznak ukazuje nové úkoly přiřazené vám. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
+- **Úkoly**: akční položky sledované napříč Vašimi nahrávkami a poštou. Odznak ukazuje nové úkoly a návrhy pro Vás. Viz [Shrnutí a úkoly](summaries-and-tasks.md#the-tasks-page).
 
 Vpravo v liště:
 
 - **Hledat** (nebo `Ctrl`/`⌘` + `K`) otevře příkazovou paletu.
 - **Synchronizovat zařízení** okamžitě stáhne nové nahrávky z cloudu vašeho nahrávače, místo čekání na další automatickou synchronizaci.
-- **Nahrát** přidá zvukový nebo video soubor z vašeho počítače.
+- **Nahrát** přidá zvukový nebo video soubor z vašeho počítače. Tlačítko je dostupné také v Úkolech, Almanachu a Nastavení. Po nahrání se otevřou Nahrávky, nová položka bude vybraná a její pracovní postup bude na začátku.
 - Kulaté tlačítko s vaším iniciálou otevře nabídku účtu: **Nastavení**, **Klávesové zkratky**, režim světlý/tmavý a **Odhlásit se**.
 
 <span id="getting-help" />
@@ -91,4 +95,4 @@ Paleta během psaní vyhledává v názvech i přepisech. Stiskněte `Enter` pro
 
 Chatterbox komunikuje anglicky i česky. Řídí se jazykem vašeho prohlížeče, dokud si v **Nastavení → Zobrazení → Jazyk** nezvolíte jiný. E-maily, které vám Chatterbox zasílá, se také posílají ve stejném jazyce.
 
-Pokračujte: [Nahrávky](recordings.md)
+Pokračujte: [Zpracování a profily](processing-and-profiles.md)

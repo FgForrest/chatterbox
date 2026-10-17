@@ -8,7 +8,7 @@ tools — Zapier-style integrations, n8n flows, your own scripts. Two
 moving parts:
 
 - **Personal API keys** authenticate read access to the `/api/v1/*`
-  surface.
+  surface. Recorder keys with `recordings:write` create streaming sessions.
 - **Webhook endpoints** push events at your own server when something
   interesting happens (a new recording, a finished transcription).
 
@@ -67,6 +67,24 @@ incoming requests.
 | `transcription.failed`      | Transcription failed (final, after retries)    |
 | `summary.completed`         | Auto-summary finished successfully             |
 | `summary.failed`            | Auto-summary failed (transcript still kept)    |
+
+### Processing timing
+
+Summary and topic work starts from the processing pipeline, one worker tick
+after the event that made it ready. Do not assume it starts in the same request.
+
+`transcription.completed` contains the recording as it exists when the
+transcript commits. It no longer contains a freshly generated title. When the
+Summary phase generates the title, a later `recording.updated` event carries it.
+
+New recordings and mailbox mail wait for filing before automatic paid steps.
+Their `transcription.completed` and `summary.completed` events therefore arrive
+only after the owner files the item and its profile reaches those phases. A
+recording session or upload with `folderId`, and mail sent to a folder address,
+skip that wait.
+
+If the hourly automatic-summary cap is full, an automatic summary is
+deferred to the next window. This delay does not emit `summary.failed`.
 
 ### Delivery shape
 
@@ -143,7 +161,8 @@ and visible in **Settings → Developer → Webhooks → Recent deliveries**.
 
 ## What writes look like
 
-There aren't any public write endpoints yet. The current `/api/v1/*`
-surface is read-only by design: list recordings, get a recording, get
-its transcript, stream its audio. If you need to push data *in*, run
-the Chatterbox UI or sync the source Plaud account.
+Personal keys created under **API keys** have the `read` scope. The Meeting
+Recorder pairing flow issues a separate key with `recordings:write`. It may list
+recorder folders and create, upload, complete, inspect, or abort streaming
+recording sessions, but it cannot read the recording library. There are no
+other public write endpoints. See [Recording sessions](../reference/public-api#recording-sessions).

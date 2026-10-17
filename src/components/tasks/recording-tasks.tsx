@@ -3,6 +3,7 @@
 import { Loader2, Plus } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useState } from "react";
+import { useOptionalConfirm } from "@/components/confirm-dialog";
 import type { SpeakerChoice } from "@/components/tasks/assignee-picker";
 import { TaskRow } from "@/components/tasks/task-row";
 import type { RecordingTasksState } from "@/components/tasks/use-recording-tasks";
@@ -36,6 +37,7 @@ export function RecordingTasks({
     allowAdd = true,
 }: RecordingTasksProps) {
     const i18n = useExtracted();
+    const confirm = useOptionalConfirm();
     const [showDropped, setShowDropped] = useState(false);
     const { data, failed, reviewing } = state;
 
@@ -107,6 +109,28 @@ export function RecordingTasks({
                             onPlay={onPlay}
                             onChange={(change, optimistic) =>
                                 state.update(task, change, optimistic)
+                            }
+                            onUndoMatch={
+                                task.canUndoMatch
+                                    ? () => {
+                                          if (!confirm) {
+                                              void state.undoMatch(task);
+                                              return;
+                                          }
+                                          void confirm({
+                                              title: i18n(
+                                                  "Undo this task match?",
+                                              ),
+                                              description: i18n(
+                                                  "This removes the link from this item. Changes already applied to the task stay.",
+                                              ),
+                                              confirmLabel: i18n("Undo match"),
+                                              pendingLabel: i18n("Undoing…"),
+                                              onConfirm: () =>
+                                                  state.undoMatch(task),
+                                          });
+                                      }
+                                    : undefined
                             }
                         />
                     ))}

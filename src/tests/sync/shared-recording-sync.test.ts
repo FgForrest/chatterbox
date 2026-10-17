@@ -7,6 +7,7 @@
  * #274 regression test.)
  */
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 const { sharing } = vi.hoisted(() => ({ sharing: { shared: true } }));
 
@@ -29,6 +30,11 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/lib/plaud/client-factory", () => ({
     createPlaudClient: vi.fn(),
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveDefaultProfile: vi.fn(async () => resolvedAudioProfile()),
+    resolveItemProfile: vi.fn(async () => resolvedAudioProfile()),
 }));
 
 vi.mock("@/lib/storage/factory", () => ({
@@ -86,7 +92,6 @@ import {
 } from "@/db/schema";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { resetAutoTranscribeStateForTests } from "@/lib/sync/auto-transcribe-state";
 import { syncRecordingsForUser } from "@/lib/sync/sync-recordings";
 import {
     upsertEnhancement,
@@ -200,7 +205,10 @@ function readyDetail(fileId: string, opts: { summary?: boolean } = {}) {
         });
         pre_download_content_list.push({
             data_id: dataId,
-            data_content: JSON.stringify({ summary: "imported summary" }),
+            data_content: JSON.stringify({
+                summary: "imported summary",
+                action_items: ["Follow up after the call"],
+            }),
         });
     }
     return {
@@ -354,7 +362,6 @@ function mockPlaudPages(
 
 describe("sync of a shared recording", () => {
     beforeEach(() => {
-        resetAutoTranscribeStateForTests();
         vi.clearAllMocks();
         sharing.shared = true;
         (db.update as Mock).mockReturnValue({
@@ -403,6 +410,12 @@ describe("sync of a shared recording", () => {
 
         expect(getFileDetail).toHaveBeenCalled();
         expect(upsertTranscription).not.toHaveBeenCalled();
+        expect(upsertEnhancement).toHaveBeenCalledWith(
+            expect.objectContaining({
+                source: "plaud",
+                actionItems: ["Follow up after the call"],
+            }),
+        );
     });
 
     it("leaves a new Plaud version of it for after the withdrawal", async () => {

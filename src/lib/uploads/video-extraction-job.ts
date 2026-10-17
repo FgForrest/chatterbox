@@ -31,6 +31,7 @@ export async function enqueueVideoExtractionJob(
             sourceStorageKey: input.sourceStorageKey,
             encryptedFilename: input.encryptedFilename,
             sourceSize: input.sourceSize,
+            folderId: input.folderId,
         },
     });
     if (enqueued.created) nudge();

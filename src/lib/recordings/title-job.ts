@@ -1,8 +1,7 @@
 /**
- * The title job (Task 5.4). Titles are generated inline after a
- * transcription; automatic Learn holds the title back until its review is
- * done, and releasing the hold queues this job instead. Its webhook is
- * `recording.updated`: `transcription.completed` fired without it.
+ * The title job (Task 5.4). The processing pipeline queues it in Summary,
+ * after Transcribe and Learn. Its webhook is `recording.updated`:
+ * `transcription.completed` fires without waiting for it.
  *
  * Only the worker registration imports the handler
  * (`title-job-handler.ts`) and what generating a title needs.
@@ -28,7 +27,7 @@ export function parseTitleJobPayload(
     return { recordingId: raw.recordingId };
 }
 
-/** Queue a recording's title; one at a time per recording. */
+/** Queue an item's title; one at a time per item. */
 export async function enqueueTitleJob(
     userId: string,
     recordingId: string,

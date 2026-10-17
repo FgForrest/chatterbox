@@ -31,6 +31,12 @@
         <section id="view-idle" hidden>
             <p id="idle-hint" data-i18n="ready">Ready to record the meeting in the active tab.</p>
             <p id="notice-text" data-i18n="noticeDefault">Inform participants and obtain any required consent before recording.</p>
+            <label id="folder-row" class="field" for="folder-picker">
+                <span data-i18n="folder">Folder</span>
+                <select id="folder-picker">
+                    <option value="" data-i18n="fileLater">File later</option>
+                </select>
+            </label>
             <button id="start" class="primary" type="button" data-i18n="recordWithConsent">Consent confirmed · Record</button>
             <p id="picker-hint" class="hint" hidden data-i18n="pickerHint">Chrome will ask you to choose a tab or screen with audio.</p>
             <p id="auto-hint" class="hint" hidden></p>

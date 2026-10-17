@@ -13,6 +13,8 @@ vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/lib/tasks/archive", () => ({
     tasksForArchive: vi.fn(async () => archivedTasks),
     taskUpdatesForArchive: vi.fn(async () => new Map()),
+    taskMentionsForArchive: vi.fn(async () => []),
+    taskHomeMovesForArchive: vi.fn(async () => []),
     archivedAssigneeIds: vi.fn(() => []),
 }));
 vi.mock("@/lib/mail/archive", () => ({
@@ -33,15 +35,23 @@ vi.mock("@/db/schema", async (importOriginal) => ({
         itemId: "learnRuns.itemId",
         transcriptionId: "learnRuns.transcriptionId",
         view: "learnRuns.view",
+        actorUserId: "learnRuns.actorUserId",
+        payerUserId: "learnRuns.payerUserId",
         trigger: "learnRuns.trigger",
         status: "learnRuns.status",
         path: "learnRuns.path",
         provider: "learnRuns.provider",
         model: "learnRuns.model",
         transcriptRevision: "learnRuns.transcriptRevision",
+        profileRevisionId: "learnRuns.profileRevisionId",
+        builtinPromptsVersion: "learnRuns.builtinPromptsVersion",
+        inputs: "learnRuns.inputs",
         stats: "learnRuns.stats",
+        errorCode: "learnRuns.errorCode",
         createdAt: "learnRuns.createdAt",
+        startedAt: "learnRuns.startedAt",
         finishedAt: "learnRuns.finishedAt",
+        updatedAt: "learnRuns.updatedAt",
     },
     learnReviewItems: {
         runId: "learnReviewItems.runId",
@@ -53,6 +63,52 @@ vi.mock("@/db/schema", async (importOriginal) => ({
     },
     transcriptions: "transcriptions",
     aiEnhancements: "aiEnhancements",
+    processingProfiles: {
+        id: "processingProfiles.id",
+        ownerUserId: "processingProfiles.ownerUserId",
+        scope: "processingProfiles.scope",
+        channel: "processingProfiles.channel",
+        name: "processingProfiles.name",
+        description: "processingProfiles.description",
+        isDefault: "processingProfiles.isDefault",
+        currentRevisionId: "processingProfiles.currentRevisionId",
+        version: "processingProfiles.version",
+        createdBy: "processingProfiles.createdBy",
+        updatedBy: "processingProfiles.updatedBy",
+        createdAt: "processingProfiles.createdAt",
+        updatedAt: "processingProfiles.updatedAt",
+        archivedAt: "processingProfiles.archivedAt",
+    },
+    processingProfileRevisions: {
+        id: "processingProfileRevisions.id",
+        profileId: "processingProfileRevisions.profileId",
+        settings: "processingProfileRevisions.settings",
+        createdBy: "processingProfileRevisions.createdBy",
+        createdAt: "processingProfileRevisions.createdAt",
+    },
+    folderDefaultProfiles: {
+        __table: "folderDefaultProfiles",
+        folderId: "folderDefaultProfiles.folderId",
+        channel: "folderDefaultProfiles.channel",
+        profileId: "folderDefaultProfiles.profileId",
+        manualOnly: "folderDefaultProfiles.manualOnly",
+    },
+    itemProcessing: {
+        __table: "itemProcessing",
+        itemId: "itemProcessing.itemId",
+        userId: "itemProcessing.userId",
+        view: "itemProcessing.view",
+        profileId: "itemProcessing.profileId",
+        profileRevisionId: "itemProcessing.profileRevisionId",
+        manualOnly: "itemProcessing.manualOnly",
+    },
+    mailPendingShares: {
+        __table: "mailPendingShares",
+        itemId: "mailPendingShares.itemId",
+        userId: "mailPendingShares.userId",
+        folderId: "mailPendingShares.folderId",
+        createdAt: "mailPendingShares.createdAt",
+    },
     aiUsageEvents: {
         __table: "aiUsageEvents",
         payerUserId: "aiUsageEvents.payerUserId",
@@ -226,7 +282,13 @@ type Row = Record<string, unknown>;
 
 function mockSelectSequence(
     results: Row[][],
-    extras: { usage?: Row[]; rates?: Row[] } = {},
+    extras: {
+        usage?: Row[];
+        rates?: Row[];
+        folderDefaults?: Row[];
+        itemChoices?: Row[];
+        pendingOrganizationPlacements?: Row[];
+    } = {},
 ) {
     let call = 0;
     dbMock.select.mockImplementation(() => ({
@@ -240,6 +302,18 @@ function mockSelectSequence(
             // Nobody here has an address beside their primary email.
             if (table?.__table === "personEmails") {
                 return { where: () => Promise.resolve([]) };
+            }
+            const processingRows = {
+                folderDefaultProfiles: extras.folderDefaults ?? [],
+                itemProcessing: extras.itemChoices ?? [],
+                mailPendingShares: extras.pendingOrganizationPlacements ?? [],
+            }[table?.__table ?? ""];
+            if (processingRows) {
+                const query = {
+                    innerJoin: () => query,
+                    where: () => Promise.resolve(processingRows),
+                };
+                return query;
             }
             // The folder assignment read joins its folder; the join itself
             // adds nothing a canned result needs to reproduce.
@@ -708,6 +782,98 @@ describe("buildAndUploadExportArchive", () => {
             entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
         );
         expect(manifest.organization).toEqual({ folders: 2, assignments: 1 });
+    });
+
+    it("carries authored processing choices and their manifest counts", async () => {
+        const requestedAt = new Date("2026-09-03T10:00:00Z");
+        mockSelectSequence([], {
+            folderDefaults: [
+                {
+                    folderId: "folder-1",
+                    channel: "audio",
+                    profileId: "profile-1",
+                    manualOnly: false,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: "item-1",
+                    view: "private",
+                    profileId: "profile-1",
+                    profileRevisionId: "revision-1",
+                    manualOnly: false,
+                },
+            ],
+            pendingOrganizationPlacements: [
+                {
+                    itemId: "item-1",
+                    folderId: "folder-org",
+                    createdAt: requestedAt,
+                },
+            ],
+        });
+
+        await buildAndUploadExportArchive({
+            scope: { kind: "personal", userId: "user-1" },
+            sourceStorage: storage,
+            destinationStorage: storage,
+            storageKey: "exports/user-1/processing.zip",
+        });
+
+        const entries = await readZipEntries(storage.uploaded as Buffer);
+        expect(
+            JSON.parse(
+                entries
+                    .get("processing/choices.json")
+                    ?.buffer.toString("utf-8") ?? "{}",
+            ),
+        ).toEqual({
+            folderDefaults: [
+                {
+                    folderId: "folder-1",
+                    channel: "audio",
+                    profileId: "profile-1",
+                    manualOnly: false,
+                },
+            ],
+            itemChoices: [
+                {
+                    itemId: "item-1",
+                    view: "private",
+                    profileId: "profile-1",
+                    profileRevisionId: "revision-1",
+                    manualOnly: false,
+                },
+            ],
+            pendingOrganizationPlacements: [
+                {
+                    itemId: "item-1",
+                    folderId: "folder-org",
+                    requestedAt: requestedAt.toISOString(),
+                    confirmedAt: null,
+                },
+            ],
+        });
+        expect(
+            JSON.parse(
+                entries.get("manifest.json")?.buffer.toString("utf-8") ?? "{}",
+            ).processing,
+        ).toEqual({
+            folderDefaults: 1,
+            itemChoices: 1,
+            pendingOrganizationPlacements: 1,
+            path: "processing/choices.json",
+        });
+        expect(
+            JSON.parse(
+                entries
+                    .get("profiles/profiles.json")
+                    ?.buffer.toString("utf-8") ?? "{}",
+            ),
+        ).toMatchObject({
+            externalProfileIds: ["profile-1"],
+            externalRevisionIds: ["revision-1"],
+        });
     });
 
     it("carries the user's own vocabulary and the phrases they suggested", async () => {
@@ -1545,7 +1711,7 @@ describe("buildAndUploadExportArchive", () => {
         ).rejects.toThrow();
     });
 
-    it("produces an empty-but-valid archive (manifest only) for a user with no recordings", async () => {
+    it("leaves an archive without authored processing choices unchanged", async () => {
         mockSelectSequence([[], [], []]);
 
         const result = await buildAndUploadExportArchive({

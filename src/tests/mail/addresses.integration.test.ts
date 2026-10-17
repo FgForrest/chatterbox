@@ -228,6 +228,7 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: orgRoot,
             name: "Weekly",
+            canCurate: true,
         });
         expect(await addressOfFolder(weekly.id)).toBe("acme-weekly");
         const found = await resolveLocalPart("ACME-Weekly");
@@ -410,11 +411,33 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
         });
     });
 
-    it("shows a folder's addresses to whoever reaches it, and lets them change them", async () => {
+    it("limits Organization folder address changes to curators", async () => {
         const personal = await createFolder({
             userId: "u-jan",
             parentId: await rootOf("u-jan"),
             name: "Steering",
+        });
+        const personalEdited = await setFolderAlias({
+            userId: "u-jan",
+            folderId: personal.id,
+            alias: "steering-notes",
+            canCurate: false,
+        });
+        expect(personalEdited.address).toBe(
+            "jan+steering-notes@klepna.example",
+        );
+        const personalListed = await loadFolderAddresses("u-jan", personal.id, {
+            canCurate: false,
+        });
+        expect(personalListed?.writable).toBe(true);
+        const personalSecondary = personalListed?.addresses.find(
+            (address) => !address.primary,
+        );
+        await removeFolderAlias({
+            userId: "u-jan",
+            folderId: personal.id,
+            addressId: personalSecondary?.id ?? "",
+            canCurate: false,
         });
         expect(await loadFolderAddresses("u-jan2", personal.id)).toBeNull();
         await expect(
@@ -429,20 +452,39 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: await rootOf(orgUserId),
             name: "Suppliers",
+            canCurate: true,
         });
         const child = await createFolder({
             userId: "u-jan",
             parentId: org.id,
             name: "Steel",
         });
-        // Another member edits the Organization folder's address.
+        const memberListed = await loadFolderAddresses("u-jan2", org.id, {
+            canCurate: false,
+        });
+        expect(memberListed?.writable).toBe(false);
+        await expect(
+            setFolderAlias({
+                userId: "u-jan2",
+                folderId: org.id,
+                alias: "member-vendors",
+                canCurate: false,
+            }),
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            message: "Only curators can change Organization folders",
+        });
+
         const edited = await setFolderAlias({
-            userId: "u-jan2",
+            userId: "u-jan",
             folderId: org.id,
             alias: "vendors",
+            canCurate: true,
         });
         expect(edited.address).toBe("acme-vendors@klepna.example");
-        const listed = await loadFolderAddresses("u-jan2", org.id);
+        const listed = await loadFolderAddresses("u-jan", org.id, {
+            canCurate: true,
+        });
         expect(listed?.writable).toBe(true);
         expect(
             listed?.addresses.map((address) => [
@@ -455,12 +497,24 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
         ]);
         const subtree = await loadFolderAddresses("u-jan", org.id, {
             subtree: true,
+            canCurate: true,
         });
         expect(
             subtree?.addresses.map((address) => address.folderId).sort(),
         ).toEqual([org.id, org.id, child.id].sort());
 
         const secondary = listed?.addresses.find((address) => !address.primary);
+        await expect(
+            removeFolderAlias({
+                userId: "u-jan2",
+                folderId: org.id,
+                addressId: secondary?.id ?? "",
+                canCurate: false,
+            }),
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            message: "Only curators can change Organization folders",
+        });
         // Its creator cannot stop it past the folder's own permission check.
         await expect(
             removeAddress({ userId: "u-jan", addressId: secondary?.id ?? "" }),
@@ -470,12 +524,14 @@ describeWithDatabase("mail addresses (PostgreSQL)", () => {
                 userId: "u-jan",
                 folderId: org.id,
                 addressId: edited.id,
+                canCurate: true,
             }),
         ).rejects.toMatchObject({ statusCode: 404 });
         await removeFolderAlias({
             userId: "u-jan",
             folderId: org.id,
             addressId: secondary?.id ?? "",
+            canCurate: true,
         });
         expect(
             (await loadFolderAddresses("u-jan", org.id))?.addresses.map(

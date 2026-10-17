@@ -37,6 +37,7 @@ import type { ContentParticipant, ContentSegment } from "@/lib/content/types";
 import { decryptText, encryptJsonField } from "@/lib/encryption/fields";
 import { env } from "@/lib/env";
 import { AppError, ErrorCode } from "@/lib/errors";
+import { itemScopeAlmanacUsage } from "@/lib/folders/item-scope";
 import { listCalendarEventsForRecording } from "@/lib/integrations/google/calendar-events";
 import { getMeetSpeakerCandidates } from "@/lib/integrations/google/meet-speaker-candidates";
 import { nudge } from "@/lib/jobs/nudge";
@@ -85,6 +86,14 @@ import {
     validateLearnOutput,
 } from "@/lib/learn/validate";
 import { maskedContentForModel } from "@/lib/mail/redact";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import {
+    loadItemProfileRevision,
+    type ResolvedItemProfile,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
+import type { ProviderPin } from "@/lib/profiles/settings";
 import { contentWriterRefusal, sharingOrgUserId } from "@/lib/sharing/writer";
 import { readTranscriptTurns } from "@/lib/transcription/read-turns";
 
@@ -151,14 +160,31 @@ async function setStatus(
     status: Outcome,
     extra: Partial<typeof learnRuns.$inferInsert> = {},
 ): Promise<void> {
-    await db
-        .update(learnRuns)
-        .set({ status, updatedAt: new Date(), ...extra })
-        .where(and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")));
+    const advance = await db.transaction(async (tx) => {
+        const [updated] = await tx
+            .update(learnRuns)
+            .set({ status, updatedAt: new Date(), ...extra })
+            .where(
+                and(eq(learnRuns.id, runId), eq(learnRuns.status, "running")),
+            )
+            .returning({
+                itemId: learnRuns.itemId,
+                userId: learnRuns.userId,
+                view: learnRuns.view,
+            });
+        if (!updated || status === "queued") return null;
+        return requestAdvanceInTx(tx, {
+            itemId: updated.itemId,
+            userId: updated.userId,
+            view: updated.view,
+            reason: "learn-settled",
+        });
+    });
+    if (advance) nudge();
 }
 
 /** The actor's chat provider, as the Learn pass talks to it. */
-function chatFor(run: AnyRun, signal: AbortSignal) {
+function chatFor(run: AnyRun, signal: AbortSignal, pin: ProviderPin | null) {
     return learnChatClients({
         actorUserId: run.actorUserId ?? "",
         recordingId: run.itemId,
@@ -166,6 +192,7 @@ function chatFor(run: AnyRun, signal: AbortSignal) {
         operation: "learn",
         schemaName: "learn_output",
         signal,
+        pin,
     });
 }
 
@@ -604,19 +631,46 @@ async function runLearnJob({
     if (run.status !== "queued" && run.status !== "running") {
         return { skipped: run.status };
     }
+    const profile = run.profileRevisionId
+        ? await loadItemProfileRevision({
+              itemId: run.itemId,
+              view: run.view,
+              ownerUserId: run.userId,
+              actorUserId: run.actorUserId ?? run.userId,
+              revisionId: run.profileRevisionId,
+          })
+        : await resolveItemProfile(
+              run.itemId,
+              run.view,
+              run.userId,
+              run.actorUserId ?? run.userId,
+          );
     if (!isRecordingRun(run)) {
         if (await isMailItem(run)) {
-            return runMailLearnJob(run, {
-                attempt,
-                maxAttempts,
-                signal,
-                reportProgress,
-            });
+            return runMailLearnJob(
+                run,
+                {
+                    attempt,
+                    maxAttempts,
+                    signal,
+                    reportProgress,
+                },
+                profile,
+            );
         }
-        await db
-            .update(learnRuns)
-            .set({ status: "cancelled", updatedAt: new Date() })
-            .where(eq(learnRuns.id, run.id));
+        await db.transaction(async (tx) => {
+            await tx
+                .update(learnRuns)
+                .set({ status: "cancelled", updatedAt: new Date() })
+                .where(eq(learnRuns.id, run.id));
+            await requestAdvanceInTx(tx, {
+                itemId: run.itemId,
+                userId: run.userId,
+                view: run.view,
+                reason: "learn-settled",
+            });
+        });
+        nudge();
         return { skipped: "unsupported kind" };
     }
     const claimed = await db
@@ -683,16 +737,34 @@ async function runLearnJob({
             provider: transcript.provider,
         });
         const labels = [...new Set(turns.map((turn) => turn.speaker))];
-        const { chat, bridge, provider, baseUrl, model } = await chatFor(
-            run,
-            signal,
-        );
+        const { chat, bridge, provider, baseUrl, model, payerUserId } =
+            await chatFor(run, signal, profile.settings.steps.learn.provider);
+        await db
+            .update(learnRuns)
+            .set({
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId,
+                inputs: {
+                    contentId: transcript.id,
+                    contentRevision: transcript.revision,
+                },
+                updatedAt: new Date(),
+            })
+            .where(eq(learnRuns.id, run.id));
         // Path 1: the bridge's CLI looks things up itself over MCP;
         // anything else takes the fallback, which looks up for it.
         const path = chooseLearnPath(
             { provider, baseUrl },
             { mcpUrl: env.LEARN_MCP_URL, bridgeUrl: env.LEARN_BRIDGE_URL },
         );
+        if (path === "fallback") {
+            tools.scopeUsage = await itemScopeAlmanacUsage(
+                run.itemId,
+                run.view,
+                run.userId,
+            );
+        }
         const unnamedLabels = labels.filter(
             (label) => !frameBefore.answeredLabels.has(label),
         );
@@ -863,10 +935,10 @@ async function runLearnJob({
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
-                const finish = (
+                const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
-                ) =>
-                    tx
+                ) => {
+                    await tx
                         .update(learnRuns)
                         .set({
                             status,
@@ -880,6 +952,13 @@ async function runLearnJob({
                             updatedAt: new Date(),
                         })
                         .where(eq(learnRuns.id, run.id));
+                    await requestAdvanceInTx(tx, {
+                        itemId: run.itemId,
+                        userId: run.userId,
+                        view: run.view,
+                        reason: "learn-settled",
+                    });
+                };
                 if (
                     validated.superseded ||
                     current.revision !== run.transcriptRevision
@@ -926,11 +1005,15 @@ async function runLearnJob({
                 // Nothing to review: the transcript is read again now.
                 const correcting =
                     status === "finished" &&
-                    (await queueCorrectionPassInTx(tx, run));
+                    (await queueCorrectionPassInTx(
+                        tx,
+                        run,
+                        profile.settings.steps.learn.correctAfterLearn,
+                    ));
                 return { status, items: items.length, correcting };
             });
             if (outcome.status === "stale") continue;
-            if ("correcting" in outcome && outcome.correcting) nudge();
+            nudge();
             return { status: outcome.status, items: outcome.items };
         }
     } catch (caught) {
@@ -1022,6 +1105,7 @@ async function runMailLearnJob(
         Parameters<JobHandler<LearnJobPayload>["run"]>[0],
         "attempt" | "maxAttempts" | "signal" | "reportProgress"
     >,
+    profile: ResolvedItemProfile,
 ): Promise<JobResult> {
     const claimed = await db
         .update(learnRuns)
@@ -1099,6 +1183,11 @@ async function runMailLearnJob(
             read: { kind: "recording", ownerUserId: run.userId, shared },
             budget: { remaining: TOOL_BUDGET },
             language: content.language,
+            scopeUsage: await itemScopeAlmanacUsage(
+                run.itemId,
+                run.view,
+                run.userId,
+            ),
         };
         const vocabulary = await vocabularyVisibleTo(run.scopeUserId, {
             sharedOnly: shared,
@@ -1108,7 +1197,24 @@ async function runMailLearnJob(
                 (relation) => !relation.adoptedAsKey,
             );
         const entityTypes = newThingTypes(vocabulary);
-        const { chat, provider, model } = await chatFor(run, signal);
+        const { chat, provider, model, payerUserId } = await chatFor(
+            run,
+            signal,
+            profile.settings.steps.learn.provider,
+        );
+        await db
+            .update(learnRuns)
+            .set({
+                profileRevisionId: profile.revisionId,
+                builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+                payerUserId,
+                inputs: {
+                    contentId: content.sourceId,
+                    contentRevision: content.revision,
+                },
+                updatedAt: new Date(),
+            })
+            .where(eq(learnRuns.id, run.id));
         reportProgress({ phase: "reading" });
         const pass =
             turns.length > 0
@@ -1248,10 +1354,10 @@ async function runMailLearnJob(
                 if (!current || still?.status !== "running") {
                     return { status: "cancelled" as const, items: 0 };
                 }
-                const finish = (
+                const finish = async (
                     status: "ready" | "finished" | "superseded" | "cancelled",
-                ) =>
-                    tx
+                ) => {
+                    await tx
                         .update(learnRuns)
                         .set({
                             status,
@@ -1263,6 +1369,13 @@ async function runMailLearnJob(
                             updatedAt: new Date(),
                         })
                         .where(eq(learnRuns.id, run.id));
+                    await requestAdvanceInTx(tx, {
+                        itemId: run.itemId,
+                        userId: run.userId,
+                        view: run.view,
+                        reason: "learn-settled",
+                    });
+                };
                 if (
                     validated.superseded ||
                     current.revision !== run.transcriptRevision
@@ -1319,6 +1432,7 @@ async function runMailLearnJob(
                 return { status, items: candidates.length };
             });
             if (outcome.status === "stale") continue;
+            nudge();
             return { status: outcome.status, items: outcome.items };
         }
     } catch (caught) {

@@ -15,7 +15,9 @@ import { asyncJobStatusEnum, asyncJobs } from "@/db/schema";
  * `async_job_status`, named from the schema so a rename cannot leave a stale
  * literal behind in the raw SQL below.
  */
-const STATUS_TYPE = sql.identifier(asyncJobStatusEnum.enumName);
+function statusType() {
+    return sql.identifier(asyncJobStatusEnum.enumName);
+}
 
 export type AsyncJobStatus = "pending" | "processing" | "completed" | "failed";
 
@@ -58,7 +60,9 @@ export interface ClaimedAsyncJob {
  * A job still to be finished. Also the predicate of `async_jobs_active_unique`,
  * which `enqueueJob` names as its conflict target, so the two must match.
  */
-const IS_ACTIVE = sql`${asyncJobs.status} in ('pending', 'processing')`;
+function isActive() {
+    return sql`${asyncJobs.status} in ('pending', 'processing')`;
+}
 
 /**
  * A queued job that finishes between a conflicting insert and the read that
@@ -144,7 +148,7 @@ export async function enqueueJobInTx(
         })
         .onConflictDoNothing({
             target: [asyncJobs.kind, asyncJobs.subjectId],
-            where: IS_ACTIVE,
+            where: isActive(),
         })
         .returning({ id: asyncJobs.id });
     return row !== undefined;
@@ -169,7 +173,7 @@ export async function enqueueJob(
             .values(values)
             .onConflictDoNothing({
                 target: [asyncJobs.kind, asyncJobs.subjectId],
-                where: IS_ACTIVE,
+                where: isActive(),
             })
             .returning();
         if (row) return { job: row as AsyncJobRow, created: true };
@@ -261,7 +265,7 @@ export async function getActiveJob(
             and(
                 eq(asyncJobs.kind, kind),
                 eq(asyncJobs.subjectId, subjectId),
-                IS_ACTIVE,
+                isActive(),
             ),
         )
         .limit(1);
@@ -334,7 +338,64 @@ export async function claimDueJobs(
     limit: number,
 ): Promise<ClaimedAsyncJob[]> {
     if (limit <= 0) return [];
-    const result = await db.execute(sql`
+    const result =
+        kind === "pipeline.advance"
+            ? await db.execute(sql`
+        with eligible_users as (
+            select
+                queued.user_id,
+                min(queued.next_attempt_at) as oldest_waiting
+            from ${asyncJobs} queued
+            where queued.status = 'pending'
+              and queued.kind = ${kind}
+              and queued.next_attempt_at <= now()
+              and not exists (
+                  select 1
+                  from ${asyncJobs} running
+                  where running.kind = ${kind}
+                    and running.user_id = queued.user_id
+                    and running.status = 'processing'
+              )
+            group by queued.user_id
+            order by oldest_waiting asc
+        ), locked_users as (
+            select user_id, oldest_waiting
+            from eligible_users
+            where pg_try_advisory_xact_lock(
+                hashtext('riffado:pipeline.advance'),
+                hashtext(user_id)
+            )
+            order by oldest_waiting asc
+            limit ${limit}
+        ), picked as (
+            select picked_job.id
+            from locked_users
+            cross join lateral (
+                select queued.id
+                from ${asyncJobs} queued
+                where queued.status = 'pending'
+                  and queued.kind = ${kind}
+                  and queued.user_id = locked_users.user_id
+                  and queued.next_attempt_at <= now()
+                order by
+                    queued.priority desc,
+                    queued.next_attempt_at asc,
+                    queued.created_at asc
+                limit 1
+                for update skip locked
+            ) picked_job
+        )
+        update ${asyncJobs}
+        set status = 'processing',
+            started_at = now(),
+            heartbeat_at = now(),
+            updated_at = now(),
+            attempts = attempts + 1,
+            claim_token = gen_random_uuid()::text
+        where id in (select id from picked)
+        returning id, user_id, kind, subject_id, payload, attempts, max_attempts, claim_token
+    `)
+            : await db.execute(sql`
         update ${asyncJobs}
         set status = 'processing',
             started_at = now(),
@@ -477,7 +538,7 @@ export async function failJobAttempt(input: {
         set last_error = ${input.message},
             error_code = ${input.code ?? null},
             updated_at = now(),
-            status = (case when ${buried} then 'failed' else 'pending' end)::${STATUS_TYPE},
+            status = (case when ${buried} then 'failed' else 'pending' end)::${statusType()},
             claim_token = case when ${buried} then claim_token else null end,
             started_at = case when ${buried} then started_at else null end,
             completed_at = case when ${buried} then now() else null end,
@@ -662,7 +723,7 @@ export async function listJobsForUser(
     const filters = [eq(asyncJobs.userId, userId)];
     if (opts.kind) filters.push(eq(asyncJobs.kind, opts.kind));
     if (opts.activeOnly) {
-        filters.push(IS_ACTIVE);
+        filters.push(isActive());
     }
     const rows = await db
         .select()

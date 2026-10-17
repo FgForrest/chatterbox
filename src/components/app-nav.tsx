@@ -54,7 +54,14 @@ export function AppNav({ className }: { className?: string }) {
                             key={section.href}
                             href={section.href}
                             aria-current={active ? "page" : undefined}
-                            aria-label={section.label}
+                            aria-label={
+                                section.href === "/tasks" && pendingTasks > 0
+                                    ? `${section.label}, ${i18n(
+                                          "{count, plural, one {# new task or proposal for you} other {# new tasks or proposals for you}}",
+                                          { count: pendingTasks },
+                                      )}`
+                                    : section.label
+                            }
                             className={cn(
                                 "relative flex min-w-12 items-center justify-center gap-2.5 px-3 text-sm font-semibold tracking-tight transition-[color,background-color] focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-3 sm:px-9 sm:text-lg",
                                 active
@@ -68,6 +75,7 @@ export function AppNav({ className }: { className?: string }) {
                                     active && "text-primary",
                                 )}
                                 strokeWidth={1.9}
+                                aria-hidden="true"
                             />
                             <span className="hidden sm:inline">
                                 {section.label}
@@ -76,6 +84,7 @@ export function AppNav({ className }: { className?: string }) {
                                 pendingReviews > 0 && (
                                     <span
                                         className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+                                        aria-hidden="true"
                                         title={i18n(
                                             "{count, plural, one {# review waits} other {# reviews wait}}",
                                             { count: pendingReviews },
@@ -87,8 +96,9 @@ export function AppNav({ className }: { className?: string }) {
                             {section.href === "/tasks" && pendingTasks > 0 && (
                                 <span
                                     className="rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground"
+                                    aria-hidden="true"
                                     title={i18n(
-                                        "{count, plural, one {# new task for you} other {# new tasks for you}}",
+                                        "{count, plural, one {# new task or proposal for you} other {# new tasks or proposals for you}}",
                                         { count: pendingTasks },
                                     )}
                                 >

@@ -1,0 +1,1 @@
+ALTER TABLE "recording_folder_assignments" ADD COLUMN "confirmed_at" timestamp;

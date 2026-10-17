@@ -21,6 +21,46 @@ healthy via `/api/health` once ready. There is no separate "migration
 container" — failure to migrate is failure to start, which is the
 behaviour you want.
 
+## Processing pipeline release
+
+No configuration change is required. Pull the new image and restart it as
+above. At startup, the container applies migrations `0112` through `0128`. They
+are additive apart from the loosened uniqueness constraint in `0128`. Migration
+`0116` marks existing items as **Processed before
+profiles**, so an upgrade does not start paid processing on old recordings or
+mail. Migration `0122` creates a home mention for each existing task and records
+the effective time of its current fields.
+Migration `0124` adds proposed-assignee fields and widens the proposal-kind
+check for newer proposal types. Migrations `0125` through `0127` record each
+proposal's evidence time, backfill it for existing proposals, and correct
+effective times for existing open tasks. Migration `0128` adds the encrypted
+content-vector cache used by merge search and loosens proposal uniqueness so it
+applies only to pending proposals; settled history no longer blocks a new
+proposal.
+
+After the upgrade, new recordings and mail sent to the main mailbox wait for
+their owner to file them into a folder before any paid step runs. Mail sent to a
+folder address, dashboard uploads with a folder, and Meeting Recorder sessions
+with a folder skip that wait.
+
+The Meeting Recorder extension needs its matching store release for the new
+folder picker. The old extension remains compatible with the new server, but
+its recordings arrive without `folderId` and wait for filing. Against an older
+server, the new extension offers only **File later**; if that server rejects a
+selected folder, the extension drops the folder choice and continues recording.
+
+`ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR` is optional and defaults to 60. To
+change it, update the app service's Compose environment pass-through as
+described under [Environment variables](./environment-variables#optional-knobs).
+
+Upgrading is safe. Before upgrading, take a `pg_dump` of the Riffado database.
+The supported rollback is to restore that dump and start the previous image.
+Starting the previous image against the upgraded database is not supported: it
+starts without errors but shows settled proposals as pending again. Accepting
+one in task review applies an obsolete change and deletes proposal rows. Do not
+open task reviews while rolled back. Recordings uploaded while rolled back need
+to be started manually after you roll forward.
+
 ## Picking a tag
 
 `RIFFADO_VERSION` in your `.env` controls which image tag Compose
@@ -50,8 +90,8 @@ shouldn't phone home at all, set `DISABLE_UPDATE_CHECK=true` in your
 
 ## Rolling back
 
-To roll back, set `RIFFADO_VERSION` to the previous tag and re-run
-the upgrade command:
+To roll back safely, restore the `pg_dump` taken before the upgrade, set
+`RIFFADO_VERSION` to the previous tag, and start the stack:
 
 ```bash
 # In .env
@@ -62,15 +102,13 @@ RIFFADO_VERSION=0.4.1
 docker compose pull && docker compose up -d
 ```
 
-This works because Chatterbox's database migrations are
-**additive by default** — dropping columns is treated as a deliberate
-breaking change with a CHANGELOG migration note. If you're rolling
-back across a release that explicitly dropped state (rare; called out
-loudly in CHANGELOG), check the release notes first.
+Do not start the previous image against the upgraded database. It can show
+settled proposals as pending and accepting one can apply an obsolete change.
 
 ## Backing up before an upgrade
 
-Two things to back up before a major-version upgrade:
+Before upgrading, create a logical `pg_dump` of the Riffado database. Also back
+up these two data volumes before a major-version upgrade:
 
 1. The Postgres volume (whichever path your compose file binds to
    `postgres:/var/lib/postgresql/data`).
@@ -78,8 +116,8 @@ Two things to back up before a major-version upgrade:
    bucket if you've migrated to remote storage.
 
 You can also create a logical export via **Settings → Export/Backup
-→ Create Backup**, which produces a JSON archive of recordings +
-transcripts.
+→ Create Backup**, which produces a zip archive of recordings, audio,
+transcripts, summaries, mail, tasks, profiles, and processing choices.
 That export is **plaintext** by design (it's your data), so store it
 with the same care you'd give your unencrypted database. See
 [Backup and restore](../guides/backup-and-restore).

@@ -3,6 +3,7 @@ import { requireApiSession } from "@/lib/auth-server";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { loadMailDetail } from "@/lib/mail/detail";
 import { deleteMail } from "@/lib/mail/manage";
+import { loadPrivateItemProcessing } from "@/lib/pipeline/presentation";
 
 type IdContext = { params: Promise<{ id: string }> };
 
@@ -10,13 +11,19 @@ type IdContext = { params: Promise<{ id: string }> };
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const session = await requireApiSession(request);
     const { id } = await (context as IdContext).params;
-    const detail = await loadMailDetail(session.user.id, id);
+    const [detail, processing] = await Promise.all([
+        loadMailDetail(session.user.id, id),
+        loadPrivateItemProcessing(session.user.id, id),
+    ]);
     if (!detail) {
         throw new AppError(ErrorCode.NOT_FOUND, "Mail not found", 404);
     }
-    return NextResponse.json(detail, {
-        headers: { "Cache-Control": "private, no-store" },
-    });
+    return NextResponse.json(
+        { ...detail, processing },
+        {
+            headers: { "Cache-Control": "private, no-store" },
+        },
+    );
 });
 
 /** Deletes the caller's mail for good. */

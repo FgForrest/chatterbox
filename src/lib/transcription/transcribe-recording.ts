@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { audioItemColumns, recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
-    apiCredentials,
     chatterItems,
     recordings,
     transcriptions,
@@ -15,18 +14,20 @@ import {
     getTranscriptionStyle,
 } from "@/lib/ai/provider-presets";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
-import { decrypt } from "@/lib/encryption";
 import { decryptText, encryptText } from "@/lib/encryption/fields";
 import { isHostedLockedOut } from "@/lib/entitlements";
 import { env } from "@/lib/env";
+import { AppError, ErrorCode } from "@/lib/errors";
 import {
     exportRecordingSidecarsIfEnabled,
     removeRecordingSidecar,
 } from "@/lib/export/document-sidecars";
+import { itemScopeFolderIds } from "@/lib/folders/item-scope";
 import {
     isMynahConfigured,
     transcribeViaMynah,
 } from "@/lib/hosted/transcription/mynah";
+import { nudge } from "@/lib/jobs/nudge";
 import { copyMatchingSpeakerAttributions } from "@/lib/knowledge/attribution";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
@@ -34,13 +35,19 @@ import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
-import { holdForAutoLearn } from "@/lib/learn/auto-learn";
 import { isOrgScopeEnabled } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
 import {
     captureServerEvent,
     captureServerException,
 } from "@/lib/posthog-server";
-import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
+import {
+    type ResolvedStepProvider,
+    resolveStepProvider,
+} from "@/lib/profiles/providers";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
+import type { AudioProfileSettings } from "@/lib/profiles/settings";
 import type { RecordingView } from "@/lib/sharing/access";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import { resolveRunContext } from "@/lib/sharing/run-context";
@@ -51,8 +58,7 @@ import {
     type WriterRefusal,
 } from "@/lib/sharing/writer";
 import { createUserStorageProvider } from "@/lib/storage/factory";
-import { queueAutoSummary } from "@/lib/summary/auto-summary";
-import { queueAutoTopics } from "@/lib/topics/topics-job";
+import { dropReplaceableTaskReviewInTx } from "@/lib/tasks/store";
 import {
     type AlmanacTerm,
     almanacTermsFor,
@@ -70,7 +76,6 @@ import {
     parseTranscriptionResponse,
 } from "@/lib/transcription/format";
 import { geminiTranscribe } from "@/lib/transcription/gemini-transcribe";
-import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import {
     speechmaticsTakesVocabulary,
@@ -110,12 +115,8 @@ export interface StoreBrowserTranscriptionInput {
  * Persist a transcription produced in the browser by Transformers.js.
  *
  * Mirrors the persistence half of `transcribeRecording` (tombstone check,
- * at-rest encryption, upsert, `transcription.completed` event) but skips
- * the server-side provider call. Auto-generated title and Plaud title
- * sync are intentionally NOT run from this path; browser-only users
- * typically have no AI provider configured and the title generation
- * would silently fail. If a browser-transcribing user later wants a
- * generated title they can trigger it once they configure an AI key.
+ * at-rest encryption, upsert, pipeline trigger and `transcription.completed`
+ * event) but skips the server-side provider call.
  */
 export async function storeBrowserTranscription(
     input: StoreBrowserTranscriptionInput,
@@ -138,7 +139,11 @@ export async function storeBrowserTranscription(
     }
 
     const [recording] = await db
-        .select({ id: recordings.id, deletedAt: recordings.deletedAt })
+        .select({
+            id: recordings.id,
+            deletedAt: recordings.deletedAt,
+            fileMd5: recordings.fileMd5,
+        })
         .from(recordings)
         .where(
             and(
@@ -156,6 +161,20 @@ export async function storeBrowserTranscription(
             errorCode: "RECORDING_NOT_FOUND",
         };
     }
+    const profile = await resolveManualItemProfile(
+        recordingId,
+        "private",
+        userId,
+    );
+    const runRecord = {
+        profileRevisionId: profile.revisionId,
+        builtinPromptsVersion: null,
+        payerUserId: userId,
+        inputs: {
+            contentId: recording.id,
+            contentRevision: recording.fileMd5,
+        },
+    };
 
     const RECORDING_TOMBSTONED = Symbol("recording-tombstoned");
     const RECORDING_REFUSED = Symbol("recording-refused");
@@ -163,7 +182,7 @@ export async function storeBrowserTranscription(
     // Before the transaction; see `sharingOrgUserId`.
     const orgUserId = await sharingOrgUserId();
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             const [stillActive] = await tx
                 .select({ deletedAt: recordings.deletedAt })
                 .from(recordings)
@@ -220,6 +239,7 @@ export async function storeBrowserTranscription(
                         topics: null,
                         topicsInputFingerprint: null,
                         producedByUserId: userId,
+                        ...runRecord,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
@@ -255,6 +275,7 @@ export async function storeBrowserTranscription(
                     topics: null,
                     topicsInputFingerprint: null,
                     producedByUserId: userId,
+                    ...runRecord,
                 });
                 // Which audio the browser fetched is not known here; it
                 // has no turns, so no speaker rests on it.
@@ -277,6 +298,10 @@ export async function storeBrowserTranscription(
                         eq(aiEnhancements.source, "riffado"),
                     ),
                 );
+            await dropReplaceableTaskReviewInTx(tx, {
+                recordingId,
+                ownerUserId: userId,
+            });
 
             const now = new Date();
             await tx
@@ -299,7 +324,14 @@ export async function storeBrowserTranscription(
                         isNull(chatterItems.deletedAt),
                     ),
                 );
+            return requestAdvanceInTx(tx, {
+                itemId: recordingId,
+                userId,
+                view: "private",
+                reason: "transcript",
+            });
         });
+        if (advance) nudge();
     } catch (txError) {
         if (txError === RECORDING_REFUSED && refused) {
             return refusedResult(refused);
@@ -349,7 +381,7 @@ export interface TranscribeOptions {
      */
     force?: boolean;
     /** What triggered this call. Drives the `recording_transcribed` event's `trigger` property. */
-    trigger?: "manual" | "sync" | "upload";
+    trigger?: "manual" | "sync" | "upload" | "pipeline";
     /**
      * `org` transcribes the Organization view of a shared recording: the
      * caller is the actor whose provider runs, not the owner.
@@ -516,66 +548,76 @@ async function transcribeRecordingInner(
             };
         }
 
-        const [legacyDefaultCredentials] = opts.providerId
-            ? []
+        const profile = await ((opts.trigger ?? "manual") === "manual"
+            ? resolveManualItemProfile
+            : resolveItemProfile)(
+            recordingId,
+            ctx.view,
+            ctx.ownerUserId,
+            ctx.actorUserId,
+        );
+        const profileSettings = profile.settings as AudioProfileSettings;
+        const transcribeStep = profileSettings.steps.transcribe;
+        const categorized = orgView || profile.assigned === true;
+        const manualBeforeCategorization =
+            (opts.trigger ?? "manual") === "manual" && !categorized;
+        let resolved: ResolvedStepProvider;
+        try {
+            resolved = await resolveStepProvider({
+                step: "transcription",
+                pin: opts.providerId
+                    ? { credentialId: opts.providerId, scope: "personal" }
+                    : manualBeforeCategorization
+                      ? null
+                      : transcribeStep.provider,
+                actorUserId: ctx.actorUserId,
+            });
+        } catch (error) {
+            if (
+                opts.providerId &&
+                error instanceof AppError &&
+                error.code === ErrorCode.NOT_FOUND
+            ) {
+                return {
+                    success: false,
+                    error: "No transcription API configured",
+                    errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                };
+            }
+            if (
+                !opts.providerId &&
+                (manualBeforeCategorization || !transcribeStep.provider) &&
+                error instanceof AppError &&
+                error.code === ErrorCode.NO_TRANSCRIPTION_PROVIDER
+            ) {
+                return {
+                    success: false,
+                    error: "No transcription API configured",
+                    errorCode: "NO_TRANSCRIPTION_PROVIDER",
+                };
+            }
+            throw error;
+        }
+        const [settings] = resolved.actorSettings
+            ? [resolved.actorSettings]
             : await db
                   .select()
-                  .from(apiCredentials)
-                  .where(
-                      and(
-                          eq(apiCredentials.userId, ctx.actorUserId),
-                          eq(apiCredentials.isDefaultTranscription, true),
-                      ),
-                  )
+                  .from(userSettings)
+                  .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
 
-        // The engine (provider pointer) is the actor's, because the keys are.
-        // What the output should look like (language) follows the view.
-        const [settings] = await db
-            .select()
-            .from(userSettings)
-            .where(eq(userSettings.userId, ctx.actorUserId))
-            .limit(1);
-        const [contentSettings] =
-            ctx.settingsUserId === ctx.actorUserId
-                ? [settings]
-                : await db
-                      .select()
-                      .from(userSettings)
-                      .where(eq(userSettings.userId, ctx.settingsUserId))
-                      .limit(1);
-
         const defaultLanguage =
-            contentSettings?.defaultTranscriptionLanguage || undefined;
-        const quality = settings?.transcriptionQuality || "balanced";
-        // Title, Plaud and automation side effects act on the owner's
-        // recording; a run on the Organization view never triggers them.
-        const autoGenerateTitle =
-            !orgView && (settings?.autoGenerateTitle ?? true);
-        const syncTitleToPlaud = settings?.syncTitleToPlaud ?? false;
-        const autoSummarize = !orgView && (settings?.autoSummarize ?? false);
-        const autoSummarizePreset = settings?.autoSummarizePreset ?? null;
-        const pointer = settings?.defaultTranscriptionProviderId ?? null;
-        const requested = opts.providerId || pointer || null;
-        const useManaged = isRiffadoIncludedProviderId(requested);
-
+            (opts.trigger ?? "manual") === "manual"
+                ? settings?.defaultTranscriptionLanguage || undefined
+                : transcribeStep.language || undefined;
+        const quality = transcribeStep.quality;
         void quality;
 
-        let credentials: typeof apiCredentials.$inferSelect | undefined;
-        if (!useManaged && requested) {
-            [credentials] = await db
-                .select()
-                .from(apiCredentials)
-                .where(
-                    and(
-                        eq(apiCredentials.id, requested),
-                        eq(apiCredentials.userId, ctx.actorUserId),
-                    ),
-                )
-                .limit(1);
-        } else if (!useManaged) {
-            credentials = legacyDefaultCredentials;
-        }
+        const credentials =
+            resolved.kind === "credential" ? resolved.credential : undefined;
+        const useManaged = resolved.kind === "managed";
+        const payerUserId = resolved.payerUserId;
+        const reserveCall = resolved.reserveCall;
 
         const runManagedTranscription = async () => {
             const input = {
@@ -585,12 +627,14 @@ async function transcribeRecordingInner(
                 language: defaultLanguage,
                 filename: decryptText(recording.title),
             };
+            await reserveCall();
             const result = await transcribeViaMynah(input);
             await recordAiUsage(
                 {
                     recordingId,
                     ownerUserId: ctx.ownerUserId,
-                    payerUserId: ctx.actorUserId,
+                    actorUserId: ctx.actorUserId,
+                    payerUserId,
                     operation: "transcription",
                     provider: "Mynah",
                     model: "parakeet",
@@ -613,6 +657,12 @@ async function transcribeRecordingInner(
                     ownerUserId: ctx.ownerUserId,
                     shared: orgView,
                     language: defaultLanguage ?? null,
+                    itemId: recordingId,
+                    scopeFolderIds: await itemScopeFolderIds(
+                        recordingId,
+                        ctx.view,
+                        ctx.ownerUserId,
+                    ),
                 });
             } catch (error) {
                 console.error(
@@ -647,7 +697,7 @@ async function transcribeRecordingInner(
             persistProvider = result.provider;
             persistModel = result.model;
         } else if (credentials) {
-            const apiKey = decrypt(credentials.apiKey);
+            const apiKey = credentials.apiKey;
 
             const storage = await createUserStorageProvider(ctx.ownerUserId);
             const audioBuffer = await storage.downloadFile(
@@ -684,6 +734,7 @@ async function transcribeRecordingInner(
             );
 
             if (transcriptionStyle === "gemini") {
+                await reserveCall();
                 const result = await geminiTranscribe({
                     apiKey,
                     model,
@@ -695,7 +746,8 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        actorUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -715,6 +767,7 @@ async function transcribeRecordingInner(
                 const keyterms = elevenLabsTakesKeyterms(model)
                     ? (await almanacTerms()).map((term) => term.text)
                     : [];
+                await reserveCall();
                 const result = await elevenLabsTranscribe({
                     apiKey,
                     model,
@@ -727,7 +780,8 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        actorUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -745,6 +799,7 @@ async function transcribeRecordingInner(
             } else if (transcriptionStyle === "speechmatics") {
                 // Batch accepts hours-long uploads, so the Whisper 25 MiB
                 // re-encode is skipped here the same way it is for Scribe.
+                await reserveCall();
                 const result = await speechmaticsTranscribe({
                     apiKey,
                     model,
@@ -759,7 +814,8 @@ async function transcribeRecordingInner(
                     {
                         recordingId,
                         ownerUserId: ctx.ownerUserId,
-                        payerUserId: ctx.actorUserId,
+                        actorUserId: ctx.actorUserId,
+                        payerUserId,
                         operation: "transcription",
                         provider: credentials.provider,
                         model,
@@ -776,9 +832,11 @@ async function transcribeRecordingInner(
                     apiKey,
                     baseURL: credentials.baseUrl || undefined,
                     timeout: env.WHISPER_REQUEST_TIMEOUT_MS,
+                    maxRetries: resolved.organizationCredential ? 0 : undefined,
                 });
 
                 if (transcriptionStyle === "chat") {
+                    await reserveCall();
                     const result = await chatTranscribe({
                         client: openai,
                         model,
@@ -790,7 +848,8 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
-                            payerUserId: ctx.actorUserId,
+                            actorUserId: ctx.actorUserId,
+                            payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
                             model,
@@ -829,6 +888,7 @@ async function transcribeRecordingInner(
                     // can keep the request open 20-40 min. The SDK default
                     // (10 min) times out long before that; override
                     // per-request so other OpenAI calls keep the default.
+                    await reserveCall();
                     const transcription =
                         await openai.audio.transcriptions.create(
                             buildTranscriptionParams({
@@ -855,7 +915,8 @@ async function transcribeRecordingInner(
                         {
                             recordingId,
                             ownerUserId: ctx.ownerUserId,
-                            payerUserId: ctx.actorUserId,
+                            actorUserId: ctx.actorUserId,
+                            payerUserId,
                             operation: "transcription",
                             provider: credentials.provider,
                             model,
@@ -879,7 +940,7 @@ async function transcribeRecordingInner(
                 }
             }
         } else {
-            if (requested || !isMynahConfigured()) {
+            if (opts.providerId || !isMynahConfigured()) {
                 return {
                     success: false,
                     error: "No transcription API configured",
@@ -906,6 +967,13 @@ async function transcribeRecordingInner(
             provider: persistProvider,
             model: persistModel,
             turns,
+            profileRevisionId: profile.revisionId,
+            builtinPromptsVersion: null,
+            payerUserId,
+            inputs: {
+                contentId: recording.id,
+                contentRevision: recording.fileMd5,
+            },
             allowReaped: (opts.trigger ?? "manual") === "manual",
             actorUserId: ctx.actorUserId,
             actsForOrganization: ctx.actsForOrganization,
@@ -915,9 +983,12 @@ async function transcribeRecordingInner(
             // The audio this run downloaded, not whatever a sync put there
             // meanwhile.
             audioMd5: recording.fileMd5,
+            view: ctx.view,
         });
 
-        if (!committed && reason) return refusedResult(reason);
+        if (!committed && reason && reason !== "outdated") {
+            return refusedResult(reason);
+        }
         if (!committed) {
             return {
                 success: false,
@@ -977,32 +1048,6 @@ async function transcribeRecordingInner(
             );
         }
 
-        // Automatic Learn holds the title, summary and topics back until
-        // its review is done (72 h at most), so they are made from the
-        // transcript as corrected; `transcription.completed` then fires
-        // without the title, which follows as `recording.updated`.
-        const heldForLearn =
-            !orgView &&
-            (await holdForAutoLearn({
-                userId,
-                recordingId,
-                timed: Boolean(turns?.length),
-            }));
-
-        if (!heldForLearn && autoGenerateTitle && transcriptionText.trim()) {
-            try {
-                await applyGeneratedTitle({
-                    userId,
-                    recordingId,
-                    text: transcriptionText,
-                    plaudFileId: recording.plaudFileId,
-                    syncTitleToPlaud,
-                });
-            } catch (error) {
-                console.error("Failed to generate title:", error);
-            }
-        }
-
         await emitEvent("transcription.completed", userId, recordingId);
         await notifyIfShared(recordingId);
         await captureServerEvent({
@@ -1015,17 +1060,6 @@ async function transcribeRecordingInner(
                 detected_language: detectedLanguage ?? null,
             },
         });
-
-        // Topics need the timings only some providers report. Queued like the
-        // summary, and like it not after a run on the Organization view,
-        // where the organization account detects them by hand.
-        if (!heldForLearn && !orgView && turns?.length) {
-            await queueAutoTopics(userId, recordingId, "riffado");
-        }
-
-        if (!heldForLearn && autoSummarize) {
-            await queueAutoSummary(userId, recordingId, autoSummarizePreset);
-        }
 
         return {
             success: true,
@@ -1089,5 +1123,10 @@ function refusedResult(refusal: WriterRefusal | "cancelled"): TranscribeResult {
 }
 
 function isMynahBudgetExhausted(error: unknown): boolean {
-    return error instanceof Error && error.name === "MynahBudgetExhaustedError";
+    return (
+        (error instanceof Error &&
+            error.name === "MynahBudgetExhaustedError") ||
+        (error instanceof AppError &&
+            error.code === ErrorCode.MYNAH_BUDGET_EXHAUSTED)
+    );
 }

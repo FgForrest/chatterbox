@@ -21,6 +21,7 @@ import {
     varchar,
 } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
+import type { PipelinePhases } from "@/lib/pipeline/types";
 
 export const userPlanEnum = pgEnum("user_plan", [
     "self_host",
@@ -146,7 +147,7 @@ export const adminAuditLog = pgTable(
     }),
 );
 
-// Admin mutation log (hosted-only). Separate from read audit so mutations
+// Admin mutation log. Separate from read audit so mutations
 // are easy to query/review in isolation. before/after JSON captures the
 // minimum diff needed to understand the change without storing PII
 // content (e.g., for softDeleteRecording we store filename hashes/sizes,
@@ -514,6 +515,14 @@ export type ChatterItemKind = "audio" | "mail";
  */
 export type EvidenceProvenance = "quoted" | "unverified" | "unlocated";
 
+export type TaskUpdateProposalKind =
+    | "done"
+    | "drop"
+    | "due"
+    | "due_phrase"
+    | "assignee"
+    | "attach_merge";
+
 // The Chatter pile: one row per item of any kind, sharing its id with the
 // row of its kind (`recordings`, `mail_messages`). Everything that is not
 // about one kind (folders, summaries, tasks, Learn, exports) points here.
@@ -576,6 +585,143 @@ export const chatterItems = pgTable(
         kindCheck: check(
             "chatter_items_kind_check",
             sql`${table.kind} in ('audio', 'mail')`,
+        ),
+    }),
+);
+
+export const processingProfiles = pgTable(
+    "processing_profiles",
+    {
+        id: text("id").primaryKey(),
+        ownerUserId: text("owner_user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        scope: varchar("scope", { length: 16 })
+            .$type<"personal" | "organization">()
+            .notNull(),
+        channel: varchar("channel", { length: 16 })
+            .$type<"audio" | "mail">()
+            .notNull(),
+        // Encrypted.
+        name: text("name").notNull(),
+        description: text("description"),
+        isDefault: boolean("is_default").notNull().default(false),
+        // No FK avoids a cycle with processing_profile_revisions.
+        currentRevisionId: text("current_revision_id"),
+        version: integer("version").notNull().default(1),
+        createdBy: text("created_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        updatedBy: text("updated_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+        archivedAt: timestamp("archived_at"),
+    },
+    (table) => ({
+        ownerIdx: index("processing_profiles_owner_user_id_idx").on(
+            table.ownerUserId,
+        ),
+        createdByIdx: index("processing_profiles_created_by_idx")
+            .on(table.createdBy)
+            .where(sql`${table.createdBy} is not null`),
+        updatedByIdx: index("processing_profiles_updated_by_idx")
+            .on(table.updatedBy)
+            .where(sql`${table.updatedBy} is not null`),
+        ownerChannelDefaultUnique: uniqueIndex(
+            "processing_profiles_owner_channel_default_unique",
+        )
+            .on(table.ownerUserId, table.channel)
+            .where(sql`${table.isDefault} and ${table.archivedAt} is null`),
+        scopeCheck: check(
+            "processing_profiles_scope_check",
+            sql`${table.scope} in ('personal', 'organization')`,
+        ),
+        channelCheck: check(
+            "processing_profiles_channel_check",
+            sql`${table.channel} in ('audio', 'mail')`,
+        ),
+    }),
+);
+
+// Immutable: revisions are inserted and never updated.
+export const processingProfileRevisions = pgTable(
+    "processing_profile_revisions",
+    {
+        id: text("id").primaryKey(),
+        profileId: text("profile_id")
+            .notNull()
+            .references(() => processingProfiles.id, { onDelete: "cascade" }),
+        // Encrypted JSON stored as text.
+        settings: text("settings").notNull(),
+        createdBy: text("created_by").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        profileIdIdx: index("processing_profile_revisions_profile_id_idx").on(
+            table.profileId,
+        ),
+        createdByIdx: index("processing_profile_revisions_created_by_idx")
+            .on(table.createdBy)
+            .where(sql`${table.createdBy} is not null`),
+    }),
+);
+
+// `phases` holds only state names, reason codes, generations and input
+// fingerprints, never user content, so nothing in this table is encrypted.
+export const itemProcessing = pgTable(
+    "item_processing",
+    {
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 8 })
+            .$type<"private" | "org">()
+            .notNull(),
+        profileId: text("profile_id").references(() => processingProfiles.id, {
+            onDelete: "set null",
+        }),
+        // No FK: revisions live until their profile is deleted, while this item row must survive.
+        profileRevisionId: text("profile_revision_id"),
+        manualOnly: boolean("manual_only").notNull().default(false),
+        phases: jsonb("phases").$type<PipelinePhases>().notNull().default({}),
+        requestedGeneration: integer("requested_generation")
+            .notNull()
+            .default(0),
+        processedGeneration: integer("processed_generation")
+            .notNull()
+            .default(0),
+        waitingSince: timestamp("waiting_since"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.itemId, table.view] }),
+        userIdIdx: index("item_processing_user_id_idx").on(table.userId),
+        profileIdIdx: index("item_processing_profile_id_idx")
+            .on(table.profileId)
+            .where(sql`${table.profileId} is not null`),
+        stalledIdx: index("item_processing_stalled_idx")
+            .on(table.updatedAt)
+            .where(
+                sql`${table.processedGeneration} < ${table.requestedGeneration}`,
+            ),
+        automaticTranscriptionRetryIdx: index(
+            "item_processing_auto_transcription_retry_idx",
+        )
+            .on(sql`(${table.phases} -> 'transcribe' ->> 'at')`)
+            .where(
+                sql`${table.view} = 'private' and ${table.phases} -> 'transcribe' ->> 'state' = 'failed' and coalesce((${table.phases} -> 'transcribe' ->> 'automatic')::boolean, false)`,
+            ),
+        viewCheck: check(
+            "item_processing_view_check",
+            sql`${table.view} in ('private', 'org')`,
         ),
     }),
 );
@@ -754,6 +900,32 @@ export const recordingFolders = pgTable(
         rootKindUnique: uniqueIndex("recording_folders_user_root_kind_unique")
             .on(table.userId, table.kind)
             .where(sql`${table.kind} in ('private', 'public')`),
+    }),
+);
+
+export const folderDefaultProfiles = pgTable(
+    "folder_default_profiles",
+    {
+        folderId: text("folder_id")
+            .notNull()
+            .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        channel: varchar("channel", { length: 16 })
+            .$type<"audio" | "mail">()
+            .notNull(),
+        profileId: text("profile_id").references(() => processingProfiles.id, {
+            onDelete: "set null",
+        }),
+        manualOnly: boolean("manual_only").notNull().default(false),
+    },
+    (table) => ({
+        pk: primaryKey({ columns: [table.folderId, table.channel] }),
+        profileIdIdx: index("folder_default_profiles_profile_id_idx").on(
+            table.profileId,
+        ),
+        channelCheck: check(
+            "folder_default_profiles_channel_check",
+            sql`${table.channel} in ('audio', 'mail')`,
+        ),
     }),
 );
 
@@ -1158,13 +1330,23 @@ export const transcriptions = pgTable(
         topicsInputFingerprint: varchar("topics_input_fingerprint", {
             length: 64,
         }),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
         // Who ran the provider. Differs from `userId` when the organization
         // account changes a shared recording: the rows stay the owner's, and
-        // the organization account produced (and paid for) them.
+        // the organization account produced them.
         producedByUserId: text("produced_by_user_id").references(
             () => users.id,
             { onDelete: "set null" },
         ),
+        // Who paid for the provider call; the producer remains the actor.
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         // Goes up by one on every write of `text` or `turns`, so anything
         // made from one version of the transcript (a speaker change, a Learn
         // run) can tell it is looking at the version it was made on. Topics
@@ -1182,6 +1364,9 @@ export const transcriptions = pgTable(
         producedByIdx: index("transcriptions_produced_by_user_id_idx")
             .on(table.producedByUserId)
             .where(sql`${table.producedByUserId} is not null`),
+        payerUserIdIdx: index("transcriptions_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
         // At most one transcript per (recording, user, source) so a
         // Plaud-imported transcript and the user's own provider can coexist
         // while each source still upserts cleanly. Also serves every lookup
@@ -2141,12 +2326,21 @@ export const learnRuns = pgTable(
         actorUserId: text("actor_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         trigger: varchar("trigger", { length: 16 })
             .$type<"manual" | "auto">()
             .notNull(),
         // The revision of the content it read.
         transcriptRevision: integer("transcript_revision").notNull(),
         vocabularyVersion: integer("vocabulary_version").notNull(),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
         status: varchar("status", { length: 16 })
             .$type<
                 | "queued"
@@ -2180,6 +2374,9 @@ export const learnRuns = pgTable(
         userIdx: index("learn_runs_user_id_idx").on(table.userId),
         scopeIdx: index("learn_runs_scope_user_id_idx").on(table.scopeUserId),
         actorIdx: index("learn_runs_actor_user_id_idx").on(table.actorUserId),
+        payerUserIdIdx: index("learn_runs_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
         // The review badge: recordings with a run waiting for review.
         readyIdx: index("learn_runs_ready_idx")
             .on(table.view, table.userId, table.itemId)
@@ -2419,6 +2616,14 @@ export const aiEnhancements = pgTable(
         // corrections applied); null for a summary made before corrections
         // existed, which never reads as stale.
         inputFingerprint: varchar("input_fingerprint", { length: 64 }),
+        profileRevisionId: text("profile_revision_id"),
+        builtinPromptsVersion: varchar("builtin_prompts_version", {
+            length: 32,
+        }),
+        // Content revision and, later, scope fingerprint. Never user content.
+        inputs: jsonb("inputs").$type<Record<string, unknown>>(),
+        outputLanguage: varchar("output_language", { length: 16 }),
+        outputFormatLocale: varchar("output_format_locale", { length: 16 }),
         multiPassRounds: integer("multi_pass_rounds"),
         multiPassUsed: integer("multi_pass_passes_used"),
         multiPassMerged: boolean("multi_pass_merged"),
@@ -2427,6 +2632,9 @@ export const aiEnhancements = pgTable(
             () => users.id,
             { onDelete: "set null" },
         ),
+        payerUserId: text("payer_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({
@@ -2440,6 +2648,9 @@ export const aiEnhancements = pgTable(
         producedByIdx: index("ai_enhancements_produced_by_user_id_idx")
             .on(table.producedByUserId)
             .where(sql`${table.producedByUserId} is not null`),
+        payerUserIdIdx: index("ai_enhancements_payer_user_id_idx")
+            .on(table.payerUserId)
+            .where(sql`${table.payerUserId} is not null`),
     }),
 );
 
@@ -2521,6 +2732,12 @@ export const recordingTasks = pgTable(
         updatedByUserId: text("updated_by_user_id").references(() => users.id, {
             onDelete: "set null",
         }),
+        statusEffectiveAt: timestamp("status_effective_at"),
+        dueEffectiveAt: timestamp("due_effective_at"),
+        assigneeEffectiveAt: timestamp("assignee_effective_at"),
+        originItemId: text("origin_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -2548,6 +2765,9 @@ export const recordingTasks = pgTable(
         updatedByIdx: index("recording_tasks_updated_by_user_id_idx").on(
             table.updatedByUserId,
         ),
+        originItemIdx: index("recording_tasks_origin_item_id_idx").on(
+            table.originItemId,
+        ),
         statusCheck: check(
             "recording_tasks_status_check",
             sql`${table.status} in ('proposed', 'open', 'done', 'dropped')`,
@@ -2559,6 +2779,198 @@ export const recordingTasks = pgTable(
         evidenceCheck: check(
             "recording_tasks_evidence_check",
             sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
+        ),
+    }),
+);
+
+export const taskMentions = pgTable(
+    "task_mentions",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        view: varchar("view", { length: 8 })
+            .$type<"private" | "org">()
+            .notNull(),
+        evidenceStartMs: integer("evidence_start_ms"),
+        evidenceSegmentIndex: integer("evidence_segment_index"),
+        evidenceCharStart: integer("evidence_char_start"),
+        evidenceCharEnd: integer("evidence_char_end"),
+        // Encrypted, as on `recording_tasks`.
+        quote: text("quote"),
+        provenance: varchar("provenance", {
+            length: 16,
+        }).$type<EvidenceProvenance>(),
+        contentSourceId: varchar("content_source_id", { length: 20 }),
+        contentRevision: integer("content_revision"),
+        statementAt: timestamp("statement_at").notNull(),
+        matchDecision: varchar("match_decision", { length: 16 })
+            .$type<
+                | "home"
+                | "suggested"
+                | "accepted"
+                | "rejected"
+                | "undone"
+                | "kept_new"
+            >()
+            .notNull(),
+        ticked: boolean("ticked").notNull().default(false),
+        decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        decidedAt: timestamp("decided_at"),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+        updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskIdIdx: index("task_mentions_task_id_idx").on(table.taskId),
+        itemIdIdx: index("task_mentions_item_id_idx").on(table.itemId),
+        userIdIdx: index("task_mentions_user_id_idx").on(table.userId),
+        itemViewIdx: index("task_mentions_item_id_view_idx").on(
+            table.itemId,
+            table.view,
+        ),
+        viewCheck: check(
+            "task_mentions_view_check",
+            sql`${table.view} in ('private', 'org')`,
+        ),
+        matchDecisionCheck: check(
+            "task_mentions_match_decision_check",
+            sql`${table.matchDecision} in ('home', 'suggested', 'accepted', 'rejected', 'undone', 'kept_new')`,
+        ),
+        evidenceCheck: check(
+            "task_mentions_evidence_check",
+            sql`(${table.evidenceSegmentIndex} is null and ${table.evidenceCharStart} is null and ${table.evidenceCharEnd} is null) or (${table.evidenceStartMs} is null and ${table.evidenceSegmentIndex} >= 0 and ${table.evidenceCharStart} >= 0 and ${table.evidenceCharStart} < ${table.evidenceCharEnd})`,
+        ),
+    }),
+);
+
+export const taskHomeMoves = pgTable(
+    "task_home_moves",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        fromItemId: text("from_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        toItemId: text("to_item_id").references(() => chatterItems.id, {
+            onDelete: "set null",
+        }),
+        fromUserId: text("from_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        toUserId: text("to_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        reason: varchar("reason", { length: 16 })
+            .$type<"deleted" | "erased" | "withdrawn">()
+            .notNull(),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskIdIdx: index("task_home_moves_task_id_idx").on(table.taskId),
+        fromItemIdIdx: index("task_home_moves_from_item_id_idx").on(
+            table.fromItemId,
+        ),
+        toItemIdIdx: index("task_home_moves_to_item_id_idx").on(table.toItemId),
+        fromUserIdIdx: index("task_home_moves_from_user_id_idx").on(
+            table.fromUserId,
+        ),
+        toUserIdIdx: index("task_home_moves_to_user_id_idx").on(table.toUserId),
+        actorUserIdIdx: index("task_home_moves_actor_user_id_idx").on(
+            table.actorUserId,
+        ),
+        reasonCheck: check(
+            "task_home_moves_reason_check",
+            sql`${table.reason} in ('deleted', 'erased', 'withdrawn')`,
+        ),
+    }),
+);
+
+export const taskVectors = pgTable(
+    "task_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        taskId: text("task_id")
+            .notNull()
+            .references(() => recordingTasks.id, { onDelete: "cascade" }),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        dim: integer("dim").notNull(),
+        // `encodeVector`, then encrypted.
+        vector: text("vector").notNull(),
+        // `domainLookupHash("vector-input", rendered task text)`.
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        taskGenerationUnique: unique("task_vectors_task_generation_unique").on(
+            table.taskId,
+            table.vectorGeneration,
+        ),
+        taskIdIdx: index("task_vectors_task_id_idx").on(table.taskId),
+        userIdIdx: index("task_vectors_user_id_idx").on(table.userId),
+    }),
+);
+
+export const taskContentVectors = pgTable(
+    "task_content_vectors",
+    {
+        id: text("id")
+            .primaryKey()
+            .$defaultFn(() => nanoid()),
+        userId: text("user_id")
+            .notNull()
+            .references(() => users.id, { onDelete: "cascade" }),
+        itemId: text("item_id")
+            .notNull()
+            .references(() => chatterItems.id, { onDelete: "cascade" }),
+        contentSourceId: varchar("content_source_id", { length: 20 }).notNull(),
+        contentRevision: integer("content_revision").notNull(),
+        vectorGeneration: varchar("vector_generation", {
+            length: 160,
+        }).notNull(),
+        chunkIndex: integer("chunk_index").notNull(),
+        dim: integer("dim").notNull(),
+        vector: text("vector").notNull(),
+        inputHmac: varchar("input_hmac", { length: 64 }).notNull(),
+        createdAt: timestamp("created_at").notNull().defaultNow(),
+    },
+    (table) => ({
+        contentGenerationChunkUnique: unique(
+            "task_content_vectors_content_generation_chunk_unique",
+        ).on(
+            table.itemId,
+            table.contentSourceId,
+            table.contentRevision,
+            table.vectorGeneration,
+            table.chunkIndex,
+        ),
+        userItemIdx: index("task_content_vectors_user_id_item_id_idx").on(
+            table.userId,
+            table.itemId,
         ),
     }),
 );
@@ -2592,8 +3004,8 @@ export const recordingTaskRejections = pgTable(
     }),
 );
 
-// What a later recording's summary heard about an open task: it was done,
-// or its deadline moved. Reviewed with that recording's task proposals.
+// What a later item's summary heard about an open task: its status, deadline
+// or assignee changed. Reviewed with that item's task proposals.
 export const taskUpdateProposals = pgTable(
     "task_update_proposals",
     {
@@ -2610,10 +3022,20 @@ export const taskUpdateProposals = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
-        kind: varchar("kind", { length: 8 }).$type<"done" | "due">().notNull(),
+        kind: varchar("kind", { length: 16 })
+            .$type<TaskUpdateProposalKind>()
+            .notNull(),
         dueDate: date("due_date", { mode: "string" }),
         // Encrypted, as on `recording_tasks`.
         duePhrase: text("due_phrase"),
+        proposedAssigneePersonId: text(
+            "proposed_assignee_person_id",
+        ).references(() => people.id, { onDelete: "set null" }),
+        // Encrypted unresolved name, and whether a resolved name needs review.
+        proposedAssigneeHint: text("proposed_assignee_hint"),
+        proposedAssigneeCheck: boolean("proposed_assignee_check")
+            .notNull()
+            .default(false),
         quote: text("quote"),
         evidenceStartMs: integer("evidence_start_ms"),
         evidenceSegmentIndex: integer("evidence_segment_index"),
@@ -2623,28 +3045,60 @@ export const taskUpdateProposals = pgTable(
         evidenceProvenance: varchar("evidence_provenance", {
             length: 16,
         }).$type<EvidenceProvenance>(),
+        statementAt: timestamp("statement_at").notNull().defaultNow(),
+        state: varchar("state", { length: 32 })
+            .$type<
+                | "awaiting_source_review"
+                | "awaiting_share"
+                | "awaiting_target_review"
+                | "applied"
+                | "rejected"
+                | "obsolete"
+            >()
+            .notNull()
+            .default("awaiting_source_review"),
+        routedTo: jsonb("routed_to").$type<string[] | { role: "curators" }>(),
+        decidedByUserId: text("decided_by_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
+        decidedAt: timestamp("decided_at"),
+        obsoleteReason: varchar("obsolete_reason", { length: 64 }),
         ticked: boolean("ticked").notNull().default(false),
         version: integer("version").notNull().default(0),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
     (table) => ({
-        unique: unique("task_update_proposals_unique").on(
-            table.taskId,
-            table.itemId,
-            table.kind,
-        ),
+        pendingUnique: uniqueIndex("task_update_proposals_pending_unique")
+            .on(table.taskId, table.itemId, table.kind)
+            .where(
+                sql`${table.state} in ('awaiting_source_review', 'awaiting_share', 'awaiting_target_review')`,
+            ),
         recordingIdx: index("task_update_proposals_recording_id_idx").on(
             table.itemId,
         ),
         userIdIdx: index("task_update_proposals_user_id_idx").on(table.userId),
+        userStateIdx: index("task_update_proposals_user_id_state_idx").on(
+            table.userId,
+            table.state,
+        ),
+        decidedByIdx: index("task_update_proposals_decided_by_user_id_idx").on(
+            table.decidedByUserId,
+        ),
+        proposedAssigneeIdx: index(
+            "task_update_proposals_proposed_assignee_person_id_idx",
+        ).on(table.proposedAssigneePersonId),
         kindCheck: check(
             "task_update_proposals_kind_check",
-            sql`${table.kind} in ('done', 'due')`,
+            sql`${table.kind} in ('done', 'drop', 'due', 'due_phrase', 'assignee', 'attach_merge')`,
+        ),
+        stateCheck: check(
+            "task_update_proposals_state_check",
+            sql`${table.state} in ('awaiting_source_review', 'awaiting_share', 'awaiting_target_review', 'applied', 'rejected', 'obsolete')`,
         ),
         dueCheck: check(
             "task_update_proposals_due_check",
-            sql`${table.kind} = 'done' or ${table.dueDate} is not null`,
+            sql`${table.kind} <> 'due' or ${table.dueDate} is not null`,
         ),
         evidenceCheck: check(
             "task_update_proposals_evidence_check",
@@ -2665,6 +3119,9 @@ export const aiUsageEvents = pgTable(
         userId: text("user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "set null",
+        }),
         payerUserId: text("payer_user_id")
             .notNull()
             .references(() => users.id, { onDelete: "cascade" }),
@@ -2684,6 +3141,9 @@ export const aiUsageEvents = pgTable(
             table.payerUserId,
         ),
         userIdx: index("ai_usage_events_user_id_idx").on(table.userId),
+        actorIdx: index("ai_usage_events_actor_user_id_idx")
+            .on(table.actorUserId)
+            .where(sql`${table.actorUserId} is not null`),
         payerIdx: index("ai_usage_events_payer_user_id_idx").on(
             table.payerUserId,
         ),
@@ -2733,6 +3193,7 @@ export const apiCredentials = pgTable(
             precision: 16,
             scale: 6,
         }),
+        disabledAt: timestamp("disabled_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
         updatedAt: timestamp("updated_at").notNull().defaultNow(),
     },
@@ -3691,6 +4152,9 @@ export const recordingSessions = pgTable(
             .references(() => apiKeys.id, { onDelete: "cascade" }),
         status: recordingSessionStatusEnum("status").notNull().default("open"),
         mimeType: varchar("mime_type", { length: 100 }).notNull(),
+        folderId: text("folder_id").references(() => recordingFolders.id, {
+            onDelete: "set null",
+        }),
         metadata: jsonb("metadata")
             .$type<Record<string, unknown>>()
             .notNull()
@@ -3725,6 +4189,9 @@ export const recordingSessions = pgTable(
             table.status,
             table.updatedAt,
         ),
+        folderIdIdx: index("recording_sessions_folder_id_idx")
+            .on(table.folderId)
+            .where(sql`${table.folderId} is not null`),
     }),
 );
 
@@ -4051,8 +4518,7 @@ export const mailDeliveryLog = pgTable(
     }),
 );
 
-// A mail sent to an Organization address waits in its sender's pile until
-// they share it into that folder through the share gate (D2).
+/** Intended Organization folder placements of items of any kind, pending the share gate. */
 export const mailPendingShares = pgTable(
     "mail_pending_shares",
     {
@@ -4065,6 +4531,7 @@ export const mailPendingShares = pgTable(
         folderId: text("folder_id")
             .notNull()
             .references(() => recordingFolders.id, { onDelete: "cascade" }),
+        confirmedAt: timestamp("confirmed_at"),
         createdAt: timestamp("created_at").notNull().defaultNow(),
     },
     (table) => ({

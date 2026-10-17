@@ -33,6 +33,7 @@ interface Props {
     onOpenPalette: () => void;
     onOpenSettings: () => void;
     onOpenShortcuts: () => void;
+    onOpenOnboarding: () => void;
 }
 
 /**
@@ -63,6 +64,7 @@ export function WorkstationHeader({
     onOpenPalette,
     onOpenSettings,
     onOpenShortcuts,
+    onOpenOnboarding,
 }: Props) {
     const i18n = useExtracted();
     return (
@@ -142,6 +144,7 @@ export function WorkstationHeader({
                     userEmail={userEmail}
                     onOpenSettings={onOpenSettings}
                     onOpenShortcuts={onOpenShortcuts}
+                    onOpenOnboarding={onOpenOnboarding}
                     lastSyncTime={lastSyncTime}
                     nextSyncTime={nextSyncTime}
                     isAutoSyncing={isAutoSyncing}

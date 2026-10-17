@@ -16,21 +16,13 @@ Learn is available on self-hosted instances with an AI provider that can write s
 
 ## Running Learn
 
-Click **Learn** above the transcript. The button shows how it is going:
+When Learn is manual, its widget says it is ready and offers **Learn**. Starting it opens a window; you can close that window while **Learn is reading the transcript** and leave the page. When it finishes, the same window holds the review.
 
-| Button | Meaning |
-| --- | --- |
-| **Learning…** | Learn is reading the transcript. You can leave the page. |
-| **Review (5)** | Five proposals wait for you. |
-| **Learned (4)** | You reviewed it; four proposals were applied. Click to see what happened to each. |
-| **Learned: nothing new** | Learn found nothing to propose. |
-| **Learn failed** | Something went wrong; click for the reason and to try again. |
-
-With **Learn automatically** on (Settings → Learning), Learn runs on every new transcript. The title, summary and topics then wait until you have reviewed what Learn found, so they are made from the corrected transcript. They wait 72 hours at most.
+When the item's processing profile has **Run automatically** on for Learn, Learn runs after a new transcript. Its review appears inline as part of the workflow. The strip says **Review needed** and its **Review Learn** action jumps to the review. The title, summary and topics wait so they use the corrected transcript. After 72 hours they continue without the review, but the review stays open and still blocks an intended Organization share.
 
 ## Reviewing
 
-Click **Review** to open the review:
+The review has the same contents inline or in the window opened by a run you started yourself. If you close a waiting window, **Review Learn** in the workflow strip reopens it:
 
 ![The Learn review](images/learn-review.png)
 
@@ -47,11 +39,11 @@ You do not have to open the review: the proposals also appear in the transcript 
 
 ![What the review did](images/learn-results.png)
 
-Click **Learned** to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** runs Learn again; tick **also propose again what I rejected** if you changed your mind about something.
+After the review, the widget folds to **Learn complete** with **View results** while the workflow continues. Open the results to see what happened to each proposal: applied, rejected, or why it was skipped. **Re-learn** starts another run in a window; tick **Re-learn: also propose again what I rejected on this recording** if you changed your mind about something.
 
 Accepted corrections are kept beside the original text, never in place of it, so they can always be undone. See [Corrected words](transcripts.md#corrected-words).
 
-With **Correct the transcript after Learn** on (Settings → Learning, on by default), Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
+When the processing profile has **Correct the transcript after Learn** on, Learn then reads the whole transcript once more with the Almanac at hand and fixes other misheard words. Each fix is underlined in amber and can be undone.
 
 ## Where reviews wait
 
@@ -64,6 +56,6 @@ With **Correct the transcript after Learn** on (Settings → Learning, on by def
 - Names are recognized in their inflected forms in the transcript's language, with or without accents: "Šimákem" finds Šimák.
 - A speaker named only by a first name is marked as such. A first name two people in your Almanac share names neither of them.
 - Saying a new record is one you already have teaches Chatterbox the misheard form as a nickname, so the next run recognizes it.
-- Learn can use its own provider and model, for example a stronger one than summaries use: Settings → Learning → **Learning provider**.
+- A processing profile can give Learn its own provider and model, for example a stronger one than the summary uses. See [Processing and profiles](processing-and-profiles.md).
 
 Next: [The Organization](organization.md)

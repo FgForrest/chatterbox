@@ -8,15 +8,25 @@ async function readError(response) {
     try {
         const body = await response.json();
         if (body && typeof body.error === "string") {
+            const details =
+                body.details && typeof body.details === "object"
+                    ? body.details
+                    : null;
             return {
                 message: body.error,
                 code: typeof body.code === "string" ? body.code : null,
+                field:
+                    typeof body.field === "string"
+                        ? body.field
+                        : typeof details?.field === "string"
+                          ? details.field
+                          : null,
             };
         }
     } catch {
         // fall through
     }
-    return { message: `Request failed (${response.status})`, code: null };
+    return { message: `Request failed (${response.status})`, code: null, field: null };
 }
 
 /**
@@ -32,10 +42,11 @@ async function request(auth, path, init = {}) {
         headers,
     });
     if (!response.ok) {
-        const { message, code } = await readError(response);
+        const { message, code, field } = await readError(response);
         const error = new Error(message);
         error.status = response.status;
         error.code = code;
+        error.field = field;
         const retryAfter = response.headers.get("Retry-After");
         if (retryAfter) {
             const seconds = Number(retryAfter);
@@ -145,6 +156,35 @@ export async function abortSession(auth, sessionId) {
 export async function getRecorderConfig(auth) {
     const response = await request(auth, "/api/v1/recorder/config");
     return response.json();
+}
+
+/** Map the recorder-folder response to safe, stable picker options. */
+export function mapRecorderFolders(body) {
+    if (!body || !Array.isArray(body.data)) return [];
+    return body.data
+        .filter(
+            (folder) =>
+                folder &&
+                typeof folder.id === "string" &&
+                typeof folder.name === "string" &&
+                typeof folder.path === "string" &&
+                (folder.scope === "personal" || folder.scope === "org"),
+        )
+        .map((folder) => ({ ...folder, label: folder.path }))
+        .sort(
+            (left, right) =>
+                (left.scope === right.scope
+                    ? 0
+                    : left.scope === "personal"
+                      ? -1
+                      : 1) || left.path.localeCompare(right.path),
+        );
+}
+
+/** Folders the paired recorder key holder may file a new recording into. */
+export async function getRecorderFolders(auth) {
+    const response = await request(auth, "/api/v1/recorder/folders");
+    return mapRecorderFolders(await response.json());
 }
 
 /** Retire older keys issued to the same installation after pairing succeeds. */

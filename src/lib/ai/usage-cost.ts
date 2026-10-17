@@ -20,6 +20,7 @@ export type AiOperation =
 export interface AiUsageContext {
     recordingId: string;
     ownerUserId: string;
+    actorUserId: string;
     payerUserId: string;
     operation: AiOperation;
     provider: string;
@@ -164,6 +165,7 @@ export async function recordAiUsage(
         await db.insert(aiUsageEvents).values({
             itemId: context.recordingId,
             userId: context.ownerUserId,
+            actorUserId: context.actorUserId,
             payerUserId: context.payerUserId,
             operation: context.operation,
             provider: context.provider,

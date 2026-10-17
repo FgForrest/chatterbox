@@ -50,6 +50,8 @@ export function SettingsNavMobile({
                 return i18n("Learning");
             case "summary":
                 return i18n("Summary");
+            case "profiles":
+                return i18n("Profiles");
             case "plaud-account":
                 return i18n("Plaud Account");
             case "sync":

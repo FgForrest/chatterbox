@@ -34,6 +34,22 @@ const planning: RecordingFolder = {
     scope: "personal",
     version: 0,
 };
+const orgRoot: RecordingFolder = {
+    id: "org-root",
+    parentId: null,
+    name: "Organization",
+    kind: "public",
+    sortOrder: 0,
+    scope: "org",
+    version: 0,
+};
+const orgPlanning: RecordingFolder = {
+    ...planning,
+    id: "org-planning",
+    parentId: orgRoot.id,
+    name: "Organization planning",
+    scope: "org",
+};
 const recordings: Recording[] = [
     {
         id: "rec-direct",
@@ -53,12 +69,18 @@ const recordings: Recording[] = [
     },
 ];
 
-function renderPane(folder: RecordingFolder) {
+function renderPane(folder: RecordingFolder, canCurate = false) {
     render(
         <ConfirmDialogProvider>
             <FolderRecordingPane
                 folder={folder}
-                folders={[privateRoot, meetings, planning]}
+                folders={[
+                    privateRoot,
+                    meetings,
+                    planning,
+                    orgRoot,
+                    orgPlanning,
+                ]}
                 assignments={[
                     { recordingId: "rec-direct", folderId: "meetings" },
                     { recordingId: "rec-child", folderId: "planning" },
@@ -75,6 +97,7 @@ function renderPane(folder: RecordingFolder) {
                     googleDrive: false,
                     mail: false,
                 }}
+                canCurate={canCurate}
             />
         </ConfirmDialogProvider>,
     );
@@ -122,8 +145,25 @@ describe("folder recording pane", () => {
         renderPane(meetings);
         expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
         expect(
+            screen.getByRole("button", { name: "Default profiles" }),
+        ).toBeTruthy();
+        expect(
             screen.queryByRole("button", { name: "Synchronize" }),
         ).toBeNull();
+    });
+
+    it("hides Organization rename and delete controls from members", () => {
+        renderPane(orgPlanning);
+
+        expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    });
+
+    it("shows Organization rename and delete controls to curators", () => {
+        renderPane(orgPlanning, true);
+
+        expect(screen.getByRole("button", { name: "Rename" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     });
 
     it("sorts the recording table by every displayed column", () => {

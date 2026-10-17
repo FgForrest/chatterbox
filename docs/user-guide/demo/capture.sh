@@ -141,17 +141,19 @@ select_recording() {
 }
 
 section_onboarding() {
-    open "/settings#export"
-    click_button "Re-run Onboarding" 1500
     open "/dashboard"
+    click_button "Account menu"
+    click_text "Run setup again" 1500
     page onboarding-welcome
     click_button "Next"
     page onboarding-plaud
     click_button "Skip"
     page onboarding-ai-provider
-    click_button "Skip"
+    while [[ "$(js "(() => [...document.querySelectorAll('h3')].some((heading) => heading.textContent.trim() === 'Setup complete'))()")" != "true" ]]; do
+        click_button "Skip"
+    done
     page onboarding-done
-    click_button "Get Started" 1500
+    click_button "Get started" 1500
 }
 
 section_dashboard() {
@@ -168,7 +170,11 @@ section_recording() {
     crop erase-menu "css:[role=menu]" "css:button[aria-label='Erase recording artifacts']"
     escape
     click_button "Add to folder"
-    crop add-to-folder "css:[role=menu]" "css:button[aria-label='Add to folder']"
+    crop add-to-folder "css:[data-testid='processing-folder-row']" "css:[role=menu]"
+    escape
+    ab click "[data-testid='profile-chip']" >/dev/null
+    ab wait 1500 >/dev/null
+    crop profile-chip-menu "css:[data-testid='processing-folder-row']" "css:[role=menu]"
     escape
     click_text "Estimated AI spend"
     tag title "Weekly product sync" "h1"
@@ -176,8 +182,21 @@ section_recording() {
     click_text "Estimated AI spend"
 }
 
+section_filing() {
+    select_recording "Ideas for the Q1 roadmap"
+    tag categorize "Categorize recording" "section"
+    scroll_to categorize
+    crop categorize-card categorize
+}
+
+section_workflow() {
+    select_recording "Weekly product sync"
+    shot "css:section[aria-label='Workflow']" workflow-strip
+}
+
 section_transcript() {
     select_recording "Weekly product sync"
+    click_button "View transcript" 1200
     tag guesses "Speaker guesses" "[aria-label='Speaker guesses']"
     tag transcript "Transcription" ".bg-card"
     scroll_to guesses
@@ -205,19 +224,26 @@ section_transcript() {
 
 section_learn() {
     select_recording "Weekly product sync"
-    click_button "Review (5)" 1500
+    click_button "Review Learn" 1500
     dialog learn-review
     escape
 }
 
 section_summary() {
     select_recording "Weekly product sync"
+    click_button "View summary" 1200
     tag summary "Summary" ".bg-card"
     scroll_to summary
+    tag summary-title "Summary"
+    js "(() => {
+        const trigger = document.querySelector('[aria-label=\"Processing profile\"]');
+        const actions = trigger?.parentElement;
+        if (!actions) throw new Error('No summary profile actions');
+        actions.setAttribute('data-shot', 'summary-actions');
+        return 'ok';
+    })()" >/dev/null
+    crop summary-profile-picker summary-title summary-actions
     crop summary summary
-    click_button "Review tasks (3)" 1500
-    dialog task-review
-    escape
     select_recording "Design review: driver onboarding"
     tag summary "Summary" ".bg-card"
     scroll_to summary
@@ -227,6 +253,39 @@ section_summary() {
         return 'ok';
     })()" >/dev/null
     crop summary-multi-pass summary
+}
+
+section_task_review() {
+    ab set viewport 1440 1700 >/dev/null
+    select_recording "Weekly product sync"
+    tag task-review "Task review" "[data-workflow-widget]"
+    js "(() => {
+        document.querySelector('[data-shot=\"task-review\"]')
+            .scrollIntoView({ block: 'start' });
+        return 'ok';
+    })()" >/dev/null
+    crop task-review task-review
+    ab set viewport 1440 900 >/dev/null
+    tag candidate "Keep as new" "li"
+    scroll_to candidate
+    crop task-review-changes candidate
+    js "(() => {
+        const button = [...document.querySelectorAll('button')]
+            .find((candidate) => candidate.textContent.trim() === 'Merge into an earlier task');
+        if (!button) throw new Error('No merge-into-earlier button');
+        button.click();
+        return 'ok';
+    })()" >/dev/null
+    ab wait 1000 >/dev/null
+    js "(() => {
+        const dialogs = [...document.querySelectorAll('[role=dialog]')];
+        const dialog = dialogs.at(-1);
+        if (!dialog) throw new Error('No merge dialog');
+        dialog.setAttribute('data-shot', 'merge-earlier');
+        return 'ok';
+    })()" >/dev/null
+    crop task-merge-earlier merge-earlier
+    escape
 }
 
 section_tasks() {
@@ -242,11 +301,24 @@ section_folders() {
     page folders
     click_text "Bluefin Logistics" 1500
     top folder-pane 640
+    click_button "Default profiles" 1200
+    crop folder-default-profiles "css:[role=menu]" "css:button[aria-label='Default profiles']"
+    escape
     click_button "Settings" 1500
     dialog folder-export
     click_button "Add filesystem export" 1200
     dialog folder-export-filesystem
     escape
+}
+
+section_profiles() {
+    ab set viewport 1440 1200 >/dev/null
+    setting profiles "" profiles
+    click_button "Edit Recordings" 1200
+    blur
+    crop profile-editor "css:[role=dialog]:last-of-type"
+    escape
+    ab set viewport 1440 900 >/dev/null
 }
 
 section_organization() {
@@ -308,6 +380,12 @@ section_settings() {
     ab set viewport 1440 900 >/dev/null
 }
 
+section_routed_inbox() {
+    sign_in priya@example.com demo-password-123
+    open "/tasks"
+    top tasks-routed 700
+}
+
 section_help() {
     select_recording "Weekly product sync"
     click_button "Help" 3500
@@ -338,7 +416,7 @@ section_palette() {
 # Last: finishing the review changes the demo data.
 section_learn_finish() {
     select_recording "Weekly product sync"
-    click_button "Review (5)" 1500
+    click_button "Review Learn" 1500
     js "(() => {
         for (const group of ['Speakers', 'New facts']) {
             let e = [...document.querySelectorAll('[role=dialog] *')].find((el) =>
@@ -351,18 +429,14 @@ section_learn_finish() {
     })()" >/dev/null
     ab wait 500 >/dev/null
     click_button "Finish review" 3000
-    js "(() => {
-        [...document.querySelectorAll('button')]
-            .find((b) => b.textContent.trim().startsWith('Learned')).click();
-        return 'ok';
-    })()" >/dev/null
-    ab wait 1500 >/dev/null
+    click_button "View results" 1500
     dialog learn-results
     escape
 }
 
-sections=(onboarding dashboard recording transcript learn summary tasks folders
-    organization almanac settings help palette learn_finish)
+sections=(onboarding dashboard recording filing workflow transcript learn summary
+    task_review tasks folders organization almanac profiles settings help palette
+    learn_finish routed_inbox)
 if [[ $# -gt 0 ]]; then sections=("$@"); fi
 
 sign_in alex@example.com demo-password-123

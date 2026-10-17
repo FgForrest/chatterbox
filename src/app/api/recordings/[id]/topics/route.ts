@@ -8,6 +8,8 @@ import { actsForOrganization } from "@/lib/authz/curator";
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { appErrorFromJobFailure } from "@/lib/jobs/retryable";
 import { watchJob } from "@/lib/jobs/watch";
+import { pipelineMayQueue } from "@/lib/pipeline/pending";
+import { PIPELINE_ADVANCE_JOB_KIND } from "@/lib/pipeline/trigger";
 import {
     recordingJobSubject,
     requestedRecordingView,
@@ -65,13 +67,31 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const access = await requireRecordingView(session.user.id, id, view);
     const source = requestedTopicSource(request);
 
-    const job = await getActiveJob(
+    const topicsJob = await getActiveJob(
         TOPICS_JOB_KIND,
         recordingJobSubject(id, view),
     );
+    const matchingTopicsJob =
+        topicsJob && topicsJob.payload.source === source ? topicsJob : null;
+    const pipelineDriver =
+        !matchingTopicsJob && view === "private" && source === "riffado"
+            ? await getActiveJob(
+                  PIPELINE_ADVANCE_JOB_KIND,
+                  recordingJobSubject(id, "private"),
+              )
+            : null;
+    const pipelineJob =
+        pipelineDriver &&
+        (await pipelineMayQueue(access.ownerUserId, id, "topics"))
+            ? pipelineDriver
+            : null;
+    const job =
+        matchingTopicsJob ??
+        (pipelineJob?.userId === access.contentUserId ? pipelineJob : null);
     return NextResponse.json({
         topics: await readTopics(access.contentUserId, id, source),
-        jobId: job && job.payload.source === source ? job.id : null,
+        jobId: job?.id ?? null,
+        ...(job ? { jobKind: job.kind } : {}),
     });
 });
 

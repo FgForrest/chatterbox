@@ -109,6 +109,7 @@ describe("recordAiUsage with a provider card's price", () => {
         return {
             recordingId: "rec-1",
             ownerUserId: "user-1",
+            actorUserId: "actor-1",
             payerUserId: "user-1",
             operation: "transcription",
             provider: "Speechmatics",
@@ -139,6 +140,7 @@ describe("recordAiUsage with a provider card's price", () => {
         });
         await recordAiUsage(context({}), { audioSeconds: 1800 });
         expect(inserted).toMatchObject({
+            actorUserId: "actor-1",
             costUsd: (0.2).toFixed(9),
             priceSource: "user",
         });

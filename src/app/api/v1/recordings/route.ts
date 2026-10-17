@@ -6,6 +6,7 @@ import { audioItemColumns, recordingItemJoin } from "@/db/items";
 import {
     aiEnhancements,
     chatterItems,
+    itemProcessing,
     plaudDevices,
     recordings,
     transcriptions,
@@ -156,6 +157,7 @@ export const GET = apiHandler(async (request: Request) => {
             hasTranscript: transcriptExists,
             hasSummary: enhancementExists,
             cursorUpdatedAt: recordingCursorUpdatedAt(),
+            processingPhases: itemProcessing.phases,
         })
         .from(recordings)
         .innerJoin(chatterItems, recordingItemJoin)
@@ -164,6 +166,14 @@ export const GET = apiHandler(async (request: Request) => {
             and(
                 eq(plaudDevices.userId, authn.user.id),
                 eq(plaudDevices.serialNumber, recordings.deviceSn),
+            ),
+        )
+        .leftJoin(
+            itemProcessing,
+            and(
+                eq(itemProcessing.itemId, recordings.id),
+                eq(itemProcessing.userId, authn.user.id),
+                eq(itemProcessing.view, "private"),
             ),
         )
         .where(and(...conditions))
@@ -176,10 +186,15 @@ export const GET = apiHandler(async (request: Request) => {
 
     return NextResponse.json({
         data: pageRows.map((row) =>
-            serializeRecording(row.recording, row.device, {
-                hasTranscription: Boolean(row.hasTranscript),
-                hasSummary: Boolean(row.hasSummary),
-            }),
+            serializeRecording(
+                row.recording,
+                row.device,
+                {
+                    hasTranscription: Boolean(row.hasTranscript),
+                    hasSummary: Boolean(row.hasSummary),
+                },
+                row.processingPhases,
+            ),
         ),
         next_cursor:
             hasMore && last

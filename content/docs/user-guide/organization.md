@@ -1,52 +1,73 @@
 ---
 title: The Organization
-description: Sharing recordings with your colleagues.
+description: Sharing items, profiles, providers, and task rights with your colleagues.
 ---
 
-When your administrator has set it up, everyone on the instance shares an **Organization**: a folder tree next to your **Private** one, where recordings are shared with all your colleagues. Nothing is copied. A shared recording stays yours; the Organization reads it.
+When your administrator has set it up, everyone on the instance shares an **Organization**: a folder tree next to your **Private** one, where recordings and mail can be shared with colleagues. Nothing is copied. A shared item stays owned by the person who brought it in; the Organization reads one shared view.
 
 ![The Organization folder tree and a shared recording](images/organization-folder.png)
 
-## Sharing a recording
+## Sharing an item
 
-File the recording into an Organization folder: drag it onto the folder, or open it and choose a folder under **Share with the Organization** in **Add to folder**.
+Choose an Organization folder in the inline **Categorize recording** or **Categorize email** card. After categorizing, use **Add to folder** in the folder row to add another Organization placement. You can also drag an item onto a folder.
 
-![Add to folder, with the Organization's folders](images/add-to-folder.png)
+![The folder row and Add to folder menu with Organization folders](images/add-to-folder.png)
 
-Before a recording can be shared it has to be ready for others to read:
+This first creates an intended Organization placement. The item remains private while its profile runs. Chatterbox shares it automatically when it is ready for others to read:
 
-- it has a transcript,
+- it has a transcript when it is a recording,
 - every speaker is named or marked unknown,
 - no [Learn](learn.md) review is waiting,
-- the [proposed tasks](summaries-and-tasks.md#tasks-from-a-summary) are reviewed.
+- the [proposed tasks](summaries-and-tasks.md#tasks-across-items) are reviewed.
 
-If something is missing, Chatterbox says what.
+The folder row shows the intended Organization folder, and the workflow strip adds a **Share** step that shows which gate is waiting. A Learn review still blocks sharing after its three-day summary timeout.
 
-## A shared recording
+An item categorized with **Nothing automatic** is not shared by itself. Its intended folder offers **Share now** and a cancel button in the folder row. The strip says **Your turn.** and waits until you share or cancel it.
+
+Mail sent directly to an Organization folder address also starts as a private intended placement, runs the same gates, and shares automatically. See [Mail](mail.md).
+
+## A shared item
 
 ![A recording a colleague shared](images/organization-recording.png)
 
-Everyone can open, play and download a shared recording, and file it into other Organization folders. The header says who shared it, and the speakers say **Managed by the Organization**.
+Everyone can open and read a shared item, play or download shared audio, and file the item into other Organization folders. The header says who shared it, and recording speakers say **Managed by the Organization**.
 
-While a recording is shared, only the **organization account** changes it: its title, transcript, speakers, summary and topics. This keeps one version everyone reads. The owner's own copy stays as it was when it was shared.
+While an item is shared, Organization curators change its title, transcript, speakers, summary, topics, and Learn review. This keeps one version everyone reads. The owner withdraws the item before changing that shared content privately.
 
-People named in shared recordings become **Organization people**, visible in everyone's [Almanac](almanac.md). The organization account looks after them: it renames, merges and erases them for everyone. You can still keep private notes on an Organization person and give them nicknames of your own.
+Tasks are the exception. The home item's owner and curators can edit, drop, close, and merge a shared task. Its assignee can also close or reopen it. A task may collect mentions from several shared recordings and mail; see [Tasks across items](summaries-and-tasks.md#tasks-across-items).
 
-## Taking a recording back
+People named in shared recordings become **Organization people**, visible in everyone's [Almanac](almanac.md). Curators look after them: they rename, merge, and erase them for everyone. You can still keep private notes on an Organization person and give them nicknames of your own.
 
-Remove the recording from its last Organization folder (the **×** on its folder chip) to take it out of the Organization. Chatterbox asks you to confirm first and tells you what happens to it under the retention rules. After that the recording is yours alone again, and the Organization's version of it is gone for everyone.
+## Taking an item back
 
-Erasing a shared recording, or any part of it, takes it out of the Organization first.
+Remove the item from its last Organization folder to withdraw it. Chatterbox asks you to confirm first and says what happens under the retention rules. The shared view then disappears for colleagues and the item is private again.
 
-## The organization account
+Withdrawing a task's home item moves the home to the newest remaining shared mention. If no shared mention remains, the task becomes private with the withdrawn item. Erasing a shared item, or any part of it, withdraws it first.
 
-The organization account is a shared login your administrator holds. Signed in as the organization account you see the Organization's library instead of a private one, and you:
+## Organization profiles
 
-- edit shared recordings (title, transcript, speakers, summary, topics),
-- curate Organization people and things, and decide on the relations members suggest (Almanac → Vocabulary),
+Organization profiles are shared processing recipes for Organization folders. Members can use them and duplicate one into a personal profile. Curators can create, edit, archive, restore, and choose default Organization profiles. See [Processing and profiles](processing-and-profiles.md#profiles-are-processing-recipes).
+
+<span id="organization-providers" />
+
+## Organization providers
+
+**Settings → Providers → Organization providers** lists shared AI credentials that Organization profiles may use. Members see each provider, model, address, price, and disabled state as **Read-only**; API keys are never shown.
+
+Only people with `access.manage` can add, edit, enable, disable, or delete an Organization provider. They also see **Usage per member**, including calls and estimated cost. Every management change is written to the administrator audit log.
+
+Each member may make 60 calls per hour to each Organization provider by default. When the limit is reached, that member's next call is refused until the hourly window resets, without using another member's allowance. The administrator can change the limit for the instance.
+
+## Curators and the organization account
+
+With identity-provider authorization, people granted `org.curate` are curators and people granted `access.manage` manage access and Organization providers. On a local installation, the organization account holds those responsibilities. Curators can:
+
+- edit shared recordings and mail,
+- review shared Learn results and tasks,
+- manage Organization profiles, people, things, and suggested relations,
 - set up folder exports of Organization folders,
-- back up the whole Organization, with each recording's owner recorded.
+- back up the Organization, with each item's owner recorded.
 
-Its retention settings apply to shared recordings while they are shared.
+Organization retention settings apply to shared items while they are shared.
 
 Next: [Mail](mail.md)

@@ -146,6 +146,12 @@ const baseEnvSchema = z.object({
         .string()
         .optional()
         .transform((val) => (val?.trim() ? val.trim() : undefined)),
+    /** Hourly Organization-provider calls available to each member. */
+    ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: positiveIntEnv(
+        "ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR",
+        60,
+        100_000,
+    ),
 
     /**
      * OpenID Connect single sign-on (self-host only). With issuer, client id
@@ -1609,6 +1615,8 @@ function validateEnv(): Env {
             ORG_ACCOUNT_EMAIL: process.env.ORG_ACCOUNT_EMAIL,
             ORG_ACCOUNT_PASSWORD: process.env.ORG_ACCOUNT_PASSWORD,
             ORG_ACCOUNT_NAME: process.env.ORG_ACCOUNT_NAME,
+            ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:
+                process.env.ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR,
             OIDC_ISSUER_URL: process.env.OIDC_ISSUER_URL,
             OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID,
             OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET,

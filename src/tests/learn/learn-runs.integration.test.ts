@@ -31,7 +31,6 @@ import {
     transcriptCorrections,
     transcriptions,
     transcriptSpeakers,
-    userSettings,
     users,
 } from "@/db/schema";
 import {
@@ -215,6 +214,9 @@ import {
 import { finishReview } from "@/lib/learn/review";
 import { newRecordFingerprint } from "@/lib/learn/validate-new-records";
 import { ensureOrgAccount } from "@/lib/org/account";
+import { BUILTIN_PROMPTS_VERSION } from "@/lib/profiles/prompts";
+import { resolveDefaultProfile } from "@/lib/profiles/resolve";
+import { updateProfile } from "@/lib/profiles/store";
 import { requireRecordingView } from "@/lib/sharing/access";
 import type { StorageProvider } from "@/lib/storage/types";
 import { generateSummaryForRecording } from "@/lib/summary/generate-summary";
@@ -333,6 +335,49 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 .from(learnRuns)
                 .where(eq(learnRuns.id, id))
         )[0]?.status;
+
+    async function setAutomaticSummary({
+        correctAfterLearn,
+    }: {
+        correctAfterLearn?: boolean;
+    } = {}): Promise<void> {
+        const resolved = await resolveDefaultProfile(OWNER, "audio");
+        const settings = resolved.settings;
+        if (!("transcribe" in settings.steps)) {
+            throw new Error("audio profile");
+        }
+        await updateProfile({
+            ownerUserId: OWNER,
+            profileId: resolved.profile.id,
+            actor: {
+                kind: "user",
+                actorId: OWNER,
+                issuer: null,
+                subject: null,
+                capabilities: new Set(["use"]),
+                clientId: null,
+                clientPermissions: new Set(),
+                verifiedAt: null,
+            },
+            expectedVersion: resolved.profile.version,
+            settings: {
+                ...settings,
+                steps: {
+                    ...settings.steps,
+                    summary: {
+                        ...settings.steps.summary,
+                        automatic: true,
+                    },
+                    learn: {
+                        ...settings.steps.learn,
+                        ...(correctAfterLearn === undefined
+                            ? {}
+                            : { correctAfterLearn }),
+                    },
+                },
+            },
+        });
+    }
 
     it("supersedes the pending runs of a transcript that is rewritten, and leaves finished ones", async () => {
         const queued = await run("private", "queued");
@@ -494,6 +539,10 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             view: "private",
             status: "queued",
             transcriptionId: transcriptId,
+            profileRevisionId: expect.any(String),
+            builtinPromptsVersion: BUILTIN_PROMPTS_VERSION,
+            payerUserId: OWNER,
+            inputs: { contentId: transcriptId, contentRevision: 0 },
         });
         const jobs = await db()
             .select({
@@ -592,11 +641,20 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
         const jobs = await db()
             .select({ status: asyncJobs.status, payload: asyncJobs.payload })
             .from(asyncJobs);
-        expect(
-            jobs
-                .filter((job) => job.status === "pending")
-                .map((job) => job.payload),
-        ).toEqual([{ runId: again.runId }]);
+        const pending = jobs
+            .filter((job) => job.status === "pending")
+            .map((job) => job.payload);
+        expect(pending).toHaveLength(2);
+        expect(pending).toEqual(
+            expect.arrayContaining([
+                { runId: again.runId },
+                {
+                    itemId: REC,
+                    view: "private",
+                    reason: "transcript",
+                },
+            ]),
+        );
     });
 
     it("keeps an owner's unfinished run from sharing, and lets only the organization account run it while shared", async () => {
@@ -1965,10 +2023,7 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                     );
                 };
 
-                await db().insert(userSettings).values({
-                    userId: OWNER,
-                    autoSummarize: true,
-                });
+                await setAutomaticSummary();
                 await undoLast();
                 expect(await summaryJobs()).toMatchObject([
                     { userId: OWNER, status: "pending" },
@@ -2080,6 +2135,9 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
             });
 
             it("summarizes again after a finish that applied nothing but took back what the summary read", async () => {
+                // Seed this choice into the immutable profile before Learn
+                // records the revision it will use through review finish.
+                await setAutomaticSummary({ correctAfterLearn: false });
                 await readyRun();
                 const { items } = (await (
                     await route(getReviewRoute, OWNER, "review")
@@ -2104,11 +2162,6 @@ describeWithDatabase("Learn runs (PostgreSQL)", () => {
                 await generateSummaryForRecording(OWNER, REC);
                 // No correction pass: it would refresh the summary itself,
                 // once it ends.
-                await db().insert(userSettings).values({
-                    userId: OWNER,
-                    autoSummarize: true,
-                    correctAfterLearn: false,
-                });
                 // Unticked after all, and finished: nothing applied.
                 await route(patchItemRoute, OWNER, `review/items/${id}`, {
                     method: "PATCH",

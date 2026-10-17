@@ -6,23 +6,33 @@ import {
     asyncJobs,
     type ChatterItemKind,
     chatterItems,
+    itemProcessing,
+    mailContents,
     recordings,
     transcriptions,
 } from "@/db/schema";
 import { userCuratesOrganizationNow } from "@/lib/authz/curator";
 import { encryptJsonField, encryptText } from "@/lib/encryption/fields";
+import { nudge } from "@/lib/jobs/nudge";
 import { speakerVersionOf } from "@/lib/knowledge/speaker-label-rules";
 import { storedSpeakerVersion } from "@/lib/knowledge/speaker-labels";
 import {
     stampNewTranscriptAudioInTx,
     transcriptRewrittenInTx,
 } from "@/lib/knowledge/transcript-rewrite";
+import { markSummaryStepDoneInTx, updatePhaseInTx } from "@/lib/pipeline/state";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import type { PipelineView } from "@/lib/pipeline/types";
 import {
     contentWriterRefusal,
     sharingOrgUserId,
     type WriterRefusal,
 } from "@/lib/sharing/writer";
-import { type TaskProposals, writeTaskProposalsInTx } from "@/lib/tasks/store";
+import {
+    dropReplaceableTaskReviewInTx,
+    type TaskProposals,
+    writeTaskProposalsInTx,
+} from "@/lib/tasks/store";
 import type { TranscriptTurn } from "@/lib/transcription/turns";
 
 /**
@@ -37,6 +47,13 @@ export type TranscriptSource = "riffado" | "plaud" | "mixed";
 
 /** Summary pipeline provenance. One row per source can coexist. */
 export type EnhancementSource = "riffado" | "plaud";
+
+export interface ProcessingRunInputs extends Record<string, unknown> {
+    contentId: string;
+    contentSourceId?: string;
+    contentRevision: number | string;
+    itemProfileRevisionId?: string | null;
+}
 
 export interface UpsertTranscriptionArgs {
     /** The recording's owner, who owns its content rows. */
@@ -76,6 +93,11 @@ export interface UpsertTranscriptionArgs {
     actsForOrganization?: boolean;
     /** Account whose provider produced the text; defaults to the actor. */
     producedByUserId?: string;
+    /** Immutable profile and input provenance for this provider run. */
+    profileRevisionId?: string | null;
+    builtinPromptsVersion?: string | null;
+    payerUserId?: string | null;
+    inputs?: ProcessingRunInputs | null;
     /**
      * The job this write finishes. Cancelled meanwhile (the recording was
      * withdrawn, erased or deleted), it writes nothing, even if the
@@ -88,6 +110,9 @@ export interface UpsertTranscriptionArgs {
      */
     audioMd5?: string | null;
     jobId?: string;
+    view?: PipelineView;
+    /** Demo/restore writes remain on the synthesized legacy pipeline state. */
+    pipeline?: "trigger" | "legacy";
 }
 
 export interface UpsertEnhancementArgs {
@@ -131,13 +156,23 @@ export interface UpsertEnhancementArgs {
     actsForOrganization?: boolean;
     /** Account whose provider produced the summary; defaults to the actor. */
     producedByUserId?: string;
+    /** Immutable profile, prompt, language and input provenance for this run. */
+    profileRevisionId?: string | null;
+    builtinPromptsVersion?: string | null;
+    outputLanguage?: string | null;
+    outputFormatLocale?: string | null;
+    payerUserId?: string | null;
+    inputs?: ProcessingRunInputs | null;
     /** See `UpsertTranscriptionArgs.jobId`. */
     jobId?: string;
+    view?: PipelineView;
     /**
      * The task proposals the summary made, stored with it in its
      * transaction: they replace the ones its source made before.
      */
-    tasks?: TaskProposals;
+    tasks?: TaskProposals | null;
+    /** Demo/restore writes remain on the synthesized legacy pipeline state. */
+    pipeline?: "trigger" | "legacy";
 }
 
 /**
@@ -153,7 +188,7 @@ export interface UpsertEnhancementArgs {
  */
 export interface UpsertResult {
     committed: boolean;
-    reason?: WriterRefusal | "cancelled";
+    reason?: WriterRefusal | "cancelled" | "outdated";
 }
 
 const RECORDING_WRITE_BLOCKED = Symbol("recording-write-blocked");
@@ -163,6 +198,88 @@ class WriterRefused {
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+interface CurrentFenceInput {
+    contentId: string;
+    contentSourceId: string;
+    contentRevision: number;
+    profileRevisionId: string | null;
+}
+
+async function currentFenceInput(
+    tx: Tx,
+    args: UpsertEnhancementArgs,
+): Promise<CurrentFenceInput | null> {
+    const [processing] = await tx
+        .select({ profileRevisionId: itemProcessing.profileRevisionId })
+        .from(itemProcessing)
+        .where(
+            and(
+                eq(itemProcessing.itemId, args.recordingId),
+                eq(itemProcessing.userId, args.userId),
+                eq(itemProcessing.view, args.view ?? "private"),
+            ),
+        )
+        .limit(1);
+    if (args.kind === "mail") {
+        const [content] = await tx
+            .select({ id: mailContents.id, revision: mailContents.revision })
+            .from(mailContents)
+            .where(
+                and(
+                    eq(mailContents.itemId, args.recordingId),
+                    eq(mailContents.userId, args.userId),
+                ),
+            )
+            .limit(1);
+        return content
+            ? {
+                  contentId: content.id,
+                  contentSourceId: "mail",
+                  contentRevision: content.revision,
+                  profileRevisionId: processing?.profileRevisionId ?? null,
+              }
+            : null;
+    }
+    const source = args.inputs?.contentSourceId;
+    if (source !== "riffado" && source !== "plaud" && source !== "mixed") {
+        return null;
+    }
+    const [content] = await tx
+        .select({ id: transcriptions.id, revision: transcriptions.revision })
+        .from(transcriptions)
+        .where(
+            and(
+                eq(transcriptions.recordingId, args.recordingId),
+                eq(transcriptions.userId, args.userId),
+                eq(transcriptions.source, source),
+            ),
+        )
+        .limit(1);
+    return content
+        ? {
+              contentId: content.id,
+              contentSourceId: source,
+              contentRevision: content.revision,
+              profileRevisionId: processing?.profileRevisionId ?? null,
+          }
+        : null;
+}
+
+function fenceMatches(
+    inputs: ProcessingRunInputs,
+    current: CurrentFenceInput | null,
+): boolean {
+    if (!current) return false;
+    const sameContent =
+        inputs.contentId === current.contentId &&
+        inputs.contentSourceId === current.contentSourceId &&
+        inputs.contentRevision === current.contentRevision;
+    const sameProfile =
+        !("itemProfileRevisionId" in inputs) ||
+        inputs.itemProfileRevisionId === current.profileRevisionId;
+    return sameContent && sameProfile;
+}
 
 /**
  * Whether the job a write finishes is still running. A cancellation marks
@@ -227,7 +344,7 @@ export async function upsertTranscription(
     const actsForOrganization = await curatesNow(args, actorUserId);
 
     try {
-        await db.transaction(async (tx) => {
+        const advance = await db.transaction(async (tx) => {
             const [stillActive] = await tx
                 .select({
                     deletedAt: recordings.deletedAt,
@@ -266,7 +383,6 @@ export async function upsertTranscription(
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
                 throw new WriterRefused("cancelled");
             }
-
             const [current] = await tx
                 .select({
                     id: transcriptions.id,
@@ -289,6 +405,12 @@ export async function upsertTranscription(
             const encryptedTurns = turns?.length
                 ? encryptJsonField(turns)
                 : null;
+            const runRecordColumns = {
+                profileRevisionId: args.profileRevisionId ?? null,
+                builtinPromptsVersion: args.builtinPromptsVersion ?? null,
+                payerUserId: args.payerUserId ?? null,
+                inputs: args.inputs ?? null,
+            };
 
             if (current) {
                 await tx
@@ -305,6 +427,7 @@ export async function upsertTranscription(
                         model,
                         source,
                         producedByUserId,
+                        ...runRecordColumns,
                         revision: sql`${transcriptions.revision} + 1`,
                     })
                     .where(
@@ -334,6 +457,10 @@ export async function upsertTranscription(
                                 ),
                             ),
                         );
+                    await dropReplaceableTaskReviewInTx(tx, {
+                        recordingId,
+                        ownerUserId: userId,
+                    });
                 }
             } else {
                 await tx.insert(transcriptions).values({
@@ -349,6 +476,7 @@ export async function upsertTranscription(
                     model,
                     source,
                     producedByUserId,
+                    ...runRecordColumns,
                 });
                 // Which audio it was made from, for a later rewrite.
                 await stampNewTranscriptAudioInTx(tx, {
@@ -370,7 +498,16 @@ export async function upsertTranscription(
                         eq(chatterItems.userId, userId),
                     ),
                 );
+            return args.pipeline === "legacy"
+                ? null
+                : requestAdvanceInTx(tx, {
+                      itemId: recordingId,
+                      userId,
+                      view: args.view ?? "private",
+                      reason: "transcript",
+                  });
         });
+        if (advance) nudge();
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };
@@ -413,7 +550,7 @@ export async function upsertEnhancement(
     const isMail = args.kind === "mail";
 
     try {
-        await db.transaction(async (tx) => {
+        const outcome = await db.transaction(async (tx) => {
             const [stillActive] = isMail
                 ? await tx
                       .select({
@@ -464,6 +601,47 @@ export async function upsertEnhancement(
             if (args.jobId && !(await jobStillRunning(tx, args.jobId))) {
                 throw new WriterRefused("cancelled");
             }
+            if (args.inputs?.contentSourceId) {
+                const current = await currentFenceInput(tx, args);
+                if (!fenceMatches(args.inputs, current)) {
+                    const advance =
+                        args.pipeline === "legacy"
+                            ? null
+                            : await requestAdvanceInTx(tx, {
+                                  itemId: recordingId,
+                                  userId,
+                                  view: args.view ?? "private",
+                                  reason: "summary",
+                              });
+                    if (advance && current) {
+                        const profileChanged =
+                            "itemProfileRevisionId" in args.inputs &&
+                            args.inputs.itemProfileRevisionId !==
+                                current.profileRevisionId;
+                        await updatePhaseInTx(
+                            tx,
+                            recordingId,
+                            args.view ?? "private",
+                            userId,
+                            "summary",
+                            {
+                                state: "outdated",
+                                reason: profileChanged
+                                    ? "profile_changed"
+                                    : "content_changed",
+                                generation: advance.requestedGeneration,
+                                inputs: {
+                                    contentId: current.contentId,
+                                    contentSourceId: current.contentSourceId,
+                                    contentRevision: current.contentRevision,
+                                },
+                                at: new Date().toISOString(),
+                            },
+                        );
+                    }
+                    return { advance, outdated: true };
+                }
+            }
 
             const [existing] = await tx
                 .select({ id: aiEnhancements.id })
@@ -484,6 +662,14 @@ export async function upsertEnhancement(
                 multiPassUsed: multiPass?.passesUsed ?? null,
                 multiPassMerged: multiPass?.merged ?? null,
             };
+            const runRecordColumns = {
+                profileRevisionId: args.profileRevisionId ?? null,
+                builtinPromptsVersion: args.builtinPromptsVersion ?? null,
+                outputLanguage: args.outputLanguage ?? null,
+                outputFormatLocale: args.outputFormatLocale ?? null,
+                payerUserId: args.payerUserId ?? null,
+                inputs: args.inputs ?? null,
+            };
 
             const encryptedSummary = encryptText(summary);
             const encryptedKeyPoints = encryptJsonField(keyPoints);
@@ -502,6 +688,7 @@ export async function upsertEnhancement(
                         source,
                         producedByUserId,
                         ...multiPassColumns,
+                        ...runRecordColumns,
                     })
                     .where(
                         and(
@@ -522,6 +709,7 @@ export async function upsertEnhancement(
                     source,
                     producedByUserId,
                     ...multiPassColumns,
+                    ...runRecordColumns,
                 });
             }
             if (args.tasks) {
@@ -529,7 +717,21 @@ export async function upsertEnhancement(
                     recordingId,
                     ownerUserId: userId,
                     actorUserId,
+                    view: args.view ?? "private",
+                    contentSourceId:
+                        typeof args.inputs?.contentSourceId === "string"
+                            ? args.inputs.contentSourceId
+                            : null,
+                    contentRevision:
+                        typeof args.inputs?.contentRevision === "number"
+                            ? args.inputs.contentRevision
+                            : null,
                     proposals: args.tasks,
+                });
+            } else if (args.tasks === null && typeof tx.delete === "function") {
+                await dropReplaceableTaskReviewInTx(tx, {
+                    recordingId,
+                    ownerUserId: userId,
                 });
             }
 
@@ -544,7 +746,38 @@ export async function upsertEnhancement(
                         eq(chatterItems.userId, userId),
                     ),
                 );
+            const advance =
+                args.pipeline === "legacy"
+                    ? null
+                    : await requestAdvanceInTx(tx, {
+                          itemId: recordingId,
+                          userId,
+                          view: args.view ?? "private",
+                          reason: "summary",
+                      });
+            if (
+                advance &&
+                args.inputs &&
+                typeof args.inputs.contentSourceId === "string" &&
+                typeof args.inputs.contentRevision === "number"
+            ) {
+                await markSummaryStepDoneInTx(tx, {
+                    itemId: recordingId,
+                    userId,
+                    view: args.view ?? "private",
+                    step: "summary",
+                    content: {
+                        contentId: args.inputs.contentId,
+                        contentSourceId: args.inputs.contentSourceId,
+                        contentRevision: args.inputs.contentRevision,
+                    },
+                    generation: advance.requestedGeneration,
+                });
+            }
+            return { advance, outdated: false };
         });
+        if (outcome.advance) nudge();
+        if (outcome.outdated) return { committed: false, reason: "outdated" };
     } catch (txError) {
         if (txError === RECORDING_WRITE_BLOCKED) {
             return { committed: false };

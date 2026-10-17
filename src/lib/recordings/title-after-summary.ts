@@ -1,8 +1,10 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { recordings, userSettings } from "@/db/schema";
+import { resolveItemProfile } from "@/lib/profiles/resolve";
 import { applyGeneratedTitle } from "@/lib/recordings/apply-generated-title";
 import { titleStillGenerated } from "@/lib/recordings/generated-title";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { emitEvent } from "@/lib/webhooks/emit";
 
 /** Retitle a private recording from its completed summary when enabled. */
@@ -11,18 +13,24 @@ export async function updateTitleAfterSummary(input: {
     recordingId: string;
     summary: string;
     keyPoints: string[];
+    fence?: TitleInputFence;
 }): Promise<void> {
     if (!input.summary.trim()) return;
     const [settings] = await db
         .select({
-            autoGenerateTitle: userSettings.autoGenerateTitle,
             syncTitleToPlaud: userSettings.syncTitleToPlaud,
         })
         .from(userSettings)
         .where(eq(userSettings.userId, input.userId))
         .limit(1);
+    const profile = await resolveItemProfile(
+        input.recordingId,
+        "private",
+        input.userId,
+    );
+    const title = profile.settings.steps.title;
     if (
-        !(settings?.autoGenerateTitle ?? true) ||
+        !title.automatic ||
         !(await titleStillGenerated(input.userId, input.recordingId))
     ) {
         return;
@@ -46,6 +54,7 @@ export async function updateTitleAfterSummary(input: {
         source: "summary",
         plaudFileId: recording.plaudFileId,
         syncTitleToPlaud: settings?.syncTitleToPlaud ?? false,
+        ...(input.fence ? { fence: input.fence } : {}),
     });
     if (retitled) {
         await emitEvent("recording.updated", input.userId, input.recordingId);

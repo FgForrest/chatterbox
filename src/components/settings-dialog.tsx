@@ -1,7 +1,7 @@
 "use client";
 
 import { useExtracted } from "next-intl";
-import { useCallback } from "react";
+import { type ReactNode, useCallback } from "react";
 import { HelpButton } from "@/components/help/help-button";
 import { SettingsNavMobile } from "@/components/settings-nav-mobile";
 import { SettingsNavSidebar } from "@/components/settings-nav-sidebar";
@@ -30,7 +30,6 @@ interface SettingsDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     initialProviders?: Provider[];
-    onReRunOnboarding?: () => void;
     isHosted?: boolean;
     /** The instance receives mail and the viewer may have addresses. */
     mailEnabled?: boolean;
@@ -38,6 +37,7 @@ interface SettingsDialogProps {
     accessManagement?: boolean;
     /** Forwarded to `SettingsContent` -> `PlaudAccountSection`. */
     onPlaudReconnected?: () => void;
+    headerAction?: ReactNode;
 }
 
 const EMPTY_PROVIDERS: Provider[] = [];
@@ -46,11 +46,11 @@ export function SettingsDialog({
     open,
     onOpenChange,
     initialProviders = EMPTY_PROVIDERS,
-    onReRunOnboarding,
     isHosted = false,
     mailEnabled = false,
     accessManagement = false,
     onPlaudReconnected,
+    headerAction,
 }: SettingsDialogProps) {
     const i18n = useExtracted();
     const onClose = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -115,6 +115,7 @@ export function SettingsDialog({
                                 mailEnabled={mailEnabled}
                                 accessManagement={accessManagement}
                             />
+                            {headerAction}
                             <HelpButton topic={`settings.${activeSection}`} />
                         </header>
 
@@ -126,7 +127,6 @@ export function SettingsDialog({
                                 <SettingsContent
                                     activeSection={activeSection}
                                     initialProviders={initialProviders}
-                                    onReRunOnboarding={onReRunOnboarding}
                                     isHosted={isHosted}
                                     mailEnabled={mailEnabled}
                                     accessManagement={accessManagement}

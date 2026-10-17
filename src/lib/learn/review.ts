@@ -97,6 +97,11 @@ import type { LearnObject, LearnSubject } from "@/lib/learn/output";
 import type { ReviewCandidate } from "@/lib/learn/validate";
 import type { NewRecordPayload } from "@/lib/learn/validate-new-records";
 import { assertOwnScopeWritable, getOrgUserId } from "@/lib/org/config";
+import { requestAdvanceInTx } from "@/lib/pipeline/trigger";
+import {
+    loadItemProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
 import type { RecordingViewContext } from "@/lib/sharing/access";
 import {
     contentWriterScope,
@@ -734,6 +739,20 @@ export async function finishReview(
     const orgUserId = await sharingOrgUserId();
     const latest = await latestRun(access, source);
     if (!latest || latest.status !== "ready") throw reviewNotFound();
+    const profile = latest.profileRevisionId
+        ? await loadItemProfileRevision({
+              itemId: latest.itemId,
+              view: latest.view,
+              ownerUserId: latest.userId,
+              actorUserId,
+              revisionId: latest.profileRevisionId,
+          })
+        : await resolveItemProfile(
+              latest.itemId,
+              latest.view,
+              latest.userId,
+              actorUserId,
+          );
     // Where a new record may be found already: what the run could read.
     const readScopes = readableScopes(
         {
@@ -748,8 +767,9 @@ export async function finishReview(
         { actorUserId, orgUserId, actsForOrganization },
         versions,
         readScopes,
+        profile.settings.steps.learn.correctAfterLearn,
     );
-    if (finished.correcting) nudge();
+    nudge();
     // The last review done releases what automatic Learn held back, unless
     // the correction pass it queued is still to run (that releases it).
     await releaseAutoLearnHold(access.recordingId);
@@ -1020,6 +1040,7 @@ function finishInTx(
     writer: ReviewWriter,
     versions: Record<string, number>,
     readScopes: readonly string[],
+    correctAfterLearn: boolean,
 ): Promise<FinishedReview> {
     const { actorUserId, orgUserId } = writer;
     return db.transaction(async (tx) => {
@@ -1046,6 +1067,12 @@ function finishInTx(
                 .update(learnRuns)
                 .set({ status: "superseded", updatedAt: new Date() })
                 .where(eq(learnRuns.id, run.id));
+            await requestAdvanceInTx(tx, {
+                itemId: run.itemId,
+                userId: run.userId,
+                view: run.view,
+                reason: "review-finished",
+            });
             return {
                 status: "superseded",
                 applied: 0,
@@ -1666,11 +1693,21 @@ function finishInTx(
         if (typesCreated) await bumpVocabularyVersionInTx(tx);
         await bumpScopeInTx(tx, scopes);
         const correcting = isRecordingRun(latest)
-            ? await queueCorrectionPassInTx(tx, {
-                  ...run,
-                  transcriptionId: latest.transcriptionId,
-              })
+            ? await queueCorrectionPassInTx(
+                  tx,
+                  {
+                      ...run,
+                      transcriptionId: latest.transcriptionId,
+                  },
+                  correctAfterLearn,
+              )
             : false;
+        await requestAdvanceInTx(tx, {
+            itemId: run.itemId,
+            userId: run.userId,
+            view: run.view,
+            reason: "review-finished",
+        });
         return {
             status: "finished",
             applied,

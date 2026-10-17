@@ -1,76 +1,91 @@
 ---
 title: Shrnutí a úkoly
-description: Shrnutí, šablony, vícekrokové shrnutí a úkoly, které shrnutí nalezne.
+description: Shrnutí, profily zpracování a úkoly sledované napříč nahrávkami a poštou.
 ---
-
-<span id="summaries" />
 
 ## Shrnutí
 
-Jakmile má nahrávka přepis, karta **Shrnutí** pod ním jej může shrnout.
+Jakmile má nahrávka přepis a pracovní postup dospěje ke kroku **Shrnout**, objeví se pod přepisem prvek **Shrnutí**. Stejný prvek má i pošta. Během pracovního postupu je vložený v položce a hotové předchozí prvky se skládají do jednoho řádku. Po dokončení vypadá položka jako dříve.
 
 ![Shrnutí s úkoly čekajícími na kontrolu](images/summary.png)
 
-1. Vyberte šablonu v rozbalovacím seznamu vedle tlačítka. Výchozí je vaše základní šablona.
-2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí.
+1. Vyberte profil zpracování v rozbalovacím seznamu vedle tlačítka. Začíná na profilu položky. Pokud zvolíte jiný, Chatterbox si v tomto prohlížeči zapamatuje volbu pro další položky se stejným přiřazeným profilem.
+2. Klikněte na **Shrnout** nebo na **Znovu shrnout** pro nahrazení existujícího shrnutí nahrávky. U pošty se tlačítko jmenuje **Shrnout znovu**.
 
-Během zpracování karta ukazuje, jak dlouho už operace trvá a u vícekrokového shrnutí, jak daleko je: `Summarizing — 1/3 passes`, poté `Merging 3 passes…`. Můžete stránku opustit – shrnutí se nezastaví a po návratu bude připravené.
+Ruční výběr může použít libovolný dostupný profil pro daný druh položky. Když shrnutí spustíte sami, otevře se v okně; pruh pracovního postupu toto okno znovu otevře, pokud vyžaduje pozornost. Profil dodává instrukce shrnutí, jazyk a formát výstupu, poskytovatele, hledání úkolů a nastavení funkce **Vícenásobné shrnování**. Viz [Zpracování a profily](processing-and-profiles.md).
+
+![Výběr profilu zpracování pro ruční shrnutí](images/summary-profile-picker.png)
+
+Během zpracování karta ukazuje, jak dlouho už operace trvá a u funkce **Vícenásobné shrnování** také postup: `Probíhá shrnutí — 1/3 průchodů`, poté `Slučování 3 průchodů…`. Můžete stránku opustit; shrnutí se nezastaví a po návratu bude připravené.
 
 Shrnutí jsou psána ve formátu Markdown, takže nadpisy, seznamy a tabulky se tak i zobrazují. Za textem následují **Klíčové body**. Dvě ikony umožňují shrnutí zkopírovat nebo stáhnout jako Markdown soubor.
 
-Shrnutí jsou ve stejném jazyce, jako je nahrávka, pokud si v Nastavení → Shrnutí → **Jazyk výstupu AI** nezvolíte jiný jazyk. Chcete-li automaticky shrnovat každý nový přepis, aktivujte zde možnost **Automaticky vytvořit shrnutí po přepisu**.
+Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**. Pruh pracovního postupu označí práci vytvořenou ze starších vstupů jako **Zastaralé**.
 
-Pokud opravíte jména v přepisu po vytvoření shrnutí, u shrnutí se objeví upozornění **Mohou obsahovat neaktuální jména nebo pojmy** s odkazem na **Znovu vygenerovat**.
+### Instrukce shrnutí a Vícenásobné shrnování
 
-<span id="templates" />
-
-### Šablony
-
-Šablona je instrukce, kterou dostane AI. Chatterbox obsahuje **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body** – tyto šablony můžete upravit nebo napsat vlastní v Nastavení → Shrnutí. Podrobnosti najdete v [nastavení shrnutí](settings.md#summary).
-
-<span id="multi-pass-summaries" />
-
-### Vícekroková shrnutí
+Chatterbox obsahuje instrukce shrnutí, například **Obecné shrnutí**, **Zápis z jednání**, **Klíčové body** a **Akční body**. Nyní jsou součástí profilů zpracování, nikoli výběru u shrnutí. V profilu můžete změnit zaměření, instrukce, jazyk nebo formát výstupu.
 
 ![Shrnutí vytvořené dvěma ze tří kroků](images/summary-multi-pass.png)
 
-S aktivovanou funkcí **Vícekrokové shrnutí** (Nastavení → Shrnutí) Chatterbox přepis shrnuje vícekrát a výsledky slučuje, takže i body zachycené jen jedním krokem se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik kroků nastavíte.
-
-Zápatí takového shrnutí uvádí **vícekrokové · 3**. Pokud některý krok selže a shrnutí je z méně kroků, odznak zežloutne, například **vícekrokové · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
+Profil může shrnout přepis 2krát až 5krát a výsledky sloučit, takže i bod zachycený jen jedním během se objeví ve shrnutí. Cena procesu je přibližně tolikrát vyšší, kolik běhů nastavíte. Zápatí uvádí **Vícenásobné shrnování · 3**. Pokud některý běh selže a shrnutí vznikne z menšího počtu, odznak zežloutne, například **Vícenásobné shrnování · 2/3**; najeďte na něj kurzorem a zobrazí se důvod.
 
 <span id="tasks-from-a-summary" />
+<span id="tasks-across-items" />
 
-## Úkoly ze shrnutí
+## Úkoly napříč položkami
 
-Shrnutí také hledá položky, které někdo slíbil udělat. Každá taková položka se navrhne jako úkol, včetně toho, kdo jej má splnit, termínu (stanoveného na základě data nahrávky, takže „do pátku“ se přepočítá na datum) a přesné citace.
+### Úkoly ze shrnutí
 
-Kliknutím na **Zkontrolovat úkoly** ve shrnutí je můžete projít:
+Shrnutí hledá věci, které někdo slíbil udělat. Úkol již nepatří jednomu shrnutí: shromažďuje zmínky z nahrávek a pošty zařazených do jeho rozsahu složek. **Kde bylo řečeno** otevře zvukovou pasáž nebo zvýrazní odpovídající text pošty. **Dřívější zmínka** ukazuje starší důkaz bez změny úkolu.
+
+Jakmile jsou změny úkolů připravené, otevře se za shrnutím vložený prvek **Kontrola úkolů**. Pruh pracovního postupu uvádí **Ke kontrole** a akce **Zkontrolovat úkoly** k němu přeskočí. Pokud úkoly vznikly ze shrnutí, které jste po pracovním postupu spustili sami, stejná kontrola se otevře v okně.
 
 ![Kontrola navržených úkolů](images/task-review.png)
 
-- **Odznačte** to, co není úkol. Odznačené návrhy se znovu nenavrhují pro tuto nahrávku.
-- **Opravte** text, osobu nebo termín splnění. Nejprve se nabízí osoby vystupující v nahrávce, poté všichni z vašeho Almanachu. Jméno následované **?**, například **Marek?**, bylo rozpoznáno jen podle křestního jména – zkontrolujte jej.
-- **Sloučit…** umožňuje spojit dva návrhy, pokud jsou to stejné úkoly. **Přidat úkol** vloží úkol, který shrnutí opomenulo.
-- **Kde bylo řečeno** přehraje pasáž, kde byl úkol dohodnut.
-- **Přijmout úkoly** uloží označené položky. **Uložit a pokračovat později** uchová vaše změny pro pozdější úpravy.
+- Nová akce může nabídnout **Navržené shody** s dřívějšími otevřenými úkoly ze stejného rozsahu složek. Každá navržená shoda je zpočátku nezaškrtnutá bez ohledu na počet kandidátů nebo původ důkazu. Shodu, kterou chcete přijmout, zaškrtněte. Nezaškrtnuté jsou zpočátku také změny termínu a dokončení.
+- Pokud je možných kandidátů více, vyberte správný, nebo zvolte **Ponechat jako nový**. **Sloučit do dřívějšího úkolu** prohledá všechny otevřené úkoly v rozsahu složek, nejen navržené kandidáty.
+- Změna termínu zobrazuje **Současný termín** i **Navržený termín**. Dokončení je označeno **Vyžaduje potvrzení**. Výrok starší než poslední úprava úkolu se zobrazí jako **Dřívější zmínka** a nevyžaduje rozhodnutí.
+- Shrnutí může také navrhnout **Už není potřeba** nebo **Předáno někomu jinému**. Tyto možnosti nejsou nikdy předem vybrané. Neznámý řešitel se zobrazí ke kontrole a nevytvoří se potají.
+- Odškrtněte nový úkol, který není skutečný. Před přijetím opravte jeho text, řešitele nebo termín. **Přidat úkol** doplní úkol, který shrnutí opomenulo. **Použít vybrané změny** použije vše, co zůstalo zaškrtnuté; **Uložit a pokračovat později** zachová kontrolu bez použití změn.
 
-Shrnutí také rozpozná, pokud byl dřívější úkol splněn nebo posunut, a navrhne **Označit jako splněné** nebo nový termín splnění.
+Kontrola zobrazuje jednu kartu pro každý úkol. Shoda je hlavní rozhodnutí; změny termínu, dokončení, **Už není potřeba** a **Předáno někomu jinému** pro tento úkol jsou uvedeny pod ní.
 
-Přijaté úkoly jsou vypsané na kartě shrnutí. Zaškrtněte je po dokončení, nebo použijte **Přidat úkol** pro ruční doplnění.
+![Změny úkolu a dřívější zmínka v kontrole](images/task-review-changes.png)
+
+![Výběr dřívějšího úkolu ke sloučení](images/task-merge-earlier.png)
+
+Po přijetí shody ji může vlastník položky v jejím seznamu úkolů zrušit; u sdílené položky to mohou provést také kurátoři. Zrušením se tato zmínka oddělí do vlastního úkolu. Změny polí již použité na dřívější úkol zůstanou použité.
+
+Přijaté úkoly jsou uvedené u položky. Zaškrtněte je po dokončení, nebo použijte **Přidat úkol** pro ruční doplnění. Úkol žije, dokud existuje alespoň jedna zmínka, i když nahradíte shrnutí, které jej původně našlo.
+
+<span id="routed-proposals" />
+
+## Směrované návrhy
+
+Pokud zkontrolujete navrženou změnu, ale nemáte právo ji použít, Chatterbox ji předá někomu, kdo toto právo má. **Návrhy pro vás** na stránce Úkoly jsou schránkou těchto rozhodnutí a odznak v navigaci uvádí jejich počet. Při použití návrhu se oprávnění zkontroluje znovu.
+
+![Směrovaný návrh úkolu ve schránce na stránce Úkoly](images/tasks-routed.png)
+
+U sdíleného úkolu mohou vlastník jeho domovské položky a kurátoři Organizace upravovat text, termín a řešitele, úkol zrušit, sloučit a uzavřít. Řešitel jej může také uzavřít nebo znovu otevřít. U soukromého úkolu může tyto úkony provádět pouze jeho vlastník. Tato práva úkolů jsou výjimkou z ostatních pravidel úprav sdílených položek.
+
+Po smazání domovské položky se domovem stane nejnovější přeživší zmínka ve stejném rozsahu. Pokud žádná nezůstane, úkol zmizí. Po odebrání sdílené domovské položky z Organizace se domovem stane nejnovější zbývající sdílená zmínka. Pokud žádná nezůstane, úkol se stane soukromým spolu s odebranou položkou. Odebraná zmínka již není v Organizaci viditelná. Retence, která odstraní zvuk nebo vytvořený obsah, domov nepřesouvá.
 
 <span id="the-tasks-page" />
 
 ## Stránka Úkoly
 
-**Úkoly** v horní liště zobrazují úkoly ze všech vašich nahrávek.
+**Úkoly** v horní liště zobrazují úkoly z nahrávek i pošty.
 
-![Úkoly přiřazené vám](images/tasks-mine.png)
+![Úkoly přiřazené Vám](images/tasks-mine.png)
 
-- **Moje**: úkoly přiřazené vám. Chatterbox určí vaše záznamy v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se vám zde úkoly nezobrazují.
-- **Sledované**: ostatní úkoly z vašich nahrávek, přiřazené jiným osobám nebo zatím nikomu.
+- **Moje**: úkoly přiřazené Vám. Chatterbox určí Váš záznam v Almanachu podle e-mailové adresy; otevřete svůj záznam v Almanachu a zvolte **Toto jsem já**, pokud se Vám zde úkoly nezobrazují.
+- **Sledované**: ostatní úkoly z Vašich položek, přiřazené jiným osobám nebo zatím nikomu.
 
 ![Úkoly, které sledujete](images/tasks-tracked.png)
 
-Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete volby **Hotovo**, **Zrušit** (nebo **Obnovit**) a **Kde bylo řečeno**, což otevře nahrávku v daném okamžiku.
+Filtry zobrazí otevřené, hotové nebo zrušené úkoly, úkoly z jedné složky i úkoly po termínu, splatné tento týden nebo zatím bez termínu. Seznam lze třídit podle novosti nebo termínu splnění. U každého úkolu najdete akce, ke kterým máte oprávnění, a **Kde bylo řečeno** pro každou zmínku.
 
-Pokračujte: [Almanach](almanac.md)
+Akci **Sloučit do dřívějšího úkolu** zde použijte, pokud dva řádky představují stejnou práci. Cílovému úkolu zůstanou jeho pole. Rozdíly vyžadující oprávnění jiné osoby se předají jako návrhy a nepoužijí se potají. Soukromý úkol a úkol Organizace nelze sloučit způsobem, který by úkol Organizace před členy skryl.
+
+Dále: [Almanach](almanac.md)

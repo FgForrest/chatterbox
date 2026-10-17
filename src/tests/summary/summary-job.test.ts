@@ -31,11 +31,13 @@ describe("parseSummaryJobPayload", () => {
             parseSummaryJobPayload({
                 recordingId: "rec-1",
                 presetId: "meeting-notes",
+                profileRevisionId: "revision-1",
                 trigger: "manual",
             }),
         ).toEqual({
             recordingId: "rec-1",
             presetId: "meeting-notes",
+            profileRevisionId: "revision-1",
             trigger: "manual",
         });
     });
@@ -57,6 +59,15 @@ describe("parseSummaryJobPayload", () => {
     it("rejects a preset that is not a string", () => {
         expect(() =>
             parseSummaryJobPayload({ recordingId: "rec-1", presetId: 12 }),
+        ).toThrow(InvalidJobPayloadError);
+    });
+
+    it("rejects a profile revision that is not a string", () => {
+        expect(() =>
+            parseSummaryJobPayload({
+                recordingId: "rec-1",
+                profileRevisionId: 12,
+            }),
         ).toThrow(InvalidJobPayloadError);
     });
 
@@ -83,14 +94,14 @@ describe("parseSummaryJobPayload", () => {
         await enqueueSummaryJob({
             userId: "user-1",
             recordingId: "rec-1",
-            presetId: "meeting-notes",
+            profileRevisionId: "revision-1",
             trigger: "manual",
         });
         const written = (enqueueJob as Mock).mock.calls[0][0].payload;
 
         expect(parseSummaryJobPayload(written)).toEqual({
             recordingId: "rec-1",
-            presetId: "meeting-notes",
+            profileRevisionId: "revision-1",
             trigger: "manual",
         });
     });

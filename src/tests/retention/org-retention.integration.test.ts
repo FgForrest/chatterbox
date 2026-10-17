@@ -23,6 +23,7 @@ import {
     chatterItems,
     recordingFolders,
     recordings,
+    taskContentVectors,
     transcriptions,
     userSettings,
     users,
@@ -175,6 +176,20 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
                 model: "whisper-1",
                 source: "riffado",
             });
+        await db()
+            .insert(taskContentVectors)
+            .values({
+                id: "retention-content-vector",
+                userId: OWNER,
+                itemId: REC,
+                contentSourceId: "retention-transcript",
+                contentRevision: 1,
+                vectorGeneration: "retention-model",
+                chunkIndex: 0,
+                dim: 2,
+                vector: "encrypted-vector",
+                inputHmac: "0".repeat(64),
+            });
         await addRecordingToFolder({
             userId: OWNER,
             recordingId: REC,
@@ -270,6 +285,12 @@ describeWithDatabase("retention and the Organization (PostgreSQL)", () => {
         expect(outcome.reaped.sort()).toEqual(["audio", "transcript"]);
         expect(storage.deleted).toEqual([`${OWNER}/old.mp3`]);
         expect(await db().select().from(transcriptions)).toEqual([]);
+        expect(
+            await db()
+                .select()
+                .from(taskContentVectors)
+                .where(eq(taskContentVectors.itemId, REC)),
+        ).toEqual([]);
         // The markers describe the one recording, so its owner's sync and
         // auto-transcription leave it alone after a withdrawal too.
         expect(await markers()).toEqual({ audio: true, transcript: true });

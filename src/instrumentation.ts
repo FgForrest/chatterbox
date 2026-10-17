@@ -72,6 +72,7 @@ type EnvModule = {
 type McpConfigModule = { mcpConfigWarnings: () => string[] };
 
 type AutoLearnModule = { startAutoLearnSweeper: () => void };
+type PipelineModule = { startPipelineSweeper: () => void };
 type PosthogServerModule = {
     captureServerException: (
         error: unknown,
@@ -192,6 +193,10 @@ export async function register() {
     const { startAutoLearnSweeper } =
         require("./lib/learn/auto-learn") as AutoLearnModule;
     startAutoLearnSweeper();
+
+    const { startPipelineSweeper } =
+        require("./lib/pipeline/sweep") as PipelineModule;
+    startPipelineSweeper();
 
     // Sweeps recording-session chunks left behind by a tab that closed
     // mid-recording, and expired chunks of sessions whose finalize failed.

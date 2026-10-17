@@ -5,9 +5,12 @@ import { generateTitleFromTranscription } from "@/lib/ai/generate-title";
 import { refreshExistingRecordingSidecars } from "@/lib/export/document-sidecars";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
 import {
+    storeGeneratedMailTitle,
     storeGeneratedTitle,
     titleStillGenerated,
 } from "@/lib/recordings/generated-title";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
+import type { RecordingView } from "@/lib/sharing/view";
 
 /**
  * Generate a title from a summary or transcript and make it the recording's name:
@@ -21,11 +24,15 @@ export async function applyGeneratedTitle(input: {
     userId: string;
     recordingId: string;
     text: string;
-    plaudFileId: string;
+    plaudFileId?: string;
     syncTitleToPlaud: boolean;
+    kind?: "audio" | "mail";
     source?: "summary" | "transcript";
     expectedTitleEditedAt?: Date | null;
     actorUserId?: string;
+    view?: RecordingView;
+    fence?: TitleInputFence;
+    skipIfTitleStepDoneForFence?: boolean;
 }): Promise<boolean> {
     const { userId, recordingId, text, plaudFileId, syncTitleToPlaud } = input;
     if (!text.trim()) return false;
@@ -35,25 +42,46 @@ export async function applyGeneratedTitle(input: {
         text,
         input.source ?? "transcript",
         userId,
+        input.view ?? "private",
     );
 
     // Not stored when a person has set a title, and then nothing below runs.
     const retitled = generatedTitle
-        ? await storeGeneratedTitle(
-              userId,
-              recordingId,
-              generatedTitle,
-              input.expectedTitleEditedAt,
-              input.actorUserId ?? userId,
-          )
+        ? input.kind === "mail"
+            ? await storeGeneratedMailTitle(
+                  userId,
+                  recordingId,
+                  generatedTitle,
+                  input.expectedTitleEditedAt,
+                  input.actorUserId ?? userId,
+                  input.fence,
+                  {
+                      skipIfTitleStepDoneForFence:
+                          input.skipIfTitleStepDoneForFence,
+                  },
+              )
+            : await storeGeneratedTitle(
+                  userId,
+                  recordingId,
+                  generatedTitle,
+                  input.expectedTitleEditedAt,
+                  input.actorUserId ?? userId,
+                  input.fence,
+                  {
+                      skipIfTitleStepDoneForFence:
+                          input.skipIfTitleStepDoneForFence,
+                  },
+              )
         : false;
     if (!generatedTitle || !retitled) return false;
 
     // The export was planned under the old title; plan again so its
     // directory follows the rename now.
-    await refreshExistingRecordingSidecars(userId, recordingId);
+    if (input.kind !== "mail") {
+        await refreshExistingRecordingSidecars(userId, recordingId);
+    }
 
-    if (syncTitleToPlaud) {
+    if (syncTitleToPlaud && plaudFileId) {
         try {
             const [connection] = await db
                 .select()

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { chatterItems, mailMessages, userSettings } from "@/db/schema";
+import { chatterItems, mailMessages, userSettings, users } from "@/db/schema";
 import { CONTENT_IS_DATA_DIRECTIVE } from "@/lib/ai/content-directive";
 import {
     MAIL_PARTICIPANT_DIRECTIVE,
@@ -9,7 +9,7 @@ import {
     MAIL_SUMMARY_SYSTEM,
     MAIL_TASKS_DIRECTIVE,
 } from "@/lib/ai/mail-summary-prompts";
-import { resolveTemplate } from "@/lib/ai/prompt-templates";
+import { isPresetId, resolveTemplate } from "@/lib/ai/prompt-templates";
 import {
     getAiOutputLanguageDirective,
     normalizeSummaryPromptConfig,
@@ -23,7 +23,22 @@ import { decryptJsonField, decryptText } from "@/lib/encryption/fields";
 import { AppError, ErrorCode } from "@/lib/errors";
 import { exportRecordingSidecarsIfEnabled } from "@/lib/export/document-sidecars";
 import { maskedContentForModel, secretAddressMasker } from "@/lib/mail/redact";
+import { itemScopeFingerprint } from "@/lib/pipeline/scope-fingerprint";
 import { captureServerEvent } from "@/lib/posthog-server";
+import {
+    BUILTIN_PROMPTS_VERSION,
+    resolveSummaryPrompt,
+} from "@/lib/profiles/prompts";
+import {
+    loadSelectedProfileRevision,
+    resolveItemProfile,
+} from "@/lib/profiles/resolve";
+import { resolveManualItemProfile } from "@/lib/profiles/resolve-manual";
+import {
+    MAIL_SUMMARY_PROMPT_ID,
+    type MailProfileSettings,
+} from "@/lib/profiles/settings";
+import type { TitleInputFence } from "@/lib/recordings/title-input";
 import { notifyIfShared } from "@/lib/sharing/notify";
 import type { ContentRunContext } from "@/lib/sharing/run-context";
 import {
@@ -41,10 +56,10 @@ import type {
     GenerateSummaryOptions,
     GenerateSummaryResult,
 } from "./generate-summary";
+import { resolveMultiPass } from "./multi-pass-resolution";
 import { runSummary, summaryModelFor } from "./summary-model";
 
-/** The built-in mail template's id, reported when no template was chosen. */
-export const MAIL_SUMMARY_PROMPT_ID = "mail";
+export { MAIL_SUMMARY_PROMPT_ID } from "@/lib/profiles/settings";
 
 function mailNotSummarized(message: string): AppError {
     return new AppError(ErrorCode.INVALID_INPUT, message, 400);
@@ -114,26 +129,75 @@ export async function generateMailSummary(
     }
     const content = await maskedContentForModel(stored);
     const sentAt = mail.sentAt ?? mail.occurredAt;
+    const title = decryptText(mail.title);
+    const subject = (await secretAddressMasker([title]))(title);
+    const mailText = renderMailForModel(content, { subject, sentAt });
 
-    const tasksContext = await loadTasksPromptContext({
-        recording: {
-            id: mail.id,
-            userId: mail.userId,
-            occurredAt: sentAt,
-            timezone: null,
-            zonemins: null,
-        },
-        transcriptionId: null,
-        orgView,
-        reviewer: await taskViewerById(
-            orgView ? ctx.settingsUserId : ctx.ownerUserId,
-        ),
-        noun: "mail",
-    }).catch((error: unknown) => {
-        console.error("[summary] task context unavailable:", error);
-        return { text: "", refs: new Map<string, string>() };
-    });
-
+    const profile = opts.presetId
+        ? null
+        : opts.profileRevisionId
+          ? await loadSelectedProfileRevision({
+                revisionId: opts.profileRevisionId,
+                actorUserId: ctx.actorUserId,
+                channel: "mail",
+                view: ctx.view,
+            })
+          : await ((opts.trigger ?? "manual") === "manual"
+                ? resolveManualItemProfile
+                : resolveItemProfile)(
+                itemId,
+                ctx.view,
+                ctx.ownerUserId,
+                ctx.actorUserId,
+            );
+    const profileSettings = profile?.settings as
+        | MailProfileSettings
+        | undefined;
+    const tasksEnabled = profileSettings?.steps.tasks.enabled !== false;
+    const itemProfileRevisionId =
+        opts.profileRevisionId ??
+        (profile?.assigned ? profile.revisionId : null);
+    const titleFence: TitleInputFence = {
+        contentId: stored.sourceId,
+        contentSourceId: "mail",
+        contentRevision: stored.revision,
+        profileRevisionId: itemProfileRevisionId,
+    };
+    const tasksContext = tasksEnabled
+        ? await loadTasksPromptContext({
+              recording: {
+                  id: mail.id,
+                  userId: mail.userId,
+                  occurredAt: sentAt,
+                  timezone: null,
+                  zonemins: null,
+              },
+              transcriptionId: null,
+              language: content.language,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              noun: "mail",
+              participants: content.participants,
+              itemText: mailText,
+          }).catch(async (error: unknown) => {
+              console.error("[summary] task context unavailable:", error);
+              return {
+                  text: "",
+                  refs: new Map<string, string>(),
+                  scopeFingerprint: await itemScopeFingerprint(
+                      itemId,
+                      ctx.view,
+                      ctx.ownerUserId,
+                  ),
+              };
+          })
+        : {
+              text: "",
+              refs: new Map<string, string>(),
+              scopeFingerprint: null,
+          };
     const [userSettingsRow] = await db
         .select()
         .from(userSettings)
@@ -147,11 +211,17 @@ export async function generateMailSummary(
                   .from(userSettings)
                   .where(eq(userSettings.userId, ctx.actorUserId))
                   .limit(1);
+    const [owner] = await db
+        .select({ uiLocale: users.uiLocale })
+        .from(users)
+        .where(eq(users.id, ctx.ownerUserId))
+        .limit(1);
 
     // A chosen template is honoured; otherwise mail gets its own, since the
     // user's default is written for recordings.
-    let usedPromptId = MAIL_SUMMARY_PROMPT_ID;
+    let usedPromptId: string = MAIL_SUMMARY_PROMPT_ID;
     let promptTemplate = MAIL_SUMMARY_PROMPT;
+    let builtinPromptsVersion: string | null = BUILTIN_PROMPTS_VERSION;
     if (opts.presetId && opts.presetId !== MAIL_SUMMARY_PROMPT_ID) {
         const promptConfig = normalizeSummaryPromptConfig(
             userSettingsRow?.summaryPrompt
@@ -165,30 +235,55 @@ export async function generateMailSummary(
         );
         usedPromptId = resolved.id;
         promptTemplate = resolved.prompt;
+        const selected = promptConfig.templates.find(
+            (template) => template.id === resolved.id,
+        );
+        builtinPromptsVersion =
+            isPresetId(SUMMARY_TEMPLATE_KIND, resolved.id) &&
+            selected?.prompt === null
+                ? BUILTIN_PROMPTS_VERSION
+                : null;
     }
 
-    const summaryModel = await summaryModelFor(ctx.actorUserId);
+    const contentLanguage =
+        content.language ?? userSettingsRow?.defaultTranscriptionLanguage;
+    const outputLanguage = profileSettings
+        ? resolveAiOutputLanguage(
+              profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+          )
+        : resolveAiOutputLanguage(
+              userSettingsRow?.aiOutputLanguage,
+              contentLanguage,
+          );
+    const profilePrompt = profileSettings
+        ? resolveSummaryPrompt({
+              settings: profileSettings.steps.summary,
+              outputLanguage: profileSettings.steps.summary.outputLanguage,
+              contentLanguage,
+              uiLocale: owner?.uiLocale === "cs-CZ" ? "cs-CZ" : "en",
+          })
+        : null;
+    if (profilePrompt) {
+        usedPromptId = profileSettings?.steps.summary.preset ?? usedPromptId;
+        promptTemplate = profilePrompt.text;
+        builtinPromptsVersion = profilePrompt.builtinVersion;
+    }
+
+    const summaryModel = await summaryModelFor(
+        ctx.actorUserId,
+        profileSettings?.steps.summary.provider ?? null,
+    );
     const { credentials, model } = summaryModel;
 
-    const title = decryptText(mail.title);
-    const subject = (await secretAddressMasker([title]))(title);
-    const mailText = renderMailForModel(content, { subject, sentAt });
-    const outputLanguage = resolveAiOutputLanguage(
-        userSettingsRow?.aiOutputLanguage,
-        content.language ?? userSettingsRow?.defaultTranscriptionLanguage,
-    );
     const languageDirective = getAiOutputLanguageDirective(outputLanguage);
     const mergeLanguageDirective = getAiOutputLanguageDirective(
         outputLanguage,
         "extractions",
     );
-    // The tasks already decided name what people typed, an address too.
-    const tasksText = (await secretAddressMasker([tasksContext.text]))(
-        tasksContext.text,
-    );
     const prompt = [
         promptTemplate.replaceAll("{transcription}", () => mailText),
-        tasksText,
+        tasksContext.text,
     ]
         .filter(Boolean)
         .join("\n\n");
@@ -197,21 +292,26 @@ export async function generateMailSummary(
         CONTENT_IS_DATA_DIRECTIVE,
         SUMMARY_MARKDOWN_DIRECTIVE,
         MAIL_PARTICIPANT_DIRECTIVE,
-        MAIL_TASKS_DIRECTIVE,
+        tasksEnabled ? MAIL_TASKS_DIRECTIVE : "",
         languageDirective,
     ]
         .filter(Boolean)
         .join(" ");
 
-    const multiPassOn =
-        actorSettingsRow?.summaryMultiPass === true &&
-        (opts.trigger !== "auto" || actorSettingsRow?.summaryMultiPassAuto);
+    const multiPassResolution = resolveMultiPass({
+        profileSummary: profileSettings?.steps.summary ?? null,
+        hasProfile: profile !== null,
+        actorSettings: actorSettingsRow,
+        settings: userSettingsRow,
+        trigger: opts.trigger,
+    });
     const { payload, multiPass } = await runSummary({
         model: summaryModel,
         usage: {
             itemId,
             ownerUserId: ctx.ownerUserId,
-            payerUserId: ctx.actorUserId,
+            actorUserId: ctx.actorUserId,
+            payerUserId: summaryModel.payerUserId,
         },
         systemContent,
         prompt,
@@ -221,39 +321,38 @@ export async function generateMailSummary(
                 CONTENT_IS_DATA_DIRECTIVE,
                 SUMMARY_MARKDOWN_DIRECTIVE,
                 MAIL_PARTICIPANT_DIRECTIVE,
-                SUMMARY_TASKS_MERGE_DIRECTIVE,
+                tasksEnabled ? SUMMARY_TASKS_MERGE_DIRECTIVE : "",
                 mergeLanguageDirective,
             ]
                 .filter(Boolean)
                 .join("\n\n"),
-        multiPass: multiPassOn
-            ? {
-                  rounds: actorSettingsRow?.summaryMultiPassRounds ?? null,
-                  mergePrompt: userSettingsRow?.summaryMergePrompt
-                      ? decryptText(userSettingsRow.summaryMergePrompt)
-                      : null,
-              }
-            : null,
+        multiPass: multiPassResolution.config,
         onProgress: opts.onProgress,
+        tasksEnabled,
     });
 
     const { summary, keyPoints, actionItems } = payload;
-    const tasks = await resolveTaskProposals({
-        source: "riffado",
-        items: payload.taskItems,
-        updates: payload.taskUpdates,
-        refs: tasksContext.refs,
-        ownerUserId: ctx.ownerUserId,
-        transcriptionId: null,
-        turns: null,
-        language: content.language,
-        orgView,
-        summaryText: summary,
-        mail: content,
-    }).catch((error: unknown) => {
-        console.error("[summary] task proposals unavailable:", error);
-        return undefined;
-    });
+    const tasks = tasksEnabled
+        ? await resolveTaskProposals({
+              source: "riffado",
+              items: payload.taskItems,
+              updates: payload.taskUpdates,
+              refs: tasksContext.refs,
+              ownerUserId: ctx.ownerUserId,
+              transcriptionId: null,
+              turns: null,
+              language: content.language,
+              orgView,
+              reviewer: await taskViewerById(
+                  orgView ? ctx.settingsUserId : ctx.ownerUserId,
+              ),
+              summaryText: summary,
+              mail: content,
+          }).catch((error: unknown) => {
+              console.error("[summary] task proposals unavailable:", error);
+              return undefined;
+          })
+        : null;
 
     const { committed, reason } = await upsertEnhancement({
         userId: ctx.contentUserId,
@@ -268,13 +367,48 @@ export async function generateMailSummary(
         model,
         multiPass,
         inputFingerprint: createHash("sha256").update(mailText).digest("hex"),
+        profileRevisionId: profile?.revisionId ?? null,
+        builtinPromptsVersion,
+        outputLanguage,
+        outputFormatLocale: profilePrompt?.formatLocale ?? null,
+        payerUserId: summaryModel.payerUserId,
+        inputs: {
+            contentId: stored.sourceId,
+            contentSourceId: "mail",
+            contentRevision: stored.revision,
+            itemProfileRevisionId,
+            ...(tasksContext.scopeFingerprint
+                ? { scopeFingerprint: tasksContext.scopeFingerprint }
+                : {}),
+            multiPass: multiPassResolution.source,
+        },
         allowReaped: (opts.trigger ?? "manual") === "manual",
         actorUserId: ctx.actorUserId,
         actsForOrganization: ctx.actsForOrganization,
         jobId: opts.jobId,
+        view: ctx.view,
         tasks,
     });
     if (!committed) {
+        if (reason === "outdated") {
+            return {
+                ownerUserId: ctx.ownerUserId,
+                summary,
+                keyPoints,
+                actionItems,
+                provider: credentials.provider,
+                model,
+                promptId: usedPromptId,
+                promptFallback:
+                    !profile &&
+                    opts.presetId !== undefined &&
+                    opts.presetId !== MAIL_SUMMARY_PROMPT_ID &&
+                    usedPromptId !== opts.presetId,
+                multiPass,
+                committed: false,
+                titleFence,
+            };
+        }
         if (reason === "cancelled") {
             throw new AppError(
                 ErrorCode.NOT_FOUND,
@@ -316,9 +450,12 @@ export async function generateMailSummary(
         model,
         promptId: usedPromptId,
         promptFallback:
+            !profile &&
             opts.presetId !== undefined &&
             opts.presetId !== MAIL_SUMMARY_PROMPT_ID &&
             usedPromptId !== opts.presetId,
         multiPass,
+        committed: true,
+        titleFence,
     };
 }

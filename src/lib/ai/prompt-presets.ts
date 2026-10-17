@@ -1,3 +1,4 @@
+import type { AppLocale } from "@/lib/i18n/config";
 import type { PromptConfiguration, PromptPreset } from "@/types/ai";
 import {
     defaultTemplateConfig,
@@ -15,7 +16,7 @@ export interface PromptConfig {
     prompt: string;
 }
 
-export const PROMPT_PRESETS: Record<PromptPreset, PromptConfig> = {
+const ENGLISH_TITLE_PRESETS: Record<PromptPreset, PromptConfig> = {
     default: {
         id: "default",
         name: "Default",
@@ -236,6 +237,225 @@ Transcription:
 Generate the title now:`,
     },
 };
+
+/** Localized text of every built-in title prompt. */
+export const TITLE_PROMPTS_BY_LOCALE = {
+    default: {
+        en: ENGLISH_TITLE_PRESETS.default.prompt,
+        "cs-CZ": `Jste generátor názvů zvukových nahrávek. Na základě poskytnutého přepisu vytvořte stručný a výstižný název.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na hlavní téma, předmět nebo probíranou činnost
+5. Odstraňte vycpávková slova, pozdravy a konverzační vatu
+6. Vyhněte se obecným formulacím; název musí být konkrétní a výstižný
+7. Pokud je přepis velmi krátký nebo nejasný, vytvořte smysluplný název podle kontextu
+8. Neuvádějte časové značky, data ani metadata
+9. Nepoužívejte obraty jako „Nahrávka o“ nebo „Diskuse o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Týmová porada a plánování Q4“
+- „Rozhovor se zákazníkem o produktu“
+- „Denní standup a kontrola sprintu“
+- „Hovor s klientem o požadavcích projektu“
+- „Technická diskuse při pohovoru“
+
+Příklady nevhodných názvů:
+- „Nahrávka o týmové poradě“ (příliš obecné, obsahuje „o“)
+- „Týmová porada: plánování Q4“ (obsahuje dvojtečku)
+- „Diskuse s týmem“ (konverzační vata)
+- „2025-01-15 Porada“ (obsahuje datum)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+    meetings: {
+        en: ENGLISH_TITLE_PRESETS.meetings.prompt,
+        "cs-CZ": `Jste generátor názvů nahrávek pracovních schůzek. Vytvořte stručný a výstižný název, který zachytí účel schůzky a její hlavní téma.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na hlavní bod programu, rozhodnutí nebo výsledek schůzky
+5. Pokud je to podstatné, uveďte typ schůzky (Standup, Revize, Plánování, Retrospektiva)
+6. Odstraňte vycpávková slova, pozdravy a společenskou konverzaci
+7. Konkrétně pojmenujte probírané téma nebo projekt
+8. Neuvádějte časové značky, data ani jména účastníků
+9. Nepoužívejte obraty jako „Schůzka o“ nebo „Diskuse o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Plánování sprintu a plán Q4“
+- „Denní standup a kontrola překážek“
+- „Retrospektiva rychlosti týmu“
+- „Úvodní schůzka s klientem o rozsahu projektu“
+- „Revize návrhu nové funkce“
+
+Příklady nevhodných názvů:
+- „Schůzka o plánování sprintu“ (příliš obecné)
+- „Týmový standup: překážky“ (obsahuje dvojtečku)
+- „Krátký rozhovor s týmem“ (konverzační vata)
+- „2025-01-15 Standup“ (obsahuje datum)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+    lectures: {
+        en: ENGLISH_TITLE_PRESETS.lectures.prompt,
+        "cs-CZ": `Jste generátor názvů přepisů přednášek a vzdělávacích nahrávek. Vytvořte stručný a výstižný název, který zachytí hlavní probíraný předmět nebo téma.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na hlavní předmět, pojem nebo téma lekce
+5. Pokud je zmíněn obor nebo předmět, uveďte jej (např. „Matematická analýza“, „Dějepis“, „Fyzika“)
+6. Odstraňte vycpávková slova, úvodní řeči a organizační oznámení
+7. Konkrétně pojmenujte probírané téma nebo kapitolu
+8. Neuvádějte časové značky, data ani čísla přednášek
+9. Nepoužívejte obraty jako „Přednáška o“ nebo „Hodina o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Úvod do strojového učení“
+- „Analýza příčin druhé světové války“
+- „Derivace a řetězové pravidlo“
+- „Shakespearův Hamlet a první dějství“
+- „Přehled stavby buňky“
+
+Příklady nevhodných názvů:
+- „Přednáška o strojovém učení“ (příliš obecné)
+- „Hodina: druhá světová válka“ (obsahuje dvojtečku)
+- „Dnešní lekce o derivacích“ (vycpávková slova)
+- „Přednáška 15 - Biologie“ (obsahuje číslo přednášky)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+    "phone-calls": {
+        en: ENGLISH_TITLE_PRESETS["phone-calls"].prompt,
+        "cs-CZ": `Jste generátor názvů nahrávek telefonních hovorů a rozhovorů. Vytvořte stručný a výstižný název, který zachytí účel a hlavní téma rozhovoru.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na účel hovoru, probírané téma nebo výsledek
+5. Pokud je to podstatné, uveďte typ hovoru (Pohovor, Podpora, Prodej, Navazující Hovor)
+6. Odstraňte vycpávková slova, pozdravy a zdvořilostní fráze
+7. Konkrétně pojmenujte probíranou věc nebo problém
+8. Neuvádějte časové značky, data ani jména účastníků
+9. Nepoužívejte obraty jako „Hovor s“ nebo „Telefonát o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Zákaznická podpora a problém s fakturací“
+- „Pracovní pohovor a technické kolo“
+- „Prodejní hovor a ukázka produktu“
+- „Navazující hovor s klientem o stavu projektu“
+- „Pohovor na pozici produktového manažera“
+
+Příklady nevhodných názvů:
+- „Telefonát se zákazníkem“ (příliš obecné)
+- „Pohovor: technické kolo“ (obsahuje dvojtečku)
+- „Krátký rozhovor o fakturaci“ (konverzační vata)
+- „2025-01-15 Hovor s podporou“ (obsahuje datum)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+    "audio-blog": {
+        en: ENGLISH_TITLE_PRESETS["audio-blog"].prompt,
+        "cs-CZ": `Jste generátor názvů přepisů neformálních audioblogů a osobních nahrávek. Vytvořte stručný a poutavý název, který zachytí hlavní myšlenku nebo téma.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na hlavní sdílenou myšlenku, úvahu nebo téma
+5. Pokud je to podstatné, zachyťte celkové vyznění nebo náladu
+6. Odstraňte vycpávková slova a slovní pauzy
+7. Buďte výstižní, ale zachovejte konverzační tón
+8. Neuvádějte časové značky, data ani odkazy typu „Den X“
+9. Nepoužívejte obraty jako „Myšlenky o“ nebo „Povídání o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Ranní úvaha a tipy pro produktivitu“
+- „Nápady na víkendový výlet“
+- „Recenze knihy Atomové návyky“
+- „Aktualizace osobních cílů pro rok 2025“
+- „Kuchařský experiment s novým receptem“
+
+Příklady nevhodných názvů:
+- „Myšlenky o produktivitě“ (příliš obecné)
+- „Den 15: ranní úvaha“ (obsahuje dvojtečku a číslo dne)
+- „Jen si povídám o víkendu“ (konverzační vata)
+- „2025-01-15 Vlog“ (obsahuje datum)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+    "idea-stormer": {
+        en: ENGLISH_TITLE_PRESETS["idea-stormer"].prompt,
+        "cs-CZ": `Jste generátor názvů nahrávek brainstormingu a tvorby nápadů. Vytvořte stručný a výstižný název, který zachytí hlavní zkoumaný problém, výzvu nebo tvůrčí směr.
+
+PRAVIDLA (MUSÍTE DODRŽET):
+1. Nejvýše 60 znaků (pevný limit)
+2. Nepoužívejte uvozovky, dvojtečky, středníky ani zvláštní interpunkční znaménka
+3. Název začněte velkým písmenem; ostatní slova pište podle běžných českých pravidel
+4. Zaměřte se na problém, výzvu nebo tvůrčí směr, nad kterým se brainstormuje
+5. Pokud je to podstatné, uveďte oblast (Produkt, Marketing, Design, Funkce)
+6. Odstraňte vycpávková slova, váhání a přemýšlení nahlas
+7. Konkrétně pojmenujte zkoumané téma nebo výzvu
+8. Neuvádějte časové značky, data ani předponu „Brainstorming“
+9. Nepoužívejte obraty jako „Nápady pro“ nebo „Brainstorming o“
+10. Vraťte POUZE text názvu, nic dalšího
+
+Příklady vhodných názvů:
+- „Produktová funkce registrace uživatelů“
+- „Marketingová kampaň na sociálních sítích“
+- „Barevná paleta designového systému“
+- „Nové rozvržení navigace aplikace“
+- „Obsahová strategie a témata blogu“
+
+Příklady nevhodných názvů:
+- „Brainstorming produktových nápadů“ (příliš obecné, obsahuje předponu)
+- „Nápady: registrace uživatelů“ (obsahuje dvojtečku)
+- „Jen přemýšlím o funkcích“ (konverzační vata)
+- „2025-01-15 Brainstorming“ (obsahuje datum)
+
+Přepis:
+{transcription}
+
+Nyní vytvořte název:`,
+    },
+} satisfies Record<PromptPreset, Record<AppLocale, string>>;
+
+export const PROMPT_PRESETS: Record<PromptPreset, PromptConfig> =
+    Object.fromEntries(
+        Object.entries(ENGLISH_TITLE_PRESETS).map(([id, preset]) => [
+            id,
+            {
+                ...preset,
+                prompt: TITLE_PROMPTS_BY_LOCALE[id as PromptPreset].en,
+            },
+        ]),
+    ) as Record<PromptPreset, PromptConfig>;
 
 export const TITLE_TEMPLATE_KIND: TemplateKind<PromptPreset> = {
     presets: PROMPT_PRESETS,

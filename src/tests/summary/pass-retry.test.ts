@@ -22,6 +22,8 @@ import {
     transcriptions,
     userSettings,
 } from "@/db/schema";
+import type { LegacyProfileSettings } from "@/lib/profiles/seed";
+import { resolvedAudioProfile } from "@/tests/profiles/seeded-profile-fixture";
 
 // Without corrections a model reads the stored text as it is.
 // Task proposals read and write the database; covered on their own.
@@ -65,8 +67,25 @@ vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
     captureServerEvent: vi.fn(),
 }));
+vi.mock("@/lib/env", () => ({
+    env: { IS_HOSTED: false, ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR: 60 },
+}));
 
-const { createMock } = vi.hoisted(() => ({ createMock: vi.fn() }));
+const { createMock, profileLegacy } = vi.hoisted(() => ({
+    createMock: vi.fn(),
+    profileLegacy: {
+        current: {} as Partial<LegacyProfileSettings>,
+    },
+}));
+
+vi.mock("@/lib/profiles/resolve", () => ({
+    resolveItemProfile: vi.fn(async () =>
+        resolvedAudioProfile(profileLegacy.current),
+    ),
+}));
+vi.mock("@/lib/pipeline/trigger", () => ({
+    requestAdvanceInTx: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("openai", async (importOriginal) => {
     const actual = await importOriginal<typeof import("openai")>();
@@ -128,6 +147,7 @@ vi.mock("@/db", () => ({
 }));
 
 function stage(settings: Record<string, unknown> = {}) {
+    profileLegacy.current = settings;
     selectResults.set(recordings, [
         [{ id: "rec-1", userId: "user-1", deletedAt: null }],
         [{ deletedAt: null }],

@@ -27,6 +27,7 @@ export async function createRecordingSession(input: {
     metadata: RecordingSessionMetadata;
     startedAt: Date;
     noticeAcknowledgedAt: Date | null;
+    folderId: string | null;
 }): Promise<{ session: RecordingSessionRow; key: string; expiresAt: Date }> {
     const key = randomBytes(32).toString("base64");
     const expiresAt = new Date(Date.now() + CAPTURE_KEY_RETENTION_MS);
@@ -60,6 +61,7 @@ export async function createRecordingSession(input: {
                 metadata: { ...input.metadata },
                 startedAt: input.startedAt,
                 noticeAcknowledgedAt: input.noticeAcknowledgedAt,
+                folderId: input.folderId,
             })
             .returning();
         if (!row) throw new Error("Recording session insert returned no row");
@@ -174,6 +176,7 @@ export async function replaceRecordingSession(input: {
                 metadata: old.metadata,
                 startedAt: old.startedAt,
                 noticeAcknowledgedAt: old.noticeAcknowledgedAt,
+                folderId: old.folderId,
             })
             .returning();
         if (!replacement)
