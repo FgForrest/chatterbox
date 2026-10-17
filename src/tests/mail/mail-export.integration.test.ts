@@ -387,6 +387,7 @@ describeWithDatabase("mail in folder exports (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: orgRoot?.id ?? "",
             name: "Archive",
+            canCurate: true,
         });
         await addRecordingToFolder({
             userId: "u-jan",

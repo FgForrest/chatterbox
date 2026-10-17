@@ -637,6 +637,7 @@ describeWithDatabase("Learn on mail (PostgreSQL)", () => {
             userId: "u-jan",
             parentId: root?.id ?? "",
             name: "Pilots",
+            canCurate: true,
         });
         await addRecordingToFolder({
             userId: "u-jan",
