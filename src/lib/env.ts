@@ -1600,6 +1600,164 @@ export const envSchema = baseEnvSchema.superRefine((parsed, ctx) => {
 
 export type Env = z.infer<typeof envSchema>;
 
+type EnvInputKey = keyof z.input<typeof baseEnvSchema>;
+
+/** Environment keys consumed by the schema. */
+export const envSchemaKeys = Object.keys(baseEnvSchema.shape) as EnvInputKey[];
+
+/** Reads every schema input through an explicit access for Edge bundling. */
+export function readEnvInput(): Record<EnvInputKey, string | undefined> {
+    return {
+        IS_HOSTED: process.env.IS_HOSTED,
+        SELF_HOST_MODE: process.env.SELF_HOST_MODE,
+        ORG_ACCOUNT_EMAIL: process.env.ORG_ACCOUNT_EMAIL,
+        ORG_ACCOUNT_PASSWORD: process.env.ORG_ACCOUNT_PASSWORD,
+        ORG_ACCOUNT_NAME: process.env.ORG_ACCOUNT_NAME,
+        ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:
+            process.env.ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR,
+        OIDC_ISSUER_URL: process.env.OIDC_ISSUER_URL,
+        OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID,
+        OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET,
+        OIDC_PROVIDER_NAME: process.env.OIDC_PROVIDER_NAME,
+        OIDC_SCOPES: process.env.OIDC_SCOPES,
+        OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
+        MCP_AUDIENCE: process.env.MCP_AUDIENCE,
+        MCP_ALLOWED_CLIENTS: process.env.MCP_ALLOWED_CLIENTS,
+        MCP_PUBLIC_INGRESS_HEADER: process.env.MCP_PUBLIC_INGRESS_HEADER,
+        MCP_PUBLIC_CLIENTS: process.env.MCP_PUBLIC_CLIENTS,
+        MCP_CONNECTOR_KEYS: process.env.MCP_CONNECTOR_KEYS,
+        MCP_RESOURCE_AUDIENCE: process.env.MCP_RESOURCE_AUDIENCE,
+        MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
+        MCP_SERVICE_CLIENTS: process.env.MCP_SERVICE_CLIENTS,
+        AUTHZ_MODE: process.env.AUTHZ_MODE,
+        IDENTITY_PROVIDER: process.env.IDENTITY_PROVIDER,
+        KEYCLOAK_ROLES_CLIENT: process.env.KEYCLOAK_ROLES_CLIENT,
+        KEYCLOAK_GROUP_USE_ID: process.env.KEYCLOAK_GROUP_USE_ID,
+        KEYCLOAK_GROUP_CURATE_ID: process.env.KEYCLOAK_GROUP_CURATE_ID,
+        KEYCLOAK_GROUP_ACCESS_MANAGE_ID:
+            process.env.KEYCLOAK_GROUP_ACCESS_MANAGE_ID,
+        KEYCLOAK_VERIFIER_CLIENT_ID: process.env.KEYCLOAK_VERIFIER_CLIENT_ID,
+        KEYCLOAK_VERIFIER_CLIENT_SECRET:
+            process.env.KEYCLOAK_VERIFIER_CLIENT_SECRET,
+        AUTHZ_VERIFICATION_MAX_AGE: process.env.AUTHZ_VERIFICATION_MAX_AGE,
+        AUTHZ_ADMIN_MAX_AUTH_AGE: process.env.AUTHZ_ADMIN_MAX_AUTH_AGE,
+        MAIL_DOMAIN: process.env.MAIL_DOMAIN,
+        MAIL_ORG_NICKNAME: process.env.MAIL_ORG_NICKNAME,
+        MAIL_FORMER_ORG_NICKNAMES: process.env.MAIL_FORMER_ORG_NICKNAMES,
+        MAIL_ADDRESS_HASH_SECRET: process.env.MAIL_ADDRESS_HASH_SECRET,
+        MAIL_INGEST_SECRET: process.env.MAIL_INGEST_SECRET,
+        MAIL_MAX_SIGNATURE_AGE_HOURS: process.env.MAIL_MAX_SIGNATURE_AGE_HOURS,
+        MAIL_DAILY_LIMIT: process.env.MAIL_DAILY_LIMIT,
+        MAIL_MAX_MESSAGE_MB: process.env.MAIL_MAX_MESSAGE_MB,
+        MAIL_INACTIVE_DAYS: process.env.MAIL_INACTIVE_DAYS,
+        DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
+        DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
+        DOCS_REPOSITORY: process.env.DOCS_REPOSITORY,
+        DATABASE_URL: process.env.DATABASE_URL,
+        BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
+        API_TOKEN_HASH_SECRET: process.env.API_TOKEN_HASH_SECRET,
+        APP_URL: process.env.APP_URL,
+        WEBHOOKS_REQUIRE_PUBLIC_TARGETS:
+            process.env.WEBHOOKS_REQUIRE_PUBLIC_TARGETS,
+        RATE_LIMIT_TRUST_PROXY_HEADERS:
+            process.env.RATE_LIMIT_TRUST_PROXY_HEADERS,
+        ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
+        DEFAULT_STORAGE_TYPE: process.env.DEFAULT_STORAGE_TYPE,
+        LOCAL_STORAGE_PATH: process.env.LOCAL_STORAGE_PATH,
+        S3_ENDPOINT: process.env.S3_ENDPOINT,
+        S3_BUCKET: process.env.S3_BUCKET,
+        S3_REGION: process.env.S3_REGION,
+        S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
+        S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
+        FILESYSTEM_EXPORT_ROOT: process.env.FILESYSTEM_EXPORT_ROOT,
+        GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+        EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
+        EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
+        EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
+        LEARN_MCP_URL: process.env.LEARN_MCP_URL,
+        LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
+        KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
+        GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+        GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,
+        GOOGLE_CLOUD_PROJECT_NUMBER: process.env.GOOGLE_CLOUD_PROJECT_NUMBER,
+        GOOGLE_WORKSPACE_DOMAINS: process.env.GOOGLE_WORKSPACE_DOMAINS,
+        BACKUP_STORAGE_PATH: process.env.BACKUP_STORAGE_PATH,
+        WEBSHARE_API_KEY: process.env.WEBSHARE_API_KEY,
+        PLAUD_PROXY_SCOPE: process.env.PLAUD_PROXY_SCOPE,
+        PLAUD_SYNC_RATE_LIMIT_PER_MINUTE:
+            process.env.PLAUD_SYNC_RATE_LIMIT_PER_MINUTE,
+        BACKGROUND_SYNC_ENABLED: process.env.BACKGROUND_SYNC_ENABLED,
+        BACKGROUND_SYNC_INTERVAL_MS: process.env.BACKGROUND_SYNC_INTERVAL_MS,
+        VIDEO_UPLOAD_MAX_BYTES: process.env.VIDEO_UPLOAD_MAX_BYTES,
+        WHISPER_MAX_BYTES: process.env.WHISPER_MAX_BYTES,
+        WHISPER_COMPRESS_BITRATE_KBPS:
+            process.env.WHISPER_COMPRESS_BITRATE_KBPS,
+        WHISPER_REQUEST_TIMEOUT_MS: process.env.WHISPER_REQUEST_TIMEOUT_MS,
+        AUTO_SUMMARY_RATE_LIMIT_PER_HOUR:
+            process.env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
+        SMTP_HOST: process.env.SMTP_HOST,
+        SMTP_PORT: process.env.SMTP_PORT,
+        SMTP_SECURE: process.env.SMTP_SECURE,
+        RYBBIT_SITE_ID: process.env.RYBBIT_SITE_ID,
+        RYBBIT_HOST: process.env.RYBBIT_HOST,
+        POSTHOG_KEY: process.env.POSTHOG_KEY,
+        SMTP_USER: process.env.SMTP_USER,
+        SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+        SMTP_FROM: process.env.SMTP_FROM,
+        ADMIN_EMAILS: process.env.ADMIN_EMAILS,
+        ADMIN_IP_ALLOWLIST: process.env.ADMIN_IP_ALLOWLIST,
+        ADMIN_REAUTH_TTL_MINUTES: process.env.ADMIN_REAUTH_TTL_MINUTES,
+        ADMIN_MUTATION_TTL_MINUTES: process.env.ADMIN_MUTATION_TTL_MINUTES,
+        ADMIN_HOSTNAME: process.env.ADMIN_HOSTNAME,
+        REACHER_API_URL: process.env.REACHER_API_URL,
+        REACHER_API_KEY: process.env.REACHER_API_KEY,
+        SMTP_MARKETING_FROM: process.env.SMTP_MARKETING_FROM,
+        SMTP_REPLY_TO: process.env.SMTP_REPLY_TO,
+        EMAIL_SEND_RATE_PER_SECOND: process.env.EMAIL_SEND_RATE_PER_SECOND,
+        STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+        STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
+        STRIPE_PRICE_ID_USD: process.env.STRIPE_PRICE_ID_USD,
+        STRIPE_PRICE_ID_EUR: process.env.STRIPE_PRICE_ID_EUR,
+        STRIPE_STANDARD_PRICE_ID_USD: process.env.STRIPE_STANDARD_PRICE_ID_USD,
+        STRIPE_STANDARD_PRICE_ID_EUR: process.env.STRIPE_STANDARD_PRICE_ID_EUR,
+        STRIPE_PRICE_ID_USD_ANNUAL: process.env.STRIPE_PRICE_ID_USD_ANNUAL,
+        STRIPE_PRICE_ID_EUR_ANNUAL: process.env.STRIPE_PRICE_ID_EUR_ANNUAL,
+        STRIPE_LEGACY_PRO_PRICE_IDS: process.env.STRIPE_LEGACY_PRO_PRICE_IDS,
+        STRIPE_PORTAL_CONFIGURATION_ID:
+            process.env.STRIPE_PORTAL_CONFIGURATION_ID,
+        GEO_COUNTRY_HEADER: process.env.GEO_COUNTRY_HEADER,
+        BILLING_ENABLED: process.env.BILLING_ENABLED,
+        MYNAH_BASE_URL: process.env.MYNAH_BASE_URL,
+        MYNAH_SERVICE_TOKEN: process.env.MYNAH_SERVICE_TOKEN,
+        BILLING_PRO_INCLUDED_SECONDS: process.env.BILLING_PRO_INCLUDED_SECONDS,
+        BILLING_FREE_INCLUDED_SECONDS:
+            process.env.BILLING_FREE_INCLUDED_SECONDS,
+        BILLING_FOUNDING_MEMBER_CAPACITY:
+            process.env.BILLING_FOUNDING_MEMBER_CAPACITY,
+        BILLING_PRICE_USD: process.env.BILLING_PRICE_USD,
+        BILLING_PRICE_EUR: process.env.BILLING_PRICE_EUR,
+        BILLING_STANDARD_PRICE_USD: process.env.BILLING_STANDARD_PRICE_USD,
+        BILLING_STANDARD_PRICE_EUR: process.env.BILLING_STANDARD_PRICE_EUR,
+        BILLING_PRICE_USD_ANNUAL: process.env.BILLING_PRICE_USD_ANNUAL,
+        BILLING_PRICE_EUR_ANNUAL: process.env.BILLING_PRICE_EUR_ANNUAL,
+        BILLING_DEFAULT_CURRENCY: process.env.BILLING_DEFAULT_CURRENCY,
+        BILLING_PRO_INTERVAL: process.env.BILLING_PRO_INTERVAL,
+        BILLING_PRO_DESCRIPTION: process.env.BILLING_PRO_DESCRIPTION,
+        BILLING_TRIAL_DAYS: process.env.BILLING_TRIAL_DAYS,
+        BILLING_TRIAL_GRACE_DAYS: process.env.BILLING_TRIAL_GRACE_DAYS,
+        BILLING_PAID_GRACE_DAYS: process.env.BILLING_PAID_GRACE_DAYS,
+        BILLING_LAUNCH_DATE: process.env.BILLING_LAUNCH_DATE,
+        RECORDER_AUTO_RECORD_PLATFORMS:
+            process.env.RECORDER_AUTO_RECORD_PLATFORMS,
+        RECORDER_AUTO_STOP_QUIET_SECONDS:
+            process.env.RECORDER_AUTO_STOP_QUIET_SECONDS,
+        RECORDER_NOTICE_TEXT: process.env.RECORDER_NOTICE_TEXT,
+        RECORDER_LOCK_DEFAULTS: process.env.RECORDER_LOCK_DEFAULTS,
+        NEXT_PUBLIC_RECORDER_EXTENSION_ID:
+            process.env.NEXT_PUBLIC_RECORDER_EXTENSION_ID,
+    };
+}
+
 function validateEnv(): Env {
     if (typeof window !== "undefined") {
         throw new Error(
@@ -1609,152 +1767,7 @@ function validateEnv(): Env {
     }
 
     try {
-        const parsed = envSchema.parse({
-            IS_HOSTED: process.env.IS_HOSTED,
-            SELF_HOST_MODE: process.env.SELF_HOST_MODE,
-            ORG_ACCOUNT_EMAIL: process.env.ORG_ACCOUNT_EMAIL,
-            ORG_ACCOUNT_PASSWORD: process.env.ORG_ACCOUNT_PASSWORD,
-            ORG_ACCOUNT_NAME: process.env.ORG_ACCOUNT_NAME,
-            ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR:
-                process.env.ORG_PROVIDER_CALLS_PER_MEMBER_PER_HOUR,
-            OIDC_ISSUER_URL: process.env.OIDC_ISSUER_URL,
-            OIDC_CLIENT_ID: process.env.OIDC_CLIENT_ID,
-            OIDC_CLIENT_SECRET: process.env.OIDC_CLIENT_SECRET,
-            OIDC_PROVIDER_NAME: process.env.OIDC_PROVIDER_NAME,
-            OIDC_SCOPES: process.env.OIDC_SCOPES,
-            OIDC_SESSION_MAX_AGE: process.env.OIDC_SESSION_MAX_AGE,
-            MCP_AUDIENCE: process.env.MCP_AUDIENCE,
-            MCP_ALLOWED_CLIENTS: process.env.MCP_ALLOWED_CLIENTS,
-            MCP_PUBLIC_INGRESS_HEADER: process.env.MCP_PUBLIC_INGRESS_HEADER,
-            MCP_PUBLIC_CLIENTS: process.env.MCP_PUBLIC_CLIENTS,
-            MCP_CONNECTOR_KEYS: process.env.MCP_CONNECTOR_KEYS,
-            MCP_RESOURCE_AUDIENCE: process.env.MCP_RESOURCE_AUDIENCE,
-            MCP_AUDIT_RETENTION_DAYS: process.env.MCP_AUDIT_RETENTION_DAYS,
-            MCP_SERVICE_CLIENTS: process.env.MCP_SERVICE_CLIENTS,
-            AUTHZ_MODE: process.env.AUTHZ_MODE,
-            IDENTITY_PROVIDER: process.env.IDENTITY_PROVIDER,
-            KEYCLOAK_ROLES_CLIENT: process.env.KEYCLOAK_ROLES_CLIENT,
-            KEYCLOAK_GROUP_USE_ID: process.env.KEYCLOAK_GROUP_USE_ID,
-            KEYCLOAK_GROUP_CURATE_ID: process.env.KEYCLOAK_GROUP_CURATE_ID,
-            KEYCLOAK_GROUP_ACCESS_MANAGE_ID:
-                process.env.KEYCLOAK_GROUP_ACCESS_MANAGE_ID,
-            KEYCLOAK_VERIFIER_CLIENT_ID:
-                process.env.KEYCLOAK_VERIFIER_CLIENT_ID,
-            KEYCLOAK_VERIFIER_CLIENT_SECRET:
-                process.env.KEYCLOAK_VERIFIER_CLIENT_SECRET,
-            AUTHZ_VERIFICATION_MAX_AGE: process.env.AUTHZ_VERIFICATION_MAX_AGE,
-            AUTHZ_ADMIN_MAX_AUTH_AGE: process.env.AUTHZ_ADMIN_MAX_AUTH_AGE,
-            DISABLE_REGISTRATION: process.env.DISABLE_REGISTRATION,
-            DISABLE_UPDATE_CHECK: process.env.DISABLE_UPDATE_CHECK,
-            DOCS_REPOSITORY: process.env.DOCS_REPOSITORY,
-            DATABASE_URL: process.env.DATABASE_URL,
-            BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
-            API_TOKEN_HASH_SECRET: process.env.API_TOKEN_HASH_SECRET,
-            APP_URL: process.env.APP_URL,
-            WEBHOOKS_REQUIRE_PUBLIC_TARGETS:
-                process.env.WEBHOOKS_REQUIRE_PUBLIC_TARGETS,
-            RATE_LIMIT_TRUST_PROXY_HEADERS:
-                process.env.RATE_LIMIT_TRUST_PROXY_HEADERS,
-            ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
-            DEFAULT_STORAGE_TYPE: process.env.DEFAULT_STORAGE_TYPE,
-            LOCAL_STORAGE_PATH: process.env.LOCAL_STORAGE_PATH,
-            S3_ENDPOINT: process.env.S3_ENDPOINT,
-            S3_BUCKET: process.env.S3_BUCKET,
-            S3_REGION: process.env.S3_REGION,
-            S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
-            S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
-            FILESYSTEM_EXPORT_ROOT: process.env.FILESYSTEM_EXPORT_ROOT,
-            GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
-            EMBEDDING_BASE_URL: process.env.EMBEDDING_BASE_URL,
-            EMBEDDING_MODEL: process.env.EMBEDDING_MODEL,
-            EMBEDDING_API_KEY: process.env.EMBEDDING_API_KEY,
-            LEARN_MCP_URL: process.env.LEARN_MCP_URL,
-            LEARN_BRIDGE_URL: process.env.LEARN_BRIDGE_URL,
-            KNOWLEDGE_MEMORY_MB: process.env.KNOWLEDGE_MEMORY_MB,
-            GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
-            GOOGLE_PICKER_API_KEY: process.env.GOOGLE_PICKER_API_KEY,
-            GOOGLE_CLOUD_PROJECT_NUMBER:
-                process.env.GOOGLE_CLOUD_PROJECT_NUMBER,
-            GOOGLE_WORKSPACE_DOMAINS: process.env.GOOGLE_WORKSPACE_DOMAINS,
-            BACKUP_STORAGE_PATH: process.env.BACKUP_STORAGE_PATH,
-            WEBSHARE_API_KEY: process.env.WEBSHARE_API_KEY,
-            PLAUD_PROXY_SCOPE: process.env.PLAUD_PROXY_SCOPE,
-            PLAUD_SYNC_RATE_LIMIT_PER_MINUTE:
-                process.env.PLAUD_SYNC_RATE_LIMIT_PER_MINUTE,
-            BACKGROUND_SYNC_ENABLED: process.env.BACKGROUND_SYNC_ENABLED,
-            BACKGROUND_SYNC_INTERVAL_MS:
-                process.env.BACKGROUND_SYNC_INTERVAL_MS,
-            VIDEO_UPLOAD_MAX_BYTES: process.env.VIDEO_UPLOAD_MAX_BYTES,
-            WHISPER_MAX_BYTES: process.env.WHISPER_MAX_BYTES,
-            WHISPER_COMPRESS_BITRATE_KBPS:
-                process.env.WHISPER_COMPRESS_BITRATE_KBPS,
-            WHISPER_REQUEST_TIMEOUT_MS: process.env.WHISPER_REQUEST_TIMEOUT_MS,
-            AUTO_SUMMARY_RATE_LIMIT_PER_HOUR:
-                process.env.AUTO_SUMMARY_RATE_LIMIT_PER_HOUR,
-            SMTP_HOST: process.env.SMTP_HOST,
-            SMTP_PORT: process.env.SMTP_PORT,
-            SMTP_SECURE: process.env.SMTP_SECURE,
-            RYBBIT_SITE_ID: process.env.RYBBIT_SITE_ID,
-            RYBBIT_HOST: process.env.RYBBIT_HOST,
-            POSTHOG_KEY: process.env.POSTHOG_KEY,
-            SMTP_USER: process.env.SMTP_USER,
-            SMTP_PASSWORD: process.env.SMTP_PASSWORD,
-            SMTP_FROM: process.env.SMTP_FROM,
-            ADMIN_EMAILS: process.env.ADMIN_EMAILS,
-            ADMIN_IP_ALLOWLIST: process.env.ADMIN_IP_ALLOWLIST,
-            ADMIN_REAUTH_TTL_MINUTES: process.env.ADMIN_REAUTH_TTL_MINUTES,
-            ADMIN_MUTATION_TTL_MINUTES: process.env.ADMIN_MUTATION_TTL_MINUTES,
-            ADMIN_HOSTNAME: process.env.ADMIN_HOSTNAME,
-            REACHER_API_URL: process.env.REACHER_API_URL,
-            REACHER_API_KEY: process.env.REACHER_API_KEY,
-            SMTP_MARKETING_FROM: process.env.SMTP_MARKETING_FROM,
-            SMTP_REPLY_TO: process.env.SMTP_REPLY_TO,
-            EMAIL_SEND_RATE_PER_SECOND: process.env.EMAIL_SEND_RATE_PER_SECOND,
-            STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
-            STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET,
-            STRIPE_PRICE_ID_USD: process.env.STRIPE_PRICE_ID_USD,
-            STRIPE_PRICE_ID_EUR: process.env.STRIPE_PRICE_ID_EUR,
-            STRIPE_STANDARD_PRICE_ID_USD:
-                process.env.STRIPE_STANDARD_PRICE_ID_USD,
-            STRIPE_STANDARD_PRICE_ID_EUR:
-                process.env.STRIPE_STANDARD_PRICE_ID_EUR,
-            STRIPE_PRICE_ID_USD_ANNUAL: process.env.STRIPE_PRICE_ID_USD_ANNUAL,
-            STRIPE_PRICE_ID_EUR_ANNUAL: process.env.STRIPE_PRICE_ID_EUR_ANNUAL,
-            STRIPE_LEGACY_PRO_PRICE_IDS:
-                process.env.STRIPE_LEGACY_PRO_PRICE_IDS,
-            STRIPE_PORTAL_CONFIGURATION_ID:
-                process.env.STRIPE_PORTAL_CONFIGURATION_ID,
-            BILLING_ENABLED: process.env.BILLING_ENABLED,
-            MYNAH_BASE_URL: process.env.MYNAH_BASE_URL,
-            MYNAH_SERVICE_TOKEN: process.env.MYNAH_SERVICE_TOKEN,
-            BILLING_PRO_INCLUDED_SECONDS:
-                process.env.BILLING_PRO_INCLUDED_SECONDS,
-            BILLING_FREE_INCLUDED_SECONDS:
-                process.env.BILLING_FREE_INCLUDED_SECONDS,
-            BILLING_FOUNDING_MEMBER_CAPACITY:
-                process.env.BILLING_FOUNDING_MEMBER_CAPACITY,
-            BILLING_PRICE_USD: process.env.BILLING_PRICE_USD,
-            BILLING_PRICE_EUR: process.env.BILLING_PRICE_EUR,
-            BILLING_STANDARD_PRICE_USD: process.env.BILLING_STANDARD_PRICE_USD,
-            BILLING_STANDARD_PRICE_EUR: process.env.BILLING_STANDARD_PRICE_EUR,
-            BILLING_PRICE_USD_ANNUAL: process.env.BILLING_PRICE_USD_ANNUAL,
-            BILLING_PRICE_EUR_ANNUAL: process.env.BILLING_PRICE_EUR_ANNUAL,
-            BILLING_DEFAULT_CURRENCY: process.env.BILLING_DEFAULT_CURRENCY,
-            BILLING_PRO_INTERVAL: process.env.BILLING_PRO_INTERVAL,
-            BILLING_PRO_DESCRIPTION: process.env.BILLING_PRO_DESCRIPTION,
-            BILLING_TRIAL_DAYS: process.env.BILLING_TRIAL_DAYS,
-            BILLING_TRIAL_GRACE_DAYS: process.env.BILLING_TRIAL_GRACE_DAYS,
-            BILLING_PAID_GRACE_DAYS: process.env.BILLING_PAID_GRACE_DAYS,
-            BILLING_LAUNCH_DATE: process.env.BILLING_LAUNCH_DATE,
-            RECORDER_AUTO_RECORD_PLATFORMS:
-                process.env.RECORDER_AUTO_RECORD_PLATFORMS,
-            RECORDER_AUTO_STOP_QUIET_SECONDS:
-                process.env.RECORDER_AUTO_STOP_QUIET_SECONDS,
-            RECORDER_NOTICE_TEXT: process.env.RECORDER_NOTICE_TEXT,
-            RECORDER_LOCK_DEFAULTS: process.env.RECORDER_LOCK_DEFAULTS,
-            NEXT_PUBLIC_RECORDER_EXTENSION_ID:
-                process.env.NEXT_PUBLIC_RECORDER_EXTENSION_ID,
-        });
+        const parsed = envSchema.parse(readEnvInput());
 
         const isProductionBuildPhase =
             process.env.NEXT_PHASE === "phase-production-build";
