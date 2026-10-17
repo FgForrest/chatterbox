@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ProfileChannel } from "@/lib/profiles/settings";
 import {
     addSummarizingId,
@@ -630,6 +631,7 @@ export function useTranscriptionSummary({
                     summaryProfileId ? { profileId: summaryProfileId } : {},
                 ),
             });
+            if (response.ok) invalidateItemProcessing(targetId);
 
             const isStream = (
                 response.headers.get("content-type") ?? ""

@@ -1,9 +1,9 @@
 "use client";
 
-import { GraduationCap } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { LearnWorkflowLine } from "@/components/learn/learn-workflow-line";
 import {
     handleLearnReviewFailure,
     LearnEvidence,
@@ -11,12 +11,7 @@ import {
     LearnReviewRow,
     useLearnFinishFooter,
 } from "@/components/learn/review-parts";
-import {
-    WorkflowWidget,
-    WorkflowWidgetLine,
-    WorkflowWidgetRunLine,
-} from "@/components/pipeline/workflow-widget";
-import { Button } from "@/components/ui/button";
+import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import type {
     MailFactPayload,
@@ -25,6 +20,7 @@ import type {
 } from "@/lib/learn/mail-candidates";
 import type { ReviewItemView, ReviewView } from "@/lib/learn/review";
 import type { MailDetail } from "@/lib/mail/detail";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { WorkflowWidgetState } from "@/lib/pipeline/workflow-widgets";
 import { cn } from "@/lib/utils";
 import type { Recording } from "@/types/recording";
@@ -101,6 +97,7 @@ export function MailLearnCard({
                 );
                 return;
             }
+            invalidateItemProcessing(mail.id);
             await load();
         } finally {
             setBusy(false);
@@ -191,6 +188,7 @@ export function MailLearnCard({
                 );
                 return;
             }
+            invalidateItemProcessing(mail.id);
             const finished = (await response.json()) as { applied: number };
             toast.success(
                 i18n(
@@ -404,15 +402,14 @@ export function MailLearnCard({
 
     if (!ready && status !== "finished" && status !== "failed" && !learning) {
         return (
-            <WorkflowWidgetRunLine
+            <LearnWorkflowLine
                 id={widgetId}
                 title={i18n("Learn")}
                 facts={i18n("Ready when you are")}
-                icon={<GraduationCap className="size-4" />}
                 tone={tone}
-                runLabel={i18n("Learn")}
-                disabled={busy}
-                onRun={() => void start()}
+                actionLabel={i18n("Learn")}
+                actionDisabled={busy}
+                onAction={() => void start()}
             />
         );
     }
@@ -425,21 +422,20 @@ export function MailLearnCard({
             { count: items.length },
         );
         lineAction = i18n("Review");
+    } else if (status === "finished" || status === "failed") {
+        lineFacts = description;
     }
     const dialogLine = (
-        <WorkflowWidgetLine
+        <LearnWorkflowLine
             title={ready ? i18n("Learn") : title}
             facts={lineFacts}
-            icon={<GraduationCap className="size-4" />}
             tone={tone}
             working={learning}
-            action={
-                !learning ? (
-                    <Button size="sm" onClick={openReview}>
-                        {lineAction}
-                    </Button>
-                ) : undefined
-            }
+            finished={status === "finished"}
+            failed={status === "failed"}
+            actionLabel={lineAction}
+            onAction={learning ? undefined : openReview}
+            onRetry={status === "failed" ? () => void start() : undefined}
         />
     );
     let inlineLine: ReactNode;
@@ -447,14 +443,15 @@ export function MailLearnCard({
         inlineLine = dialogLine;
     } else if ((status === "finished" || status === "failed") && !open) {
         inlineLine = (
-            <WorkflowWidgetLine
+            <LearnWorkflowLine
                 title={title}
                 facts={description}
-                icon={<GraduationCap className="size-4" />}
                 tone={tone}
-                expanded={false}
-                onExpand={openReview}
-                expandLabel={i18n("View results")}
+                finished={status === "finished"}
+                failed={status === "failed"}
+                actionLabel={i18n("View results")}
+                onAction={openReview}
+                onRetry={status === "failed" ? () => void start() : undefined}
             />
         );
     }
