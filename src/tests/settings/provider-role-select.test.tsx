@@ -123,4 +123,30 @@ describe("empty provider picker", () => {
             ).length,
         ).toBeGreaterThan(0);
     });
+
+    it("names the automatic own chat fallback in the unset option", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) => {
+                const body = url.includes("organization-providers")
+                    ? { providers: [] }
+                    : {
+                          providers: [provider("personal", "Personal AI")],
+                          defaults: {
+                              transcription: null,
+                              summary: null,
+                              learn: null,
+                              topics: null,
+                              title: null,
+                          },
+                      };
+                return Promise.resolve(Response.json(body));
+            }),
+        );
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText("Automatic: Personal AI · model"),
+        ).toBeTruthy();
+    });
 });

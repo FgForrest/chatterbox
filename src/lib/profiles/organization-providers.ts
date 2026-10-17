@@ -7,6 +7,7 @@ import {
     users,
 } from "@/db/schema";
 import {
+    clearDefaultProviderReferences,
     type DefaultProviderPointers,
     loadDefaultProviderPointers,
     type ProviderRole,
@@ -142,12 +143,16 @@ function publicProvider(
 }
 
 async function applyOrganizationDefaults(
+    tx: Tx,
     orgUserId: string,
     credential: Pick<CredentialRow, "id" | "provider">,
     defaults: Partial<Record<ProviderRole, boolean>> | undefined,
-): Promise<void> {
-    if (!defaults) return;
-    const current = await loadDefaultProviderPointers(orgUserId);
+): Promise<{
+    before: DefaultProviderPointers;
+    after: DefaultProviderPointers;
+}> {
+    const current = await loadDefaultProviderPointers(orgUserId, tx);
+    if (!defaults) return { before: current, after: current };
     const roles: ProviderRole[] = [
         "transcription",
         "summary",
@@ -158,11 +163,15 @@ async function applyOrganizationDefaults(
     for (const role of roles) {
         const selected = defaults[role];
         if (selected === true) {
-            await setDefaultProvider(orgUserId, role, credential.id);
+            await setDefaultProvider(orgUserId, role, credential.id, tx);
         } else if (selected === false && current[role] === credential.id) {
-            await setDefaultProvider(orgUserId, role, null);
+            await setDefaultProvider(orgUserId, role, null, tx);
         }
     }
+    return {
+        before: current,
+        after: await loadDefaultProviderPointers(orgUserId, tx),
+    };
 }
 
 function validateOrganizationDefaults(
@@ -189,7 +198,10 @@ function validateOrganizationDefaults(
     }
 }
 
-function auditSnapshot(row: CredentialRow | null) {
+function auditSnapshot(
+    row: CredentialRow | null,
+    pointers?: DefaultProviderPointers,
+) {
     if (!row) return null;
     return {
         provider: row.provider,
@@ -197,6 +209,11 @@ function auditSnapshot(row: CredentialRow | null) {
         model: row.defaultModel,
         label: row.provider,
         disabled: row.disabledAt !== null,
+        defaults: pointers
+            ? (Object.entries(pointers) as [ProviderRole, string | null][])
+                  .filter(([, providerId]) => providerId === row.id)
+                  .map(([role]) => role)
+            : [],
     };
 }
 
@@ -209,6 +226,8 @@ export async function writeOrganizationProviderAudit(
         credentialId: string;
         before: CredentialRow | null;
         after: CredentialRow | null;
+        beforeDefaults?: DefaultProviderPointers;
+        afterDefaults?: DefaultProviderPointers;
     },
 ): Promise<void> {
     await tx.insert(adminActionLog).values({
@@ -218,8 +237,8 @@ export async function writeOrganizationProviderAudit(
         targetUserId: input.context.orgUserId,
         targetResourceId: input.credentialId,
         reason: "Organization provider settings change",
-        before: auditSnapshot(input.before),
-        after: auditSnapshot(input.after),
+        before: auditSnapshot(input.before, input.beforeDefaults),
+        after: auditSnapshot(input.after, input.afterDefaults),
     });
 }
 
@@ -302,20 +321,23 @@ export async function createOrganizationProvider(
                 500,
             );
         }
+        const defaults = await applyOrganizationDefaults(
+            tx,
+            context.orgUserId,
+            created,
+            input.defaults,
+        );
         await writeOrganizationProviderAudit(tx, {
             context,
             action: "org_provider.create",
             credentialId: created.id,
             before: null,
             after: created,
+            beforeDefaults: defaults.before,
+            afterDefaults: defaults.after,
         });
-        return publicProvider(created);
+        return publicProvider(created, defaults.after);
     });
-    await applyOrganizationDefaults(
-        context.orgUserId,
-        provider,
-        input.defaults,
-    );
     return provider;
 }
 
@@ -374,20 +396,23 @@ export async function updateOrganizationProvider(
         } else if (before.disabledAt !== null && after.disabledAt === null) {
             action = "org_provider.enable";
         }
+        const defaults = await applyOrganizationDefaults(
+            tx,
+            context.orgUserId,
+            after,
+            input.defaults,
+        );
         await writeOrganizationProviderAudit(tx, {
             context,
             action,
             credentialId,
             before,
             after,
+            beforeDefaults: defaults.before,
+            afterDefaults: defaults.after,
         });
-        return publicProvider(after);
+        return publicProvider(after, defaults.after);
     });
-    await applyOrganizationDefaults(
-        context.orgUserId,
-        provider,
-        input.defaults,
-    );
     return provider;
 }
 
@@ -411,6 +436,15 @@ export async function deleteOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        const beforeDefaults = await loadDefaultProviderPointers(
+            context.orgUserId,
+            tx,
+        );
+        await clearDefaultProviderReferences(
+            context.orgUserId,
+            credentialId,
+            tx,
+        );
         await tx
             .delete(apiCredentials)
             .where(
@@ -425,6 +459,11 @@ export async function deleteOrganizationProvider(
             credentialId,
             before,
             after: null,
+            beforeDefaults,
+            afterDefaults: await loadDefaultProviderPointers(
+                context.orgUserId,
+                tx,
+            ),
         });
     });
 }

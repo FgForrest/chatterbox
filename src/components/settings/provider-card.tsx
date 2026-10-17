@@ -102,6 +102,7 @@ function ManagedProviderDetails({ provider }: { provider: ProviderCardItem }) {
 }
 
 function ProviderRow({
+    scope,
     provider,
     canManage,
     busy,
@@ -110,6 +111,7 @@ function ProviderRow({
     onToggleDisabled,
     onDelete,
 }: {
+    scope: ProviderScope;
     provider: ProviderCardItem;
     canManage: boolean;
     busy: boolean;
@@ -122,6 +124,13 @@ function ProviderRow({
     const label = providerLabel(provider);
     const disabled = provider.disabledAt != null;
     const managed = provider.managed === true;
+    const organizationDefault =
+        scope === "organization" &&
+        (provider.isDefaultTranscription === true ||
+            provider.isDefaultEnhancement === true ||
+            provider.isDefaultLearn === true ||
+            provider.isDefaultTopics === true ||
+            provider.isDefaultTitle === true);
     const actionLabel = disabled ? i18n("Enable") : i18n("Disable");
     const actionAria = disabled
         ? i18n("Enable {name}", { name: label })
@@ -140,6 +149,11 @@ function ProviderRow({
                     {disabled && (
                         <span className="rounded border px-1.5 py-0.5 text-xs text-muted-foreground">
                             {i18n("Disabled")}
+                        </span>
+                    )}
+                    {disabled && organizationDefault && (
+                        <span className="rounded border border-destructive/40 bg-destructive/5 px-1.5 py-0.5 text-xs text-destructive">
+                            {i18n("Disabled Organization default")}
                         </span>
                     )}
                     {managed && <ManagedProviderDetails provider={provider} />}
@@ -377,6 +391,7 @@ export function ProviderCard({
                     {providers.map((provider) => (
                         <ProviderRow
                             key={provider.id}
+                            scope={scope}
                             provider={provider}
                             canManage={canManage}
                             busy={busyId === provider.id}

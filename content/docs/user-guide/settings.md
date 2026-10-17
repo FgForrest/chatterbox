@@ -43,13 +43,14 @@ Members inspect **Organization providers** as **Read-only** and may choose any e
 - **Primary transcript** when both Plaud and your provider have made one,
 - **Default transcription language**, used when you transcribe now.
 
-Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
+Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Without a profile pin, titles use your title choice, your summary choice, the Organization title default, the Organization summary default, then your first enabled chat provider. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
 
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that
-does not pin a topics provider uses your choice, then your summary choice, then
-the Organization defaults. Automatic topic detection is set under
+does not pin a topics provider uses your topics choice, your summary choice,
+the Organization topics default, the Organization summary default, then your
+first enabled chat provider. Automatic topic detection is set under
 **Profiles**. Topic templates you created or edited before profiles remain
 read-only under **Templates from before profiles**; use **Copy into a profile**
 to keep editing one.
@@ -57,15 +58,16 @@ to keep editing one.
 ## Learning
 
 This section keeps the account-level Learn provider default. A profile that
-does not pin a Learn provider uses your choice, then your summary choice, then
-the Organization defaults. Automatic Learn and transcript
+does not pin a Learn provider uses your Learn choice, your summary choice, the
+Organization Learn default, the Organization summary default, then your first
+enabled chat provider. Automatic Learn and transcript
 correction are set under **Profiles**.
 
 ## Summary
 
 This section keeps the account-level summary provider and multi-pass defaults.
-A profile without a pinned summary provider uses your choice, or the
-Organization default when you have not chosen one. Automatic titles and
+A profile without a pinned summary provider uses your summary choice, the
+Organization summary default, then your first enabled chat provider. Automatic titles and
 summaries, output language and format, and profile-specific multi-pass behavior
 are set under **Profiles**. Summary templates you created or edited before
 profiles remain read-only under **Templates from before profiles**; use **Copy

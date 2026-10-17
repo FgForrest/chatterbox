@@ -187,21 +187,26 @@ export function ProvidersSection({
         let description = i18n(
             "Profiles that use it stop with an error until it is enabled again.",
         );
+        const roles = providerRoles(provider, i18n);
+        const names = new Intl.ListFormat(locale, {
+            style: "long",
+            type: "conjunction",
+        }).format(roles);
         if (scope === "personal") {
-            const roles = providerRoles(provider, i18n);
             description = i18n(
                 "Nothing uses it now. It stays saved but is not offered until you enable it again.",
             );
             if (roles.length > 0) {
-                const names = new Intl.ListFormat(locale, {
-                    style: "long",
-                    type: "conjunction",
-                }).format(roles);
                 description = i18n(
                     "{roles} use this provider. They stop with an error until you enable it again or choose another provider.",
                     { roles: names },
                 );
             }
+        } else if (roles.length > 0) {
+            description = i18n(
+                "This provider is the Organization default for {roles}. Members following those defaults will stop until it is enabled or another default is chosen.",
+                { roles: names },
+            );
         }
 
         void confirm({

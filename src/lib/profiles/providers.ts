@@ -6,7 +6,10 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
-import { defaultProviderCandidates } from "@/lib/ai/provider-resolution-order";
+import {
+    type DefaultProviderCandidate,
+    defaultProviderCandidates,
+} from "@/lib/ai/provider-resolution-order";
 import { holderAccess } from "@/lib/authz/access-state";
 import { decrypt } from "@/lib/encryption";
 import { env } from "@/lib/env";
@@ -114,17 +117,48 @@ async function credentialByOwner(
     return credential;
 }
 
+type ProviderChoice =
+    | { kind: "profile-pin"; scope: "personal" | "organization" }
+    | { kind: "member-default"; role: ProcessingStep }
+    | { kind: "organization-default"; role: ProcessingStep }
+    | { kind: "automatic" }
+    | { kind: "selected"; role: ProcessingStep };
+
 function assertEnabled(
     credential: CredentialRow,
-    scope: "personal" | "organization",
+    choice: ProviderChoice,
 ): void {
     if (credential.disabledAt) {
-        const message =
-            scope === "organization"
-                ? `The pinned provider ${credential.provider} is disabled. Ask an administrator to enable it or choose another provider.`
-                : `The provider ${credential.provider} is disabled. Enable it or choose another provider.`;
+        let message = `The provider ${credential.provider} is disabled. Enable it or choose another provider.`;
+        if (choice.kind === "profile-pin") {
+            message = `The profile pin for ${credential.provider} is disabled. Enable it or choose another provider in the profile.`;
+            if (choice.scope === "organization") {
+                message = `The profile pin for ${credential.provider} is disabled. Ask an administrator to enable it or update the profile.`;
+            }
+        } else if (choice.kind === "member-default") {
+            message = `Your default for ${choice.role}, ${credential.provider}, is disabled. Enable it or choose another provider.`;
+        } else if (choice.kind === "organization-default") {
+            message = `The Organization default for ${choice.role}, ${credential.provider}, is disabled. Ask an administrator to enable it or choose another Organization default.`;
+        }
         throw new AppError(ErrorCode.CONFLICT, message, 409);
     }
+}
+
+function candidateChoice(
+    candidate: DefaultProviderCandidate,
+    step: ProcessingStep,
+): ProviderChoice {
+    if (candidate.source === "organization-role") {
+        return { kind: "organization-default", role: step };
+    }
+    if (candidate.source === "organization-summary") {
+        return { kind: "organization-default", role: "summary" };
+    }
+    if (candidate.source === "member-summary") {
+        return { kind: "member-default", role: "summary" };
+    }
+    if (candidate.source === "member-fallback") return { kind: "automatic" };
+    return { kind: "member-default", role: step };
 }
 
 interface SubmittedPin {
@@ -253,7 +287,7 @@ async function resolvePinnedPersonal(input: {
             404,
         );
     }
-    assertEnabled(credential, "personal");
+    assertEnabled(credential, { kind: "profile-pin", scope: "personal" });
     assertSupportsStep(credential, input.step);
     return resolvedCredential(credential, input.actorUserId, noReservation);
 }
@@ -263,6 +297,7 @@ async function resolvePinnedOrganization(input: {
     pin: ProviderPin;
     actorUserId: string;
     credential?: CredentialRow;
+    choice?: ProviderChoice;
 }): Promise<ResolvedStepProvider> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
@@ -282,7 +317,10 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    assertEnabled(credential, "organization");
+    assertEnabled(
+        credential,
+        input.choice ?? { kind: "profile-pin", scope: "organization" },
+    );
     assertSupportsStep(credential, input.step);
     if (!isOrgScopeEnabled()) {
         throw new AppError(
@@ -360,6 +398,7 @@ async function resolvePointer(input: {
     step: ProcessingStep;
     pointer: string;
     actorUserId: string;
+    choice: ProviderChoice;
 }): Promise<ResolvedStepProvider> {
     if (isRiffadoIncludedProviderId(input.pointer)) {
         if (input.step === "transcription" && !isMynahConfigured()) {
@@ -378,7 +417,7 @@ async function resolvePointer(input: {
     }
     const personal = await credentialByOwner(input.pointer, input.actorUserId);
     if (personal) {
-        assertEnabled(personal, "personal");
+        assertEnabled(personal, input.choice);
         assertSupportsStep(personal, input.step);
         return resolvedCredential(personal, input.actorUserId, noReservation);
     }
@@ -391,7 +430,18 @@ async function resolvePointer(input: {
             step: input.step,
             pin: { scope: "organization", credentialId: input.pointer },
             actorUserId: input.actorUserId,
+            choice: input.choice,
         });
+    }
+    if (input.choice.kind === "member-default") {
+        throw missingProvider(
+            `Your default for ${input.choice.role} no longer exists. Choose another provider in Settings.`,
+        );
+    }
+    if (input.choice.kind === "organization-default") {
+        throw missingProvider(
+            `The Organization default for ${input.choice.role} no longer exists. Ask an administrator to choose another Organization default.`,
+        );
     }
     throw missingProvider(
         `The selected ${input.step} provider no longer exists. Choose another provider in Settings.`,
@@ -409,7 +459,7 @@ export async function validateDefaultProviderSelection(input: {
         input.actorUserId,
     );
     if (personal) {
-        assertEnabled(personal, "personal");
+        assertEnabled(personal, { kind: "selected", role: input.role });
         if (
             input.role === "transcription" &&
             isEnhancementOnlyProvider(personal.provider)
@@ -445,6 +495,7 @@ export async function validateDefaultProviderSelection(input: {
         step: input.role,
         pin: { scope: "organization", credentialId: input.providerId },
         actorUserId: input.actorUserId,
+        choice: { kind: "selected", role: input.role },
     });
 }
 
@@ -461,13 +512,15 @@ async function resolveUnpinned(
         step,
         actorState.pointers,
         organizationState?.pointers ?? null,
+        actorState.credentials,
     );
     if (candidate) {
+        const choice = candidateChoice(candidate, step);
         const personal = actorState.credentials.find(
             (credential) => credential.id === candidate.providerId,
         );
         if (personal) {
-            assertEnabled(personal, "personal");
+            assertEnabled(personal, choice);
             assertSupportsStep(personal, step);
             return {
                 ...resolvedCredential(personal, actorUserId, noReservation),
@@ -486,6 +539,7 @@ async function resolveUnpinned(
                 },
                 actorUserId,
                 credential: organization,
+                choice,
             });
             return { ...resolved, actorSettings: actorState.settings };
         }
@@ -493,27 +547,9 @@ async function resolveUnpinned(
             step,
             pointer: candidate.providerId,
             actorUserId,
+            choice,
         });
         return { ...resolved, actorSettings: actorState.settings };
-    }
-    const legacy = actorState.credentials.find((credential) => {
-        if (step === "transcription") {
-            return (
-                credential.isDefaultTranscription ||
-                (actorState.credentials.length === 1 &&
-                    !Object.hasOwn(credential, "isDefaultTranscription"))
-            );
-        }
-        if (step === "learn" && credential.isDefaultLearn) return true;
-        return credential.isDefaultEnhancement;
-    });
-    if (legacy) {
-        assertEnabled(legacy, "personal");
-        assertSupportsStep(legacy, step);
-        return {
-            ...resolvedCredential(legacy, actorUserId, noReservation),
-            actorSettings: actorState.settings,
-        };
     }
     if (step === "transcription" && isMynahConfigured()) {
         return {

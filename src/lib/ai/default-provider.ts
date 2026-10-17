@@ -24,6 +24,10 @@ export interface DefaultProviderState {
     settings: typeof userSettings.$inferSelect | undefined;
 }
 
+type DefaultProviderTransaction = Parameters<
+    Parameters<typeof db.transaction>[0]
+>[0];
+
 function preferences(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return value as Record<string, unknown>;
@@ -43,13 +47,15 @@ export function providerPointer(
 /** Load provider pointers with the credentials and settings used to derive them. */
 export async function loadDefaultProviderState(
     userId: string,
+    transaction?: DefaultProviderTransaction,
 ): Promise<DefaultProviderState> {
-    const credentials = await db
+    const executor = transaction ?? db;
+    const credentials = await executor
         .select()
         .from(apiCredentials)
         .where(eq(apiCredentials.userId, userId))
         .limit(1000);
-    const [settings] = await db
+    const [settings] = await executor
         .select()
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
@@ -57,13 +63,6 @@ export async function loadDefaultProviderState(
     const legacyTranscription = credentials.find(
         (row) => row.isDefaultTranscription,
     )?.id;
-    const selectedTranscription =
-        legacyTranscription ??
-        (credentials.length === 1 &&
-        credentials[0] &&
-        !Object.hasOwn(credentials[0], "isDefaultTranscription")
-            ? credentials[0].id
-            : undefined);
     const legacySummary = credentials.find(
         (row) => row.isDefaultEnhancement,
     )?.id;
@@ -71,7 +70,7 @@ export async function loadDefaultProviderState(
     const pointers = {
         transcription:
             settings?.defaultTranscriptionProviderId ??
-            selectedTranscription ??
+            legacyTranscription ??
             null,
         summary:
             providerPointer(settings?.defaultProviders, "summary") ??
@@ -90,8 +89,9 @@ export async function loadDefaultProviderState(
 /** Load authoritative pointers, preserving legacy summary and Learn row flags. */
 export async function loadDefaultProviderPointers(
     userId: string,
+    transaction?: DefaultProviderTransaction,
 ): Promise<DefaultProviderPointers> {
-    return (await loadDefaultProviderState(userId)).pointers;
+    return (await loadDefaultProviderState(userId, transaction)).pointers;
 }
 
 /** Set or clear one authoritative provider pointer and its legacy row mirror. */
@@ -99,8 +99,9 @@ export async function setDefaultProvider(
     userId: string,
     role: ProviderRole,
     value: string | null,
+    transaction?: DefaultProviderTransaction,
 ): Promise<void> {
-    await db.transaction(async (tx) => {
+    const apply = async (tx: DefaultProviderTransaction): Promise<void> => {
         await tx
             .select({ id: users.id })
             .from(users)
@@ -196,5 +197,38 @@ export async function setDefaultProvider(
                     ),
                 );
         }
-    });
+    };
+    if (transaction) {
+        await apply(transaction);
+        return;
+    }
+    await db.transaction(apply);
+}
+
+/** Clear every provider pointer owned by one user that references a credential. */
+export async function clearDefaultProviderReferences(
+    userId: string,
+    credentialId: string,
+    transaction?: DefaultProviderTransaction,
+): Promise<void> {
+    const clear = async (tx: DefaultProviderTransaction): Promise<void> => {
+        const pointers = await loadDefaultProviderPointers(userId, tx);
+        const roles: ProviderRole[] = [
+            "transcription",
+            "summary",
+            "learn",
+            "topics",
+            "title",
+        ];
+        for (const role of roles) {
+            if (pointers[role] === credentialId) {
+                await setDefaultProvider(userId, role, null, tx);
+            }
+        }
+    };
+    if (transaction) {
+        await clear(transaction);
+        return;
+    }
+    await db.transaction(clear);
 }

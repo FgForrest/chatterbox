@@ -131,16 +131,22 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const organizationOptions = organization.filter((provider) =>
         supports(provider, purpose),
     );
-    const selectedId =
-        defaults?.[role] ??
-        personal.find((provider) => isOrganizationDefault(provider, purpose))
-            ?.id ??
-        null;
-    const organizationDefault = organizationOptions.find((provider) =>
+    const selectedId = defaults?.[role] ?? null;
+    const roleOrganizationDefault = organizationOptions.find((provider) =>
         isOrganizationDefault(provider, purpose),
     );
     const followsSummary =
         purpose === "topics" || purpose === "learning" || purpose === "title";
+    const summaryOrganizationDefault = organizationOptions.find(
+        (provider) => provider.isDefaultEnhancement === true,
+    );
+    const organizationDefault =
+        roleOrganizationDefault ??
+        (followsSummary && !defaults?.summary
+            ? summaryOrganizationDefault
+            : undefined);
+    const automaticProvider =
+        purpose === "transcription" ? undefined : personalOptions[0];
     let value = selectedId ?? NOT_CHOSEN;
     if (
         !selectedId &&
@@ -148,7 +154,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
         (!followsSummary || !defaults?.summary)
     ) {
         value = ORGANIZATION_DEFAULT;
-    } else if (!selectedId && followsSummary) {
+    } else if (!selectedId && followsSummary && defaults?.summary) {
         value = FOLLOW_SUMMARY;
     }
 
@@ -215,7 +221,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     />
                 </SelectTrigger>
                 <SelectContent>
-                    {followsSummary && (
+                    {followsSummary && defaults?.summary && (
                         <SelectItem value={FOLLOW_SUMMARY}>
                             {i18n("Same as summaries")}
                         </SelectItem>
@@ -227,11 +233,22 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                             })}
                         </SelectItem>
                     )}
-                    {!followsSummary && !organizationDefault && !noOptions && (
-                        <SelectItem value={NOT_CHOSEN}>
-                            {i18n("Not chosen")}
-                        </SelectItem>
-                    )}
+                    {!selectedId &&
+                        !organizationDefault &&
+                        automaticProvider && (
+                            <SelectItem value={NOT_CHOSEN}>
+                                {i18n("Automatic: {provider}", {
+                                    provider: providerLabel(automaticProvider),
+                                })}
+                            </SelectItem>
+                        )}
+                    {purpose === "transcription" &&
+                        !organizationDefault &&
+                        !noOptions && (
+                            <SelectItem value={NOT_CHOSEN}>
+                                {i18n("Not chosen")}
+                            </SelectItem>
+                        )}
                     {personalOptions.length > 0 && (
                         <SelectGroup>
                             <SelectLabel>{i18n("Your providers")}</SelectLabel>

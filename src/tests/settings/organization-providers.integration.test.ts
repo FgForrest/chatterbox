@@ -271,6 +271,117 @@ describeWithDatabase(
             expect(response.status).toBe(403);
         });
 
+        it("records Organization default changes in the provider audit snapshot", async () => {
+            const createdResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "manager-secret",
+                    isDefaultEnhancement: true,
+                    isDefaultTitle: true,
+                }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+            await updateOrganizationProvider(
+                request(
+                    "PUT",
+                    {
+                        isDefaultEnhancement: false,
+                        isDefaultLearn: true,
+                    },
+                    `/${id}`,
+                ),
+                context(id),
+            );
+
+            const audit = await databaseClient()
+                .select()
+                .from(adminActionLog)
+                .where(eq(adminActionLog.targetResourceId, id))
+                .orderBy(adminActionLog.createdAt);
+            expect(audit[0]?.after).toMatchObject({
+                defaults: ["summary", "title"],
+            });
+            expect(audit[1]?.before).toMatchObject({
+                defaults: ["summary", "title"],
+            });
+            expect(audit[1]?.after).toMatchObject({
+                defaults: ["learn", "title"],
+            });
+        });
+
+        it("clears only the deleted provider owner's default pointers", async () => {
+            const personalResponse = await createPersonalProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "personal-secret",
+                }),
+            );
+            const personal = await personalResponse.json();
+            const personalId = personal.provider.id as string;
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "manager",
+                    defaultTranscriptionProviderId: personalId,
+                    defaultProviders: {
+                        summary: personalId,
+                        learn: personalId,
+                        topics: personalId,
+                        title: personalId,
+                    },
+                });
+            await deletePersonalProvider(
+                request("DELETE", undefined, `/${personalId}`),
+                context(personalId),
+            );
+            const [personalSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "manager"));
+            expect(personalSettings?.defaultTranscriptionProviderId).toBeNull();
+            expect(personalSettings?.defaultProviders).toEqual({});
+
+            const organizationResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "organization-secret",
+                    isDefaultTranscription: true,
+                    isDefaultEnhancement: true,
+                    isDefaultLearn: true,
+                    isDefaultTopics: true,
+                    isDefaultTitle: true,
+                }),
+            );
+            const organization = await organizationResponse.json();
+            const organizationId = organization.provider.id as string;
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "member",
+                    defaultProviders: { summary: organizationId },
+                });
+            await deleteOrganizationProvider(
+                request("DELETE", undefined, `/${organizationId}`),
+                context(organizationId),
+            );
+            const [organizationSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            const [memberSettings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "member"));
+            expect(
+                organizationSettings?.defaultTranscriptionProviderId,
+            ).toBeNull();
+            expect(organizationSettings?.defaultProviders).toEqual({});
+            expect(memberSettings?.defaultProviders).toEqual({
+                summary: organizationId,
+            });
+        });
+
         it("lets a member select a non-default Organization provider", async () => {
             const defaultResponse = await createOrganizationProvider(
                 request("POST", {

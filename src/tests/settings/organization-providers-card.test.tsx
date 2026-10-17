@@ -286,7 +286,7 @@ describe.each([
         const confirmation =
             scope === "personal"
                 ? "Transcription and Summaries use this provider. They stop with an error until you enable it again or choose another provider."
-                : "Profiles that use it stop with an error until it is enabled again.";
+                : "This provider is the Organization default for Transcription, Summaries, Learn, Topics, and Titles. Members following those defaults will stop until it is enabled or another default is chosen.";
         expect(await screen.findByText(confirmation)).toBeTruthy();
         await confirmAction("Disable");
         await waitFor(() => {
@@ -298,6 +298,11 @@ describe.each([
         });
         card = await cardFor(scope);
         expect(within(card).getByText("Disabled")).toBeTruthy();
+        if (scope === "organization") {
+            expect(
+                within(card).getByText("Disabled Organization default"),
+            ).toBeTruthy();
+        }
         fireEvent.click(
             within(card).getByRole("button", {
                 name: `Enable ${provider.provider} · ${provider.defaultModel}`,

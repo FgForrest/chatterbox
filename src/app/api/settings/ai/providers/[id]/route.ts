@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
 import {
+    clearDefaultProviderReferences,
     loadDefaultProviderPointers,
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
@@ -222,12 +223,6 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         email: session.user.email,
     });
 
-    const [settings] = await db
-        .select({ pointer: userSettings.defaultTranscriptionProviderId })
-        .from(userSettings)
-        .where(eq(userSettings.userId, session.user.id))
-        .limit(1);
-
     if (auditContext) {
         await db.transaction(async (tx) => {
             const [before] = await tx
@@ -241,6 +236,12 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                 )
                 .for("update")
                 .limit(1);
+            const beforeDefaults = before
+                ? await loadDefaultProviderPointers(session.user.id, tx)
+                : undefined;
+            if (before) {
+                await clearDefaultProviderReferences(session.user.id, id, tx);
+            }
             await tx
                 .delete(apiCredentials)
                 .where(
@@ -256,22 +257,39 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                     credentialId: id,
                     before,
                     after: null,
+                    beforeDefaults,
+                    afterDefaults: await loadDefaultProviderPointers(
+                        session.user.id,
+                        tx,
+                    ),
                 });
             }
         });
     } else {
-        await db
-            .delete(apiCredentials)
-            .where(
-                and(
-                    eq(apiCredentials.id, id),
-                    eq(apiCredentials.userId, session.user.id),
-                ),
-            );
-    }
-
-    if (settings?.pointer === id) {
-        await setDefaultTranscriptionProvider(session.user.id, null);
+        await db.transaction(async (tx) => {
+            const [owned] = await tx
+                .select({ id: apiCredentials.id })
+                .from(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.id, id),
+                        eq(apiCredentials.userId, session.user.id),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (owned) {
+                await clearDefaultProviderReferences(session.user.id, id, tx);
+            }
+            await tx
+                .delete(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.id, id),
+                        eq(apiCredentials.userId, session.user.id),
+                    ),
+                );
+        });
     }
 
     return NextResponse.json({ success: true });

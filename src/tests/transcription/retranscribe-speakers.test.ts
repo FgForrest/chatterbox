@@ -147,10 +147,20 @@ function stubLookups(existingTranscript: Record<string, unknown> | null) {
             rows([
                 {
                     id: "creds-1",
+                    userId,
                     provider: "openai",
                     apiKey: "key",
                     defaultModel: "gpt-4o-transcribe-diarize",
                     baseUrl: null,
+                    isDefaultTranscription: true,
+                    isDefaultEnhancement: false,
+                    isDefaultLearn: false,
+                    inputUsdPerMillion: null,
+                    outputUsdPerMillion: null,
+                    audioUsdPerHour: null,
+                    disabledAt: null,
+                    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                 },
             ]),
         )

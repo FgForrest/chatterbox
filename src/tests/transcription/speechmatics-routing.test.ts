@@ -141,7 +141,17 @@ function mockDbForCredential(credential: CredentialRow): void {
                     limit: vi.fn().mockResolvedValue([
                         {
                             id: "creds-sm",
+                            userId: "user-sm",
                             apiKey: "encrypted-key",
+                            isDefaultTranscription: true,
+                            isDefaultEnhancement: false,
+                            isDefaultLearn: false,
+                            inputUsdPerMillion: null,
+                            outputUsdPerMillion: null,
+                            audioUsdPerHour: null,
+                            disabledAt: null,
+                            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                            updatedAt: new Date("2026-01-01T00:00:00.000Z"),
                             ...credential,
                         },
                     ]),

@@ -435,9 +435,24 @@ describe("Transcription", () => {
                             limit: vi.fn().mockResolvedValue([
                                 {
                                     id: "creds-1",
+                                    userId: mockUserId,
                                     provider: "openai",
                                     apiKey: "encrypted-key",
+                                    baseUrl: null,
                                     defaultModel: "whisper-1",
+                                    isDefaultTranscription: true,
+                                    isDefaultEnhancement: false,
+                                    isDefaultLearn: false,
+                                    inputUsdPerMillion: null,
+                                    outputUsdPerMillion: null,
+                                    audioUsdPerHour: null,
+                                    disabledAt: null,
+                                    createdAt: new Date(
+                                        "2026-01-01T00:00:00.000Z",
+                                    ),
+                                    updatedAt: new Date(
+                                        "2026-01-01T00:00:00.000Z",
+                                    ),
                                 },
                             ]),
                         }),
@@ -520,10 +535,24 @@ describe("Transcription", () => {
                             limit: vi.fn().mockResolvedValue([
                                 {
                                     id: "creds-1",
+                                    userId: mockUserId,
                                     provider: "openai",
                                     apiKey: "encrypted-key",
                                     defaultModel: "whisper-1",
                                     baseUrl: null,
+                                    isDefaultTranscription: true,
+                                    isDefaultEnhancement: false,
+                                    isDefaultLearn: false,
+                                    inputUsdPerMillion: null,
+                                    outputUsdPerMillion: null,
+                                    audioUsdPerHour: null,
+                                    disabledAt: null,
+                                    createdAt: new Date(
+                                        "2026-01-01T00:00:00.000Z",
+                                    ),
+                                    updatedAt: new Date(
+                                        "2026-01-01T00:00:00.000Z",
+                                    ),
                                 },
                             ]),
                         }),

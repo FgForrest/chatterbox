@@ -120,3 +120,52 @@ describe("provider-default terminal behavior", () => {
         ).toEqual([]);
     });
 });
+
+describe("chat credential fallback", () => {
+    const credentials = [
+        {
+            id: "own-chat",
+            provider: "OpenAI",
+            disabledAt: null,
+            createdAt: new Date("2026-01-02T00:00:00.000Z"),
+        },
+    ];
+
+    it("uses the first enabled own chat credential without an Organization default", () => {
+        expect(
+            defaultProviderCandidates("summary", empty(), empty(), credentials),
+        ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
+    });
+
+    it("keeps an Organization default ahead of the own chat fallback", () => {
+        const organization = empty();
+        organization.summary = "organization-chat";
+        expect(
+            defaultProviderCandidates(
+                "summary",
+                empty(),
+                organization,
+                credentials,
+            ),
+        ).toEqual([
+            {
+                source: "organization-role",
+                providerId: "organization-chat",
+            },
+        ]);
+    });
+
+    it("skips a transcription-only first credential", () => {
+        expect(
+            defaultProviderCandidates("summary", empty(), null, [
+                {
+                    id: "audio-first",
+                    provider: "ElevenLabs",
+                    disabledAt: null,
+                    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                },
+                ...credentials,
+            ]),
+        ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
+    });
+});
