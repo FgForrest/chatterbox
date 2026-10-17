@@ -32,7 +32,7 @@ Je-li Organizace povolena, členové vidí profily Organizace a mohou je dupliko
 
 Někteří poskytovatelé zajišťují pouze přepis (ElevenLabs, Speechmatics). Kroky shrnutí pak potřebují druhého poskytovatele.
 
-Členové vidí **Poskytovatele organizace** jen pro čtení. Osoby s oprávněním `access.manage` je mohou přidávat, duplikovat, upravovat, zakázat, povolit a odstranit a na stejné kartě vidí využití podle členů. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
+Členové vidí **Poskytovatele organizace** jen pro čtení a mohou kteréhokoli povoleného poskytovatele zvolit jako výchozího pro svůj účet. Osoby s oprávněním `access.manage` je mohou přidávat, duplikovat, upravovat, zakázat, povolit a odstranit, volit výchozí poskytovatele Organizace a na stejné kartě vidí využití podle členů. Výchozí poskytovatel Organizace platí pro všechny členy, včetně soukromých položek, dokud si člen pro stejnou roli nezvolí vlastního poskytovatele. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
 
 ## Přepis
 
@@ -48,7 +48,8 @@ Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní prof
 ## Témata
 
 Tato sekce zachovává výchozího poskytovatele témat účtu. Profil bez
-připnutého poskytovatele témat jej použije. Automatická detekce témat se
+připnutého poskytovatele témat použije Vaši volbu, poté Vaši volbu pro shrnutí
+a nakonec výchozí poskytovatele Organizace. Automatická detekce témat se
 nastavuje v sekci **Profily**. Starší šablony témat zůstávají jen pro čtení pod
 **Šablony z doby před profily**; pomocí **Zkopírovat do profilu** je můžete dál
 upravovat.
@@ -56,14 +57,16 @@ upravovat.
 ## Učení
 
 Tato sekce zachovává výchozího poskytovatele Učení účtu. Profil bez připnutého
-poskytovatele Učení jej použije. Automatické Učení a oprava přepisu se nastavují
+poskytovatele Učení použije Vaši volbu, poté Vaši volbu pro shrnutí a nakonec
+výchozí poskytovatele Organizace. Automatické Učení a oprava přepisu se nastavují
 v sekci **Profily**.
 
 ## Shrnutí
 
 Tato sekce zachovává výchozího poskytovatele shrnutí a předvolbu funkce
-**Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí je
-použije. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
+**Vícenásobné shrnování** účtu. Profil bez připnutého poskytovatele shrnutí
+použije Vaši volbu, nebo výchozího poskytovatele Organizace, pokud jste si
+žádného nezvolili. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
 **Vícenásobné shrnování** v profilu se nastavují v
 sekci **Profily**. Starší šablony shrnutí zůstávají jen pro čtení pod **Šablony
 z doby před profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.

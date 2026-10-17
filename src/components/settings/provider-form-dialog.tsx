@@ -106,6 +106,9 @@ export function ProviderFormDialog({
     const [defaultModel, setDefaultModel] = useState("");
     const [isDefaultTranscription, setIsDefaultTranscription] = useState(false);
     const [isDefaultEnhancement, setIsDefaultEnhancement] = useState(false);
+    const [isDefaultLearn, setIsDefaultLearn] = useState(false);
+    const [isDefaultTopics, setIsDefaultTopics] = useState(false);
+    const [isDefaultTitle, setIsDefaultTitle] = useState(false);
     const [pricing, setPricing] = useState<PricingDraft>(EMPTY_PRICING);
     const [saving, setSaving] = useState(false);
 
@@ -117,6 +120,9 @@ export function ProviderFormDialog({
             setDefaultModel("");
             setIsDefaultTranscription(false);
             setIsDefaultEnhancement(false);
+            setIsDefaultLearn(false);
+            setIsDefaultTopics(false);
+            setIsDefaultTitle(false);
             setPricing(EMPTY_PRICING);
             return;
         }
@@ -130,6 +136,9 @@ export function ProviderFormDialog({
         setIsDefaultEnhancement(
             editing && source?.isDefaultEnhancement === true,
         );
+        setIsDefaultLearn(editing && source?.isDefaultLearn === true);
+        setIsDefaultTopics(editing && source?.isDefaultTopics === true);
+        setIsDefaultTitle(editing && source?.isDefaultTitle === true);
         setPricing(duplicating ? EMPTY_PRICING : pricingDraft(source?.rate));
     }, [duplicating, editing, open, source]);
 
@@ -147,7 +156,12 @@ export function ProviderFormDialog({
         if (!preset) return;
         setBaseUrl(preset.baseUrl);
         setDefaultModel(preset.defaultModel);
-        if (preset.transcriptionOnly) setIsDefaultEnhancement(false);
+        if (preset.transcriptionOnly) {
+            setIsDefaultEnhancement(false);
+            setIsDefaultLearn(false);
+            setIsDefaultTopics(false);
+            setIsDefaultTitle(false);
+        }
         if (preset.enhancementOnly) setIsDefaultTranscription(false);
     };
 
@@ -188,13 +202,16 @@ export function ProviderFormDialog({
             body.copyKeyFrom = source.id;
         }
         if (apiKey.trim()) body.apiKey = apiKey.trim();
-        if (personal) {
-            body.isDefaultTranscription = enhancementOnly
-                ? false
-                : isDefaultTranscription;
-            body.isDefaultEnhancement = transcriptionOnly
-                ? false
-                : isDefaultEnhancement;
+        body.isDefaultTranscription = enhancementOnly
+            ? false
+            : isDefaultTranscription;
+        body.isDefaultEnhancement = transcriptionOnly
+            ? false
+            : isDefaultEnhancement;
+        if (!personal) {
+            body.isDefaultLearn = transcriptionOnly ? false : isDefaultLearn;
+            body.isDefaultTopics = transcriptionOnly ? false : isDefaultTopics;
+            body.isDefaultTitle = transcriptionOnly ? false : isDefaultTitle;
         }
 
         setSaving(true);
@@ -243,7 +260,7 @@ export function ProviderFormDialog({
                     {scope === "organization" && (
                         <DialogDescription>
                             {i18n(
-                                "Members may send content to this provider when a profile uses it. Keys are write-only.",
+                                "Members may use this provider for account defaults and Organization profiles. Keys are write-only.",
                             )}
                         </DialogDescription>
                     )}
@@ -349,62 +366,158 @@ export function ProviderFormDialog({
                         onChange={setDefaultModel}
                         disabled={saving}
                     />
-                    {personal && (
-                        <Panel variant="inset" className="space-y-2 text-sm">
-                            <label
-                                className={
-                                    enhancementOnly
-                                        ? "flex items-center gap-2 opacity-60"
-                                        : "flex cursor-pointer items-center gap-2"
+                    <Panel variant="inset" className="space-y-2 text-sm">
+                        <label
+                            className={
+                                enhancementOnly
+                                    ? "flex items-center gap-2 opacity-60"
+                                    : "flex cursor-pointer items-center gap-2"
+                            }
+                        >
+                            <input
+                                type="checkbox"
+                                checked={
+                                    isDefaultTranscription && !enhancementOnly
                                 }
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={
-                                        isDefaultTranscription &&
-                                        !enhancementOnly
-                                    }
-                                    disabled={
-                                        saving ||
-                                        enhancementOnly ||
-                                        sourceDisabled
-                                    }
-                                    onChange={(event) =>
-                                        setIsDefaultTranscription(
-                                            event.target.checked,
-                                        )
-                                    }
-                                />
-                                <span>{i18n("Use for transcription")}</span>
-                            </label>
-                            <label
-                                className={
-                                    transcriptionOnly
-                                        ? "flex items-center gap-2 opacity-60"
-                                        : "flex cursor-pointer items-center gap-2"
+                                disabled={
+                                    saving || enhancementOnly || sourceDisabled
                                 }
-                            >
-                                <input
-                                    type="checkbox"
-                                    checked={
-                                        isDefaultEnhancement &&
-                                        !transcriptionOnly
+                                onChange={(event) =>
+                                    setIsDefaultTranscription(
+                                        event.target.checked,
+                                    )
+                                }
+                            />
+                            <span>
+                                {personal
+                                    ? i18n("Use for transcription")
+                                    : i18n(
+                                          "Organization default for transcription",
+                                      )}
+                            </span>
+                        </label>
+                        <label
+                            className={
+                                transcriptionOnly
+                                    ? "flex items-center gap-2 opacity-60"
+                                    : "flex cursor-pointer items-center gap-2"
+                            }
+                        >
+                            <input
+                                type="checkbox"
+                                checked={
+                                    isDefaultEnhancement && !transcriptionOnly
+                                }
+                                disabled={
+                                    saving ||
+                                    transcriptionOnly ||
+                                    sourceDisabled
+                                }
+                                onChange={(event) =>
+                                    setIsDefaultEnhancement(
+                                        event.target.checked,
+                                    )
+                                }
+                            />
+                            <span>
+                                {personal
+                                    ? i18n("Use for summaries")
+                                    : i18n(
+                                          "Organization default for summaries",
+                                      )}
+                            </span>
+                        </label>
+                        {!personal && (
+                            <>
+                                <label
+                                    className={
+                                        transcriptionOnly
+                                            ? "flex items-center gap-2 opacity-60"
+                                            : "flex cursor-pointer items-center gap-2"
                                     }
-                                    disabled={
-                                        saving ||
-                                        transcriptionOnly ||
-                                        sourceDisabled
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={
+                                            isDefaultLearn && !transcriptionOnly
+                                        }
+                                        disabled={
+                                            saving ||
+                                            transcriptionOnly ||
+                                            sourceDisabled
+                                        }
+                                        onChange={(event) =>
+                                            setIsDefaultLearn(
+                                                event.target.checked,
+                                            )
+                                        }
+                                    />
+                                    <span>
+                                        {i18n("Organization default for Learn")}
+                                    </span>
+                                </label>
+                                <label
+                                    className={
+                                        transcriptionOnly
+                                            ? "flex items-center gap-2 opacity-60"
+                                            : "flex cursor-pointer items-center gap-2"
                                     }
-                                    onChange={(event) =>
-                                        setIsDefaultEnhancement(
-                                            event.target.checked,
-                                        )
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={
+                                            isDefaultTopics &&
+                                            !transcriptionOnly
+                                        }
+                                        disabled={
+                                            saving ||
+                                            transcriptionOnly ||
+                                            sourceDisabled
+                                        }
+                                        onChange={(event) =>
+                                            setIsDefaultTopics(
+                                                event.target.checked,
+                                            )
+                                        }
+                                    />
+                                    <span>
+                                        {i18n(
+                                            "Organization default for topics",
+                                        )}
+                                    </span>
+                                </label>
+                                <label
+                                    className={
+                                        transcriptionOnly
+                                            ? "flex items-center gap-2 opacity-60"
+                                            : "flex cursor-pointer items-center gap-2"
                                     }
-                                />
-                                <span>{i18n("Use for summaries")}</span>
-                            </label>
-                        </Panel>
-                    )}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={
+                                            isDefaultTitle && !transcriptionOnly
+                                        }
+                                        disabled={
+                                            saving ||
+                                            transcriptionOnly ||
+                                            sourceDisabled
+                                        }
+                                        onChange={(event) =>
+                                            setIsDefaultTitle(
+                                                event.target.checked,
+                                            )
+                                        }
+                                    />
+                                    <span>
+                                        {i18n(
+                                            "Organization default for titles",
+                                        )}
+                                    </span>
+                                </label>
+                            </>
+                        )}
+                    </Panel>
                     <ProviderPricingFields
                         provider={provider}
                         model={defaultModel}

@@ -3,6 +3,10 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
 import {
+    loadDefaultProviderPointers,
+    setDefaultProvider,
+} from "@/lib/ai/default-provider";
+import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
@@ -130,31 +134,6 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         if (!before) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
-        // If setting as default, remove default flag from other providers
-        if (isDefaultTranscription) {
-            await tx
-                .update(apiCredentials)
-                .set({ isDefaultTranscription: false })
-                .where(
-                    and(
-                        eq(apiCredentials.userId, session.user.id),
-                        eq(apiCredentials.isDefaultTranscription, true),
-                    ),
-                );
-        }
-
-        if (isDefaultEnhancement) {
-            await tx
-                .update(apiCredentials)
-                .set({ isDefaultEnhancement: false })
-                .where(
-                    and(
-                        eq(apiCredentials.userId, session.user.id),
-                        eq(apiCredentials.isDefaultEnhancement, true),
-                    ),
-                );
-        }
-
         // Build update object
         const updateData: Partial<typeof apiCredentials.$inferInsert> = {
             updatedAt: new Date(),
@@ -163,12 +142,6 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         if (baseUrl !== undefined) updateData.baseUrl = baseUrl || null;
         if (defaultModel !== undefined) {
             updateData.defaultModel = defaultModel || null;
-        }
-        if (isDefaultTranscription !== undefined) {
-            updateData.isDefaultTranscription = Boolean(isDefaultTranscription);
-        }
-        if (isDefaultEnhancement !== undefined) {
-            updateData.isDefaultEnhancement = Boolean(isDefaultEnhancement);
         }
         if (hasRates) Object.assign(updateData, parseProviderRates(body));
         if (typeof disabled === "boolean") {
@@ -225,6 +198,14 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
 
         if (settings?.pointer === id) {
             await setDefaultTranscriptionProvider(session.user.id, null);
+        }
+    }
+    if (isDefaultEnhancement === true) {
+        await setDefaultProvider(session.user.id, "summary", id);
+    } else if (isDefaultEnhancement === false) {
+        const pointers = await loadDefaultProviderPointers(session.user.id);
+        if (pointers.summary === id) {
+            await setDefaultProvider(session.user.id, "summary", null);
         }
     }
 

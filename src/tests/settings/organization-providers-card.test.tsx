@@ -47,6 +47,11 @@ const organizationProvider: ProviderCardItem = {
     defaultModel: "gpt-4o-mini",
     rate: null,
     disabledAt: null,
+    isDefaultTranscription: true,
+    isDefaultEnhancement: true,
+    isDefaultLearn: true,
+    isDefaultTopics: true,
+    isDefaultTitle: true,
 };
 
 const titles: Record<ProviderScope, string> = {
@@ -57,7 +62,7 @@ const titles: Record<ProviderScope, string> = {
 const descriptions: Record<ProviderScope, string> = {
     personal: "Only you can use these keys.",
     organization:
-        "Shared with every member through Organization profiles. Keys are write-only.",
+        "Shared with every member. Organization defaults apply until a member chooses another provider. Keys are write-only.",
 };
 
 const collections: Record<ProviderScope, string> = {
@@ -381,8 +386,21 @@ describe.each([
             expect(screen.getByText("Use for transcription")).toBeTruthy();
             expect(screen.getByText("Use for summaries")).toBeTruthy();
         } else {
-            expect(screen.queryByText("Use for transcription")).toBeNull();
-            expect(screen.queryByText("Use for summaries")).toBeNull();
+            expect(
+                screen.getByText("Organization default for transcription"),
+            ).toBeTruthy();
+            expect(
+                screen.getByText("Organization default for summaries"),
+            ).toBeTruthy();
+            expect(
+                screen.getByText("Organization default for Learn"),
+            ).toBeTruthy();
+            expect(
+                screen.getByText("Organization default for topics"),
+            ).toBeTruthy();
+            expect(
+                screen.getByText("Organization default for titles"),
+            ).toBeTruthy();
         }
     });
 });
@@ -395,6 +413,11 @@ describe("Organization provider permissions and usage", () => {
         expect(await within(card).findByText("Read-only")).toBeTruthy();
         expect(within(card).queryByRole("button")).toBeNull();
         expect(within(card).getByText("OpenAI")).toBeTruthy();
+        expect(within(card).getByText("Transcription")).toBeTruthy();
+        expect(within(card).getByText("Summaries")).toBeTruthy();
+        expect(within(card).getByText("Learn")).toBeTruthy();
+        expect(within(card).getByText("Topics")).toBeTruthy();
+        expect(within(card).getByText("Titles")).toBeTruthy();
         expect(within(card).queryByText("never-render-this-secret")).toBeNull();
     });
 

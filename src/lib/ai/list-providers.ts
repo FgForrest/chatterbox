@@ -1,9 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { apiCredentials, userSettings } from "@/db/schema";
+import { apiCredentials } from "@/db/schema";
+import { loadDefaultProviderPointers } from "@/lib/ai/default-provider";
 import { type AiRate, hasRate, storedRate } from "@/lib/ai/published-rates";
-import { titleProviderId } from "@/lib/ai/title-provider";
-import { topicsProviderId } from "@/lib/ai/topics-provider";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import {
     getManagedTranscriptionProvider,
@@ -55,17 +54,7 @@ export async function listUserProviders(
     userId: string,
     options: ListUserProvidersOptions = {},
 ): Promise<ProviderListItem[]> {
-    const [settings] = await db
-        .select({
-            pointer: userSettings.defaultTranscriptionProviderId,
-            defaultProviders: userSettings.defaultProviders,
-        })
-        .from(userSettings)
-        .where(eq(userSettings.userId, userId))
-        .limit(1);
-    const pointer = settings?.pointer ?? null;
-    const topicsPointer = topicsProviderId(settings?.defaultProviders);
-    const titlePointer = titleProviderId(settings?.defaultProviders);
+    const pointers = await loadDefaultProviderPointers(userId);
 
     const rows = await db
         .select({
@@ -73,8 +62,6 @@ export async function listUserProviders(
             provider: apiCredentials.provider,
             baseUrl: apiCredentials.baseUrl,
             defaultModel: apiCredentials.defaultModel,
-            isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
-            isDefaultLearn: apiCredentials.isDefaultLearn,
             inputUsdPerMillion: apiCredentials.inputUsdPerMillion,
             outputUsdPerMillion: apiCredentials.outputUsdPerMillion,
             audioUsdPerHour: apiCredentials.audioUsdPerHour,
@@ -100,7 +87,6 @@ export async function listUserProviders(
     const learn = isLearnDeploymentAvailable();
     const credentials: ProviderListItem[] = rows.map(
         ({
-            isDefaultLearn,
             inputUsdPerMillion,
             outputUsdPerMillion,
             audioUsdPerHour,
@@ -114,17 +100,18 @@ export async function listUserProviders(
             return {
                 ...row,
                 rate: hasRate(rate) ? rate : null,
-                isDefaultTranscription: row.id === pointer,
-                isDefaultTopics: row.id === topicsPointer,
-                isDefaultTitle: row.id === titlePointer,
-                ...(learn ? { isDefaultLearn } : {}),
+                isDefaultTranscription: row.id === pointers.transcription,
+                isDefaultEnhancement: row.id === pointers.summary,
+                isDefaultTopics: row.id === pointers.topics,
+                isDefaultTitle: row.id === pointers.title,
+                ...(learn ? { isDefaultLearn: row.id === pointers.learn } : {}),
             };
         },
     );
 
     const managed = await getManagedTranscriptionProvider(
         userId,
-        isRiffadoIncludedProviderId(pointer),
+        isRiffadoIncludedProviderId(pointers.transcription),
     );
 
     return managed ? [managed, ...credentials] : credentials;

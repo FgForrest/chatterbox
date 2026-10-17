@@ -8,13 +8,21 @@ import {
     it,
     vi,
 } from "vitest";
-import { apiCredentials, userSettings, users } from "@/db/schema";
+import {
+    aiUsageEvents,
+    apiCredentials,
+    chatterItems,
+    userSettings,
+    users,
+} from "@/db/schema";
 import {
     pickEnhancementCredential,
     pickLearnCredential,
     pickTopicsCredential,
 } from "@/lib/ai/enhancement-provider";
 import { titleProviderId } from "@/lib/ai/title-provider";
+import { recordAiUsage } from "@/lib/ai/usage-cost";
+import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { RIFFADO_INCLUDED_PROVIDER_ID } from "@/lib/transcription/included-provider";
 import {
     createMigratedTestDatabase,
@@ -280,6 +288,203 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         );
     });
 
+    it("uses Organization transcription and summary defaults for a member with no provider", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultTranscriptionProviderId: "org-card",
+                defaultProviders: { summary: "org-card" },
+            });
+
+        for (const step of ["transcription", "summary"] as const) {
+            const resolved = await resolveStepProvider({
+                step,
+                pin: null,
+                actorUserId: "actor",
+            });
+            expect(resolved).toMatchObject({
+                kind: "credential",
+                payerUserId: "org-user",
+                organizationCredential: true,
+                credential: { id: "org-card" },
+            });
+        }
+    });
+
+    it("records resolved transcription and summary usage against the Organization payer", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultTranscriptionProviderId: "org-card",
+                defaultProviders: { summary: "org-card" },
+            });
+        await databaseClient().insert(chatterItems).values({
+            id: "org-default-usage-item",
+            userId: "actor",
+            kind: "audio",
+            title: "encrypted",
+            occurredAt: new Date(),
+        });
+
+        for (const operation of ["transcription", "summary"] as const) {
+            const resolved = await resolveStepProvider({
+                step: operation,
+                pin: null,
+                actorUserId: "actor",
+            });
+            if (resolved.kind !== "credential") {
+                throw new Error("expected a credential provider");
+            }
+            await recordAiUsage(
+                {
+                    recordingId: "org-default-usage-item",
+                    ownerUserId: "actor",
+                    actorUserId: "actor",
+                    payerUserId: resolved.payerUserId,
+                    operation,
+                    provider: resolved.credential.provider,
+                    model: resolved.credential.defaultModel ?? "gpt-4o-mini",
+                    credentialId: resolved.credential.id,
+                },
+                operation === "transcription"
+                    ? { audioSeconds: 30 }
+                    : { inputTokens: 100, outputTokens: 20 },
+            );
+        }
+
+        const usage = await databaseClient()
+            .select()
+            .from(aiUsageEvents)
+            .where(eq(aiUsageEvents.itemId, "org-default-usage-item"));
+        expect(usage).toHaveLength(2);
+        expect(usage).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    operation: "transcription",
+                    actorUserId: "actor",
+                    payerUserId: "org-user",
+                }),
+                expect.objectContaining({
+                    operation: "summary",
+                    actorUserId: "actor",
+                    payerUserId: "org-user",
+                }),
+            ]),
+        );
+    });
+
+    it("offers Learn through an Organization default and an Organization pin", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultProviders: { learn: "org-card" },
+            });
+
+        await expect(isLearnAvailableFor("actor")).resolves.toBe(true);
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "org-user"));
+        await expect(
+            isLearnAvailableFor("actor", {
+                scope: "organization",
+                credentialId: "org-card",
+            }),
+        ).resolves.toBe(true);
+    });
+
+    it("prefers a member pointer over the Organization default", async () => {
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultProviders: { summary: "org-card" },
+            });
+        await databaseClient()
+            .update(userSettings)
+            .set({ defaultProviders: { summary: "summary" } })
+            .where(eq(userSettings.userId, "actor"));
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).resolves.toMatchObject({
+            payerUserId: "actor",
+            credential: { id: "summary" },
+        });
+    });
+
+    it("allows a member pointer to select a non-default Organization provider", async () => {
+        await insertCredential({ id: "org-other", userId: "org-user" });
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultProviders: { summary: "org-card" },
+            });
+        await databaseClient()
+            .update(userSettings)
+            .set({ defaultProviders: { summary: "org-other" } })
+            .where(eq(userSettings.userId, "actor"));
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).resolves.toMatchObject({
+            payerUserId: "org-user",
+            organizationCredential: true,
+            credential: { id: "org-other" },
+        });
+    });
+
+    it("skips Organization defaults for an unauthorized member", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await databaseClient()
+            .insert(userSettings)
+            .values({
+                userId: "org-user",
+                defaultProviders: { summary: "org-card" },
+            });
+        state.idp = true;
+        state.holderMayUse = false;
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({ code: "AI_PROVIDER_NOT_CONFIGURED" });
+    });
+
     it("rejects disabled and non-Organization credentials for an Organization pin", async () => {
         await expect(
             resolveStepProvider({
@@ -398,7 +603,7 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         ).resolves.toMatchObject({ kind: "managed", payerUserId: "actor" });
     });
 
-    it("skips a disabled credential when no role or pin selects it", async () => {
+    it("does not silently choose another credential when no role selects it", async () => {
         await databaseClient()
             .update(apiCredentials)
             .set({
@@ -411,13 +616,13 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
                     eq(apiCredentials.userId, "actor"),
                 ),
             );
-        const resolved = await resolveStepProvider({
-            step: "summary",
-            pin: null,
-            actorUserId: "actor",
-        });
-        expect(resolved.credential?.id).not.toBe("summary");
-        expect(resolved.credential?.disabledAt).toBeNull();
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({ code: "AI_PROVIDER_NOT_CONFIGURED" });
     });
 
     it("fails with the provider name when transcription points at a disabled credential", async () => {

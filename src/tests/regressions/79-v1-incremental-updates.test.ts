@@ -342,7 +342,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                         isDefaultEnhancement: true,
                     },
                 ]),
-            );
+            )
+            .mockReturnValueOnce(selectRows([]));
 
         const txInsertValues = vi.fn().mockResolvedValue(undefined);
         const recordingBumpSet = vi.fn().mockReturnValue({
@@ -414,7 +415,8 @@ describe("Issue #79 - v1 incremental update timestamps", () => {
                         isDefaultEnhancement: true,
                     },
                 ]),
-            );
+            )
+            .mockReturnValueOnce(selectRows([]));
 
         let enhancementUpdateWhere: unknown;
         const enhancementUpdateSet = vi.fn().mockReturnValue({

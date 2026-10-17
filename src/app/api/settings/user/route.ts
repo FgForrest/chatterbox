@@ -17,7 +17,10 @@ import {
 import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import { EXPORT_FORMATS } from "@/lib/export/formats";
 import { isSupportedLocale } from "@/lib/i18n/config";
-import { isAutoLearnOffered } from "@/lib/knowledge/availability";
+import {
+    isAutoLearnOffered,
+    isLearnDeploymentAvailable,
+} from "@/lib/knowledge/availability";
 import {
     readLegacySettingsFromProfiles,
     writeLegacySettingsToProfiles,
@@ -265,6 +268,7 @@ export const GET = apiHandler(async (request: Request) => {
             titleGenerationPrompt: null,
             topicPrompt: null,
             autoLearnOffered: await isAutoLearnOffered(session.user.id),
+            learnDeploymentAvailable: isLearnDeploymentAvailable(),
             barkPushUrl: null,
             barkPushUrlSet: false,
             userEmail,
@@ -276,6 +280,7 @@ export const GET = apiHandler(async (request: Request) => {
     const settingsData = extractSettings(settings);
     // The switch is shown only where automatic Learn is offered.
     settingsData.autoLearnOffered = await isAutoLearnOffered(session.user.id);
+    settingsData.learnDeploymentAvailable = isLearnDeploymentAvailable();
     if (settings.titleGenerationPrompt) {
         settingsData.titleGenerationPrompt = decryptJsonField(
             settings.titleGenerationPrompt,

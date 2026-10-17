@@ -32,7 +32,7 @@ If the Organization is enabled, members see Organization profiles and can duplic
 
 Some providers only transcribe (ElevenLabs, Speechmatics). Summary steps then need a second provider.
 
-Members inspect **Organization providers** as **Read-only**. People with `access.manage` can add, duplicate, edit, disable, enable, and delete them, and can see usage per member in the same card. See [Organization providers](organization.md#organization-providers).
+Members inspect **Organization providers** as **Read-only** and may choose any enabled one as an account default. People with `access.manage` can add, duplicate, edit, disable, enable, and delete them, choose Organization defaults, and see usage per member in the same card. An Organization default applies to every member, including private items, until that member chooses a provider for the same role. See [Organization providers](organization.md#organization-providers).
 
 ## Transcription
 
@@ -48,20 +48,23 @@ Automatic transcription, title generation, and their profile-specific providers 
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that
-does not pin a topics provider uses it. Automatic topic detection is set under
+does not pin a topics provider uses your choice, then your summary choice, then
+the Organization defaults. Automatic topic detection is set under
 **Profiles**. Older topic templates remain read-only under **Templates from
 before profiles**; use **Copy into a profile** to keep editing one.
 
 ## Learning
 
 This section keeps the account-level Learn provider default. A profile that
-does not pin a Learn provider uses it. Automatic Learn and transcript
+does not pin a Learn provider uses your choice, then your summary choice, then
+the Organization defaults. Automatic Learn and transcript
 correction are set under **Profiles**.
 
 ## Summary
 
 This section keeps the account-level summary provider and multi-pass defaults.
-A profile without a pinned summary provider uses them. Automatic titles and
+A profile without a pinned summary provider uses your choice, or the
+Organization default when you have not chosen one. Automatic titles and
 summaries, output language and format, and profile-specific multi-pass behavior
 are set under **Profiles**. Older summary templates remain read-only under
 **Templates from before profiles**; use **Copy into a profile** to keep editing

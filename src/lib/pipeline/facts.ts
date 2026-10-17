@@ -2,7 +2,6 @@ import { and, desc, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
     aiEnhancements,
-    apiCredentials,
     asyncJobs,
     chatterItems,
     learnRuns,
@@ -15,7 +14,6 @@ import {
     transcriptions,
     users,
 } from "@/db/schema";
-import { pickEnhancementCredential } from "@/lib/ai/enhancement-provider";
 import { isLearnDeploymentAvailable } from "@/lib/knowledge/availability";
 import { learnRunOpen } from "@/lib/learn/learn-open";
 import { isSummaryStale } from "@/lib/learn/summary-refresh";
@@ -27,12 +25,16 @@ import type {
     PipelinePhases,
     PipelineView,
 } from "@/lib/pipeline/types";
-import { resolveStepProvider } from "@/lib/profiles/providers";
+import {
+    type ProcessingStep,
+    resolveStepProvider,
+} from "@/lib/profiles/providers";
 import {
     AssignedProfileUnavailableError,
     resolveItemProfile,
 } from "@/lib/profiles/resolve";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
+import type { ProviderPin } from "@/lib/profiles/settings";
 import { TITLE_JOB_KIND } from "@/lib/recordings/title-job";
 import { loadShareGate } from "@/lib/sharing/load-share-gate";
 import { recordingJobSubject } from "@/lib/sharing/view";
@@ -42,6 +44,19 @@ import { plaudActionItemsFingerprint } from "@/lib/tasks/plaud-proposals";
 import { waitingTaskDecisions } from "@/lib/tasks/waiting-review";
 import { TOPICS_JOB_KIND } from "@/lib/topics/topics-job";
 import { TRANSCRIPTION_JOB_KIND } from "@/lib/transcription/transcription-job";
+
+async function providerAvailable(
+    userId: string,
+    step: ProcessingStep,
+    pin: ProviderPin | null,
+): Promise<boolean> {
+    try {
+        await resolveStepProvider({ step, pin, actorUserId: userId });
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 async function readShared(itemId: string, userId: string): Promise<boolean> {
     const [row] = await db
@@ -132,7 +147,7 @@ export async function gatherFacts(
     userId: string,
     options: { legacyIfEmpty?: boolean } = {},
 ): Promise<PipelineFacts> {
-    const [processing, [item], credentials] = await Promise.all([
+    const [processing, [item]] = await Promise.all([
         readProcessing(itemId, view, userId),
         db
             .select({
@@ -149,14 +164,6 @@ export async function gatherFacts(
                 ),
             )
             .limit(1),
-        db
-            .select({
-                provider: apiCredentials.provider,
-                isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
-                disabledAt: apiCredentials.disabledAt,
-            })
-            .from(apiCredentials)
-            .where(eq(apiCredentials.userId, userId)),
     ]);
 
     const missing = !item;
@@ -181,8 +188,10 @@ export async function gatherFacts(
                 profileAssigned: false,
                 resolution: null,
             },
-            hasEnhancementCredential: Boolean(
-                pickEnhancementCredential(credentials),
+            hasEnhancementCredential: await providerAvailable(
+                userId,
+                "summary",
+                null,
             ),
             learnAvailability: isLearnDeploymentAvailable()
                 ? "no_provider"
@@ -741,8 +750,10 @@ export async function gatherFacts(
                   }
                 : {}),
         },
-        hasEnhancementCredential: Boolean(
-            pickEnhancementCredential(credentials),
+        hasEnhancementCredential: await providerAvailable(
+            userId,
+            "summary",
+            resolvedProfile?.settings.steps.summary.provider ?? null,
         ),
         stepAvailability,
         learnAvailability,

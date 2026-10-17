@@ -65,6 +65,8 @@ vi.mock("@/lib/ai/enhancement-provider", () => ({
 vi.mock("@/lib/ai/provider-presets", () => ({
     getDefaultTranscriptionModel: vi.fn().mockReturnValue("whisper-1"),
     getTranscriptionStyle: vi.fn().mockReturnValue("whisper"),
+    isEnhancementOnlyProvider: vi.fn().mockReturnValue(false),
+    isTranscriptionOnlyProvider: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("@/lib/ai/usage-cost", () => ({
@@ -147,6 +149,7 @@ vi.mock("@/lib/mail/auto-process", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/org/config", () => ({
+    getOrgUserId: vi.fn().mockResolvedValue(null),
     isOrgScopeEnabled: mocks.isOrgScopeEnabled,
 }));
 

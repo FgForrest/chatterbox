@@ -6,6 +6,16 @@ import {
     apiCredentials,
     users,
 } from "@/db/schema";
+import {
+    type DefaultProviderPointers,
+    loadDefaultProviderPointers,
+    type ProviderRole,
+    setDefaultProvider,
+} from "@/lib/ai/default-provider";
+import {
+    isEnhancementOnlyProvider,
+    isTranscriptionOnlyProvider,
+} from "@/lib/ai/provider-presets";
 import { hasRate, storedRate } from "@/lib/ai/published-rates";
 import type { ActorContext } from "@/lib/authz/model";
 import { mayManageAccess, mayUse } from "@/lib/authz/policy";
@@ -34,6 +44,7 @@ export interface OrganizationProviderInput {
         outputUsdPerMillion: string | null;
         audioUsdPerHour: string | null;
     };
+    defaults?: Partial<Record<ProviderRole, boolean>>;
 }
 
 export interface OrganizationProviderUpdate {
@@ -42,6 +53,7 @@ export interface OrganizationProviderUpdate {
     defaultModel?: string | null;
     rates?: OrganizationProviderInput["rates"];
     disabled?: boolean;
+    defaults?: Partial<Record<ProviderRole, boolean>>;
 }
 
 type CredentialRow = typeof apiCredentials.$inferSelect;
@@ -106,7 +118,10 @@ export async function organizationProviderManageContext(
     return context;
 }
 
-function publicProvider(row: CredentialRow) {
+function publicProvider(
+    row: CredentialRow,
+    pointers?: DefaultProviderPointers,
+) {
     const rate = storedRate(row);
     return {
         id: row.id,
@@ -118,7 +133,60 @@ function publicProvider(row: CredentialRow) {
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
         scope: "organization" as const,
+        isDefaultTranscription: pointers?.transcription === row.id,
+        isDefaultEnhancement: pointers?.summary === row.id,
+        isDefaultLearn: pointers?.learn === row.id,
+        isDefaultTopics: pointers?.topics === row.id,
+        isDefaultTitle: pointers?.title === row.id,
     };
+}
+
+async function applyOrganizationDefaults(
+    orgUserId: string,
+    credential: Pick<CredentialRow, "id" | "provider">,
+    defaults: Partial<Record<ProviderRole, boolean>> | undefined,
+): Promise<void> {
+    if (!defaults) return;
+    const current = await loadDefaultProviderPointers(orgUserId);
+    const roles: ProviderRole[] = [
+        "transcription",
+        "summary",
+        "learn",
+        "topics",
+        "title",
+    ];
+    for (const role of roles) {
+        const selected = defaults[role];
+        if (selected === true) {
+            await setDefaultProvider(orgUserId, role, credential.id);
+        } else if (selected === false && current[role] === credential.id) {
+            await setDefaultProvider(orgUserId, role, null);
+        }
+    }
+}
+
+function validateOrganizationDefaults(
+    provider: string,
+    defaults: Partial<Record<ProviderRole, boolean>> | undefined,
+): void {
+    if (defaults?.transcription && isEnhancementOnlyProvider(provider)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            `${provider} cannot transcribe`,
+            400,
+        );
+    }
+    const chatRoles: ProviderRole[] = ["summary", "learn", "topics", "title"];
+    if (
+        isTranscriptionOnlyProvider(provider) &&
+        chatRoles.some((role) => defaults?.[role] === true)
+    ) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            `${provider} cannot be an Organization chat default`,
+            400,
+        );
+    }
 }
 
 function auditSnapshot(row: CredentialRow | null) {
@@ -159,12 +227,15 @@ export async function writeOrganizationProviderAudit(
 export async function listOrganizationProviders(
     context: OrganizationProviderContext,
 ) {
-    const rows = await db
-        .select()
-        .from(apiCredentials)
-        .where(eq(apiCredentials.userId, context.orgUserId))
-        .orderBy(apiCredentials.createdAt, apiCredentials.id);
-    return rows.map(publicProvider);
+    const [rows, pointers] = await Promise.all([
+        db
+            .select()
+            .from(apiCredentials)
+            .where(eq(apiCredentials.userId, context.orgUserId))
+            .orderBy(apiCredentials.createdAt, apiCredentials.id),
+        loadDefaultProviderPointers(context.orgUserId),
+    ]);
+    return rows.map((row) => publicProvider(row, pointers));
 }
 
 /** Create one Organization-owned provider and its audit row atomically. */
@@ -172,7 +243,8 @@ export async function createOrganizationProvider(
     context: OrganizationProviderContext,
     input: OrganizationProviderInput,
 ) {
-    return db.transaction(async (tx) => {
+    validateOrganizationDefaults(input.provider, input.defaults);
+    const provider = await db.transaction(async (tx) => {
         let encryptedApiKey = input.encryptedApiKey;
         if (!encryptedApiKey && input.copyKeyFrom) {
             const [source] = await tx
@@ -239,6 +311,12 @@ export async function createOrganizationProvider(
         });
         return publicProvider(created);
     });
+    await applyOrganizationDefaults(
+        context.orgUserId,
+        provider,
+        input.defaults,
+    );
+    return provider;
 }
 
 /** Update, disable, or enable one Organization provider with an audit row. */
@@ -247,7 +325,7 @@ export async function updateOrganizationProvider(
     credentialId: string,
     input: OrganizationProviderUpdate,
 ) {
-    return db.transaction(async (tx) => {
+    const provider = await db.transaction(async (tx) => {
         const [before] = await tx
             .select()
             .from(apiCredentials)
@@ -262,6 +340,7 @@ export async function updateOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
+        validateOrganizationDefaults(before.provider, input.defaults);
         const update: Partial<typeof apiCredentials.$inferInsert> = {
             updatedAt: new Date(),
         };
@@ -304,6 +383,12 @@ export async function updateOrganizationProvider(
         });
         return publicProvider(after);
     });
+    await applyOrganizationDefaults(
+        context.orgUserId,
+        provider,
+        input.defaults,
+    );
+    return provider;
 }
 
 /** Delete one Organization provider and retain its non-secret audit snapshot. */

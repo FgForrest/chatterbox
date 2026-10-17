@@ -23,6 +23,11 @@ const createSchema = z
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
         audioUsdPerHour: z.unknown().optional(),
+        isDefaultTranscription: z.boolean().optional(),
+        isDefaultEnhancement: z.boolean().optional(),
+        isDefaultLearn: z.boolean().optional(),
+        isDefaultTopics: z.boolean().optional(),
+        isDefaultTitle: z.boolean().optional(),
     })
     .strict()
     .refine((value) => value.apiKey || value.copyKeyFrom, {
@@ -78,6 +83,13 @@ export const POST = apiHandler(async (request: Request) => {
         baseUrl: body.baseUrl || null,
         defaultModel: body.defaultModel || null,
         rates: parseProviderRates(body),
+        defaults: {
+            transcription: body.isDefaultTranscription,
+            summary: body.isDefaultEnhancement,
+            learn: body.isDefaultLearn,
+            topics: body.isDefaultTopics,
+            title: body.isDefaultTitle,
+        },
     });
     return NextResponse.json({ provider });
 });

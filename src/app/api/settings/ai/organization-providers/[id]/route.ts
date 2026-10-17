@@ -23,6 +23,11 @@ const updateSchema = z
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
         audioUsdPerHour: z.unknown().optional(),
+        isDefaultTranscription: z.boolean().optional(),
+        isDefaultEnhancement: z.boolean().optional(),
+        isDefaultLearn: z.boolean().optional(),
+        isDefaultTopics: z.boolean().optional(),
+        isDefaultTitle: z.boolean().optional(),
     })
     .strict()
     .refine((value) => Object.keys(value).length > 0, {
@@ -81,6 +86,13 @@ export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
             : {}),
         ...(body.disabled !== undefined ? { disabled: body.disabled } : {}),
         ...(hasRates ? { rates: parseProviderRates(body) } : {}),
+        defaults: {
+            transcription: body.isDefaultTranscription,
+            summary: body.isDefaultEnhancement,
+            learn: body.isDefaultLearn,
+            topics: body.isDefaultTopics,
+            title: body.isDefaultTitle,
+        },
     });
     return NextResponse.json({ success: true });
 });

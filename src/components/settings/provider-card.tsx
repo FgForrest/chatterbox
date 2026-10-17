@@ -103,7 +103,6 @@ function ManagedProviderDetails({ provider }: { provider: ProviderCardItem }) {
 
 function ProviderRow({
     provider,
-    scope,
     canManage,
     busy,
     onDuplicate,
@@ -112,7 +111,6 @@ function ProviderRow({
     onDelete,
 }: {
     provider: ProviderCardItem;
-    scope: ProviderScope;
     canManage: boolean;
     busy: boolean;
     onDuplicate: (provider: ProviderCardItem) => void;
@@ -124,7 +122,6 @@ function ProviderRow({
     const label = providerLabel(provider);
     const disabled = provider.disabledAt != null;
     const managed = provider.managed === true;
-    const showRoles = scope === "personal";
     const actionLabel = disabled ? i18n("Enable") : i18n("Disable");
     const actionAria = disabled
         ? i18n("Enable {name}", { name: label })
@@ -160,34 +157,26 @@ function ProviderRow({
                         rate={provider.rate}
                     />
                 )}
-                {showRoles && (
-                    <div className="flex flex-wrap gap-1.5">
-                        {provider.isDefaultTranscription && (
-                            <RoleChip
-                                icon={FileText}
-                                label={i18n("Transcription")}
-                            />
-                        )}
-                        {provider.isDefaultEnhancement && (
-                            <RoleChip
-                                icon={ListChecks}
-                                label={i18n("Summaries")}
-                            />
-                        )}
-                        {provider.isDefaultLearn && (
-                            <RoleChip
-                                icon={GraduationCap}
-                                label={i18n("Learn")}
-                            />
-                        )}
-                        {provider.isDefaultTopics && (
-                            <RoleChip icon={ListTree} label={i18n("Topics")} />
-                        )}
-                        {provider.isDefaultTitle && (
-                            <RoleChip icon={Pencil} label={i18n("Titles")} />
-                        )}
-                    </div>
-                )}
+                <div className="flex flex-wrap gap-1.5">
+                    {provider.isDefaultTranscription && (
+                        <RoleChip
+                            icon={FileText}
+                            label={i18n("Transcription")}
+                        />
+                    )}
+                    {provider.isDefaultEnhancement && (
+                        <RoleChip icon={ListChecks} label={i18n("Summaries")} />
+                    )}
+                    {provider.isDefaultLearn && (
+                        <RoleChip icon={GraduationCap} label={i18n("Learn")} />
+                    )}
+                    {provider.isDefaultTopics && (
+                        <RoleChip icon={ListTree} label={i18n("Topics")} />
+                    )}
+                    {provider.isDefaultTitle && (
+                        <RoleChip icon={Pencil} label={i18n("Titles")} />
+                    )}
+                </div>
             </div>
             {canManage && !managed && (
                 <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
@@ -325,7 +314,7 @@ export function ProviderCard({
         : i18n("Your providers");
     const description = organization
         ? i18n(
-              "Shared with every member through Organization profiles. Keys are write-only.",
+              "Shared with every member. Organization defaults apply until a member chooses another provider. Keys are write-only.",
           )
         : i18n("Only you can use these keys.");
     const empty = organization
@@ -389,7 +378,6 @@ export function ProviderCard({
                         <ProviderRow
                             key={provider.id}
                             provider={provider}
-                            scope={scope}
                             canManage={canManage}
                             busy={busyId === provider.id}
                             onDuplicate={onDuplicate}

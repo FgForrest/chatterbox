@@ -1369,7 +1369,7 @@ describeWithDatabase("pipeline.advance (PostgreSQL)", () => {
             });
 
         const mailFacts = await gatherFacts(mailId, "private", USER_ID);
-        expect(mailFacts.hasEnhancementCredential).toBe(false);
+        expect(mailFacts.hasEnhancementCredential).toBe(true);
         expect(mailFacts.stepAvailability?.summary).toBe("available");
         expect(mailFacts.profile?.automatic.summary).toBe(true);
         expect(planAdvance(mailFacts).actions).toContainEqual({

@@ -94,6 +94,7 @@ vi.mock("@/lib/org/config", () => ({
 }));
 vi.mock("@/lib/knowledge/availability", () => ({
     isAutoLearnOffered: async () => false,
+    isLearnDeploymentAvailable: () => true,
 }));
 vi.mock("@/lib/posthog-server", () => ({
     captureServerException: vi.fn(),
