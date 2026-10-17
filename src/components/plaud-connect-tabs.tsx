@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { toastApiError } from "@/lib/api-errors";
 import {
     DEFAULT_SERVER_KEY,
@@ -665,14 +666,14 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
 
             <div className="space-y-2">
                 <Label htmlFor="plaud-region">{i18n("Plaud region")}</Label>
-                <select
+                <NativeSelect
                     id="plaud-region"
                     value={serverKey}
                     onChange={(e) =>
                         setServerKey(e.target.value as PlaudServerKey)
                     }
                     disabled={isLoading}
-                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    className="w-full"
                 >
                     {(Object.keys(PLAUD_SERVERS) as PlaudServerKey[]).map(
                         (key) => (
@@ -681,7 +682,7 @@ function PasteTokenPane({ onConnected, onUseConnector }: PasteTokenPaneProps) {
                             </option>
                         ),
                     )}
-                </select>
+                </NativeSelect>
                 {serverKey === "custom" && (
                     <Input
                         type="url"

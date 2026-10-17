@@ -35,6 +35,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { effectiveRecordingCounts } from "@/lib/folders/hierarchy";
 import { cn } from "@/lib/utils";
 import type {
@@ -666,13 +667,13 @@ export function FolderTree({
                         </DialogDescription>
                     </DialogHeader>
                     {action?.kind === "move" ? (
-                        <select
+                        <NativeSelect
                             value={moveParentId}
                             onChange={(event) =>
                                 setMoveParentId(event.target.value)
                             }
                             aria-label={i18n("Destination folder")}
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="w-full"
                         >
                             {folders
                                 .filter(
@@ -685,7 +686,7 @@ export function FolderTree({
                                         {folderLabel(folder)}
                                     </option>
                                 ))}
-                        </select>
+                        </NativeSelect>
                     ) : (
                         <Input
                             value={draft}

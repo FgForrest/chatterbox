@@ -59,6 +59,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import {
@@ -1713,8 +1714,8 @@ function PhraseItem({
                     aria-label={i18n("Name of the relation")}
                     onChange={(event) => setLabel(event.target.value)}
                 />
-                <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("How many values")}
                     value={cardinality}
                     onChange={(event) =>
@@ -1725,7 +1726,7 @@ function PhraseItem({
                 >
                     <option value="many">{i18n("Many values")}</option>
                     <option value="one">{i18n("One value at a time")}</option>
-                </select>
+                </NativeSelect>
                 <Button
                     size="sm"
                     variant={chosen === "create" ? "default" : "outline"}
