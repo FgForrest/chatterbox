@@ -87,6 +87,21 @@ const profiles = [
         updatedAt: "2026-10-15T00:00:00.000Z",
     },
     {
+        id: "last-personal",
+        name: "Last Personal Profile",
+        description: null,
+        channel: "audio" as const,
+        scope: "personal" as const,
+        isDefault: false,
+        isYourDefault: false,
+        isOrganizationDefault: false,
+        deleteDisposition: "archive" as const,
+        version: 1,
+        canEdit: true,
+        archivedAt: null,
+        updatedAt: "2026-10-15T00:00:00.000Z",
+    },
+    {
         id: "mail-profile",
         name: "Mail Profile",
         description: null,
@@ -617,16 +632,24 @@ describe("Settings Profiles", () => {
 
     describe.each([
         {
+            id: "personal-default",
             name: "Default Profile",
             description:
                 "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
         },
         {
+            id: "unavailable-pin",
             name: "Unavailable Pin",
             description:
                 "This profile has no processing history and will be permanently deleted.",
         },
-    ])("Delete confirmation for $name", ({ name, description }) => {
+        {
+            id: "last-personal",
+            name: "Last Personal Profile",
+            description:
+                "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
+        },
+    ])("Delete confirmation for $name", ({ id, name, description }) => {
         it("explains the server-selected disposition before deleting", async () => {
             await renderList();
             fireEvent.click(
@@ -637,8 +660,7 @@ describe("Settings Profiles", () => {
             expect(
                 calls.some(
                     (call) =>
-                        call.url ===
-                            `/api/settings/profiles/${name === "Default Profile" ? "personal-default" : "unavailable-pin"}` &&
+                        call.url === `/api/settings/profiles/${id}` &&
                         call.method === "DELETE",
                 ),
             ).toBe(false);
@@ -647,8 +669,7 @@ describe("Settings Profiles", () => {
                 expect(
                     calls.some(
                         (call) =>
-                            call.url ===
-                                `/api/settings/profiles/${name === "Default Profile" ? "personal-default" : "unavailable-pin"}` &&
+                            call.url === `/api/settings/profiles/${id}` &&
                             call.method === "DELETE",
                     ),
                 ).toBe(true),

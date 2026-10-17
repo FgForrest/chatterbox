@@ -366,6 +366,13 @@ function defaultLegacySettings(): LegacyProfileSettings {
     };
 }
 
+function legacySettingsAreDefaults(legacy: LegacyProfileSettings): boolean {
+    const defaults = defaultLegacySettings();
+    return (Object.keys(defaults) as Array<keyof LegacyProfileSettings>).every(
+        (key) => legacy[key] === defaults[key],
+    );
+}
+
 /** Lazily seed one owner's legacy settings into immutable profile revisions. */
 export async function ensureProfiles(userId: string): Promise<void> {
     const existing = await db
@@ -378,14 +385,11 @@ export async function ensureProfiles(userId: string): Promise<void> {
     const orgUserId = await getOrgUserId();
     const scope: ProfileScope =
         orgUserId === userId ? "organization" : "personal";
-    if (
+    const organizationMember =
         scope === "personal" &&
-        orgUserId &&
+        Boolean(orgUserId) &&
         isOrgScopeEnabled() &&
-        (await mayUseOrganizationProfiles(userId))
-    ) {
-        return;
-    }
+        (await mayUseOrganizationProfiles(userId));
 
     await db.transaction(async (tx) => {
         await lockProfileSeedOwner(tx, userId);
@@ -406,6 +410,12 @@ export async function ensureProfiles(userId: string): Promise<void> {
             .from(users)
             .where(eq(users.id, userId))
             .limit(1);
+        if (
+            organizationMember &&
+            (!stored || legacySettingsAreDefaults(stored))
+        ) {
+            return;
+        }
         const legacy: LegacyProfileSettings = stored ?? defaultLegacySettings();
 
         for (const profile of buildSeedProfiles(

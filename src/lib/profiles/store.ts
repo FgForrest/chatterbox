@@ -754,9 +754,7 @@ async function profileHistoryReferences(
     const item = await executor
         .select({ id: itemProcessing.itemId })
         .from(itemProcessing)
-        .where(
-            and(eq(itemProcessing.userId, ownerUserId), itemProfileReference),
-        )
+        .where(itemProfileReference)
         .limit(1);
     if (item.length > 0) return true;
     if (revisionIds.length === 0) return false;
@@ -764,32 +762,17 @@ async function profileHistoryReferences(
         executor
             .select({ id: transcriptions.id })
             .from(transcriptions)
-            .where(
-                and(
-                    eq(transcriptions.userId, ownerUserId),
-                    inArray(transcriptions.profileRevisionId, revisionIds),
-                ),
-            )
+            .where(inArray(transcriptions.profileRevisionId, revisionIds))
             .limit(1),
         executor
             .select({ id: learnRuns.id })
             .from(learnRuns)
-            .where(
-                and(
-                    eq(learnRuns.userId, ownerUserId),
-                    inArray(learnRuns.profileRevisionId, revisionIds),
-                ),
-            )
+            .where(inArray(learnRuns.profileRevisionId, revisionIds))
             .limit(1),
         executor
             .select({ id: aiEnhancements.id })
             .from(aiEnhancements)
-            .where(
-                and(
-                    eq(aiEnhancements.userId, ownerUserId),
-                    inArray(aiEnhancements.profileRevisionId, revisionIds),
-                ),
-            )
+            .where(inArray(aiEnhancements.profileRevisionId, revisionIds))
             .limit(1),
     ]);
     return (
@@ -797,7 +780,11 @@ async function profileHistoryReferences(
     );
 }
 
-/** Report whether deleting a personal profile preserves it as archived history. */
+/**
+ * Report whether deleting an owner-scoped personal profile preserves it as
+ * archived history. Once ownership establishes its opaque profile and revision
+ * IDs, references are checked across every history owner without reading data.
+ */
 export async function profileDeleteDisposition(
     ownerUserId: string,
     profileId: string,

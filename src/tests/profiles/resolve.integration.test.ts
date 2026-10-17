@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import {
     afterAll,
     beforeAll,
@@ -64,6 +64,7 @@ vi.mock("@/lib/env", () => ({ env: mockEnv }));
 
 import {
     AssignedProfileUnavailableError,
+    loadSelectedProfileRevision,
     ProfileSelectionRequiredError,
     resolveDefaultProfile,
     resolveItemProfile,
@@ -83,6 +84,7 @@ const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const OWNER = "profile-resolve-owner";
 const ORG = "profile-resolve-org";
 const ITEM = "profile-resolve-item";
+const ORGANIZATION_ITEM = "profile-resolve-organization-item";
 
 function actor(userId: string): ActorContext {
     return {
@@ -117,13 +119,24 @@ describeWithDatabase("item profile resolution", () => {
                 { id: OWNER, email: "profile-owner@example.test" },
                 { id: ORG, email: "organization@example.test", role: "org" },
             ]);
-        await db().insert(chatterItems).values({
-            id: ITEM,
-            userId: OWNER,
-            kind: "audio",
-            title: "encrypted-title",
-            occurredAt: new Date(),
-        });
+        await db()
+            .insert(chatterItems)
+            .values([
+                {
+                    id: ITEM,
+                    userId: OWNER,
+                    kind: "audio",
+                    title: "encrypted-title",
+                    occurredAt: new Date(),
+                },
+                {
+                    id: ORGANIZATION_ITEM,
+                    userId: ORG,
+                    kind: "audio",
+                    title: "encrypted-organization-title",
+                    occurredAt: new Date(),
+                },
+            ]);
     }, 120_000);
 
     beforeEach(async () => {
@@ -132,7 +145,7 @@ describeWithDatabase("item profile resolution", () => {
             .where(eq(recordingFolders.userId, OWNER));
         await db()
             .delete(itemProcessing)
-            .where(eq(itemProcessing.itemId, ITEM));
+            .where(inArray(itemProcessing.itemId, [ITEM, ORGANIZATION_ITEM]));
         await db()
             .delete(processingProfiles)
             .where(eq(processingProfiles.ownerUserId, OWNER));
@@ -167,6 +180,47 @@ describeWithDatabase("item profile resolution", () => {
         });
         expect(resolved.revisionId).toBe(resolved.profile.currentRevisionId);
         expect(resolved.settings.steps.summary.preset).toBe("general");
+    });
+
+    it("gives a member with default legacy settings no personal profiles", async () => {
+        await db().insert(userSettings).values({ userId: OWNER });
+
+        const resolved = await resolveItemProfile(ITEM, "private", OWNER);
+        const personal = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, OWNER));
+
+        expect(personal).toEqual([]);
+        expect(resolved.profile).toMatchObject({
+            ownerUserId: ORG,
+            scope: "organization",
+            channel: "audio",
+        });
+    });
+
+    it("seeds customized legacy settings for an existing Organization member", async () => {
+        await db().insert(userSettings).values({
+            userId: OWNER,
+            autoTranscribe: true,
+            defaultTranscriptionLanguage: "cs",
+        });
+
+        const resolved = await resolveItemProfile(ITEM, "private", OWNER);
+
+        expect(resolved.profile).toMatchObject({
+            ownerUserId: OWNER,
+            scope: "personal",
+            channel: "audio",
+            isDefault: true,
+        });
+        if (!("transcribe" in resolved.settings.steps)) {
+            throw new Error("expected audio profile settings");
+        }
+        expect(resolved.settings.steps.transcribe).toMatchObject({
+            automatic: true,
+            language: "cs",
+        });
     });
 
     it("keeps an existing user's personal default after the pointer migration", async () => {
@@ -356,6 +410,51 @@ describeWithDatabase("item profile resolution", () => {
             resolveDefaultProfile(OWNER, "audio"),
         ).resolves.toMatchObject({
             profile: { ownerUserId: ORG, scope: "organization" },
+        });
+    });
+
+    it("archives a personal profile referenced by another owner's Organization item", async () => {
+        const historical = await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "audio",
+            name: "Manual Organization run",
+            settings: defaultProfileSettings("audio"),
+        });
+        await createProfile({
+            ownerUserId: OWNER,
+            actor: actor(OWNER),
+            scope: "personal",
+            channel: "mail",
+            name: "Remaining profile",
+            settings: defaultProfileSettings("mail"),
+        });
+        await db().insert(itemProcessing).values({
+            itemId: ORGANIZATION_ITEM,
+            userId: ORG,
+            view: "org",
+            profileId: historical.id,
+            profileRevisionId: historical.currentRevisionId,
+        });
+
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: OWNER,
+                profileId: historical.id,
+                actor: actor(OWNER),
+            }),
+        ).resolves.toEqual({ disposition: "archive" });
+        await expect(
+            loadSelectedProfileRevision({
+                revisionId: historical.currentRevisionId ?? "missing",
+                actorUserId: OWNER,
+                channel: "audio",
+                view: "private",
+            }),
+        ).resolves.toMatchObject({
+            profile: { id: historical.id },
+            revisionId: historical.currentRevisionId,
         });
     });
 
