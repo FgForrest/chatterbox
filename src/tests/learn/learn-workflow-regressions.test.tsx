@@ -207,12 +207,14 @@ describe.each([
     {
         name: "recording",
         renderCase: renderRecording,
+        startPath: "/api/recordings/recording-1/learn?source=riffado",
     },
     {
         name: "mail",
         renderCase: renderMail,
+        startPath: "/api/recordings/mail-1/learn",
     },
-])("$name Learn workflow line", ({ renderCase }) => {
+])("$name Learn workflow line", ({ renderCase, startPath }) => {
     it("uses the expand affordance for finished results", async () => {
         renderCase("dialog", FINISHED_REVIEW);
 
@@ -241,6 +243,21 @@ describe.each([
                 line?.querySelectorAll("button:not([aria-expanded])") ?? [],
             ),
         ).toEqual([retry]);
+    });
+
+    it("starts Learn when Try again is clicked", async () => {
+        renderCase("dialog", FAILED_REVIEW);
+        const fetchMock = vi.mocked(fetch);
+
+        fireEvent.click(
+            await screen.findByRole("button", { name: "Try again" }),
+        );
+
+        await waitFor(() =>
+            expect(fetchMock).toHaveBeenCalledWith(startPath, {
+                method: "POST",
+            }),
+        );
     });
 
     it.each([

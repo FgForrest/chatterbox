@@ -121,6 +121,8 @@ describe("useUploadQueue completion", () => {
         });
         const onUploadStarted = vi.fn();
         const onUploadComplete = vi.fn();
+        const invalidated = vi.fn();
+        const stop = onItemProcessingInvalidated("recording-2", invalidated);
         const { result } = renderHook(() =>
             useUploadQueue({ onUploadStarted, onUploadComplete }),
         );
@@ -145,6 +147,8 @@ describe("useUploadQueue completion", () => {
                 resumed: false,
             }),
         );
+        expect(invalidated).toHaveBeenCalledOnce();
+        stop();
     });
 });
 

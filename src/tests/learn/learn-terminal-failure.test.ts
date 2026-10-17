@@ -40,4 +40,22 @@ describe("Learn terminal job failure", () => {
         );
         expect(mocks.releaseAutoLearnHold).toHaveBeenCalledWith("recording-1");
     });
+
+    it("does not release the pipeline hold when the run was already settled", async () => {
+        mocks.failLearnRunAfterTerminalJob.mockResolvedValueOnce(null);
+
+        await learnJobHandler.onTerminalFailure?.({
+            jobId: "job-1",
+            userId: "user-1",
+            payload: { runId: "run-1" },
+            errorCode: "PROVIDER_FAILED",
+        });
+
+        expect(mocks.failLearnRunAfterTerminalJob).toHaveBeenCalledWith(
+            "run-1",
+            "user-1",
+            "PROVIDER_FAILED",
+        );
+        expect(mocks.releaseAutoLearnHold).not.toHaveBeenCalled();
+    });
 });
