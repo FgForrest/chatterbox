@@ -19,6 +19,7 @@ import { ProfileEditor } from "@/components/settings/profile-editor";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
 import type {
     SettingsProfileSummary,
@@ -205,9 +206,9 @@ export function ProfilesSection() {
                 action={
                     <div className="flex flex-wrap justify-end gap-2">
                         {data?.permissions.canCreateOrganization && (
-                            <select
+                            <NativeSelect
                                 aria-label={i18n("New profile scope")}
-                                className="h-8 rounded-md border bg-background px-2 text-sm"
+                                className="h-8"
                                 value={newProfileScope}
                                 onChange={(event) =>
                                     setNewProfileScope(
@@ -221,7 +222,7 @@ export function ProfilesSection() {
                                 <option value="organization">
                                     {i18n("Organization")}
                                 </option>
-                            </select>
+                            </NativeSelect>
                         )}
                         <Button
                             type="button"
@@ -264,9 +265,8 @@ export function ProfilesSection() {
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                 />
-                <select
+                <NativeSelect
                     aria-label={i18n("Channel")}
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
                     value={channel}
                     onChange={(event) => {
                         setChannel(
@@ -278,10 +278,9 @@ export function ProfilesSection() {
                     <option value="all">{i18n("All channels")}</option>
                     <option value="audio">{i18n("For recordings")}</option>
                     <option value="mail">{i18n("For mail")}</option>
-                </select>
-                <select
+                </NativeSelect>
+                <NativeSelect
                     aria-label={i18n("Scope")}
-                    className="h-9 rounded-md border bg-background px-3 text-sm"
                     value={scope}
                     onChange={(event) => {
                         setScope(
@@ -298,7 +297,7 @@ export function ProfilesSection() {
                     <option value="personal">{i18n("Personal")}</option>
                     <option value="organization">{i18n("Organization")}</option>
                     <option value="archived">{i18n("Archived")}</option>
-                </select>
+                </NativeSelect>
             </div>
 
             {loading && !data ? (

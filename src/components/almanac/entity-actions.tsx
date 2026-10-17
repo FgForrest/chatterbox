@@ -15,6 +15,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage, parseApiError } from "@/lib/api-errors";
 
 interface Candidate {
@@ -346,20 +347,20 @@ export function EntityActions({
                                     )}
                                 </DialogDescription>
                             </DialogHeader>
-                            <select
+                            <NativeSelect
                                 value={typeKey}
                                 onChange={(event) =>
                                     setTypeKey(event.target.value)
                                 }
                                 aria-label={i18n("Kind of thing")}
-                                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="w-full"
                             >
                                 {types.map((type) => (
                                     <option key={type.key} value={type.key}>
                                         {type.label}
                                     </option>
                                 ))}
-                            </select>
+                            </NativeSelect>
                             {footer(() => void saveType(), i18n("Save"))}
                         </>
                     )}
@@ -377,13 +378,13 @@ export function EntityActions({
                                     )}
                                 </DialogDescription>
                             </DialogHeader>
-                            <select
+                            <NativeSelect
                                 value={targetId}
                                 onChange={(event) =>
                                     setTargetId(event.target.value)
                                 }
                                 aria-label={i18n("Merge target")}
-                                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="w-full"
                             >
                                 <option value="">
                                     {i18n("Choose a thing")}
@@ -399,7 +400,7 @@ export function EntityActions({
                                             : ""}
                                     </option>
                                 ))}
-                            </select>
+                            </NativeSelect>
                             {footer(
                                 () => void merge(),
                                 i18n("Merge"),

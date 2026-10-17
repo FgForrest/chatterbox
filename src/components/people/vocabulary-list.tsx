@@ -15,6 +15,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { parseApiError } from "@/lib/api-errors";
 import type { OwnType } from "@/lib/knowledge/vocabulary";
 
@@ -322,11 +323,11 @@ export function VocabularyList({
                                   )}
                         </DialogDescription>
                     </DialogHeader>
-                    <select
+                    <NativeSelect
                         value={targetKey}
                         onChange={(event) => setTargetKey(event.target.value)}
                         aria-label={i18n("Merge target")}
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="w-full"
                     >
                         <option value="">{i18n("Choose a type")}</option>
                         {candidates.map((candidate) => (
@@ -335,7 +336,7 @@ export function VocabularyList({
                                 {candidate.core ? ` · ${i18n("built in")}` : ""}
                             </option>
                         ))}
-                    </select>
+                    </NativeSelect>
                     {target && mergeCount !== null && (
                         <p className="text-sm">
                             {current?.kind === "entity"

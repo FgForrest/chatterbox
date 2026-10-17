@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import type { ProviderListItem } from "@/lib/ai/list-providers";
 import { MAIL_SUMMARY_PROMPT_PARTS } from "@/lib/ai/mail-summary-prompts";
@@ -203,9 +204,9 @@ function ProviderPinSelect({
         );
     return (
         <div className="space-y-2">
-            <select
+            <NativeSelect
                 id={id}
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="w-full"
                 value={mixed ? MIXED_PROVIDER_VALUE : selectedValue}
                 disabled={disabled}
                 onChange={(event) =>
@@ -231,7 +232,7 @@ function ProviderPinSelect({
                         {option.label}
                     </option>
                 ))}
-            </select>
+            </NativeSelect>
             {unavailable && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                     {i18n(
@@ -899,9 +900,9 @@ function BasicEditor({
                 <Label htmlFor="profile-output-language">
                     {i18n("Output language")}
                 </Label>
-                <select
+                <NativeSelect
                     id="profile-output-language"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={summary.outputLanguage}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -918,7 +919,7 @@ function BasicEditor({
                                 : languageName(locale, language.code)}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </div>
 
             <div className="flex items-center justify-between rounded-md border px-3 py-2">
@@ -1163,10 +1164,10 @@ function TranscribeSettings({
         <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2">
                 <Label htmlFor="transcribe-language">{i18n("Language")}</Label>
-                <select
+                <NativeSelect
                     id="transcribe-language"
                     aria-label={i18n("Language")}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.language ?? "auto"}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1185,13 +1186,13 @@ function TranscribeSettings({
                             {option.label}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </div>
             <div className="space-y-2">
                 <Label htmlFor="transcribe-quality">{i18n("Quality")}</Label>
-                <select
+                <NativeSelect
                     id="transcribe-quality"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.quality}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1206,15 +1207,15 @@ function TranscribeSettings({
                     <option value="fast">{i18n("Fast")}</option>
                     <option value="balanced">{i18n("Balanced")}</option>
                     <option value="accurate">{i18n("Accurate")}</option>
-                </select>
+                </NativeSelect>
             </div>
             <div className="space-y-2">
                 <Label htmlFor="plaud-transcript">
                     {i18n("Plaud transcript")}
                 </Label>
-                <select
+                <NativeSelect
                     id="plaud-transcript"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.plaudTranscript}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1230,7 +1231,7 @@ function TranscribeSettings({
                     <option value="also_transcribe">
                         {i18n("Also transcribe with my provider")}
                     </option>
-                </select>
+                </NativeSelect>
             </div>
         </div>
     );
@@ -1252,9 +1253,9 @@ function TitleSettings({
         <div className="space-y-4">
             <div className="space-y-2">
                 <Label htmlFor="title-preset">{i18n("Preset")}</Label>
-                <select
+                <NativeSelect
                     id="title-preset"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.preset}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1269,7 +1270,7 @@ function TitleSettings({
                             {presetLabels[preset]}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </div>
             <LocaleTextEditor
                 kind="title-prompt"
@@ -1319,9 +1320,9 @@ function SummarySettings({
         <div className="space-y-4">
             <div className="space-y-2">
                 <Label htmlFor="summary-preset">{i18n("Preset")}</Label>
-                <select
+                <NativeSelect
                     id="summary-preset"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.preset}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1341,7 +1342,7 @@ function SummarySettings({
                             {presetLabels[preset]}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </div>
             <div className="space-y-2">
                 <Label htmlFor="advanced-summary-focus">
@@ -1406,9 +1407,9 @@ function SummarySettings({
                 <Label htmlFor="advanced-output-language">
                     {i18n("Output language")}
                 </Label>
-                <select
+                <NativeSelect
                     id="advanced-output-language"
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                    className="w-full"
                     value={step.outputLanguage}
                     disabled={readOnly}
                     onChange={(event) =>
@@ -1425,7 +1426,7 @@ function SummarySettings({
                                 : languageName(locale, language.code)}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </div>
             <div className="space-y-3 rounded-md border p-3">
                 <div className="flex items-center justify-between gap-3">

@@ -16,6 +16,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 
 /** A new record's payload, as the review shows it. */
 export interface NewRecordView {
@@ -190,8 +191,8 @@ export function NewRecordItem({
                             }}
                         />
                         {payload.kind === "entity" && (
-                            <select
-                                className="h-8 rounded-md border bg-background px-2 text-sm"
+                            <NativeSelect
+                                className="h-8"
                                 aria-label={i18n("Kind of thing")}
                                 value={typeKey ?? ""}
                                 disabled={disabled}
@@ -208,7 +209,7 @@ export function NewRecordItem({
                                         {type.label}
                                     </option>
                                 ))}
-                            </select>
+                            </NativeSelect>
                         )}
                         <Button
                             size="sm"

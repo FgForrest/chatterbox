@@ -15,6 +15,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 
 interface MergeCandidate {
@@ -242,11 +243,11 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                             )}
                         </DialogDescription>
                     </DialogHeader>
-                    <select
+                    <NativeSelect
                         value={targetId}
                         onChange={(event) => setTargetId(event.target.value)}
                         aria-label={i18n("Merge target")}
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="w-full"
                     >
                         <option value="">{i18n("Choose a person")}</option>
                         {candidates.map((candidate) => (
@@ -260,7 +261,7 @@ export function PersonActions({ person, accountEmail }: PersonActionsProps) {
                                     : ""}
                             </option>
                         ))}
-                    </select>
+                    </NativeSelect>
                     <DialogFooter>
                         <Button
                             variant="outline"
