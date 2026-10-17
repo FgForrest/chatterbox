@@ -529,7 +529,7 @@ export async function settleDeadLearnRuns(recordingId: string): Promise<void> {
 /** Fail one Learn run as soon as its queue job becomes terminal. */
 export async function failLearnRunAfterTerminalJob(
     runId: string,
-    userId: string,
+    actorUserId: string,
     errorCode: string,
 ): Promise<string | null> {
     const result = await db.transaction(async (tx) => {
@@ -544,7 +544,7 @@ export async function failLearnRunAfterTerminalJob(
             .where(
                 and(
                     eq(learnRuns.id, runId),
-                    eq(learnRuns.userId, userId),
+                    eq(learnRuns.actorUserId, actorUserId),
                     inArray(learnRuns.status, ["queued", "running"]),
                 ),
             )

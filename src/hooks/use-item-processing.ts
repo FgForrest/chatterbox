@@ -63,6 +63,7 @@ export function useItemProcessing({
     const revalidationRef = useRef(revalidation);
     revalidationRef.current = revalidation;
     const previousItemId = useRef(itemId);
+    const recentInvalidationItemId = useRef<string | null>(null);
 
     useEffect(() => {
         const nextData = initialData?.itemId === itemId ? initialData : null;
@@ -122,6 +123,8 @@ export function useItemProcessing({
 
     useEffect(() => {
         if (!enabled) return;
+        if (recentInvalidationItemId.current === itemId) return;
+        recentInvalidationItemId.current = itemId;
         const recent = recentItemProcessingInvalidation(itemId);
         if (recent !== null) {
             beginRevalidation(recent);

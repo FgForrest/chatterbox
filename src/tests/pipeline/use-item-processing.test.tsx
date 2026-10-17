@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook } from "@testing-library/react";
+import { useEffect, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useItemProcessing } from "@/hooks/use-item-processing";
-import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
+import {
+    ITEM_PROCESSING_REVALIDATION_MS,
+    invalidateItemProcessing,
+} from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 
 vi.mock("@/components/tasks/task-api", () => ({
@@ -47,6 +51,51 @@ function processing(
         jobs: { transcription: job, summary: null },
         failures: [],
     };
+}
+
+interface MailProcessingProbeProps {
+    itemId: string;
+    initialData: ItemProcessingPresentation | null;
+    onProcessingChange: (data: ItemProcessingPresentation | null) => void;
+}
+
+function MailProcessingProbe({
+    itemId,
+    initialData,
+    onProcessingChange,
+}: MailProcessingProbeProps) {
+    const { data } = useItemProcessing({
+        itemId,
+        kind: "mail",
+        initialData,
+    });
+
+    useEffect(() => {
+        onProcessingChange(data);
+    }, [data, onProcessingChange]);
+
+    return null;
+}
+
+function MailRoundTrip({
+    initialData,
+}: {
+    initialData: ItemProcessingPresentation;
+}) {
+    const [processingData, setProcessingData] =
+        useState<ItemProcessingPresentation | null>(initialData);
+
+    useEffect(() => {
+        setProcessingData(initialData);
+    }, [initialData]);
+
+    return (
+        <MailProcessingProbe
+            itemId={initialData.itemId}
+            initialData={processingData}
+            onProcessingChange={setProcessingData}
+        />
+    );
 }
 
 beforeEach(() => {
@@ -245,5 +294,131 @@ describe("useItemProcessing", () => {
         expect(fetchMock).toHaveBeenCalledTimes(3);
         expect(result.current.workflow?.visible).toBe(true);
         expect(result.current.workflow?.status?.message).toBe("notFiled");
+    });
+
+    it("stops revalidating when the invalidation window expires", async () => {
+        const itemId = "unchanged-recording";
+        const unchanged = processing(null, itemId);
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ processing: unchanged }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        renderHook(() =>
+            useItemProcessing({
+                itemId,
+                kind: "audio",
+                initialData: unchanged,
+            }),
+        );
+
+        await act(async () => {
+            invalidateItemProcessing(itemId);
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(
+                ITEM_PROCESSING_REVALIDATION_MS - 1,
+            );
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(15);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(15);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(30_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(15);
+    });
+
+    it("cleans up revalidation polling and listeners on unmount", async () => {
+        const itemId = "unmounted-recording";
+        const unchanged = processing(null, itemId);
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ processing: unchanged }),
+        });
+        vi.stubGlobal("fetch", fetchMock);
+        const { unmount } = renderHook(() =>
+            useItemProcessing({
+                itemId,
+                kind: "audio",
+                initialData: unchanged,
+            }),
+        );
+
+        await act(async () => {
+            invalidateItemProcessing(itemId);
+            await Promise.resolve();
+        });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        unmount();
+        await act(async () => {
+            window.dispatchEvent(new Event("focus"));
+            await vi.advanceTimersByTimeAsync(30_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        await act(async () => {
+            invalidateItemProcessing(itemId);
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("consumes a recent mail invalidation once across processing round trips", async () => {
+        const itemId = "mail-round-trip";
+        const initial: ItemProcessingPresentation = {
+            ...processing(null, itemId),
+            kind: "mail",
+            phases: {
+                categorize: {
+                    state: "done",
+                    reason: "categorized",
+                    generation: 0,
+                    at: "2026-10-16T08:00:00.000Z",
+                },
+            },
+            outputs: { transcript: false, learn: false, summary: false },
+        };
+        const fetchMock = vi.fn().mockImplementation(async () => ({
+            ok: true,
+            json: async () => ({ processing: { ...initial } }),
+        }));
+        vi.stubGlobal("fetch", fetchMock);
+
+        const view = render(<MailRoundTrip initialData={{ ...initial }} />);
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        await act(async () => {
+            invalidateItemProcessing(itemId);
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
+        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
+        view.rerender(<MailRoundTrip initialData={{ ...initial }} />);
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2_000);
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });
