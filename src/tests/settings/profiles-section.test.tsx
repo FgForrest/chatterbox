@@ -224,6 +224,23 @@ describe("Settings Profiles", () => {
                         ],
                     });
                 }
+                const deleteImpactMatch = url.match(
+                    /^\/api\/settings\/profiles\/([^/?]+)\?deleteImpact=true$/,
+                );
+                if (deleteImpactMatch && method === "GET") {
+                    const summary = profiles.find(
+                        (profile) => profile.id === deleteImpactMatch[1],
+                    );
+                    return Response.json({
+                        deleteImpact: {
+                            disposition:
+                                summary?.scope === "personal"
+                                    ? summary.deleteDisposition
+                                    : null,
+                            memberDefaultCount: 0,
+                        },
+                    });
+                }
                 const detailMatch = url.match(
                     /^\/api\/settings\/profiles\/([^/?]+)$/,
                 );
@@ -655,8 +672,8 @@ describe("Settings Profiles", () => {
             fireEvent.click(
                 screen.getByRole("button", { name: `Delete ${name}` }),
             );
-            expect(screen.getByText(`Delete “${name}”?`)).toBeTruthy();
-            expect(screen.getByText(description)).toBeTruthy();
+            expect(await screen.findByText(`Delete “${name}”?`)).toBeTruthy();
+            expect(await screen.findByText(description)).toBeTruthy();
             expect(
                 calls.some(
                     (call) =>

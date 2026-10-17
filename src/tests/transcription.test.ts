@@ -45,6 +45,11 @@ vi.mock("@/lib/webhooks/emit", () => ({
     emitEvent: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/posthog-server", () => ({
+    captureServerException: vi.fn(),
+    captureServerEvent: vi.fn(),
+}));
+
 vi.mock("@/lib/entitlements", () => ({
     isHostedLockedOut: vi.fn().mockResolvedValue(false),
 }));
@@ -119,6 +124,7 @@ import {
 } from "@/lib/hosted/transcription/mynah";
 import { transcriptRewrittenInTx } from "@/lib/knowledge/transcript-rewrite";
 import { createPlaudClient } from "@/lib/plaud/client-factory";
+import { captureServerException } from "@/lib/posthog-server";
 import {
     storeBrowserTranscription,
     transcribeRecording,
@@ -205,7 +211,7 @@ describe("Transcription", () => {
             expect(result.success).toBe(true);
         });
 
-        it("should return error when no API credentials configured", async () => {
+        it("returns NO_TRANSCRIPTION_PROVIDER without reporting a failed run when no provider exists", async () => {
             (db.select as Mock)
                 .mockReturnValueOnce(
                     recordingLookup([
@@ -243,8 +249,17 @@ describe("Transcription", () => {
                 mockRecordingId,
             );
 
-            expect(result.success).toBe(false);
-            expect(result.error).toBe("No transcription API configured");
+            expect(result).toMatchObject({
+                success: false,
+                errorCode: "NO_TRANSCRIPTION_PROVIDER",
+            });
+            expect(emitEvent).not.toHaveBeenCalledWith(
+                "transcription.failed",
+                expect.anything(),
+                expect.anything(),
+                expect.anything(),
+            );
+            expect(captureServerException).not.toHaveBeenCalled();
         });
 
         it("returns the same no-provider failure for a Mynah pointer when Mynah is not configured", async () => {

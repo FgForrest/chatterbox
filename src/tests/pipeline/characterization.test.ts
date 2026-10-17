@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
     queueAutoTopics: vi.fn(),
     queueAutoSummary: vi.fn(),
     emitEvent: vi.fn(),
-    pickEnhancementCredential: vi.fn(),
     isLearnAvailableFor: vi.fn(),
     resolveRecordingAccess: vi.fn(),
     consumeRateLimitBucket: vi.fn(),
@@ -56,10 +55,6 @@ vi.mock("openai", () => ({
     OpenAI: class {
         audio = { transcriptions: { create: mocks.openAiCreate } };
     },
-}));
-
-vi.mock("@/lib/ai/enhancement-provider", () => ({
-    pickEnhancementCredential: mocks.pickEnhancementCredential,
 }));
 
 vi.mock("@/lib/ai/provider-presets", () => ({
@@ -691,9 +686,6 @@ beforeEach(() => {
     mocks.queueAutoTopics.mockResolvedValue(undefined);
     mocks.queueAutoSummary.mockResolvedValue(undefined);
     mocks.emitEvent.mockResolvedValue(undefined);
-    mocks.pickEnhancementCredential.mockImplementation(
-        (credentials: unknown[]) => credentials[0] ?? null,
-    );
     mocks.isLearnAvailableFor.mockResolvedValue(true);
     mocks.resolveRecordingAccess.mockResolvedValue({
         recordingId: ITEM_ID,

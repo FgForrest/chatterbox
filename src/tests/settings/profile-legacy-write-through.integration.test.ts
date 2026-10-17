@@ -54,6 +54,7 @@ const { authState, orgState } = vi.hoisted(() => ({
     },
     orgState: {
         orgUserId: null as string | null,
+        holderMayUse: true,
     },
 }));
 
@@ -83,10 +84,13 @@ vi.mock("@/lib/auth-server", () => ({
     }),
 }));
 vi.mock("@/lib/authz/access-state", () => ({
-    holderAccess: async () => ({
-        ok: true,
-        capabilities: authState.actor.capabilities,
-    }),
+    holderAccess: async () =>
+        orgState.holderMayUse
+            ? {
+                  ok: true,
+                  capabilities: authState.actor.capabilities,
+              }
+            : { ok: false, reason: "disabled" },
 }));
 vi.mock("@/lib/org/config", () => ({
     getOrgUserId: async () => orgState.orgUserId,
@@ -104,7 +108,12 @@ vi.mock("@/lib/posthog-server", () => ({
 import { GET, PUT } from "@/app/api/settings/user/route";
 import { resolveDefaultProfile } from "@/lib/profiles/resolve";
 import { ensureProfiles } from "@/lib/profiles/seed";
-import { getDefaultProfile } from "@/lib/profiles/store";
+import { defaultProfileSettings } from "@/lib/profiles/settings";
+import {
+    archiveProfile,
+    createProfile,
+    getDefaultProfile,
+} from "@/lib/profiles/store";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -135,19 +144,32 @@ describeWithDatabase("legacy profile settings compatibility", () => {
             "profile_legacy_settings",
         );
         dbRef.current = database.db as unknown as Record<PropertyKey, unknown>;
-        await databaseClient().insert(users).values({
-            id: "legacy-profile-user",
-            email: "legacy@example.test",
-        });
+        await databaseClient()
+            .insert(users)
+            .values([
+                {
+                    id: "legacy-profile-user",
+                    email: "legacy@example.test",
+                },
+                {
+                    id: "legacy-profile-org",
+                    email: "legacy-org@example.test",
+                    role: "org",
+                },
+            ]);
     }, 120_000);
 
     beforeEach(async () => {
         orgState.orgUserId = null;
+        orgState.holderMayUse = true;
         authState.actor.kind = "user";
         authState.actor.capabilities = new Set<Capability>(["use"]);
         await databaseClient()
             .delete(processingProfiles)
             .where(eq(processingProfiles.ownerUserId, "legacy-profile-user"));
+        await databaseClient()
+            .delete(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, "legacy-profile-org"));
         await databaseClient()
             .delete(userSettings)
             .where(eq(userSettings.userId, "legacy-profile-user"));
@@ -285,5 +307,83 @@ describeWithDatabase("legacy profile settings compatibility", () => {
             .from(userSettings)
             .where(eq(userSettings.userId, "legacy-profile-user"));
         expect(settings?.autoSummarize).toBe(true);
+    });
+
+    it("keeps GET and PUT settings usable when an explicit Organization profile is archived", async () => {
+        orgState.orgUserId = "legacy-profile-org";
+        authState.actor.capabilities = new Set<Capability>([
+            "use",
+            "org.curate",
+        ]);
+        const profile = await createProfile({
+            ownerUserId: "legacy-profile-org",
+            actor: authState.actor,
+            scope: "organization",
+            channel: "audio",
+            name: "Archived member choice",
+            settings: defaultProfileSettings("audio"),
+        });
+        await databaseClient().insert(userSettings).values({
+            userId: "legacy-profile-user",
+            defaultAudioProfileId: profile.id,
+        });
+        await archiveProfile({
+            ownerUserId: "legacy-profile-org",
+            profileId: profile.id,
+            actor: authState.actor,
+        });
+
+        expect((await GET(request("GET"))).status).toBe(200);
+        expect(
+            (
+                await PUT(
+                    request("PUT", {
+                        autoSummarize: true,
+                    }),
+                )
+            ).status,
+        ).toBe(200);
+        const [settings] = await databaseClient()
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.userId, "legacy-profile-user"));
+        expect(settings?.defaultAudioProfileId).toBe(profile.id);
+    });
+
+    it("keeps GET and PUT settings usable after Organization profile access is revoked", async () => {
+        orgState.orgUserId = "legacy-profile-org";
+        authState.actor.capabilities = new Set<Capability>([
+            "use",
+            "org.curate",
+        ]);
+        const profile = await createProfile({
+            ownerUserId: "legacy-profile-org",
+            actor: authState.actor,
+            scope: "organization",
+            channel: "audio",
+            name: "Revoked member choice",
+            settings: defaultProfileSettings("audio"),
+        });
+        await databaseClient().insert(userSettings).values({
+            userId: "legacy-profile-user",
+            defaultAudioProfileId: profile.id,
+        });
+        orgState.holderMayUse = false;
+
+        expect((await GET(request("GET"))).status).toBe(200);
+        expect(
+            (
+                await PUT(
+                    request("PUT", {
+                        autoSummarize: true,
+                    }),
+                )
+            ).status,
+        ).toBe(200);
+        const [settings] = await databaseClient()
+            .select()
+            .from(userSettings)
+            .where(eq(userSettings.userId, "legacy-profile-user"));
+        expect(settings?.defaultAudioProfileId).toBe(profile.id);
     });
 });

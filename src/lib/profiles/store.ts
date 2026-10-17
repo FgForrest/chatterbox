@@ -3,6 +3,7 @@ import { nanoid } from "nanoid";
 import { db } from "@/db";
 import {
     aiEnhancements,
+    asyncJobs,
     folderDefaultProfiles,
     itemProcessing,
     learnRuns,
@@ -758,7 +759,7 @@ async function profileHistoryReferences(
         .limit(1);
     if (item.length > 0) return true;
     if (revisionIds.length === 0) return false;
-    const [transcription, learn, enhancement] = await Promise.all([
+    const [transcription, learn, enhancement, job] = await Promise.all([
         executor
             .select({ id: transcriptions.id })
             .from(transcriptions)
@@ -774,9 +775,26 @@ async function profileHistoryReferences(
             .from(aiEnhancements)
             .where(inArray(aiEnhancements.profileRevisionId, revisionIds))
             .limit(1),
+        executor
+            .select({ id: asyncJobs.id })
+            .from(asyncJobs)
+            .where(
+                and(
+                    eq(asyncJobs.userId, ownerUserId),
+                    inArray(asyncJobs.status, ["pending", "processing"]),
+                    inArray(
+                        sql<string>`${asyncJobs.payload} ->> 'profileRevisionId'`,
+                        revisionIds,
+                    ),
+                ),
+            )
+            .limit(1),
     ]);
     return (
-        transcription.length > 0 || learn.length > 0 || enhancement.length > 0
+        transcription.length > 0 ||
+        learn.length > 0 ||
+        enhancement.length > 0 ||
+        job.length > 0
     );
 }
 
@@ -809,6 +827,39 @@ export async function profileDeleteDisposition(
         profileHistoryReferences(db, ownerUserId, profileId),
     ]);
     return referenced || allProfiles.length === 1 ? "archive" : "delete";
+}
+
+/** Count member default pointers that refer to one Organization profile. */
+export async function profileMemberDefaultCount(
+    ownerUserId: string,
+    profileId: string,
+): Promise<number | null> {
+    const [profile] = await db
+        .select({ id: processingProfiles.id })
+        .from(processingProfiles)
+        .where(
+            and(
+                eq(processingProfiles.ownerUserId, ownerUserId),
+                eq(processingProfiles.id, profileId),
+                eq(processingProfiles.scope, "organization"),
+                isNull(processingProfiles.archivedAt),
+            ),
+        )
+        .limit(1);
+    if (!profile) return null;
+    const [result] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(userSettings)
+        .where(
+            and(
+                sql`${userSettings.userId} <> ${ownerUserId}`,
+                or(
+                    eq(userSettings.defaultAudioProfileId, profileId),
+                    eq(userSettings.defaultMailProfileId, profileId),
+                ),
+            ),
+        );
+    return Number(result?.count ?? 0);
 }
 
 export interface DeletePersonalProfileResult {
@@ -860,6 +911,15 @@ export async function deletePersonalProfile(
     if (!disposition) return null;
 
     return db.transaction(async (tx) => {
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId })
+            .onConflictDoNothing({ target: userSettings.userId });
+        await tx
+            .select({ id: userSettings.id })
+            .from(userSettings)
+            .where(eq(userSettings.userId, input.ownerUserId))
+            .for("update");
         const [locked] = await tx
             .select({ id: processingProfiles.id })
             .from(processingProfiles)
@@ -909,19 +969,6 @@ export async function deletePersonalProfile(
                             folders.map(({ id }) => id),
                         ),
                         eq(folderDefaultProfiles.profileId, input.profileId),
-                    ),
-                );
-        }
-        if (isCurrentDefault) {
-            await tx
-                .update(processingProfiles)
-                .set({ isDefault: false })
-                .where(
-                    and(
-                        eq(processingProfiles.ownerUserId, input.ownerUserId),
-                        eq(processingProfiles.channel, current.channel),
-                        eq(processingProfiles.scope, "personal"),
-                        eq(processingProfiles.isDefault, true),
                     ),
                 );
         }
@@ -989,86 +1036,12 @@ export interface SetDefaultProfileInput {
     actor: ActorContext;
 }
 
-async function defaultSelectionTarget(input: SetDefaultProfileInput): Promise<{
-    channel: ProfileChannel;
-    profile: ProfileRecord | null;
-    organizationUserId: string | null;
-}> {
-    if (input.actor.kind !== "user") throw new ProfilePermissionError();
-    const organizationUserId = await getOrgUserId();
-    if (input.actor.actorId !== input.ownerUserId) {
-        if (!input.profileId || organizationUserId !== input.ownerUserId) {
-            throw new ProfilePermissionError();
-        }
-        const organization = await getProfile(
-            input.ownerUserId,
-            input.profileId,
-            input.actor.actorId,
-        );
-        if (!organization) throw new ProfilePermissionError();
-        await assertEditAccess(input.actor, organization);
-        return {
-            channel: organization.channel,
-            profile: organization,
-            organizationUserId,
-        };
-    }
-    if (!input.profileId) {
-        if (!input.channel || organizationUserId === input.ownerUserId) {
-            throw new ProfilePermissionError();
-        }
-        const state = await getDefaultProfileState(
-            input.ownerUserId,
-            input.channel,
-            input.actor.actorId,
-        );
-        if (!state.organizationDefault) throw new ProfilePermissionError();
-        return {
-            channel: input.channel,
-            profile: null,
-            organizationUserId,
-        };
-    }
-
-    const personal = await getProfile(
-        input.ownerUserId,
-        input.profileId,
-        input.actor.actorId,
-    );
-    if (personal) {
-        if (input.channel && input.channel !== personal.channel) {
-            throw new ProfilePermissionError();
-        }
-        return {
-            channel: personal.channel,
-            profile: personal,
-            organizationUserId,
-        };
-    }
-    if (!organizationUserId) throw new ProfilePermissionError();
-    const organization = await getProfile(
-        organizationUserId,
-        input.profileId,
-        input.actor.actorId,
-    );
-    if (
-        !organization ||
-        (input.channel && input.channel !== organization.channel)
-    ) {
-        throw new ProfilePermissionError();
-    }
-    return {
-        channel: organization.channel,
-        profile: organization,
-        organizationUserId,
-    };
-}
-
 /** Atomically write a member or Organization channel default and its legacy mirror. */
 export async function setDefaultProfile(
     input: SetDefaultProfileInput,
 ): Promise<boolean> {
-    const target = await defaultSelectionTarget(input);
+    if (input.actor.kind !== "user") throw new ProfilePermissionError();
+    const organizationUserId = await getOrgUserId();
     return db.transaction(async (tx) => {
         await tx
             .insert(userSettings)
@@ -1079,28 +1052,123 @@ export async function setDefaultProfile(
             .from(userSettings)
             .where(eq(userSettings.userId, input.ownerUserId))
             .for("update");
+
+        let channel: ProfileChannel;
+        let lockedTarget:
+            | Pick<StoredProfile, "id" | "ownerUserId" | "scope" | "channel">
+            | undefined;
+        if (input.profileId) {
+            const ownerCondition = organizationUserId
+                ? or(
+                      eq(processingProfiles.ownerUserId, input.ownerUserId),
+                      eq(processingProfiles.ownerUserId, organizationUserId),
+                  )
+                : eq(processingProfiles.ownerUserId, input.ownerUserId);
+            [lockedTarget] = await tx
+                .select({
+                    id: processingProfiles.id,
+                    ownerUserId: processingProfiles.ownerUserId,
+                    scope: processingProfiles.scope,
+                    channel: processingProfiles.channel,
+                })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        ownerCondition,
+                        eq(processingProfiles.id, input.profileId),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (!lockedTarget) {
+                throw new ProfilePermissionError();
+            }
+            const isOwned = lockedTarget.ownerUserId === input.ownerUserId;
+            const isOrganization =
+                lockedTarget.ownerUserId === organizationUserId &&
+                lockedTarget.scope === "organization";
+            if (!isOwned && !isOrganization) {
+                throw new ProfilePermissionError();
+            }
+            if (input.actor.actorId !== input.ownerUserId) {
+                if (
+                    organizationUserId !== input.ownerUserId ||
+                    lockedTarget.scope !== "organization"
+                ) {
+                    throw new ProfilePermissionError();
+                }
+                await assertEditAccess(input.actor, lockedTarget);
+            }
+            if (!(await mayUseProfile(input.actor.actorId, lockedTarget))) {
+                throw new ProfilePermissionError();
+            }
+            if (input.channel && input.channel !== lockedTarget.channel) {
+                throw new ProfilePermissionError();
+            }
+            channel = lockedTarget.channel;
+        } else {
+            if (
+                input.actor.actorId !== input.ownerUserId ||
+                !input.channel ||
+                !organizationUserId ||
+                organizationUserId === input.ownerUserId
+            ) {
+                throw new ProfilePermissionError();
+            }
+            channel = input.channel;
+            const [organizationDefault] = await tx
+                .select({
+                    id: processingProfiles.id,
+                    ownerUserId: processingProfiles.ownerUserId,
+                    scope: processingProfiles.scope,
+                    channel: processingProfiles.channel,
+                })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, organizationUserId),
+                        eq(processingProfiles.scope, "organization"),
+                        eq(processingProfiles.channel, channel),
+                        eq(processingProfiles.isDefault, true),
+                        isNull(processingProfiles.archivedAt),
+                    ),
+                )
+                .for("update")
+                .limit(1);
+            if (
+                !organizationDefault ||
+                !(await mayUseProfile(input.actor.actorId, organizationDefault))
+            ) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Organization default profile is unavailable",
+                    404,
+                );
+            }
+        }
         await tx
             .select({ id: processingProfiles.id })
             .from(processingProfiles)
             .where(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
-                    eq(processingProfiles.channel, target.channel),
+                    eq(processingProfiles.channel, channel),
                 ),
             )
             .orderBy(processingProfiles.id)
             .for("update");
         const now = new Date();
-        const organizationAccount =
-            target.organizationUserId === input.ownerUserId;
+        const organizationAccount = organizationUserId === input.ownerUserId;
         if (organizationAccount) {
             if (
-                !target.profile ||
-                target.profile.ownerUserId !== input.ownerUserId ||
-                target.profile.scope !== "organization"
+                !lockedTarget ||
+                lockedTarget.ownerUserId !== input.ownerUserId ||
+                lockedTarget.scope !== "organization"
             ) {
                 throw new ProfilePermissionError();
             }
+            await assertEditAccess(input.actor, lockedTarget);
             await tx
                 .update(processingProfiles)
                 .set({
@@ -1112,7 +1180,7 @@ export async function setDefaultProfile(
                 .where(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
-                        eq(processingProfiles.channel, target.channel),
+                        eq(processingProfiles.channel, channel),
                         eq(processingProfiles.isDefault, true),
                         isNull(processingProfiles.archivedAt),
                     ),
@@ -1128,12 +1196,19 @@ export async function setDefaultProfile(
                 .where(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
-                        eq(processingProfiles.id, target.profile.id),
+                        eq(processingProfiles.id, lockedTarget.id),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
                 .returning({ id: processingProfiles.id });
-            return changed.length > 0;
+            if (changed.length === 0) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+            return true;
         }
 
         await tx
@@ -1148,14 +1223,14 @@ export async function setDefaultProfile(
                 and(
                     eq(processingProfiles.ownerUserId, input.ownerUserId),
                     eq(processingProfiles.scope, "personal"),
-                    eq(processingProfiles.channel, target.channel),
+                    eq(processingProfiles.channel, channel),
                     eq(processingProfiles.isDefault, true),
                     isNull(processingProfiles.archivedAt),
                 ),
             );
 
         let pointerId: string | null = null;
-        if (target.profile?.scope === "personal") {
+        if (lockedTarget?.scope === "personal") {
             const changed = await tx
                 .update(processingProfiles)
                 .set({
@@ -1167,19 +1242,25 @@ export async function setDefaultProfile(
                 .where(
                     and(
                         eq(processingProfiles.ownerUserId, input.ownerUserId),
-                        eq(processingProfiles.id, target.profile.id),
-                        eq(processingProfiles.channel, target.channel),
+                        eq(processingProfiles.id, lockedTarget.id),
+                        eq(processingProfiles.channel, channel),
                         isNull(processingProfiles.archivedAt),
                     ),
                 )
                 .returning({ id: processingProfiles.id });
-            if (changed.length === 0) return false;
-        } else if (target.profile) {
-            pointerId = target.profile.id;
+            if (changed.length === 0) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+        } else if (lockedTarget) {
+            pointerId = lockedTarget.id;
         }
 
         const pointerUpdate =
-            target.channel === "audio"
+            channel === "audio"
                 ? { defaultAudioProfileId: pointerId, updatedAt: now }
                 : { defaultMailProfileId: pointerId, updatedAt: now };
         await tx

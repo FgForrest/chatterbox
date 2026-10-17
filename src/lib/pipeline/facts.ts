@@ -27,7 +27,7 @@ import type {
 } from "@/lib/pipeline/types";
 import {
     type ProcessingStep,
-    resolveStepProvider,
+    resolveStepProviderSelection,
 } from "@/lib/profiles/providers";
 import {
     AssignedProfileUnavailableError,
@@ -51,7 +51,7 @@ async function providerAvailable(
     pin: ProviderPin | null,
 ): Promise<boolean> {
     try {
-        await resolveStepProvider({ step, pin, actorUserId: userId });
+        await resolveStepProviderSelection({ step, pin, actorUserId: userId });
         return true;
     } catch {
         return false;
@@ -625,7 +625,7 @@ export async function gatherFacts(
         resolvedProfile.settings.steps.learn.automatic
     ) {
         try {
-            await resolveStepProvider({
+            await resolveStepProviderSelection({
                 step: "learn",
                 pin: resolvedProfile.settings.steps.learn.provider,
                 actorUserId: userId,
@@ -653,7 +653,7 @@ export async function gatherFacts(
         await Promise.all(
             checks.map(async ([step, pin]) => {
                 try {
-                    await resolveStepProvider({
+                    await resolveStepProviderSelection({
                         step,
                         pin,
                         actorUserId: userId,

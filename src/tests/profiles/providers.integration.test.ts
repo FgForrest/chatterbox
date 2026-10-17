@@ -15,12 +15,6 @@ import {
     userSettings,
     users,
 } from "@/db/schema";
-import {
-    pickEnhancementCredential,
-    pickLearnCredential,
-    pickTopicsCredential,
-} from "@/lib/ai/enhancement-provider";
-import { titleProviderId } from "@/lib/ai/title-provider";
 import { recordAiUsage } from "@/lib/ai/usage-cost";
 import { isLearnAvailableFor } from "@/lib/knowledge/availability";
 import { RIFFADO_INCLUDED_PROVIDER_ID } from "@/lib/transcription/included-provider";
@@ -202,40 +196,13 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         "title",
     ] as const) {
         it(`keeps today's unpinned ${step} selection`, async () => {
-            const rows = await databaseClient()
-                .select()
-                .from(apiCredentials)
-                .where(eq(apiCredentials.userId, "actor"))
-                .orderBy(apiCredentials.createdAt, apiCredentials.id);
-            const [settings] = await databaseClient()
-                .select()
-                .from(userSettings)
-                .where(eq(userSettings.userId, "actor"));
-            const expected =
-                step === "transcription"
-                    ? settings?.defaultTranscriptionProviderId
-                    : step === "summary"
-                      ? pickEnhancementCredential(rows)?.id
-                      : step === "learn"
-                        ? pickLearnCredential(rows)?.id
-                        : step === "topics"
-                          ? pickTopicsCredential(
-                                rows,
-                                (
-                                    settings?.defaultProviders as {
-                                        topics?: string;
-                                    }
-                                )?.topics ?? null,
-                            )?.id
-                          : (
-                                rows.find(
-                                    (row) =>
-                                        row.id ===
-                                        titleProviderId(
-                                            settings?.defaultProviders,
-                                        ),
-                                ) ?? pickEnhancementCredential(rows)
-                            )?.id;
+            const expected = {
+                transcription: "transcription",
+                summary: "summary",
+                learn: "learn",
+                topics: "topics",
+                title: "title",
+            }[step];
 
             const resolved = await resolveStepProvider({
                 step,
@@ -621,6 +588,58 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         ).resolves.toMatchObject({
             payerUserId: "actor",
             credential: { id: "unflagged-chat" },
+        });
+    });
+
+    it("ignores a legacy summary flag on a transcription-only personal provider", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await insertCredential({
+            id: "legacy-elevenlabs",
+            provider: "ElevenLabs",
+            isDefaultEnhancement: true,
+        });
+        await insertCredential({ id: "usable-summary", provider: "OpenAI" });
+
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).resolves.toMatchObject({
+            payerUserId: "actor",
+            credential: { id: "usable-summary" },
+        });
+    });
+
+    it("preserves a disabled legacy Organization summary default", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await databaseClient()
+            .update(apiCredentials)
+            .set({ isDefaultEnhancement: true })
+            .where(eq(apiCredentials.id, "org-disabled"));
+
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "CONFLICT",
+            message: expect.stringContaining(
+                "The Organization default for summary",
+            ),
         });
     });
 

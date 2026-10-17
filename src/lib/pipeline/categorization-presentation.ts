@@ -56,6 +56,7 @@ export interface CategorizationPanelPresentation {
     profiles: ProcessingProfileSummary[];
     organizationDefault?: ProcessingProfileSummary | null;
     followsOrganizationDefault?: boolean;
+    defaultProfileUnavailable?: boolean;
     resolution: ProcessingResolution;
     currentProfile: ProcessingProfileSummary | null;
     currentManualOnly: boolean;
@@ -236,6 +237,7 @@ export async function loadPrivateCategorizationPanel(
                   folderIds: selectedFolderIds,
                   view: "private",
                   seedProfiles: false,
+                  throwOnUnavailable: false,
               }),
           );
 
@@ -251,6 +253,7 @@ export async function loadPrivateCategorizationPanel(
             : null,
         followsOrganizationDefault:
             defaultState.source === "organization" && !defaultState.pointerId,
+        defaultProfileUnavailable: defaultState.explicitUnavailable,
         resolution,
         currentProfile,
         currentManualOnly: item.currentManualOnly ?? false,

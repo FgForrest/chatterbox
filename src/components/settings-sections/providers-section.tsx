@@ -169,10 +169,28 @@ export function ProvidersSection({
         }
     };
 
-    const toggleDisabled = (
+    const memberDefaultCount = async (
+        provider: ProviderCardItem,
+    ): Promise<number> => {
+        const response = await fetch(
+            providerEndpoint("organization", provider.id),
+        );
+        const body = (await response.json().catch(() => null)) as {
+            memberDefaultCount?: number;
+            error?: string;
+        } | null;
+        if (!response.ok || typeof body?.memberDefaultCount !== "number") {
+            throw new Error(
+                body?.error ?? i18n("Could not load provider impact."),
+            );
+        }
+        return body.memberDefaultCount;
+    };
+
+    const toggleDisabled = async (
         scope: ProviderScope,
         provider: ProviderCardItem,
-    ) => {
+    ): Promise<void> => {
         if (provider.disabledAt != null) {
             void mutateDisabled(scope, provider).catch((error: unknown) => {
                 toast.error(
@@ -192,6 +210,19 @@ export function ProvidersSection({
             style: "long",
             type: "conjunction",
         }).format(roles);
+        let selectedByMembers = 0;
+        if (scope === "organization") {
+            try {
+                selectedByMembers = await memberDefaultCount(provider);
+            } catch (error) {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Could not load provider impact."),
+                );
+                return;
+            }
+        }
         if (scope === "personal") {
             description = i18n(
                 "Nothing uses it now. It stays saved but is not offered until you enable it again.",
@@ -204,8 +235,13 @@ export function ProvidersSection({
             }
         } else if (roles.length > 0) {
             description = i18n(
-                "This provider is the Organization default for {roles}. Members following those defaults will stop until it is enabled or another default is chosen.",
-                { roles: names },
+                "This provider is the Organization default for {roles}. Members following those defaults will stop until it is enabled or another default is chosen. Members who chose it as their own default: {count, number}. Their runs will also stop until they choose another provider.",
+                { roles: names, count: selectedByMembers },
+            );
+        } else if (scope === "organization") {
+            description = i18n(
+                "Profiles that use it stop with an error until it is enabled again. Members who chose it as their own default: {count, number}. Their runs will also stop until they choose another provider.",
+                { count: selectedByMembers },
             );
         }
 
@@ -221,18 +257,34 @@ export function ProvidersSection({
         });
     };
 
-    const remove = (scope: ProviderScope, provider: ProviderCardItem) => {
+    const remove = async (
+        scope: ProviderScope,
+        provider: ProviderCardItem,
+    ): Promise<void> => {
         const organization = scope === "organization";
         const title = organization
             ? i18n("Delete this Organization provider?")
             : i18n("Delete this provider?");
-        const description = organization
-            ? i18n(
-                  "Profiles that pin it will stop with an error until another provider is selected.",
-              )
-            : i18n(
-                  "Its API key will be removed from this account. Recordings transcribed or summarized through it keep their data, but you'll need to re-add the provider to use it again.",
-              );
+        let description = i18n(
+            "Its API key will be removed from this account. Recordings transcribed or summarized through it keep their data, but you'll need to re-add the provider to use it again.",
+        );
+        if (organization) {
+            let selectedByMembers: number;
+            try {
+                selectedByMembers = await memberDefaultCount(provider);
+            } catch (error) {
+                toast.error(
+                    error instanceof Error
+                        ? error.message
+                        : i18n("Could not load provider impact."),
+                );
+                return;
+            }
+            description = i18n(
+                "Profiles that pin it will stop with an error until another provider is selected. Members who chose it as their own default: {count, number}. Their runs will stop until they choose another provider.",
+                { count: selectedByMembers },
+            );
+        }
         void confirm({
             title,
             description,
@@ -296,9 +348,9 @@ export function ProvidersSection({
                         openDialog("personal", "edit", provider)
                     }
                     onToggleDisabled={(provider) =>
-                        toggleDisabled("personal", provider)
+                        void toggleDisabled("personal", provider)
                     }
-                    onDelete={(provider) => remove("personal", provider)}
+                    onDelete={(provider) => void remove("personal", provider)}
                 />
                 {organizationAvailable && (
                     <ProviderCard
@@ -316,10 +368,10 @@ export function ProvidersSection({
                             openDialog("organization", "edit", provider)
                         }
                         onToggleDisabled={(provider) =>
-                            toggleDisabled("organization", provider)
+                            void toggleDisabled("organization", provider)
                         }
                         onDelete={(provider) =>
-                            remove("organization", provider)
+                            void remove("organization", provider)
                         }
                     />
                 )}

@@ -20,7 +20,11 @@ import { ProvidersSection } from "@/components/settings-sections/providers-secti
 vi.mock("next-intl", () => ({
     useExtracted: () => (text: string, values?: Record<string, unknown>) =>
         Object.entries(values ?? {}).reduce(
-            (result, [key, value]) => result.replace(`{${key}}`, String(value)),
+            (result, [key, value]) =>
+                result.replace(
+                    new RegExp(`\\{${key}(?:, number)?\\}`),
+                    String(value),
+                ),
             text,
         ),
     useLocale: () => "en-US",
@@ -136,6 +140,13 @@ function installFetch() {
                         },
                     ],
                 });
+            }
+            if (
+                url ===
+                    "/api/settings/ai/organization-providers/org-provider" &&
+                method === "GET"
+            ) {
+                return Response.json({ memberDefaultCount: 2 });
             }
             const request = recordRequest(url, init);
             if (method === "PUT" && request.body?.disabled !== undefined) {
@@ -272,6 +283,13 @@ describe.each([
                 }),
             );
         });
+        const update = requests.find(
+            (request) =>
+                request.url === `${collections[scope]}/${provider.id}` &&
+                request.method === "PUT",
+        );
+        expect(update?.body).not.toHaveProperty("isDefaultTranscription");
+        expect(update?.body).not.toHaveProperty("isDefaultEnhancement");
     });
 
     it("confirms disabling and enables immediately", async () => {
@@ -286,7 +304,7 @@ describe.each([
         const confirmation =
             scope === "personal"
                 ? "Transcription and Summaries use this provider. They stop with an error until you enable it again or choose another provider."
-                : "This provider is the Organization default for Transcription, Summaries, Learn, Topics, and Titles. Members following those defaults will stop until it is enabled or another default is chosen.";
+                : "This provider is the Organization default for Transcription, Summaries, Learn, Topics, and Titles. Members following those defaults will stop until it is enabled or another default is chosen. Members who chose it as their own default: 2. Their runs will also stop until they choose another provider.";
         expect(await screen.findByText(confirmation)).toBeTruthy();
         await confirmAction("Disable");
         await waitFor(() => {
@@ -326,6 +344,13 @@ describe.each([
                 name: `Delete ${provider.provider} · ${provider.defaultModel}`,
             }),
         );
+        if (scope === "organization") {
+            expect(
+                await screen.findByText(
+                    "Profiles that pin it will stop with an error until another provider is selected. Members who chose it as their own default: 2. Their runs will stop until they choose another provider.",
+                ),
+            ).toBeTruthy();
+        }
         await confirmAction("Delete");
         await waitFor(() => {
             expect(requests).toContainEqual({

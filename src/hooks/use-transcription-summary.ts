@@ -254,6 +254,7 @@ export function useTranscriptionSummary({
             summaryProfileOptions.find(
                 (profile) => profile.id === itemProfileId,
             ) ??
+            summaryProfileOptions.find((profile) => profile.isYourDefault) ??
             summaryProfileOptions.find(
                 (profile) =>
                     profile.scope === resolvedScope && profile.isDefault,

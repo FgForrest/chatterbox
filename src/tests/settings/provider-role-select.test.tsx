@@ -150,3 +150,119 @@ describe("empty provider picker", () => {
         ).toBeTruthy();
     });
 });
+
+describe("unavailable provider defaults", () => {
+    afterEach(() => {
+        cleanup();
+        vi.unstubAllGlobals();
+    });
+
+    it("shows a disabled Organization role default as unavailable", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) => {
+                const body = url.includes("organization-providers")
+                    ? {
+                          providers: [
+                              {
+                                  ...provider(
+                                      "org",
+                                      "Disabled Organization AI",
+                                      true,
+                                  ),
+                                  disabledAt: new Date(),
+                              },
+                          ],
+                      }
+                    : {
+                          providers: [],
+                          defaults: {
+                              transcription: null,
+                              summary: null,
+                              learn: null,
+                              topics: null,
+                              title: null,
+                          },
+                      };
+                return Promise.resolve(Response.json(body));
+            }),
+        );
+
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText(
+                "Unavailable: Disabled Organization AI · model",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "This default is unavailable. Choose another provider.",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("shows a disabled personal pointer as unavailable", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) => {
+                const body = url.includes("organization-providers")
+                    ? { providers: [] }
+                    : {
+                          providers: [
+                              {
+                                  ...provider(
+                                      "personal",
+                                      "Disabled Personal AI",
+                                  ),
+                                  disabledAt: new Date(),
+                              },
+                          ],
+                          defaults: {
+                              transcription: null,
+                              summary: "personal",
+                              learn: null,
+                              topics: null,
+                              title: null,
+                          },
+                      };
+                return Promise.resolve(Response.json(body));
+            }),
+        );
+
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText(
+                "Unavailable: Disabled Personal AI · model",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("shows a dangling personal pointer as a deleted provider", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn((url: string) => {
+                const body = url.includes("organization-providers")
+                    ? { providers: [] }
+                    : {
+                          providers: [],
+                          defaults: {
+                              transcription: null,
+                              summary: "deleted-provider",
+                              learn: null,
+                              topics: null,
+                              title: null,
+                          },
+                      };
+                return Promise.resolve(Response.json(body));
+            }),
+        );
+
+        render(<ProviderRoleSelect purpose="summary" />);
+
+        expect(
+            await screen.findByText("Unavailable: deleted provider"),
+        ).toBeTruthy();
+    });
+});

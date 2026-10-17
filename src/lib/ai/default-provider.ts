@@ -1,6 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings, users } from "@/db/schema";
+import {
+    isEnhancementOnlyProvider,
+    isTranscriptionOnlyProvider,
+} from "@/lib/ai/provider-presets";
+import { getOrgUserId } from "@/lib/org/config";
 import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 
 export type ProviderRole =
@@ -27,6 +32,11 @@ export interface DefaultProviderState {
 type DefaultProviderTransaction = Parameters<
     Parameters<typeof db.transaction>[0]
 >[0];
+
+interface SetDefaultProviderOptions {
+    transaction?: DefaultProviderTransaction;
+    onlyIf?: string;
+}
 
 function preferences(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -60,13 +70,25 @@ export async function loadDefaultProviderState(
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
         .limit(1);
+    const preserveOrganizationLegacy = (await getOrgUserId()) === userId;
     const legacyTranscription = credentials.find(
-        (row) => row.isDefaultTranscription,
+        (row) =>
+            row.isDefaultTranscription &&
+            (preserveOrganizationLegacy ||
+                !isEnhancementOnlyProvider(row.provider)),
     )?.id;
     const legacySummary = credentials.find(
-        (row) => row.isDefaultEnhancement,
+        (row) =>
+            row.isDefaultEnhancement &&
+            (preserveOrganizationLegacy ||
+                !isTranscriptionOnlyProvider(row.provider)),
     )?.id;
-    const legacyLearn = credentials.find((row) => row.isDefaultLearn)?.id;
+    const legacyLearn = credentials.find(
+        (row) =>
+            row.isDefaultLearn &&
+            (preserveOrganizationLegacy ||
+                !isTranscriptionOnlyProvider(row.provider)),
+    )?.id;
     const pointers = {
         transcription:
             settings?.defaultTranscriptionProviderId ??
@@ -99,14 +121,18 @@ export async function setDefaultProvider(
     userId: string,
     role: ProviderRole,
     value: string | null,
-    transaction?: DefaultProviderTransaction,
-): Promise<void> {
-    const apply = async (tx: DefaultProviderTransaction): Promise<void> => {
+    options: SetDefaultProviderOptions = {},
+): Promise<boolean> {
+    const apply = async (tx: DefaultProviderTransaction): Promise<boolean> => {
         await tx
             .select({ id: users.id })
             .from(users)
             .where(eq(users.id, userId))
             .for("update");
+        if (options.onlyIf !== undefined) {
+            const pointers = await loadDefaultProviderPointers(userId, tx);
+            if (pointers[role] !== options.onlyIf) return false;
+        }
         const [settings] = await tx
             .select({ defaults: userSettings.defaultProviders })
             .from(userSettings)
@@ -130,7 +156,7 @@ export async function setDefaultProvider(
                 set: { ...settingsValues, updatedAt: new Date() },
             });
 
-        if (role === "topics" || role === "title") return;
+        if (role === "topics" || role === "title") return true;
         if (role === "transcription") {
             await tx
                 .update(apiCredentials)
@@ -152,7 +178,7 @@ export async function setDefaultProvider(
                         ),
                     );
             }
-            return;
+            return true;
         }
         if (role === "summary") {
             await tx
@@ -175,7 +201,7 @@ export async function setDefaultProvider(
                         ),
                     );
             }
-            return;
+            return true;
         }
         await tx
             .update(apiCredentials)
@@ -197,38 +223,10 @@ export async function setDefaultProvider(
                     ),
                 );
         }
+        return true;
     };
-    if (transaction) {
-        await apply(transaction);
-        return;
+    if (options.transaction) {
+        return apply(options.transaction);
     }
-    await db.transaction(apply);
-}
-
-/** Clear every provider pointer owned by one user that references a credential. */
-export async function clearDefaultProviderReferences(
-    userId: string,
-    credentialId: string,
-    transaction?: DefaultProviderTransaction,
-): Promise<void> {
-    const clear = async (tx: DefaultProviderTransaction): Promise<void> => {
-        const pointers = await loadDefaultProviderPointers(userId, tx);
-        const roles: ProviderRole[] = [
-            "transcription",
-            "summary",
-            "learn",
-            "topics",
-            "title",
-        ];
-        for (const role of roles) {
-            if (pointers[role] === credentialId) {
-                await setDefaultProvider(userId, role, null, tx);
-            }
-        }
-    };
-    if (transaction) {
-        await clear(transaction);
-        return;
-    }
-    await db.transaction(clear);
+    return db.transaction(apply);
 }

@@ -58,6 +58,7 @@ interface CategorizePanelProps {
 const MANUAL_ONLY = "__manual_only__";
 const NEW_FOLDER = "__new_folder__";
 const ORGANIZATION_DEFAULT = "__organization_default__";
+const UNAVAILABLE_DEFAULT = "__unavailable_default__";
 
 function resolutionChoice(resolution: ProcessingResolution): string {
     if (resolution.status !== "resolved") return "";
@@ -68,6 +69,7 @@ function initialProfileChoice(data: CategorizePanelData): string {
     if (data.currentProfile) {
         return data.currentManualOnly ? MANUAL_ONLY : data.currentProfile.id;
     }
+    if (data.defaultProfileUnavailable) return UNAVAILABLE_DEFAULT;
     if (
         data.followsOrganizationDefault &&
         data.organizationDefault &&
@@ -162,6 +164,7 @@ export function CategorizePanel({
                 : profileChoice;
         if (
             profileChoice === MANUAL_ONLY ||
+            profileChoice === UNAVAILABLE_DEFAULT ||
             !detailProfileId ||
             details[detailProfileId]
         ) {
@@ -207,10 +210,11 @@ export function CategorizePanel({
         return [...byId.values()];
     }, [data]);
     const selectedFolder = folders.find((folder) => folder.id === folderId);
-    const selectedProfileId =
-        profileChoice === ORGANIZATION_DEFAULT
-            ? data.organizationDefault?.id
-            : profileChoice;
+    let selectedProfileId: string | undefined = profileChoice;
+    if (profileChoice === ORGANIZATION_DEFAULT) {
+        selectedProfileId = data.organizationDefault?.id;
+    }
+    if (profileChoice === UNAVAILABLE_DEFAULT) selectedProfileId = undefined;
     const selectedProfile = profileOptions.find(
         (profile) => profile.id === selectedProfileId,
     );
@@ -572,6 +576,16 @@ export function CategorizePanel({
                                         })}
                                     </SelectItem>
                                 )}
+                                {data.defaultProfileUnavailable && (
+                                    <SelectItem
+                                        value={UNAVAILABLE_DEFAULT}
+                                        disabled
+                                    >
+                                        {i18n(
+                                            "Unavailable Organization profile",
+                                        )}
+                                    </SelectItem>
+                                )}
                                 {profileOptions.map((profile) => (
                                     <SelectItem
                                         key={profile.id}
@@ -589,6 +603,13 @@ export function CategorizePanel({
                             </SelectContent>
                         </Select>
                         <p className="text-xs text-muted-foreground">
+                            {data.defaultProfileUnavailable && (
+                                <>
+                                    {i18n(
+                                        "Your selected Organization profile is unavailable. Choose another default.",
+                                    )}{" "}
+                                </>
+                            )}
                             <a
                                 href="/settings#profiles"
                                 className="rounded-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -641,7 +662,8 @@ export function CategorizePanel({
                             submitting ||
                             previewing ||
                             !folderId ||
-                            !profileChoice
+                            !profileChoice ||
+                            profileChoice === UNAVAILABLE_DEFAULT
                         }
                         onClick={() => void submit()}
                     >

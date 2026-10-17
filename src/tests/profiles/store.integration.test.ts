@@ -9,6 +9,7 @@ import {
     vi,
 } from "vitest";
 import {
+    asyncJobs,
     processingProfileRevisions,
     processingProfiles,
     userSettings,
@@ -71,6 +72,7 @@ import {
     listProfiles,
     ProfilePermissionError,
     ProfileVersionConflictError,
+    profileDeleteDisposition,
     setDefaultProfile,
     updateProfile,
 } from "@/lib/profiles/store";
@@ -116,6 +118,7 @@ describeWithDatabase("profile store", () => {
     }, 120_000);
 
     beforeEach(async () => {
+        await db().delete(asyncJobs).where(eq(asyncJobs.userId, ALICE));
         await db()
             .delete(processingProfiles)
             .where(
@@ -286,6 +289,70 @@ describeWithDatabase("profile store", () => {
         expect([first.id, second.id]).toContain(defaults[0]?.id);
     });
 
+    it("keeps the previous default when the target is archived during selection", async () => {
+        await ensureProfiles(ALICE);
+        const [previous] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        const target = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Racing target",
+            settings: defaultProfileSettings("audio"),
+        });
+        let archival: Promise<boolean> | undefined;
+        let selection: Promise<boolean> | undefined;
+
+        await db().transaction(async (tx) => {
+            await tx
+                .select({ id: processingProfiles.id })
+                .from(processingProfiles)
+                .where(
+                    and(
+                        eq(processingProfiles.ownerUserId, ALICE),
+                        eq(processingProfiles.id, target.id),
+                    ),
+                )
+                .for("update");
+            archival = archiveProfile({
+                ownerUserId: ALICE,
+                profileId: target.id,
+                actor: actor(ALICE),
+            });
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+            selection = setDefaultProfile({
+                ownerUserId: ALICE,
+                profileId: target.id,
+                actor: actor(ALICE),
+            });
+            await new Promise<void>((resolve) => setTimeout(resolve, 25));
+        });
+
+        await expect(archival).resolves.toBe(true);
+        await expect(selection).rejects.toBeInstanceOf(ProfilePermissionError);
+        const [stillDefault] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            );
+        expect(stillDefault?.id).toBe(previous?.id);
+    });
+
     it("duplicates into the actor's personal scope", async () => {
         const original = await createProfile({
             ownerUserId: ALICE,
@@ -374,6 +441,98 @@ describeWithDatabase("profile store", () => {
                 actor: actor(ALICE),
             }),
         ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
+    });
+
+    it("archives a profile referenced by a queued job payload", async () => {
+        const created = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Queued summary profile",
+            settings: defaultProfileSettings("audio"),
+        });
+        await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "Profile that remains",
+            settings: defaultProfileSettings("audio"),
+        });
+        await db()
+            .insert(asyncJobs)
+            .values({
+                id: "queued-profile-summary",
+                userId: ALICE,
+                kind: "summary",
+                subjectId: "item-1",
+                status: "pending",
+                payload: { profileRevisionId: created.currentRevisionId },
+            });
+
+        await expect(profileDeleteDisposition(ALICE, created.id)).resolves.toBe(
+            "archive",
+        );
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: created.id,
+                actor: actor(ALICE),
+            }),
+        ).resolves.toEqual({ disposition: "archive" });
+        const [revision] = await db()
+            .select({ id: processingProfileRevisions.id })
+            .from(processingProfileRevisions)
+            .where(
+                eq(
+                    processingProfileRevisions.id,
+                    created.currentRevisionId ?? "",
+                ),
+            );
+        expect(revision?.id).toBe(created.currentRevisionId);
+    });
+
+    it("serializes deletion so parallel requests cannot remove the last two profiles", async () => {
+        const first = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "audio",
+            name: "First removable profile",
+            settings: defaultProfileSettings("audio"),
+        });
+        const second = await createProfile({
+            ownerUserId: ALICE,
+            actor: actor(ALICE),
+            scope: "personal",
+            channel: "mail",
+            name: "Second removable profile",
+            settings: defaultProfileSettings("mail"),
+        });
+
+        const results = await Promise.all([
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: first.id,
+                actor: actor(ALICE),
+            }),
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: second.id,
+                actor: actor(ALICE),
+            }),
+        ]);
+
+        expect(results.map((result) => result?.disposition).sort()).toEqual([
+            "archive",
+            "delete",
+        ]);
+        const remaining = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, ALICE));
+        expect(remaining).toHaveLength(1);
     });
 
     it("searches decrypted names before paginating and filters channel and scope", async () => {

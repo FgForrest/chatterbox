@@ -10,7 +10,7 @@ const { mockEnv, resolution } = vi.hoisted(() => ({
 
 vi.mock("@/lib/env", () => ({ env: mockEnv }));
 vi.mock("@/lib/profiles/providers", () => ({
-    resolveStepProvider: async () => {
+    resolveStepProviderSelection: async () => {
         if (!resolution.available) throw new Error("no provider");
         return { kind: "credential" };
     },

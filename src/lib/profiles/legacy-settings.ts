@@ -14,7 +14,7 @@ import {
     parseProfileSettings,
 } from "@/lib/profiles/settings";
 import {
-    getDefaultProfile,
+    getDefaultProfileState,
     ProfilePermissionError,
     type ProfileRecord,
     ProfileVersionConflictError,
@@ -156,7 +156,9 @@ async function updateDefault(
     body: Record<string, unknown>,
 ): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        const current = await getDefaultProfile(userId, channel, actor.actorId);
+        const current = (
+            await getDefaultProfileState(userId, channel, actor.actorId)
+        ).effective;
         if (!current || current.ownerUserId !== userId) return;
         const settings =
             channel === "audio"
@@ -230,10 +232,12 @@ export async function readLegacySettingsFromProfiles(
     userId: string,
 ): Promise<Record<string, unknown>> {
     await ensureProfiles(userId);
-    const [audio, mail] = await Promise.all([
-        getDefaultProfile(userId, "audio", userId),
-        getDefaultProfile(userId, "mail", userId),
+    const [audioState, mailState] = await Promise.all([
+        getDefaultProfileState(userId, "audio", userId),
+        getDefaultProfileState(userId, "mail", userId),
     ]);
+    const audio = audioState.effective;
+    const mail = mailState.effective;
     const result: Record<string, unknown> = {};
     if (audio) {
         const settings = parseProfileSettings("audio", audio.settings);

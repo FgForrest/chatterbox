@@ -1,13 +1,13 @@
-import { and, count, eq, sql, sum } from "drizzle-orm";
+import { and, count, eq, ne, or, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
     adminActionLog,
     aiUsageEvents,
     apiCredentials,
+    userSettings,
     users,
 } from "@/db/schema";
 import {
-    clearDefaultProviderReferences,
     type DefaultProviderPointers,
     loadDefaultProviderPointers,
     type ProviderRole,
@@ -163,9 +163,14 @@ async function applyOrganizationDefaults(
     for (const role of roles) {
         const selected = defaults[role];
         if (selected === true) {
-            await setDefaultProvider(orgUserId, role, credential.id, tx);
+            await setDefaultProvider(orgUserId, role, credential.id, {
+                transaction: tx,
+            });
         } else if (selected === false && current[role] === credential.id) {
-            await setDefaultProvider(orgUserId, role, null, tx);
+            await setDefaultProvider(orgUserId, role, null, {
+                transaction: tx,
+                onlyIf: credential.id,
+            });
         }
     }
     return {
@@ -177,7 +182,15 @@ async function applyOrganizationDefaults(
 function validateOrganizationDefaults(
     provider: string,
     defaults: Partial<Record<ProviderRole, boolean>> | undefined,
+    disabled: boolean,
 ): void {
+    if (disabled && Object.values(defaults ?? {}).some(Boolean)) {
+        throw new AppError(
+            ErrorCode.INVALID_INPUT,
+            "A disabled provider cannot be an Organization default",
+            400,
+        );
+    }
     if (defaults?.transcription && isEnhancementOnlyProvider(provider)) {
         throw new AppError(
             ErrorCode.INVALID_INPUT,
@@ -262,7 +275,7 @@ export async function createOrganizationProvider(
     context: OrganizationProviderContext,
     input: OrganizationProviderInput,
 ) {
-    validateOrganizationDefaults(input.provider, input.defaults);
+    validateOrganizationDefaults(input.provider, input.defaults, false);
     const provider = await db.transaction(async (tx) => {
         let encryptedApiKey = input.encryptedApiKey;
         if (!encryptedApiKey && input.copyKeyFrom) {
@@ -348,6 +361,11 @@ export async function updateOrganizationProvider(
     input: OrganizationProviderUpdate,
 ) {
     const provider = await db.transaction(async (tx) => {
+        await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, context.orgUserId))
+            .for("update");
         const [before] = await tx
             .select()
             .from(apiCredentials)
@@ -362,7 +380,11 @@ export async function updateOrganizationProvider(
         if (!before || before.id !== credentialId) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
-        validateOrganizationDefaults(before.provider, input.defaults);
+        validateOrganizationDefaults(
+            before.provider,
+            input.defaults,
+            input.disabled ?? before.disabledAt !== null,
+        );
         const update: Partial<typeof apiCredentials.$inferInsert> = {
             updatedAt: new Date(),
         };
@@ -422,6 +444,11 @@ export async function deleteOrganizationProvider(
     credentialId: string,
 ): Promise<void> {
     await db.transaction(async (tx) => {
+        await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.id, context.orgUserId))
+            .for("update");
         const [before] = await tx
             .select()
             .from(apiCredentials)
@@ -438,11 +465,6 @@ export async function deleteOrganizationProvider(
         }
         const beforeDefaults = await loadDefaultProviderPointers(
             context.orgUserId,
-            tx,
-        );
-        await clearDefaultProviderReferences(
-            context.orgUserId,
-            credentialId,
             tx,
         );
         await tx
@@ -466,6 +488,45 @@ export async function deleteOrganizationProvider(
             ),
         });
     });
+}
+
+/** Count member-owned default pointers that refer to one Organization provider. */
+export async function organizationProviderMemberDefaultCount(
+    context: OrganizationProviderContext,
+    credentialId: string,
+): Promise<number> {
+    const [credential] = await db
+        .select({ id: apiCredentials.id })
+        .from(apiCredentials)
+        .where(
+            and(
+                eq(apiCredentials.userId, context.orgUserId),
+                eq(apiCredentials.id, credentialId),
+            ),
+        )
+        .limit(1);
+    if (!credential) {
+        throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
+    }
+    const [result] = await db
+        .select({ count: count(userSettings.userId) })
+        .from(userSettings)
+        .where(
+            and(
+                ne(userSettings.userId, context.orgUserId),
+                or(
+                    eq(
+                        userSettings.defaultTranscriptionProviderId,
+                        credentialId,
+                    ),
+                    sql`${userSettings.defaultProviders} ->> 'summary' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'learn' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'topics' = ${credentialId}`,
+                    sql`${userSettings.defaultProviders} ->> 'title' = ${credentialId}`,
+                ),
+            ),
+        );
+    return Number(result?.count ?? 0);
 }
 
 export interface OrganizationProviderMemberUsage {

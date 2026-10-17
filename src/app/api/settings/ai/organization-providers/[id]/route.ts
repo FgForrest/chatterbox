@@ -9,6 +9,7 @@ import { AppError, apiHandler, ErrorCode } from "@/lib/errors";
 import {
     deleteOrganizationProvider,
     organizationProviderManageContext,
+    organizationProviderMemberDefaultCount,
     updateOrganizationProvider,
 } from "@/lib/profiles/organization-providers";
 
@@ -42,6 +43,17 @@ async function contextFor(request: Request) {
         email: session.user.email,
     });
 }
+
+export const GET = apiHandler<IdContext>(async (request, routeContext) => {
+    const context = await contextFor(request);
+    const { id } = await (routeContext as IdContext).params;
+    return NextResponse.json({
+        memberDefaultCount: await organizationProviderMemberDefaultCount(
+            context,
+            id,
+        ),
+    });
+});
 
 export const PUT = apiHandler<IdContext>(async (request, routeContext) => {
     const context = await contextFor(request);

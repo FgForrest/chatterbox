@@ -84,6 +84,22 @@ function submitLabel(
     return i18n("Update Provider");
 }
 
+function addDefaultFlag(
+    body: Record<string, unknown>,
+    key:
+        | "isDefaultTranscription"
+        | "isDefaultEnhancement"
+        | "isDefaultLearn"
+        | "isDefaultTopics"
+        | "isDefaultTitle",
+    value: boolean,
+    previous: boolean,
+    mode: ProviderFormMode,
+): void {
+    if (mode === "add" && value) body[key] = true;
+    if (mode === "edit" && value !== previous) body[key] = value;
+}
+
 /** Add, edit, or duplicate a personal or Organization AI provider. */
 export function ProviderFormDialog({
     scope,
@@ -202,16 +218,42 @@ export function ProviderFormDialog({
             body.copyKeyFrom = source.id;
         }
         if (apiKey.trim()) body.apiKey = apiKey.trim();
-        body.isDefaultTranscription = enhancementOnly
-            ? false
-            : isDefaultTranscription;
-        body.isDefaultEnhancement = transcriptionOnly
-            ? false
-            : isDefaultEnhancement;
+        addDefaultFlag(
+            body,
+            "isDefaultTranscription",
+            isDefaultTranscription,
+            source?.isDefaultTranscription === true,
+            mode,
+        );
+        addDefaultFlag(
+            body,
+            "isDefaultEnhancement",
+            isDefaultEnhancement,
+            source?.isDefaultEnhancement === true,
+            mode,
+        );
         if (!personal) {
-            body.isDefaultLearn = transcriptionOnly ? false : isDefaultLearn;
-            body.isDefaultTopics = transcriptionOnly ? false : isDefaultTopics;
-            body.isDefaultTitle = transcriptionOnly ? false : isDefaultTitle;
+            addDefaultFlag(
+                body,
+                "isDefaultLearn",
+                isDefaultLearn,
+                source?.isDefaultLearn === true,
+                mode,
+            );
+            addDefaultFlag(
+                body,
+                "isDefaultTopics",
+                isDefaultTopics,
+                source?.isDefaultTopics === true,
+                mode,
+            );
+            addDefaultFlag(
+                body,
+                "isDefaultTitle",
+                isDefaultTitle,
+                source?.isDefaultTitle === true,
+                mode,
+            );
         }
 
         setSaving(true);

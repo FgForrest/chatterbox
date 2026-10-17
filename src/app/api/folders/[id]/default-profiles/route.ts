@@ -20,7 +20,7 @@ import {
     profileChannelSchema,
 } from "@/lib/profiles/settings";
 import {
-    getDefaultProfile,
+    getDefaultProfileState,
     getProfile,
     type ProfileRecord,
 } from "@/lib/profiles/store";
@@ -135,9 +135,13 @@ async function channelDefaults(
           })
         : null;
     await ensureProfiles(folder.ownerUserId);
-    const accountDefault =
+    const accountDefaultState =
         folder.scope === "personal"
-            ? await getDefaultProfile(folder.ownerUserId, channel, actorUserId)
+            ? await getDefaultProfileState(
+                  folder.ownerUserId,
+                  channel,
+                  actorUserId,
+              )
             : null;
     const inheritedFolder = defaults?.inheritedFromFolderId
         ? await db
@@ -162,7 +166,9 @@ async function channelDefaults(
             : null,
         inherited: profileSummary(inherited?.effective ?? null),
         inheritedManualOnly: inherited?.effectiveManualOnly ?? false,
-        accountDefault: profileSummary(accountDefault),
+        accountDefault: profileSummary(accountDefaultState?.effective ?? null),
+        accountDefaultUnavailable:
+            accountDefaultState?.explicitUnavailable ?? false,
     };
 }
 

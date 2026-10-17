@@ -7,6 +7,8 @@ import {
     DefaultProfileArchiveError,
     deletePersonalProfile,
     ProfileVersionConflictError,
+    profileDeleteDisposition,
+    profileMemberDefaultCount,
     updateProfile,
 } from "@/lib/profiles/store";
 import {
@@ -34,9 +36,32 @@ export const GET = apiHandler<IdContext>(async (request, context) => {
     const routeActor = await profileRouteActor(request);
     const { id } = await (context as IdContext).params;
     const { profile } = await availableProfile(id, routeActor);
+    const includeDeleteImpact =
+        new URL(request.url).searchParams.get("deleteImpact") === "true";
+    let deleteImpact:
+        | { disposition: "delete" | "archive" }
+        | { memberDefaultCount: number }
+        | undefined;
+    if (includeDeleteImpact && profile.scope === "personal") {
+        const disposition = await profileDeleteDisposition(
+            profile.ownerUserId,
+            profile.id,
+        );
+        if (disposition) deleteImpact = { disposition };
+    }
+    if (includeDeleteImpact && profile.scope === "organization") {
+        const memberDefaultCount = await profileMemberDefaultCount(
+            profile.ownerUserId,
+            profile.id,
+        );
+        if (memberDefaultCount !== null) {
+            deleteImpact = { memberDefaultCount };
+        }
+    }
     return NextResponse.json({
         profile: await profileDetail(profile, routeActor.actor),
         ...builtinPromptTexts(profile),
+        ...(deleteImpact ? { deleteImpact } : {}),
     });
 });
 

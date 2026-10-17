@@ -8,7 +8,7 @@
  */
 
 import { env } from "@/lib/env";
-import { resolveStepProvider } from "@/lib/profiles/providers";
+import { resolveStepProviderSelection } from "@/lib/profiles/providers";
 import type { ProviderPin } from "@/lib/profiles/settings";
 
 /** Learn exists on this deployment: self-hosted. */
@@ -26,7 +26,7 @@ export async function isLearnAvailableFor(
 ): Promise<boolean> {
     if (!isLearnDeploymentAvailable()) return false;
     try {
-        const resolved = await resolveStepProvider({
+        const resolved = await resolveStepProviderSelection({
             step: "learn",
             pin,
             actorUserId: userId,

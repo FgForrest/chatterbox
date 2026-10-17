@@ -34,6 +34,8 @@ Někteří poskytovatelé zajišťují pouze přepis (ElevenLabs, Speechmatics).
 
 Členové vidí **Poskytovatele organizace** jen pro čtení a mohou kteréhokoli povoleného poskytovatele zvolit jako výchozího pro svůj účet. Osoby s oprávněním `access.manage` je mohou přidávat, duplikovat, upravovat, zakázat, povolit a odstranit, volit výchozí poskytovatele Organizace a na stejné kartě vidí využití podle členů. Výchozí poskytovatel Organizace platí pro všechny členy, včetně soukromých položek, dokud si člen pro stejnou roli nezvolí vlastního poskytovatele. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
 
+Pokud je Vámi zvolený poskytovatel zakázán nebo odstraněn, výběr tuto volbu ponechá viditelnou jako nedostupnou. Zpracování dané role se zastaví, dokud nezvolíte jiného poskytovatele. Před zakázáním nebo odstraněním poskytovatele Organizace potvrzení ukáže, kolik členů si jej zvolilo jako vlastní výchozí možnost.
+
 ## Přepis
 
 Sekce **Přepis** nyní obsahuje výchozí hodnoty účtu pro tlačítko **Přepsat**, generované názvy bez poskytovatele připnutého v profilu a importovaný obsah z diktafonu:

@@ -33,9 +33,11 @@ A profile also holds the choices for that work: provider and model, transcriptio
 
 ![Editing the Recordings processing profile](images/profile-editor.png)
 
-At the top of the list, choose separate defaults for recordings and mail. Each can follow the current Organization default, use a specific Organization profile, or use one of your profiles. You can create, duplicate, delete, archive, and restore personal profiles. Deleting an unused profile removes it permanently; if processing history refers to it, Chatterbox removes it from the lists but keeps it under **Archived** so that history remains intact. A manual summary can use any available profile for the same kind of item. Its profile picker starts with the item's profile and remembers your last manual choice for that profile in this browser.
+At the top of the list, choose separate defaults for recordings and mail. Each can follow the current Organization default, use a specific Organization profile, or use one of your profiles. You can create, duplicate, delete, archive, and restore personal profiles. Deleting an unused profile removes it permanently; if processing history or a queued run refers to it, Chatterbox removes it from the lists but keeps it under **Archived** so that work can finish and history remains intact. A manual summary can use any available profile for the same kind of item. Its profile picker starts with the item's profile, then your effective default, and remembers your last manual choice for that profile in this browser.
 
 **Organization profiles** are shared recipes. Members can use them on private items and duplicate them into a personal profile. **Your default** marks the profile you currently use; **Organization default** marks the Organization's choice. When you follow the Organization default, both labels appear on that profile. Curators can create and edit the Organization versions.
+
+If a specific Organization profile you selected is archived or you lose access to it, Chatterbox keeps your choice and marks it unavailable in Profiles, folder settings, and Categorize. New processing stops until you choose another default. Before archiving an Organization profile, the curator sees how many members selected it and the same warning.
 
 <span id="folder-default-profiles" />
 

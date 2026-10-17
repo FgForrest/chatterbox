@@ -22,6 +22,7 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
+import { defaultProviderCandidates } from "@/lib/ai/provider-resolution-order";
 
 type Role = "transcription" | "topics" | "learning" | "summary" | "title";
 type PickerProvider = ProviderListItem & { scope?: "organization" };
@@ -49,8 +50,6 @@ function providerLabel(provider: PickerProvider): string {
 }
 
 function supports(provider: PickerProvider, purpose: Role): boolean {
-    if (provider.disabledAt != null || provider.available === false)
-        return false;
     if (purpose === "transcription") {
         return (
             provider.managed === true ||
@@ -63,20 +62,47 @@ function supports(provider: PickerProvider, purpose: Role): boolean {
     );
 }
 
-function isOrganizationDefault(
-    provider: PickerProvider,
-    purpose: Role,
-): boolean {
-    if (purpose === "transcription") return provider.isDefaultTranscription;
-    if (purpose === "summary") return provider.isDefaultEnhancement;
-    if (purpose === "learning") return provider.isDefaultLearn === true;
-    if (purpose === "topics") return provider.isDefaultTopics === true;
-    return provider.isDefaultTitle === true;
+function available(provider: PickerProvider, purpose: Role): boolean {
+    return (
+        supports(provider, purpose) &&
+        provider.disabledAt == null &&
+        provider.available !== false
+    );
 }
 
 interface ProviderResponse {
     providers: PickerProvider[];
     defaults?: DefaultProviderPointers;
+}
+
+const EMPTY_DEFAULTS: DefaultProviderPointers = {
+    transcription: null,
+    summary: null,
+    learn: null,
+    topics: null,
+    title: null,
+};
+
+function organizationDefaults(
+    providers: PickerProvider[],
+): DefaultProviderPointers {
+    return {
+        transcription:
+            providers.find((provider) => provider.isDefaultTranscription)?.id ??
+            null,
+        summary:
+            providers.find((provider) => provider.isDefaultEnhancement)?.id ??
+            null,
+        learn:
+            providers.find((provider) => provider.isDefaultLearn === true)
+                ?.id ?? null,
+        topics:
+            providers.find((provider) => provider.isDefaultTopics === true)
+                ?.id ?? null,
+        title:
+            providers.find((provider) => provider.isDefaultTitle === true)
+                ?.id ?? null,
+    };
 }
 
 /** Choose one account default from personal and Organization providers. */
@@ -91,7 +117,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
     const [saving, setSaving] = useState(false);
 
     const load = useCallback(async () => {
-        const personalResponse = await fetch("/api/settings/ai/providers");
+        const personalResponse = await fetch(
+            "/api/settings/ai/providers?includeDisabled=true",
+        );
         if (!personalResponse.ok) throw new Error("Failed to load providers");
         const personalBody =
             (await personalResponse.json()) as ProviderResponse;
@@ -126,37 +154,50 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
 
     const role = storageRole(purpose);
     const personalOptions = personal.filter((provider) =>
-        supports(provider, purpose),
+        available(provider, purpose),
     );
     const organizationOptions = organization.filter((provider) =>
-        supports(provider, purpose),
+        available(provider, purpose),
     );
     const selectedId = defaults?.[role] ?? null;
-    const roleOrganizationDefault = organizationOptions.find((provider) =>
-        isOrganizationDefault(provider, purpose),
-    );
     const followsSummary =
         purpose === "topics" || purpose === "learning" || purpose === "title";
-    const summaryOrganizationDefault = organizationOptions.find(
-        (provider) => provider.isDefaultEnhancement === true,
+    const organizationPointers = organizationDefaults(organization);
+    const [candidate] = defaultProviderCandidates(
+        role,
+        defaults ?? EMPTY_DEFAULTS,
+        organizationPointers,
+        personal,
     );
-    const organizationDefault =
-        roleOrganizationDefault ??
-        (followsSummary && !defaults?.summary
-            ? summaryOrganizationDefault
-            : undefined);
-    const automaticProvider =
-        purpose === "transcription" ? undefined : personalOptions[0];
-    let value = selectedId ?? NOT_CHOSEN;
+    const candidateProvider = candidate
+        ? [...personal, ...organization].find(
+              (provider) => provider.id === candidate.providerId,
+          )
+        : undefined;
+    const candidateUnavailable = Boolean(
+        candidate &&
+            (!candidateProvider || !available(candidateProvider, purpose)),
+    );
+    let value = NOT_CHOSEN;
+    if (candidate?.source === "member-role") value = candidate.providerId;
+    if (candidate?.source === "member-summary") value = FOLLOW_SUMMARY;
     if (
-        !selectedId &&
-        organizationDefault &&
-        (!followsSummary || !defaults?.summary)
+        candidate?.source === "organization-role" ||
+        candidate?.source === "organization-summary"
     ) {
         value = ORGANIZATION_DEFAULT;
-    } else if (!selectedId && followsSummary && defaults?.summary) {
-        value = FOLLOW_SUMMARY;
     }
+    const organizationDefaultId =
+        organizationPointers[role] ??
+        (followsSummary ? organizationPointers.summary : null);
+    const organizationDefault = organization.find(
+        (provider) => provider.id === organizationDefaultId,
+    );
+    const organizationDefaultAvailable = organizationDefault
+        ? available(organizationDefault, purpose)
+        : false;
+    const automaticProvider =
+        candidate?.source === "member-fallback" ? candidateProvider : undefined;
 
     const save = async (id: string) => {
         setSaving(true);
@@ -194,8 +235,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
 
     const noOptions =
         personalOptions.length === 0 && organizationOptions.length === 0;
-    let selectValue: string | undefined = value;
-    if (noOptions) selectValue = undefined;
+    const selectValue = value;
     let label = i18n("Summary provider");
     if (purpose === "transcription") label = i18n("Transcription provider");
     if (purpose === "topics") label = i18n("Topics provider");
@@ -207,7 +247,9 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
             <Select
                 value={selectValue}
                 onValueChange={(id) => void save(id)}
-                disabled={loading || saving || noOptions}
+                disabled={
+                    loading || saving || (noOptions && !candidateUnavailable)
+                }
             >
                 <SelectTrigger id={`${purpose}-provider`} className="w-full">
                     <SelectValue
@@ -221,20 +263,39 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     />
                 </SelectTrigger>
                 <SelectContent>
-                    {followsSummary && defaults?.summary && (
-                        <SelectItem value={FOLLOW_SUMMARY}>
-                            {i18n("Same as summaries")}
+                    {candidateUnavailable && (
+                        <SelectItem value={value} disabled>
+                            {candidateProvider
+                                ? i18n("Unavailable: {provider}", {
+                                      provider:
+                                          providerLabel(candidateProvider),
+                                  })
+                                : i18n("Unavailable: deleted provider")}
                         </SelectItem>
                     )}
-                    {organizationDefault && (
-                        <SelectItem value={ORGANIZATION_DEFAULT}>
-                            {i18n("Organization default: {provider}", {
-                                provider: providerLabel(organizationDefault),
-                            })}
-                        </SelectItem>
-                    )}
-                    {!selectedId &&
-                        !organizationDefault &&
+                    {followsSummary &&
+                        defaults?.summary &&
+                        !(candidateUnavailable && value === FOLLOW_SUMMARY) && (
+                            <SelectItem value={FOLLOW_SUMMARY}>
+                                {i18n("Same as summaries")}
+                            </SelectItem>
+                        )}
+                    {organizationDefault &&
+                        organizationDefaultAvailable &&
+                        !(
+                            candidateUnavailable &&
+                            value === ORGANIZATION_DEFAULT
+                        ) && (
+                            <SelectItem value={ORGANIZATION_DEFAULT}>
+                                {i18n("Organization default: {provider}", {
+                                    provider:
+                                        providerLabel(organizationDefault),
+                                })}
+                            </SelectItem>
+                        )}
+                    {!candidateUnavailable &&
+                        !selectedId &&
+                        !organizationDefaultAvailable &&
                         automaticProvider && (
                             <SelectItem value={NOT_CHOSEN}>
                                 {i18n("Automatic: {provider}", {
@@ -243,7 +304,7 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                             </SelectItem>
                         )}
                     {purpose === "transcription" &&
-                        !organizationDefault &&
+                        !organizationDefaultAvailable &&
                         !noOptions && (
                             <SelectItem value={NOT_CHOSEN}>
                                 {i18n("Not chosen")}
@@ -280,6 +341,13 @@ export function ProviderRoleSelect({ purpose }: { purpose: Role }) {
                     )}
                 </SelectContent>
             </Select>
+            {candidateUnavailable && !loading && (
+                <p className="text-xs text-muted-foreground">
+                    {i18n(
+                        "This default is unavailable. Choose another provider.",
+                    )}
+                </p>
+            )}
             {noOptions && !loading && (
                 <p className="text-xs text-muted-foreground">
                     {i18n(

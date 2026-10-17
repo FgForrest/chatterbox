@@ -21,18 +21,26 @@ type IdContext = { params: Promise<{ id: string }> };
 export const GET = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const { access, actorUserId } = await authorizeLearn(request, id);
-    const profile = await resolveItemProfile(
-        id,
-        access.view,
-        access.ownerUserId,
-        actorUserId,
-    );
-    return NextResponse.json({
-        ...(await loadReview(access, requestedReviewSource(request))),
-        available: await isLearnAvailableFor(
+    let available = false;
+    let availabilityReason: "profile_unavailable" | undefined;
+    try {
+        const profile = await resolveItemProfile(
+            id,
+            access.view,
+            access.ownerUserId,
+            actorUserId,
+        );
+        available = await isLearnAvailableFor(
             actorUserId,
             profile.settings.steps.learn.provider,
-        ),
+        );
+    } catch {
+        availabilityReason = "profile_unavailable";
+    }
+    return NextResponse.json({
+        ...(await loadReview(access, requestedReviewSource(request))),
+        available,
+        ...(availabilityReason ? { availabilityReason } : {}),
     });
 });
 

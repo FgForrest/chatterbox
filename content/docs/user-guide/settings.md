@@ -34,6 +34,8 @@ Some providers only transcribe (ElevenLabs, Speechmatics). Summary steps then ne
 
 Members inspect **Organization providers** as **Read-only** and may choose any enabled one as an account default. People with `access.manage` can add, duplicate, edit, disable, enable, and delete them, choose Organization defaults, and see usage per member in the same card. An Organization default applies to every member, including private items, until that member chooses a provider for the same role. See [Organization providers](organization.md#organization-providers).
 
+If a provider you chose is disabled or deleted, the selector keeps that choice visible as unavailable. Processing for that role stops until you choose another provider. Before an Organization provider is disabled or deleted, the confirmation shows how many members selected it as their own default.
+
 ## Transcription
 
 **Transcription** now holds account defaults for **Transcribe**, generated titles when a profile does not pin a provider, and imported recorder content. It includes:

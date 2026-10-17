@@ -12,7 +12,6 @@ import {
     createProfile,
     getDefaultProfileState,
     listActorProfiles,
-    profileDeleteDisposition,
 } from "@/lib/profiles/store";
 import {
     ensureActorProfiles,
@@ -88,19 +87,11 @@ export const GET = apiHandler(async (request: Request) => {
         result.items.map(async (profile) => {
             const summary = await profileSummary(profile, routeActor.actor);
             const state = states[profile.channel];
-            const deleteDisposition =
-                profile.scope === "personal" && summary.canEdit
-                    ? await profileDeleteDisposition(
-                          routeActor.userId,
-                          profile.id,
-                      )
-                    : null;
             return {
                 ...summary,
                 isYourDefault: state.effective?.id === profile.id,
                 isOrganizationDefault:
                     state.organizationDefault?.id === profile.id,
-                deleteDisposition,
             };
         }),
     );

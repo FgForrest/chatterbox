@@ -1,9 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { apiCredentials, userSettings } from "@/db/schema";
+import { apiCredentials, users } from "@/db/schema";
 import {
-    clearDefaultProviderReferences,
     loadDefaultProviderPointers,
     setDefaultProvider,
 } from "@/lib/ai/default-provider";
@@ -191,23 +190,16 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
     if (isDefaultTranscription === true) {
         await setDefaultTranscriptionProvider(session.user.id, id);
     } else if (isDefaultTranscription === false) {
-        const [settings] = await db
-            .select({ pointer: userSettings.defaultTranscriptionProviderId })
-            .from(userSettings)
-            .where(eq(userSettings.userId, session.user.id))
-            .limit(1);
-
-        if (settings?.pointer === id) {
-            await setDefaultTranscriptionProvider(session.user.id, null);
-        }
+        await setDefaultProvider(session.user.id, "transcription", null, {
+            onlyIf: id,
+        });
     }
     if (isDefaultEnhancement === true) {
         await setDefaultProvider(session.user.id, "summary", id);
     } else if (isDefaultEnhancement === false) {
-        const pointers = await loadDefaultProviderPointers(session.user.id);
-        if (pointers.summary === id) {
-            await setDefaultProvider(session.user.id, "summary", null);
-        }
+        await setDefaultProvider(session.user.id, "summary", null, {
+            onlyIf: id,
+        });
     }
 
     return NextResponse.json({ success: true });
@@ -225,6 +217,11 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
 
     if (auditContext) {
         await db.transaction(async (tx) => {
+            await tx
+                .select({ id: users.id })
+                .from(users)
+                .where(eq(users.id, session.user.id))
+                .for("update");
             const [before] = await tx
                 .select()
                 .from(apiCredentials)
@@ -239,9 +236,6 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
             const beforeDefaults = before
                 ? await loadDefaultProviderPointers(session.user.id, tx)
                 : undefined;
-            if (before) {
-                await clearDefaultProviderReferences(session.user.id, id, tx);
-            }
             await tx
                 .delete(apiCredentials)
                 .where(
@@ -267,7 +261,12 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         });
     } else {
         await db.transaction(async (tx) => {
-            const [owned] = await tx
+            await tx
+                .select({ id: users.id })
+                .from(users)
+                .where(eq(users.id, session.user.id))
+                .for("update");
+            await tx
                 .select({ id: apiCredentials.id })
                 .from(apiCredentials)
                 .where(
@@ -278,9 +277,6 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
                 )
                 .for("update")
                 .limit(1);
-            if (owned) {
-                await clearDefaultProviderReferences(session.user.id, id, tx);
-            }
             await tx
                 .delete(apiCredentials)
                 .where(

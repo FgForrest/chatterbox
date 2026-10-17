@@ -10,6 +10,7 @@ import { ensureProfiles } from "@/lib/profiles/seed";
 import type { ProfileChannel } from "@/lib/profiles/settings";
 import {
     getDefaultProfile,
+    getDefaultProfileState,
     getProfile,
     listProfiles,
     type ProfileRecord,
@@ -340,8 +341,18 @@ async function accountDefaultProfile(input: {
     actorUserId: string;
     channel: ProfileChannel;
     seedProfiles: boolean;
+    throwOnUnavailable: boolean;
 }): Promise<ProfileRecord | null> {
     if (input.seedProfiles) await ensureProfiles(input.ownerUserId);
+    if (!input.throwOnUnavailable) {
+        return (
+            await getDefaultProfileState(
+                input.ownerUserId,
+                input.channel,
+                input.actorUserId,
+            )
+        ).effective;
+    }
     return getDefaultProfile(
         input.ownerUserId,
         input.channel,
@@ -358,6 +369,7 @@ export async function resolveChannelDefaultProfile(input: {
     channel: ProfileChannel;
     view: RecordingView;
     seedProfiles?: boolean;
+    throwOnUnavailable?: boolean;
 }): Promise<ProfileRecord | null> {
     const profileOwnerUserId =
         input.view === "org" ? await getOrgUserId() : input.ownerUserId;
@@ -367,6 +379,7 @@ export async function resolveChannelDefaultProfile(input: {
         actorUserId: input.ownerUserId,
         channel: input.channel,
         seedProfiles: input.seedProfiles ?? true,
+        throwOnUnavailable: input.throwOnUnavailable ?? true,
     });
 }
 
@@ -387,6 +400,7 @@ export async function resolveProfileForPlacements(input: {
     folderIds: readonly string[];
     view: RecordingView;
     seedProfiles?: boolean;
+    throwOnUnavailable?: boolean;
 }): Promise<PlacementProfileResolution> {
     const seedProfiles = input.seedProfiles ?? true;
     if (input.view === "org") {

@@ -309,8 +309,43 @@ export function ProfilesSection() {
         }
     };
 
-    const removePersonal = (profile: SettingsProfileSummary) => {
-        const archives = profile.deleteDisposition === "archive";
+    const deleteImpact = async (
+        profile: SettingsProfileSummary,
+    ): Promise<
+        { disposition: "delete" | "archive" } | { memberDefaultCount: number }
+    > => {
+        const response = await fetch(
+            `/api/settings/profiles/${encodeURIComponent(profile.id)}?deleteImpact=true`,
+        );
+        if (!response.ok)
+            throw new Error(i18n("Failed to load delete impact."));
+        const body = (await response.json()) as {
+            deleteImpact?:
+                | { disposition: "delete" | "archive" }
+                | { memberDefaultCount: number };
+        };
+        if (!body.deleteImpact) {
+            throw new Error(i18n("Failed to load delete impact."));
+        }
+        return body.deleteImpact;
+    };
+
+    const removePersonal = async (profile: SettingsProfileSummary) => {
+        let impact:
+            | { disposition: "delete" | "archive" }
+            | { memberDefaultCount: number };
+        try {
+            impact = await deleteImpact(profile);
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Failed to load delete impact."),
+            );
+            return;
+        }
+        const archives =
+            "disposition" in impact && impact.disposition === "archive";
         const description = archives
             ? i18n(
                   "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
@@ -329,11 +364,27 @@ export function ProfilesSection() {
         });
     };
 
-    const archiveOrganization = (profile: SettingsProfileSummary) => {
+    const archiveOrganization = async (profile: SettingsProfileSummary) => {
+        let impact:
+            | { disposition: "delete" | "archive" }
+            | { memberDefaultCount: number };
+        try {
+            impact = await deleteImpact(profile);
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Failed to load delete impact."),
+            );
+            return;
+        }
+        const memberDefaultCount =
+            "memberDefaultCount" in impact ? impact.memberDefaultCount : 0;
         void confirm({
             title: i18n("Archive “{name}”?", { name: profile.name }),
             description: i18n(
-                "Archived profiles stop appearing in profile choices. You can restore this profile later.",
+                "Archived profiles stop appearing in profile choices. You can restore this profile later. Members using this profile as their default: {count, number}. Their processing will stop with an error until they choose another default.",
+                { count: memberDefaultCount },
             ),
             confirmLabel: i18n("Archive profile"),
             pendingLabel: i18n("Archiving…"),
@@ -650,7 +701,7 @@ export function ProfilesSection() {
                                                             },
                                                         )}
                                                         onClick={() =>
-                                                            removePersonal(
+                                                            void removePersonal(
                                                                 profile,
                                                             )
                                                         }
@@ -699,7 +750,7 @@ export function ProfilesSection() {
                                                                 },
                                                             )}
                                                             onClick={() =>
-                                                                archiveOrganization(
+                                                                void archiveOrganization(
                                                                     profile,
                                                                 )
                                                             }

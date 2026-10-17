@@ -271,6 +271,79 @@ describeWithDatabase(
             expect(response.status).toBe(403);
         });
 
+        it("refuses to assign an Organization role to a disabled provider", async () => {
+            const createdResponse = await createOrganizationProvider(
+                request("POST", {
+                    provider: "OpenAI",
+                    apiKey: "manager-secret",
+                }),
+            );
+            const created = await createdResponse.json();
+            const id = created.provider.id as string;
+            expect(
+                (
+                    await updateOrganizationProvider(
+                        request("PUT", { disabled: true }, `/${id}`),
+                        context(id),
+                    )
+                ).status,
+            ).toBe(200);
+
+            const response = await updateOrganizationProvider(
+                request("PUT", { isDefaultEnhancement: true }, `/${id}`),
+                context(id),
+            );
+
+            expect(response.status).toBe(400);
+            expect(await response.json()).toMatchObject({
+                error: "A disabled provider cannot be an Organization default",
+            });
+        });
+
+        it("does not clear a newer personal default from a stale provider edit", async () => {
+            await databaseClient()
+                .insert(apiCredentials)
+                .values([
+                    {
+                        id: "stale-provider",
+                        userId: "manager",
+                        provider: "OpenAI",
+                        apiKey: "encrypted:stale",
+                    },
+                    {
+                        id: "current-provider",
+                        userId: "manager",
+                        provider: "OpenAI",
+                        apiKey: "encrypted:current",
+                        isDefaultEnhancement: true,
+                    },
+                ]);
+            await databaseClient()
+                .insert(userSettings)
+                .values({
+                    userId: "manager",
+                    defaultProviders: { summary: "current-provider" },
+                });
+
+            const response = await updatePersonalProvider(
+                request(
+                    "PUT",
+                    { isDefaultEnhancement: false },
+                    "/stale-provider",
+                ),
+                context("stale-provider"),
+            );
+            expect(response.status).toBe(200);
+
+            const [settings] = await databaseClient()
+                .select()
+                .from(userSettings)
+                .where(eq(userSettings.userId, "manager"));
+            expect(settings?.defaultProviders).toMatchObject({
+                summary: "current-provider",
+            });
+        });
+
         it("records Organization default changes in the provider audit snapshot", async () => {
             const createdResponse = await createOrganizationProvider(
                 request("POST", {
@@ -310,7 +383,7 @@ describeWithDatabase(
             });
         });
 
-        it("clears only the deleted provider owner's default pointers", async () => {
+        it("preserves explicit default pointers when their provider is deleted", async () => {
             const personalResponse = await createPersonalProvider(
                 request("POST", {
                     provider: "OpenAI",
@@ -339,8 +412,15 @@ describeWithDatabase(
                 .select()
                 .from(userSettings)
                 .where(eq(userSettings.userId, "manager"));
-            expect(personalSettings?.defaultTranscriptionProviderId).toBeNull();
-            expect(personalSettings?.defaultProviders).toEqual({});
+            expect(personalSettings?.defaultTranscriptionProviderId).toBe(
+                personalId,
+            );
+            expect(personalSettings?.defaultProviders).toEqual({
+                summary: personalId,
+                learn: personalId,
+                topics: personalId,
+                title: personalId,
+            });
 
             const organizationResponse = await createOrganizationProvider(
                 request("POST", {
@@ -373,10 +453,15 @@ describeWithDatabase(
                 .select()
                 .from(userSettings)
                 .where(eq(userSettings.userId, "member"));
-            expect(
-                organizationSettings?.defaultTranscriptionProviderId,
-            ).toBeNull();
-            expect(organizationSettings?.defaultProviders).toEqual({});
+            expect(organizationSettings?.defaultTranscriptionProviderId).toBe(
+                organizationId,
+            );
+            expect(organizationSettings?.defaultProviders).toEqual({
+                summary: organizationId,
+                learn: organizationId,
+                topics: organizationId,
+                title: organizationId,
+            });
             expect(memberSettings?.defaultProviders).toEqual({
                 summary: organizationId,
             });

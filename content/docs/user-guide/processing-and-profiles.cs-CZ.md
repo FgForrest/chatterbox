@@ -33,9 +33,11 @@ Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přep
 
 ![Úprava profilu Nahrávky](images/profile-editor.png)
 
-V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a poštu. Každý může sledovat aktuální výchozí profil Organizace, použít konkrétní profil Organizace nebo jeden z Vašich profilů. Osobní profily můžete vytvářet, duplikovat, mazat, archivovat a obnovovat. Smazání nepoužitého profilu jej odstraní natrvalo; pokud na něj odkazuje historie zpracování, Chatterbox jej odebere ze seznamů, ale ponechá jej pod **Archivované**, aby historie zůstala zachována. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
+V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a poštu. Každý může sledovat aktuální výchozí profil Organizace, použít konkrétní profil Organizace nebo jeden z Vašich profilů. Osobní profily můžete vytvářet, duplikovat, mazat, archivovat a obnovovat. Smazání nepoužitého profilu jej odstraní natrvalo; pokud na něj odkazuje historie zpracování nebo úloha ve frontě, Chatterbox jej odebere ze seznamů, ale ponechá jej pod **Archivované**, aby mohla práce skončit a historie zůstala zachována. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky, poté Vaším účinným výchozím profilem, a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
 
 **Profily Organizace** jsou sdílené recepty. Členové je mohou používat na soukromé položky a duplikovat do osobního profilu. Štítek **Vaše výchozí** označuje profil, který právě používáte; **Výchozí profil Organizace** označuje volbu Organizace. Když sledujete výchozí profil Organizace, tento profil má oba štítky. Kurátoři mohou vytvářet a upravovat verze Organizace.
+
+Pokud je konkrétní profil Organizace, který jste zvolili, archivován nebo k němu ztratíte přístup, Chatterbox Vaši volbu zachová a v Profilech, nastavení složky i kartě Zařazení ji označí jako nedostupnou. Nové zpracování se zastaví, dokud nezvolíte jiný výchozí profil. Před archivací profilu Organizace kurátor uvidí počet členů, kteří jej zvolili, a stejné upozornění.
 
 <span id="folder-default-profiles" />
 

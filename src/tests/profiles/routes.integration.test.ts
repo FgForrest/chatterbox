@@ -375,6 +375,31 @@ describeWithDatabase("profile settings routes", () => {
         ).toBe(404);
     });
 
+    it("reports how many members selected an Organization profile before archive", async () => {
+        state.actorId = "curator";
+        state.capabilities = new Set(["use", "org.curate"]);
+        const created = await create({
+            name: "Member-selected Organization profile",
+            channel: "audio",
+            scope: "organization",
+        });
+        const id = created.body.profile.id as string;
+        await databaseClient().insert(userSettings).values({
+            userId: "profile-owner",
+            defaultAudioProfileId: id,
+        });
+
+        const response = await getProfile(
+            request("GET", `/${id}?deleteImpact=true`),
+            context(id),
+        );
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({
+            deleteImpact: { memberDefaultCount: 1 },
+        });
+    });
+
     it("returns validation paths and the current version on conflict", async () => {
         const created = await create({
             name: "Validated",

@@ -54,6 +54,17 @@ export type ResolvedStepProvider =
           provider: typeof RIFFADO_INCLUDED_PROVIDER_LABEL;
       });
 
+export type ResolvedStepProviderSelection =
+    | (ResolvedProviderBase & {
+          kind: "credential";
+          credential: CredentialRow;
+      })
+    | (ResolvedProviderBase & {
+          kind: "managed";
+          credential: null;
+          provider: typeof RIFFADO_INCLUDED_PROVIDER_LABEL;
+      });
+
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 function noReservation(): Promise<void> {
@@ -72,15 +83,15 @@ function missingProvider(
     );
 }
 
-function resolvedCredential(
+function resolvedCredentialSelection(
     credential: CredentialRow,
     payerUserId: string,
     reserveCall: () => Promise<void>,
     organizationCredential = false,
-): ResolvedStepProvider {
+): ResolvedStepProviderSelection {
     return {
         kind: "credential",
-        credential: { ...credential, apiKey: decrypt(credential.apiKey) },
+        credential,
         payerUserId,
         reserveCall,
         organizationCredential,
@@ -89,7 +100,7 @@ function resolvedCredential(
 
 async function managedProvider(
     actorUserId: string,
-): Promise<ResolvedStepProvider> {
+): Promise<ResolvedStepProviderSelection> {
     return {
         kind: "managed",
         credential: null,
@@ -97,6 +108,19 @@ async function managedProvider(
         payerUserId: actorUserId,
         reserveCall: noReservation,
         organizationCredential: false,
+    };
+}
+
+function decryptResolvedProvider(
+    selection: ResolvedStepProviderSelection,
+): ResolvedStepProvider {
+    if (selection.kind === "managed") return selection;
+    return {
+        ...selection,
+        credential: {
+            ...selection.credential,
+            apiKey: decrypt(selection.credential.apiKey),
+        },
     };
 }
 
@@ -257,7 +281,7 @@ async function resolvePinnedPersonal(input: {
     step: ProcessingStep;
     pin: ProviderPin;
     actorUserId: string;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     if (isRiffadoIncludedProviderId(input.pin.credentialId)) {
         if (input.step !== "transcription") {
             throw new AppError(
@@ -289,7 +313,11 @@ async function resolvePinnedPersonal(input: {
     }
     assertEnabled(credential, { kind: "profile-pin", scope: "personal" });
     assertSupportsStep(credential, input.step);
-    return resolvedCredential(credential, input.actorUserId, noReservation);
+    return resolvedCredentialSelection(
+        credential,
+        input.actorUserId,
+        noReservation,
+    );
 }
 
 async function resolvePinnedOrganization(input: {
@@ -298,7 +326,7 @@ async function resolvePinnedOrganization(input: {
     actorUserId: string;
     credential?: CredentialRow;
     choice?: ProviderChoice;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     const orgUserId = await getOrgUserId();
     if (!orgUserId) {
         throw new AppError(
@@ -358,7 +386,12 @@ async function resolvePinnedOrganization(input: {
         }
     };
 
-    return resolvedCredential(credential, orgUserId, reserveCall, true);
+    return resolvedCredentialSelection(
+        credential,
+        orgUserId,
+        reserveCall,
+        true,
+    );
 }
 
 function assertSupportsStep(
@@ -399,7 +432,7 @@ async function resolvePointer(input: {
     pointer: string;
     actorUserId: string;
     choice: ProviderChoice;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     if (isRiffadoIncludedProviderId(input.pointer)) {
         if (input.step === "transcription" && !isMynahConfigured()) {
             throw new AppError(
@@ -419,7 +452,11 @@ async function resolvePointer(input: {
     if (personal) {
         assertEnabled(personal, input.choice);
         assertSupportsStep(personal, input.step);
-        return resolvedCredential(personal, input.actorUserId, noReservation);
+        return resolvedCredentialSelection(
+            personal,
+            input.actorUserId,
+            noReservation,
+        );
     }
     const orgUserId = await getOrgUserId();
     const organization = orgUserId
@@ -434,18 +471,21 @@ async function resolvePointer(input: {
         });
     }
     if (input.choice.kind === "member-default") {
-        throw missingProvider(
-            `Your default for ${input.choice.role} no longer exists. Choose another provider in Settings.`,
-        );
+        const message = `Your default for ${input.choice.role} no longer exists. Choose another provider in Settings.`;
+        throw input.step === "transcription"
+            ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+            : missingProvider(message);
     }
     if (input.choice.kind === "organization-default") {
-        throw missingProvider(
-            `The Organization default for ${input.choice.role} no longer exists. Ask an administrator to choose another Organization default.`,
-        );
+        const message = `The Organization default for ${input.choice.role} no longer exists. Ask an administrator to choose another Organization default.`;
+        throw input.step === "transcription"
+            ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+            : missingProvider(message);
     }
-    throw missingProvider(
-        `The selected ${input.step} provider no longer exists. Choose another provider in Settings.`,
-    );
+    const message = `The selected ${input.step} provider no longer exists. Choose another provider in Settings.`;
+    throw input.step === "transcription"
+        ? new AppError(ErrorCode.NO_TRANSCRIPTION_PROVIDER, message, 400)
+        : missingProvider(message);
 }
 
 /** Validate that an actor may select a provider pointer for one role. */
@@ -502,7 +542,7 @@ export async function validateDefaultProviderSelection(input: {
 async function resolveUnpinned(
     step: ProcessingStep,
     actorUserId: string,
-): Promise<ResolvedStepProvider> {
+): Promise<ResolvedStepProviderSelection> {
     const actorState = await loadDefaultProviderState(actorUserId);
     const orgUserId = await organizationDefaultOwner(actorUserId);
     const organizationState = orgUserId
@@ -523,7 +563,11 @@ async function resolveUnpinned(
             assertEnabled(personal, choice);
             assertSupportsStep(personal, step);
             return {
-                ...resolvedCredential(personal, actorUserId, noReservation),
+                ...resolvedCredentialSelection(
+                    personal,
+                    actorUserId,
+                    noReservation,
+                ),
                 actorSettings: actorState.settings,
             };
         }
@@ -557,19 +601,25 @@ async function resolveUnpinned(
             actorSettings: actorState.settings,
         };
     }
-    const message =
-        step === "transcription"
-            ? "No transcription API configured"
-            : `No provider is configured for ${step}`;
-    throw missingProvider(message, { providerSelection: "absent" });
+    if (step === "transcription") {
+        throw new AppError(
+            ErrorCode.NO_TRANSCRIPTION_PROVIDER,
+            "No transcription API configured",
+            400,
+            { providerSelection: "absent" },
+        );
+    }
+    throw missingProvider(`No provider is configured for ${step}`, {
+        providerSelection: "absent",
+    });
 }
 
-/** Resolve one processing step's provider and payer at the moment it runs. */
-export async function resolveStepProvider(input: {
+/** Choose and authorize one processing provider without decrypting its key. */
+export async function resolveStepProviderSelection(input: {
     step: ProcessingStep;
     pin: ProviderPin | null;
     actorUserId: string;
-}): Promise<ResolvedStepProvider> {
+}): Promise<ResolvedStepProviderSelection> {
     if (input.pin?.scope === "personal") {
         return resolvePinnedPersonal({ ...input, pin: input.pin });
     }
@@ -577,4 +627,13 @@ export async function resolveStepProvider(input: {
         return resolvePinnedOrganization({ ...input, pin: input.pin });
     }
     return resolveUnpinned(input.step, input.actorUserId);
+}
+
+/** Resolve one processing step's provider and decrypt its key for a request. */
+export async function resolveStepProvider(input: {
+    step: ProcessingStep;
+    pin: ProviderPin | null;
+    actorUserId: string;
+}): Promise<ResolvedStepProvider> {
+    return decryptResolvedProvider(await resolveStepProviderSelection(input));
 }
