@@ -12,7 +12,11 @@
 export interface DkimSignature {
     /** The signing domain (`d=`), lowercase. */
     domain: string;
+    /** The key selector (`s=`). */
+    selector: string;
     result: string;
+    /** The verifier's diagnostic, or an empty string. */
+    comment: string;
     /**
      * The addresses in the To and Cc header lines the signature covers,
      * lowercase: read from the signed lines themselves, so an unsigned To

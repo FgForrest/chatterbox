@@ -30,7 +30,7 @@ import {
     resolveLocalPart,
 } from "@/lib/mail/addresses";
 import { isMailEnabled, mailDomain } from "@/lib/mail/config";
-import { authenticateMessage } from "@/lib/mail/dkim";
+import { authenticateMessage, logDkimRefusal } from "@/lib/mail/dkim";
 import { parseMessage } from "@/lib/mail/parse";
 import {
     evaluateRecipient,
@@ -231,8 +231,10 @@ export async function precheckMail(
         .filter((entry) => entry.verdict.accept)
         .map((entry) => entry.resolved.recipient);
     if (accepted.length === 0) {
+        const refusalReasons = new Set<RefusalReason>();
         for (const { resolved, verdict } of judged) {
             if (verdict.accept) continue;
+            refusalReasons.add(verdict.reason);
             await logRefusal({
                 resolved,
                 reason: verdict.reason,
@@ -240,6 +242,9 @@ export async function precheckMail(
                 facts: input.facts,
                 at: now,
             });
+        }
+        for (const reason of refusalReasons) {
+            logDkimRefusal(reason, input.facts.dkim);
         }
     }
     return { accepted };
@@ -280,11 +285,13 @@ export async function ingestMail(input: IngestInput): Promise<IngestResult> {
 
     const byOwner = new Map<string, OwnerDelivery>();
     const outcomeOf = new Map<string, RecipientOutcome>();
+    const refusalReasons = new Set<RefusalReason>();
     for (const recipient of ourRecipients(input.recipients)) {
         const resolved = await resolveRecipient(recipient, now);
         const verdict = verdictFor(resolved, facts, senderUser);
         if (!verdict.accept) {
             outcomeOf.set(recipient, "refused");
+            refusalReasons.add(verdict.reason);
             await logRefusal({
                 resolved,
                 reason: verdict.reason,
@@ -318,6 +325,12 @@ export async function ingestMail(input: IngestInput): Promise<IngestResult> {
         if (resolved.address) delivery.addresses.push(resolved.address.id);
         delivery.recipients.push(recipient);
         byOwner.set(verdict.ownerUserId, delivery);
+    }
+
+    if (byOwner.size === 0) {
+        for (const reason of refusalReasons) {
+            logDkimRefusal(reason, facts.dkim);
+        }
     }
 
     let overQuota = false;

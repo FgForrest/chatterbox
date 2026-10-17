@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { readBoundedJson } from "@/lib/http/bounded-json";
-import { MAX_DKIM_SIGNATURES } from "@/lib/mail/dkim";
+import {
+    MAX_DKIM_COMMENT_LENGTH,
+    MAX_DKIM_SELECTOR_LENGTH,
+    MAX_DKIM_SIGNATURES,
+} from "@/lib/mail/dkim";
 import { MAX_RECIPIENTS, precheckMail } from "@/lib/mail/ingest";
 import { mailIngestGate } from "@/lib/mail/ingest-gate";
 
@@ -19,7 +23,16 @@ const precheckSchema = z.object({
             .array(
                 z.object({
                     domain: z.string().trim().toLowerCase().max(253),
+                    selector: z
+                        .string()
+                        .trim()
+                        .max(MAX_DKIM_SELECTOR_LENGTH)
+                        .default(""),
                     result: z.string().max(32),
+                    comment: z
+                        .string()
+                        .max(MAX_DKIM_COMMENT_LENGTH)
+                        .default(""),
                     signedRecipients: z.array(address).max(500),
                     signedAt: z.string().datetime().nullable(),
                 }),
