@@ -152,16 +152,22 @@ describe("folder recording pane", () => {
         ).toBeNull();
     });
 
-    it("hides Organization rename and delete controls from members", () => {
+    it("hides Organization curation controls from members", () => {
         renderPane(orgPlanning);
 
+        expect(
+            screen.queryByRole("button", { name: "Default profiles" }),
+        ).toBeNull();
         expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
         expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     });
 
-    it("shows Organization rename and delete controls to curators", () => {
+    it("shows Organization curation controls to curators", () => {
         renderPane(orgPlanning, true);
 
+        expect(
+            screen.getByRole("button", { name: "Default profiles" }),
+        ).toBeTruthy();
         expect(screen.getByRole("button", { name: "Rename" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     });

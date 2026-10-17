@@ -338,8 +338,10 @@ export function CategorizePanel({
     const nothingAutomatic = i18n(
         "Nothing runs automatically. You start each step yourself.",
     );
-    let automationSentence: string;
-    if (profileChoice === MANUAL_ONLY) {
+    let automationSentence: string | null = null;
+    if (!profileChoice) {
+        automationSentence = null;
+    } else if (profileChoice === MANUAL_ONLY) {
         automationSentence = nothingAutomatic;
     } else if (!selectedDetails) {
         automationSentence = i18n("Loading profile automation…");
@@ -577,13 +579,15 @@ export function CategorizePanel({
                     </div>
                 )}
 
-                <div className="flex gap-2.5 rounded-md border border-[color-mix(in_oklch,var(--step-working)_25%,var(--border))] bg-[color-mix(in_oklch,var(--step-working)_8%,transparent)] px-3 py-2.5 text-sm">
-                    <GraduationCap
-                        className="mt-0.5 size-4 shrink-0 text-[var(--step-working)]"
-                        aria-hidden
-                    />
-                    <p>{automationSentence}</p>
-                </div>
+                {automationSentence && (
+                    <div className="flex gap-2.5 rounded-md border border-[color-mix(in_oklch,var(--step-working)_25%,var(--border))] bg-[color-mix(in_oklch,var(--step-working)_8%,transparent)] px-3 py-2.5 text-sm">
+                        <GraduationCap
+                            className="mt-0.5 size-4 shrink-0 text-[var(--step-working)]"
+                            aria-hidden
+                        />
+                        <p>{automationSentence}</p>
+                    </div>
+                )}
             </div>
 
             <footer className="flex flex-wrap items-center gap-3 border-t bg-muted/15 px-4 py-3 sm:px-5">

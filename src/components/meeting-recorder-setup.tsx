@@ -12,6 +12,7 @@ import { useExtracted, useLocale } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import {
     browserRecorderExtensionClient,
@@ -647,8 +648,8 @@ export function MeetingRecorderSetup({
                                     key={capture.client_recording_id}
                                     className="space-y-2 rounded border p-2 text-sm"
                                 >
-                                    <select
-                                        className="w-full rounded border bg-background px-2 py-1"
+                                    <NativeSelect
+                                        className="h-8 w-full"
                                         aria-label={i18n("New recorder key")}
                                         value={
                                             rebindTargets[
@@ -682,7 +683,7 @@ export function MeetingRecorderSetup({
                                                     {key.name}
                                                 </option>
                                             ))}
-                                    </select>
+                                    </NativeSelect>
                                     <Button
                                         size="sm"
                                         disabled={

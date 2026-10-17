@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { ImportDialog } from "@/components/almanac/import-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 
 export interface ThingSummary {
@@ -121,18 +122,18 @@ export function ThingsList({
         >
             <label className="space-y-1.5 text-sm" htmlFor="thing-type">
                 <span className="font-medium">{i18n("Kind of thing")}</span>
-                <select
+                <NativeSelect
                     id="thing-type"
                     value={typeKey}
                     onChange={(event) => setTypeKey(event.target.value)}
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="w-full"
                 >
                     {types.map((type) => (
                         <option key={type.key} value={type.key}>
                             {type.label}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
             </label>
             <label className="space-y-1.5 text-sm" htmlFor="thing-name">
                 <span className="font-medium">{i18n("Name")}</span>
@@ -243,13 +244,12 @@ export function ThingsList({
                                     className="bg-card pl-9 shadow-xs"
                                 />
                             </div>
-                            <select
+                            <NativeSelect
                                 value={activeType}
                                 onChange={(event) =>
                                     setTypeFilter(event.target.value)
                                 }
                                 aria-label={i18n("Kind of thing")}
-                                className="h-9 rounded-md border bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             >
                                 <option value="">{i18n("All types")}</option>
                                 {typesInUse.map((key) => (
@@ -257,7 +257,7 @@ export function ThingsList({
                                         {typeLabels[key] ?? key}
                                     </option>
                                 ))}
-                            </select>
+                            </NativeSelect>
                             {actions}
                         </div>
                     </div>

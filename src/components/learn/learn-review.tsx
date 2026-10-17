@@ -26,6 +26,7 @@ import {
     useLearnFailure,
     useSkipReason,
 } from "@/components/learn/learn-results";
+import { LearnWorkflowLine } from "@/components/learn/learn-workflow-line";
 import {
     linkedRecordId,
     NewRecordItem,
@@ -45,10 +46,7 @@ import {
 } from "@/components/learn/review-speaker";
 import { speakerAccent } from "@/components/people/speaker-accents";
 import { SpeakerPicker } from "@/components/people/speaker-picker";
-import {
-    WorkflowWidget,
-    WorkflowWidgetLine,
-} from "@/components/pipeline/workflow-widget";
+import { WorkflowWidget } from "@/components/pipeline/workflow-widget";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -59,6 +57,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 import { followJob } from "@/lib/jobs/client";
 import {
@@ -66,6 +65,7 @@ import {
     speakerKey,
 } from "@/lib/knowledge/speaker-label-rules";
 import { refsIn } from "@/lib/learn/new-refs";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { WorkflowWidgetFrame } from "@/lib/pipeline/workflow-widgets";
 import type { RecordingView } from "@/lib/sharing/view";
 import { withRecordingView } from "@/lib/sharing/view";
@@ -308,6 +308,7 @@ export function LearnReview({
                 );
                 return;
             }
+            invalidateItemProcessing(recordingId);
             const { jobId } = (await response.json()) as {
                 jobId: string | null;
             };
@@ -489,6 +490,7 @@ export function LearnReview({
                 );
                 return;
             }
+            invalidateItemProcessing(recordingId);
             const result = (await response.json()) as {
                 status: string;
                 applied: number;
@@ -682,6 +684,7 @@ export function LearnReview({
     if (!state?.available && !ready && !finished && !failed) return null;
     const learned = finished ? learnedCount(state?.items ?? []) : 0;
     const pending = status === "queued" || status === "running";
+    const working = running || pending;
     const buttonClass =
         "h-auto gap-1 px-0 text-sm font-medium hover:bg-transparent hover:text-primary";
 
@@ -897,26 +900,21 @@ export function LearnReview({
             );
         } else {
             trigger = (
-                <WorkflowWidgetLine
+                <LearnWorkflowLine
                     id={resolvedWidgetId}
                     title={finishedTitle}
                     facts={finishedFacts}
-                    icon={finishedIcon}
-                    action={
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setResultsOpen(true)}
-                        >
-                            {i18n("View results")}
-                        </Button>
+                    finished={finished}
+                    failed={failed}
+                    actionLabel={i18n("View results")}
+                    onAction={() => setResultsOpen(true)}
+                    onRetry={
+                        failed && state?.available ? startLearn : undefined
                     }
-                    onOpen={() => setResultsOpen(true)}
                 />
             );
         }
-    } else if (!ready && !pending) {
+    } else if (!ready && !working) {
         if (showTrigger) {
             trigger = (
                 <Button
@@ -937,20 +935,15 @@ export function LearnReview({
             );
         } else {
             trigger = (
-                <WorkflowWidgetLine
+                <LearnWorkflowLine
                     id={resolvedWidgetId}
                     title={i18n("Learn")}
                     facts={i18n(
                         "Ready when you are. Review what the transcript can teach the Almanac.",
                     )}
                     tone="next"
-                    icon={<GraduationCap className="size-4" />}
-                    action={
-                        <Button type="button" size="sm" onClick={startLearn}>
-                            {i18n("Learn")}
-                        </Button>
-                    }
-                    onOpen={startLearn}
+                    actionLabel={i18n("Learn")}
+                    onAction={startLearn}
                 />
             );
         }
@@ -961,15 +954,15 @@ export function LearnReview({
                 variant="ghost"
                 size="sm"
                 className={buttonClass}
-                disabled={pending}
+                disabled={working}
                 onClick={() => setOpen(true)}
             >
-                {pending ? (
+                {working ? (
                     <Loader2 className="size-4 animate-spin" />
                 ) : (
                     <GraduationCap className="size-4" />
                 )}
-                {pending
+                {working
                     ? i18n("Learning…")
                     : i18n("Review ({count})", { count: String(count) })}
             </Button>
@@ -977,9 +970,9 @@ export function LearnReview({
     }
 
     let dialogLine: ReactNode = null;
-    if (!showTrigger && pending) {
+    if (!showTrigger && working) {
         dialogLine = (
-            <WorkflowWidgetLine
+            <LearnWorkflowLine
                 title={i18n("Learn")}
                 facts={i18n("Learn is reading the transcript")}
                 tone="working"
@@ -988,23 +981,15 @@ export function LearnReview({
         );
     } else if (!showTrigger && ready) {
         dialogLine = (
-            <WorkflowWidgetLine
+            <LearnWorkflowLine
                 title={i18n("Learn")}
                 facts={i18n(
                     "{count, plural, one {# suggestion waits for your review} other {# suggestions wait for your review}}",
                     { count },
                 )}
                 tone="review"
-                icon={<GraduationCap className="size-4" />}
-                action={
-                    <Button
-                        type="button"
-                        size="sm"
-                        onClick={() => setOpen(true)}
-                    >
-                        {i18n("Review")}
-                    </Button>
-                }
+                actionLabel={i18n("Review")}
+                onAction={() => setOpen(true)}
             />
         );
     }
@@ -1060,20 +1045,20 @@ export function LearnReview({
                 </DialogContent>
             </Dialog>
             {trigger}
-            {(ready || pending) && (
+            {(ready || working) && (
                 <WorkflowWidget
                     id={resolvedWidgetId}
                     frame={frame}
-                    tone={pending ? "working" : "review"}
+                    tone={working ? "working" : "review"}
                     open={open}
                     onOpenChange={setOpen}
                     title={
-                        pending
+                        working
                             ? i18n("Learn")
                             : i18n("Review what Learn found")
                     }
                     helpLink={
-                        pending ? undefined : (
+                        working ? undefined : (
                             <HelpLink
                                 topic="learn.review"
                                 label={i18n("reviewing what Learn found")}
@@ -1081,7 +1066,7 @@ export function LearnReview({
                         )
                     }
                     description={
-                        pending ? (
+                        working ? (
                             i18n(
                                 "Learn is reading the transcript with your Almanac.",
                             )
@@ -1100,9 +1085,9 @@ export function LearnReview({
                     }
                     dialogWidth="3xl"
                     dialogLine={dialogLine}
-                    bodyClassName={pending ? undefined : "space-y-8"}
+                    bodyClassName={working ? undefined : "space-y-8"}
                 >
-                    {pending ? (
+                    {working ? (
                         <p className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                             {i18n(
@@ -1713,8 +1698,8 @@ function PhraseItem({
                     aria-label={i18n("Name of the relation")}
                     onChange={(event) => setLabel(event.target.value)}
                 />
-                <select
-                    className="h-8 rounded-md border bg-background px-2 text-sm"
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("How many values")}
                     value={cardinality}
                     onChange={(event) =>
@@ -1725,7 +1710,7 @@ function PhraseItem({
                 >
                     <option value="many">{i18n("Many values")}</option>
                     <option value="one">{i18n("One value at a time")}</option>
-                </select>
+                </NativeSelect>
                 <Button
                     size="sm"
                     variant={chosen === "create" ? "default" : "outline"}

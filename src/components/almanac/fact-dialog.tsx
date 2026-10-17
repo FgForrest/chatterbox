@@ -19,6 +19,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { parseApiError } from "@/lib/api-errors";
 
 /** A relation a fact may use, as the viewer's vocabulary has it. */
@@ -173,7 +174,7 @@ export function FactDialog({
                     </p>
                 ) : (
                     <div className="space-y-3">
-                        <select
+                        <NativeSelect
                             value={relationKey}
                             disabled={Boolean(editing)}
                             onChange={(event) => {
@@ -182,7 +183,7 @@ export function FactDialog({
                                 setPicking(true);
                             }}
                             aria-label={i18n("Relation")}
-                            className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            className="w-full"
                         >
                             {(editing ? relations : usable).map((candidate) => (
                                 <option
@@ -192,7 +193,7 @@ export function FactDialog({
                                     {candidate.label}
                                 </option>
                             ))}
-                        </select>
+                        </NativeSelect>
                         {literal ? (
                             <Input
                                 value={text}

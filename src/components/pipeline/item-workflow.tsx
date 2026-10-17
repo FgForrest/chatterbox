@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useItemProcessing } from "@/hooks/use-item-processing";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { WorkflowActionCode } from "@/lib/pipeline/workflow-status";
 import type {
@@ -271,7 +272,7 @@ export function ItemWorkflow({
 }: ItemWorkflowProps) {
     const i18n = useExtracted();
     const enabled = isOwn && view !== "org";
-    const { data, setData, workflow, refresh } = useItemProcessing({
+    const { data, setData, workflow } = useItemProcessing({
         itemId,
         kind,
         initialData,
@@ -282,6 +283,10 @@ export function ItemWorkflow({
     const panelRequest = useRef<{ itemId: string } | null>(null);
     const filingRef = useRef<HTMLDivElement>(null);
     const pendingFilingFocus = useRef(false);
+    const invalidate = useCallback(
+        () => invalidateItemProcessing(itemId),
+        [itemId],
+    );
 
     useEffect(() => {
         onProcessingChange?.(data);
@@ -349,6 +354,7 @@ export function ItemWorkflow({
                     { method: "DELETE" },
                 );
                 if (!response.ok) throw new Error(String(response.status));
+                invalidate();
                 onChanged?.();
             } catch {
                 setData(previous);
@@ -359,7 +365,7 @@ export function ItemWorkflow({
                 );
             }
         },
-        [data, i18n, itemId, onChanged, setData],
+        [data, i18n, invalidate, itemId, onChanged, setData],
     );
 
     const shareNow = useCallback(async () => {
@@ -380,13 +386,13 @@ export function ItemWorkflow({
             );
             if (!response.ok) throw new Error(String(response.status));
             toast.success(i18n("Sharing started."));
-            void refresh();
+            invalidate();
             onChanged?.();
         } catch {
             setData(previous);
             toast.error(i18n("The item could not be shared."));
         }
-    }, [data, i18n, itemId, onChanged, refresh, setData]);
+    }, [data, i18n, invalidate, itemId, onChanged, setData]);
 
     const changeProfile = useCallback(
         async (choice: string) => {
@@ -430,14 +436,14 @@ export function ItemWorkflow({
                     },
                 );
                 if (!response.ok) throw new Error(String(response.status));
-                void refresh();
+                invalidate();
                 onChanged?.();
             } catch {
                 setData(previous);
                 toast.error(i18n("The profile could not be changed."));
             }
         },
-        [data, i18n, itemId, onChanged, panelData, refresh, setData],
+        [data, i18n, invalidate, itemId, onChanged, panelData, setData],
     );
 
     const processAgain = useCallback(async () => {
@@ -451,13 +457,13 @@ export function ItemWorkflow({
             );
             if (!response.ok) throw new Error(String(response.status));
             toast.success(i18n("Processing requested."));
-            void refresh();
+            invalidate();
             onChanged?.();
         } catch {
             setData(previous);
             toast.error(i18n("The item could not be processed again."));
         }
-    }, [data, i18n, itemId, onChanged, refresh, setData]);
+    }, [data, i18n, invalidate, itemId, onChanged, setData]);
 
     const optimisticCategorize = useCallback(
         (submission: CategorizeSubmission) => {
@@ -572,13 +578,40 @@ export function ItemWorkflow({
         }
     };
 
+    const addToFolder = async (targetItemId: string, folderId: string) => {
+        await onAddToFolder(targetItemId, folderId);
+        invalidate();
+    };
+    const removeFromFolder = async (
+        targetItemId: string,
+        folderId: string,
+        withdraw?: boolean,
+    ) => {
+        await onRemoveFromFolder(targetItemId, folderId, withdraw);
+        invalidate();
+    };
+    const moveBetweenFolders = onMoveBetweenFolders
+        ? async (
+              targetItemId: string,
+              fromFolderId: string,
+              toFolderId: string,
+          ) => {
+              await onMoveBetweenFolders(
+                  targetItemId,
+                  fromFolderId,
+                  toFolderId,
+              );
+              invalidate();
+          }
+        : undefined;
+
     const folderProps = {
         folders,
         folderAssignments,
         onSelectFolder,
-        onAddToFolder,
-        onRemoveFromFolder,
-        onMoveBetweenFolders,
+        onAddToFolder: addToFolder,
+        onRemoveFromFolder: removeFromFolder,
+        onMoveBetweenFolders: moveBetweenFolders,
     };
 
     return (
@@ -598,7 +631,7 @@ export function ItemWorkflow({
                             onTranscribe={onTranscribe}
                             onOptimisticCategorize={optimisticCategorize}
                             onCategorized={() => {
-                                void refresh();
+                                invalidate();
                                 onChanged?.();
                             }}
                         />

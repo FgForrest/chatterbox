@@ -15,6 +15,7 @@ import { TaskReviewLink } from "@/components/tasks/task-review-dialog";
 import { useRecordingTasks } from "@/components/tasks/use-recording-tasks";
 import { Button } from "@/components/ui/button";
 import { getApiErrorMessage } from "@/lib/api-errors";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     isWorkflowWidgetLineVisible,
     type WorkflowWidgetFrame,
@@ -104,6 +105,7 @@ export function MailSummaryCard({
                 );
                 return;
             }
+            invalidateItemProcessing(mail.id);
             if (response.status === 202) {
                 toast.info(i18n("The summary is still being made."));
                 return;

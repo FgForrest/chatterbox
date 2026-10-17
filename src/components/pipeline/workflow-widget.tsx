@@ -347,7 +347,7 @@ export function WorkflowWidgetLine({
     let control = action;
     if (onExpand && expandLabel) {
         const label = expanded && collapseLabel ? collapseLabel : expandLabel;
-        control = (
+        const expandControl = (
             <Button
                 type="button"
                 variant="ghost"
@@ -363,6 +363,14 @@ export function WorkflowWidgetLine({
                 )}
                 {label}
             </Button>
+        );
+        control = action ? (
+            <div className="flex shrink-0 items-center gap-2">
+                {expandControl}
+                {action}
+            </div>
+        ) : (
+            expandControl
         );
     }
     return (

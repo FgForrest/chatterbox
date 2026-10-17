@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { NativeSelect } from "@/components/ui/native-select";
 import { listUsers } from "@/db/queries/admin";
 import {
     formatBytes,
@@ -62,17 +63,13 @@ export default async function AdminUsersPage({
                     placeholder="Search by email"
                     className="border rounded px-3 py-2 text-sm bg-background w-64"
                 />
-                <select
-                    name="sort"
-                    defaultValue={sort}
-                    className="border rounded p-2 text-sm bg-background"
-                >
+                <NativeSelect name="sort" defaultValue={sort}>
                     {SORTS.map((s) => (
                         <option key={s.key} value={s.key}>
                             Sort: {s.label}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
                 <button
                     type="submit"
                     className="border rounded px-3 py-2 text-sm hover:bg-muted"
