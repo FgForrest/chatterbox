@@ -7,6 +7,7 @@ import type {
     PendingUploadPhase,
 } from "@/components/dashboard/pending-upload-row";
 import { followJob, type JobProgressSnapshot } from "@/lib/jobs/client";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import {
     formatUploadLimit,
     isSupportedUpload,
@@ -74,6 +75,7 @@ export function useUploadQueue({
 
     const completeUpload = useCallback(
         (upload: UploadCompletion, message: string) => {
+            invalidateItemProcessing(upload.recordingId);
             const action = onUploadComplete(upload);
             toast.success(
                 message,

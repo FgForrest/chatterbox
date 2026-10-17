@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { getApiErrorMessage } from "@/lib/api-errors";
 
 export interface SuggestedPhrase {
@@ -132,7 +133,6 @@ function PhraseRow({
             </div>
         );
     }
-    const select = "h-8 rounded-md border bg-background px-2 text-sm";
     return (
         <div className="space-y-2 text-sm">
             <div className="flex items-center justify-between gap-4">
@@ -140,8 +140,8 @@ function PhraseRow({
                 <span className="text-muted-foreground">{members}</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-                <select
-                    className={select}
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("Relation it means")}
                     value={mapTo}
                     onChange={(event) => setMapTo(event.target.value)}
@@ -151,7 +151,7 @@ function PhraseRow({
                             {type.label}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
                 <Button
                     size="sm"
                     variant="outline"
@@ -176,8 +176,8 @@ function PhraseRow({
                     aria-label={i18n("Name of the relation")}
                     onChange={(event) => setLabel(event.target.value)}
                 />
-                <select
-                    className={select}
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("Who or what it is about")}
                     value={subject}
                     onChange={(event) => setSubject(event.target.value)}
@@ -187,10 +187,10 @@ function PhraseRow({
                             {type.label}
                         </option>
                     ))}
-                </select>
+                </NativeSelect>
                 <span aria-hidden>→</span>
-                <select
-                    className={select}
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("What it relates to")}
                     value={object}
                     onChange={(event) => setObject(event.target.value)}
@@ -201,9 +201,9 @@ function PhraseRow({
                             {type.label}
                         </option>
                     ))}
-                </select>
-                <select
-                    className={select}
+                </NativeSelect>
+                <NativeSelect
+                    className="h-8"
                     aria-label={i18n("How many values")}
                     value={cardinality}
                     onChange={(event) =>
@@ -214,7 +214,7 @@ function PhraseRow({
                 >
                     <option value="many">{i18n("Many values")}</option>
                     <option value="one">{i18n("One value at a time")}</option>
-                </select>
+                </NativeSelect>
                 <Button
                     size="sm"
                     disabled={busy || !label.trim()}

@@ -284,7 +284,7 @@ export function FolderRecordingPane({
                     )}
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                    {folder.kind === "custom" && (
+                    {folder.kind === "custom" && canManageFolder && (
                         <FolderDefaultProfiles
                             key={folder.id}
                             folderId={folder.id}

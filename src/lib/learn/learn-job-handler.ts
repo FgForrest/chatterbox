@@ -56,6 +56,7 @@ import { learnChatClients } from "@/lib/learn/chat-clients";
 import { queueCorrectionPassInTx } from "@/lib/learn/correction-pass-queue";
 import { isFinalLearnError } from "@/lib/learn/errors";
 import {
+    failLearnRunAfterTerminalJob,
     LEARN_JOB_KIND,
     LEARN_MAX_ATTEMPTS,
     type LearnJobPayload,
@@ -613,6 +614,14 @@ export const learnJobHandler: JobHandler<LearnJobPayload> = {
         } finally {
             await settled(context.payload.runId).catch(() => undefined);
         }
+    },
+    async onTerminalFailure({ payload, userId, errorCode }): Promise<void> {
+        const itemId = await failLearnRunAfterTerminalJob(
+            payload.runId,
+            userId,
+            errorCode,
+        );
+        if (itemId) await releaseAutoLearnHold(itemId);
     },
 };
 

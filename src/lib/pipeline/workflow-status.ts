@@ -170,6 +170,15 @@ function displayState(
         return data.jobs.summary === "queued" ? "queued" : "working";
     }
     if (
+        data.failures.some(
+            (failure) =>
+                failure.phase === phase &&
+                failure.reasonCode !== "profile_unavailable",
+        )
+    ) {
+        return "problem";
+    }
+    if (
         phase === "taskReview" &&
         record?.state === "waiting" &&
         data.taskReviewWaiting > 0

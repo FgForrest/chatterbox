@@ -43,16 +43,16 @@ Sekce **Přepis** nyní obsahuje výchozí hodnoty účtu pro tlačítko **Přep
 - **Primární přepis**, pokud jej vytvořil Plaud i Váš poskytovatel,
 - **Výchozí jazyk přepisu**, který se použije při okamžitém přepisu.
 
-Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Staré šablony názvů zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
+Automatický přepis, vytváření názvů a poskytovatelé pro konkrétní profil se nastavují v sekci **Profily**. Šablony názvů, které jste před zavedením profilů vytvořili nebo upravili, zůstávají pod **Šablony z doby před profily** a lze je zkopírovat do profilu.
 
 ## Témata
 
 Tato sekce zachovává výchozího poskytovatele témat účtu. Profil bez
 připnutého poskytovatele témat použije Vaši volbu, poté Vaši volbu pro shrnutí
 a nakonec výchozí poskytovatele Organizace. Automatická detekce témat se
-nastavuje v sekci **Profily**. Starší šablony témat zůstávají jen pro čtení pod
-**Šablony z doby před profily**; pomocí **Zkopírovat do profilu** je můžete dál
-upravovat.
+nastavuje v sekci **Profily**. Šablony témat, které jste před zavedením profilů
+vytvořili nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před
+profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
 ## Učení
 
@@ -68,8 +68,9 @@ Tato sekce zachovává výchozího poskytovatele shrnutí a předvolbu funkce
 použije Vaši volbu, nebo výchozího poskytovatele Organizace, pokud jste si
 žádného nezvolili. Automatické názvy a shrnutí, jazyk a formát výstupu a chování funkce
 **Vícenásobné shrnování** v profilu se nastavují v
-sekci **Profily**. Starší šablony shrnutí zůstávají jen pro čtení pod **Šablony
-z doby před profily**; pomocí **Zkopírovat do profilu** je můžete dál upravovat.
+sekci **Profily**. Šablony shrnutí, které jste před zavedením profilů vytvořili
+nebo upravili, zůstávají jen pro čtení pod **Šablony z doby před profily**;
+pomocí **Zkopírovat do profilu** je můžete dál upravovat.
 
 ## Zobrazení
 

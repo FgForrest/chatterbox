@@ -316,6 +316,89 @@ describe("workflow widgets", () => {
         expect(widgets.summary.visible).toBe(false);
         expect(widgets.taskReview.visible).toBe(false);
     });
+
+    it.each([
+        "title",
+        "topics",
+    ] as const)("marks Summary as a problem when its %s substep fails", (step) => {
+        const data = presentation({
+            phases: {
+                categorize: phase("done"),
+                transcribe: phase("done"),
+                learn: phase("done"),
+                summary: {
+                    ...phase("done"),
+                    steps: {
+                        [step]: phase("failed", "SERVICE_UNAVAILABLE"),
+                    },
+                },
+            },
+            outputs: { transcript: true, learn: true, summary: true },
+            failures: [
+                {
+                    phase: "summary",
+                    step,
+                    reasonCode: "SERVICE_UNAVAILABLE",
+                    retryAvailable: true,
+                },
+            ],
+        });
+
+        const workflow = workflowStatus.deriveWorkflowStatus(data, "audio");
+        expect(
+            workflow.steps.find((candidate) => candidate.id === "summary"),
+        ).toMatchObject({ state: "problem", current: true });
+        expect(workflow.status).toMatchObject({
+            actor: "problem",
+            message: "failureUnavailable",
+            params: { step: "summary" },
+            action: "retry",
+        });
+    });
+
+    it.each([
+        { step: "title", job: "queued", state: "queued" },
+        { step: "title", job: "running", state: "working" },
+        { step: "topics", job: "queued", state: "queued" },
+        { step: "topics", job: "running", state: "working" },
+    ] as const)("keeps Summary $state while its $step retry job is $job", ({
+        step,
+        job,
+        state,
+    }) => {
+        const data = presentation({
+            phases: {
+                categorize: phase("done"),
+                transcribe: phase("done"),
+                learn: phase("done"),
+                summary: {
+                    ...phase("failed", "SERVICE_UNAVAILABLE"),
+                    steps: {
+                        [step]: phase("failed", "SERVICE_UNAVAILABLE"),
+                    },
+                },
+            },
+            outputs: { transcript: true, learn: true, summary: false },
+            jobs: { transcription: null, summary: job },
+            failures: [
+                {
+                    phase: "summary",
+                    step,
+                    reasonCode: "SERVICE_UNAVAILABLE",
+                    retryAvailable: true,
+                },
+            ],
+        });
+
+        const workflow = workflowStatus.deriveWorkflowStatus(data, "audio");
+        expect(
+            workflow.steps.find((candidate) => candidate.id === "summary"),
+        ).toMatchObject({ state, current: true });
+        expect(deriveWorkflowWidgets(data).summary).toMatchObject({
+            active: true,
+            tone: "working",
+        });
+    });
 });
 
 describe.each([
