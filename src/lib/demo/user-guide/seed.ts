@@ -56,7 +56,11 @@ import { seedCoreVocabulary } from "@/lib/knowledge/vocabulary";
 import { peopleByAddress } from "@/lib/mail/known-quotes";
 import { MAIL_PARSER_VERSION, segmentMail } from "@/lib/mail/segment";
 import { ensureOrgAccount } from "@/lib/org/account";
-import type { PhaseState, PipelinePhases } from "@/lib/pipeline/types";
+import type {
+    ContentRevisionInput,
+    PhaseState,
+    PipelinePhases,
+} from "@/lib/pipeline/types";
 import { ensureProfiles } from "@/lib/profiles/seed";
 import { buildRecordingStorageFilename } from "@/lib/recordings/filename";
 import { taskViewerById } from "@/lib/tasks/access";
@@ -1205,8 +1209,13 @@ async function seedTaskGraph(
     });
 }
 
-function phase(state: PhaseState, reason: string, at: string) {
-    return { state, reason, generation: 1, at };
+function phase(
+    state: PhaseState,
+    reason: string,
+    at: string,
+    inputs?: ContentRevisionInput,
+) {
+    return { state, reason, generation: 1, at, ...(inputs ? { inputs } : {}) };
 }
 
 async function seedProcessingStates(
@@ -1226,17 +1235,39 @@ async function seedProcessingStates(
             (fixture.orgFolders?.length ?? 0) === 0;
         const profile = profiles[fixture.owner].audio;
         const taskReview = fixture.key === "product-sync";
+        const [transcription] = await db
+            .select({
+                id: transcriptions.id,
+                revision: transcriptions.revision,
+            })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.recordingId, itemId),
+                    eq(transcriptions.userId, scopes[fixture.owner].userId),
+                    eq(transcriptions.source, "riffado"),
+                ),
+            )
+            .limit(1);
+        const input = transcription
+            ? {
+                  contentId: transcription.id,
+                  contentSourceId: "riffado",
+                  contentRevision: transcription.revision,
+              }
+            : undefined;
         const phases: PipelinePhases = unfiled
             ? { categorize: phase("waiting", "needs_folder", at) }
             : {
                   categorize: phase("done", "categorized", at),
-                  transcribe: phase("done", "content-available", at),
+                  transcribe: phase("done", "content-available", at, input),
                   learn: phase(
                       fixture.learn ? "waiting" : "done",
                       fixture.learn ? "manual_review_pending" : "released",
                       at,
+                      input,
                   ),
-                  summary: phase("done", "completed", at),
+                  summary: phase("done", "completed", at, input),
                   taskReview: phase(
                       taskReview ? "waiting" : "done",
                       taskReview ? "needs_review" : "reviewed",
@@ -1260,6 +1291,22 @@ async function seedProcessingStates(
     const mailId = itemIds[DEMO_MAIL.key];
     if (!mailId) throw new Error("No demo mail");
     const mailProfile = profiles.alex.mail;
+    const [mailContent] = await db
+        .select({ id: mailContents.id, revision: mailContents.revision })
+        .from(mailContents)
+        .where(
+            and(
+                eq(mailContents.itemId, mailId),
+                eq(mailContents.userId, scopes.alex.userId),
+            ),
+        )
+        .limit(1);
+    if (!mailContent) throw new Error("No demo mail content");
+    const mailInput = {
+        contentId: mailContent.id,
+        contentSourceId: "mail",
+        contentRevision: mailContent.revision,
+    };
     await db.insert(itemProcessing).values({
         itemId: mailId,
         userId: scopes.alex.userId,
@@ -1268,8 +1315,8 @@ async function seedProcessingStates(
         profileRevisionId: mailProfile.revisionId,
         phases: {
             categorize: phase("done", "categorized", at),
-            learn: phase("done", "released", at),
-            summary: phase("done", "completed", at),
+            learn: phase("done", "released", at, mailInput),
+            summary: phase("done", "completed", at, mailInput),
             taskReview: phase("done", "reviewed", at),
             share: phase("done", "shared", at),
         },
@@ -1298,6 +1345,11 @@ async function seedLearnRun(
             trigger: "manual",
             transcriptRevision: transcription.revision,
             vocabularyVersion: 0,
+            inputs: {
+                contentId: transcription.id,
+                contentSourceId: "riffado",
+                contentRevision: transcription.revision,
+            },
             status: "ready",
         })
         .returning({ id: learnRuns.id });

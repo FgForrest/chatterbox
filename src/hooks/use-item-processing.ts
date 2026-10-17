@@ -19,7 +19,19 @@ interface Revalidation {
 }
 
 function processingKey(data: ItemProcessingPresentation | null): string {
-    return JSON.stringify(data);
+    return JSON.stringify(data?.phases ?? {});
+}
+
+function hasActiveStep(
+    data: ItemProcessingPresentation | null,
+    kind: "audio" | "mail",
+): boolean {
+    return (
+        data !== null &&
+        deriveWorkflowStatus(data, kind).steps.some(
+            (step) => step.state === "queued" || step.state === "working",
+        )
+    );
 }
 
 interface UseItemProcessingOptions {
@@ -99,7 +111,11 @@ export function useItemProcessing({
                 const next = body.processing ?? null;
                 setData(next);
                 const current = revalidationRef.current;
-                if (current && processingKey(next) !== current.baseline) {
+                if (
+                    current &&
+                    (processingKey(next) !== current.baseline ||
+                        hasActiveStep(next, kind))
+                ) {
                     revalidationRef.current = null;
                     setRevalidation(null);
                 }
@@ -141,12 +157,26 @@ export function useItemProcessing({
         workflow?.steps.some(
             (step) => step.state === "queued" || step.state === "working",
         ) ?? false;
+    const previousActivity = useRef({ active, itemId });
 
     useEffect(() => {
         if (!active || !revalidationRef.current) return;
         revalidationRef.current = null;
         setRevalidation(null);
     }, [active]);
+
+    useEffect(() => {
+        const previous = previousActivity.current;
+        previousActivity.current = { active, itemId };
+        if (
+            previous.itemId === itemId &&
+            previous.active &&
+            !active &&
+            enabled
+        ) {
+            beginRevalidation();
+        }
+    }, [active, beginRevalidation, enabled, itemId]);
 
     useEffect(() => {
         const onVisibility = () =>

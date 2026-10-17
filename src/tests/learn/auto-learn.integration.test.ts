@@ -584,6 +584,88 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
         expect(next.remaining).toBe(18);
     });
 
+    it("does not start automatic Learn after a failed manual run on the current input", async () => {
+        const [transcript] = await db()
+            .select({ revision: transcriptions.revision })
+            .from(transcriptions)
+            .where(
+                and(
+                    eq(transcriptions.id, riffadoId),
+                    eq(transcriptions.userId, OWNER),
+                ),
+            )
+            .limit(1);
+        const input = {
+            contentId: riffadoId,
+            contentSourceId: "riffado",
+            contentRevision: transcript?.revision ?? 0,
+        };
+        const now = new Date().toISOString();
+        await db()
+            .insert(itemProcessing)
+            .values({
+                itemId: REC,
+                userId: OWNER,
+                view: "private",
+                phases: {
+                    categorize: {
+                        state: "done",
+                        reason: "categorized",
+                        generation: 0,
+                        at: now,
+                    },
+                    transcribe: {
+                        state: "done",
+                        reason: "content-available",
+                        generation: 0,
+                        inputs: input,
+                        at: now,
+                    },
+                    learn: {
+                        state: "running",
+                        reason: "manual",
+                        generation: 0,
+                        inputs: input,
+                        at: now,
+                    },
+                },
+            });
+        await db().insert(learnRuns).values({
+            userId: OWNER,
+            scopeUserId: OWNER,
+            itemId: REC,
+            transcriptionId: riffadoId,
+            view: "private",
+            actorUserId: OWNER,
+            trigger: "manual",
+            transcriptRevision: input.contentRevision,
+            vocabularyVersion: 0,
+            inputs: input,
+            status: "failed",
+            errorCode: "AI_PROVIDER_API_ERROR",
+        });
+
+        await runAdvance();
+
+        expect(
+            await db()
+                .select({
+                    trigger: learnRuns.trigger,
+                    status: learnRuns.status,
+                })
+                .from(learnRuns)
+                .where(
+                    and(eq(learnRuns.itemId, REC), eq(learnRuns.userId, OWNER)),
+                ),
+        ).toEqual([{ trigger: "manual", status: "failed" }]);
+        expect((await processing())?.phases.learn).toMatchObject({
+            state: "done",
+            reason: "manual_finished",
+            inputs: input,
+        });
+        expect(await kinds()).not.toContain("learn.run");
+    });
+
     it("waits while a run is queued or awaits review, and releases once when the last review is done", async () => {
         await hold();
         const ready = await run("ready");

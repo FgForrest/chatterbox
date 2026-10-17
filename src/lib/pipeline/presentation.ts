@@ -92,6 +92,18 @@ export interface ItemProcessingPresentation {
     processAgain: boolean;
     processAgainReason: "profile_changed" | null;
     learnFindingsWaiting: number;
+    latestLearnRun?: {
+        status:
+            | "queued"
+            | "running"
+            | "ready"
+            | "finished"
+            | "failed"
+            | "superseded"
+            | "cancelled";
+        errorCode: string | null;
+        updatedAt: string;
+    } | null;
     taskReviewWaiting: number;
     jobs: {
         transcription: ProcessingJobState | null;
@@ -334,7 +346,7 @@ export async function loadPrivateItemProcessing(
         transcripts,
         mailContent,
         summaries,
-        finishedLearnRuns,
+        learnRunRows,
     ] = await Promise.all([
         getOrgUserId(),
         db
@@ -519,6 +531,10 @@ export async function loadPrivateItemProcessing(
                 transcriptionId: learnRuns.transcriptionId,
                 transcriptRevision: learnRuns.transcriptRevision,
                 inputs: learnRuns.inputs,
+                status: learnRuns.status,
+                errorCode: learnRuns.errorCode,
+                createdAt: learnRuns.createdAt,
+                updatedAt: learnRuns.updatedAt,
             })
             .from(learnRuns)
             .where(
@@ -526,9 +542,9 @@ export async function loadPrivateItemProcessing(
                     eq(learnRuns.itemId, itemId),
                     eq(learnRuns.userId, ownerUserId),
                     eq(learnRuns.view, "private"),
-                    eq(learnRuns.status, "finished"),
                 ),
-            ),
+            )
+            .orderBy(desc(learnRuns.createdAt)),
     ]);
     const taskReviewWaiting = await countItemTaskReviewWaiting(
         itemId,
@@ -614,7 +630,8 @@ export async function loadPrivateItemProcessing(
                   },
               }
             : null;
-    const learnDone = finishedLearnRuns.some((run) => {
+    const learnDone = learnRunRows.some((run) => {
+        if (run.status !== "finished") return false;
         const inputs = run.inputs as {
             contentId?: unknown;
             contentRevision?: unknown;
@@ -699,6 +716,13 @@ export async function loadPrivateItemProcessing(
             ? processingOutdatedReason(item.phases ?? {})
             : null,
         learnFindingsWaiting: learnFindings?.count ?? 0,
+        latestLearnRun: learnRunRows[0]
+            ? {
+                  status: learnRunRows[0].status,
+                  errorCode: learnRunRows[0].errorCode,
+                  updatedAt: learnRunRows[0].updatedAt.toISOString(),
+              }
+            : null,
         taskReviewWaiting,
         jobs: {
             transcription: processingJobState(transcriptionJobs),

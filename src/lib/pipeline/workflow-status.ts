@@ -138,11 +138,28 @@ function recordState(record: PhaseRecord | undefined): WorkflowStepState {
     }
 }
 
+function currentLearnRun(data: ItemProcessingPresentation) {
+    const run = data.latestLearnRun;
+    if (!run) return null;
+    const phaseAt = data.phases.learn?.at;
+    if (phaseAt && Date.parse(run.updatedAt) <= Date.parse(phaseAt))
+        return null;
+    if (
+        run.status !== "queued" &&
+        run.status !== "running" &&
+        run.status !== "failed"
+    ) {
+        return null;
+    }
+    return run;
+}
+
 function displayState(
     data: ItemProcessingPresentation,
     phase: PhaseName,
 ): WorkflowStepState {
     const record = data.phases[phase];
+    const learnRun = phase === "learn" ? currentLearnRun(data) : null;
     if (phase === "categorize") {
         if (
             record?.reason === "needs_folder" ||
@@ -156,6 +173,9 @@ function displayState(
     if (phase === "transcribe" && data.jobs.transcription) {
         return data.jobs.transcription === "queued" ? "queued" : "working";
     }
+    if (learnRun?.status === "queued") return "queued";
+    if (learnRun?.status === "running") return "working";
+    if (learnRun?.status === "failed") return "problem";
     if (phase === "learn" && record?.state === "waiting") {
         if (
             data.learnFindingsWaiting > 0 ||
@@ -381,9 +401,19 @@ function failureMessage(reasonCode: string): WorkflowMessageCode {
 function failureStatus(
     data: ItemProcessingPresentation,
 ): WorkflowStatusSentence | null {
-    const failure = phaseOrder.flatMap((phase) =>
-        data.failures.filter((candidate) => candidate.phase === phase),
-    )[0];
+    const learnRun = currentLearnRun(data);
+    const failure =
+        learnRun?.status === "failed"
+            ? {
+                  phase: "learn" as const,
+                  reasonCode: learnRun.errorCode ?? "UNKNOWN_FAILURE",
+                  retryAvailable: true,
+              }
+            : phaseOrder.flatMap((phase) =>
+                  data.failures.filter(
+                      (candidate) => candidate.phase === phase,
+                  ),
+              )[0];
     if (!failure || failure.reasonCode === "profile_unavailable") return null;
     return {
         actor: "problem",
@@ -454,6 +484,13 @@ function deriveStatus(
     }
     if (data.jobs.transcription === "running") {
         return { actor: "working", message: "transcribing" };
+    }
+    const learnRun = currentLearnRun(data);
+    if (learnRun?.status === "queued") {
+        return { actor: "queued", message: "learnQueued" };
+    }
+    if (learnRun?.status === "running") {
+        return { actor: "working", message: "learnRunning" };
     }
     if (data.phases.learn?.state === "running") {
         return { actor: "working", message: "learnRunning" };
