@@ -168,6 +168,15 @@ describe("Settings Profiles", () => {
                                 isDefaultEnhancement: true,
                                 createdAt: "2026-10-15T00:00:00.000Z",
                             },
+                            {
+                                id: "transcription-ai",
+                                provider: "ElevenLabs",
+                                defaultModel: "scribe_v2",
+                                baseUrl: null,
+                                isDefaultTranscription: true,
+                                isDefaultEnhancement: false,
+                                createdAt: "2026-10-15T00:00:00.000Z",
+                            },
                         ],
                     });
                 }
@@ -376,6 +385,9 @@ describe("Settings Profiles", () => {
 
     it("does not show recording-only steps in a mail profile", async () => {
         await edit("Mail Profile");
+        expect(
+            screen.queryByRole("combobox", { name: "AI for transcription" }),
+        ).toBeNull();
         fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
 
         expect(
@@ -388,6 +400,70 @@ describe("Settings Profiles", () => {
         expect(
             screen.getAllByRole("switch", { name: "Run automatically" }),
         ).toHaveLength(3);
+    });
+
+    it("shows the transcription provider in Basic for recording profiles", async () => {
+        await edit("Default Profile");
+
+        const provider = await screen.findByRole("combobox", {
+            name: "AI for transcription",
+        });
+        expect(provider.textContent).toContain("ElevenLabs · scribe_v2");
+        expect(
+            screen.getByText(
+                "Default leaves transcription unpinned, so it uses the account's transcription provider or Mynah when available.",
+            ),
+        ).toBeTruthy();
+    });
+
+    it("updates the Advanced transcription pin and saved settings from Basic", async () => {
+        await edit("Default Profile");
+
+        fireEvent.change(
+            await screen.findByRole("combobox", {
+                name: "AI for transcription",
+            }),
+            { target: { value: "personal:transcription-ai" } },
+        );
+        fireEvent.click(screen.getByRole("tab", { name: "Advanced" }));
+        expect(
+            (
+                screen.getByRole("combobox", {
+                    name: "Transcribe provider",
+                }) as HTMLSelectElement
+            ).value,
+        ).toBe("personal:transcription-ai");
+
+        fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.method === "PUT" &&
+                        (call.body as { settings: AudioProfileSettings })
+                            .settings.steps.transcribe.provider
+                            ?.credentialId === "transcription-ai" &&
+                        (call.body as { settings: AudioProfileSettings })
+                            .settings.steps.transcribe.provider?.scope ===
+                            "personal",
+                ),
+            ).toBe(true),
+        );
+    });
+
+    it("disables the Basic transcription provider for read-only profiles", async () => {
+        await renderList();
+        fireEvent.click(
+            screen.getByRole("button", { name: "View Org Profile" }),
+        );
+
+        expect(
+            (
+                await screen.findByRole("combobox", {
+                    name: "AI for transcription",
+                })
+            ).hasAttribute("disabled"),
+        ).toBe(true);
     });
 
     it("shows an unavailable provider pin and requires another choice", async () => {

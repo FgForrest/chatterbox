@@ -2363,6 +2363,8 @@
   "s-n2ku": "Profile name",
   "fNCCY7": "Basic",
   "ZBVds5": "Save profile",
+  "NYS0Gw": "AI for transcription",
+  "KusbTa": "Default leaves transcription unpinned, so it uses the account's transcription provider or Mynah when available.",
   "gMyemh": "AI for text steps",
   "twl3O-": "Default for each role",
   "PMRgKV": "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role leaves every step unpinned.",
