@@ -529,6 +529,7 @@ describeWithDatabase(
                     provider: "OpenAI",
                     copyKeyFrom: source.provider.id,
                     defaultModel: "gpt-4o",
+                    isDefaultEnhancement: true,
                 }),
             );
             const duplicate = await response.json();
@@ -544,6 +545,13 @@ describeWithDatabase(
                 .where(eq(apiCredentials.id, duplicate.provider.id));
             expect(duplicateRow?.apiKey).toBe(sourceRow?.apiKey);
             expect(duplicateRow?.userId).toBe("org-user");
+            const [settings] = await databaseClient()
+                .select({ defaults: userSettings.defaultProviders })
+                .from(userSettings)
+                .where(eq(userSettings.userId, "org-user"));
+            expect(settings?.defaults).toMatchObject({
+                summary: duplicate.provider.id,
+            });
 
             const [audit] = await databaseClient()
                 .select()

@@ -5,7 +5,6 @@ import {
     isEnhancementOnlyProvider,
     isTranscriptionOnlyProvider,
 } from "@/lib/ai/provider-presets";
-import { getOrgUserId } from "@/lib/org/config";
 import { isRiffadoIncludedProviderId } from "@/lib/transcription/included-provider";
 
 export type ProviderRole =
@@ -38,6 +37,20 @@ interface SetDefaultProviderOptions {
     onlyIf?: string;
 }
 
+type DefaultProviderCredential = Pick<
+    typeof apiCredentials.$inferSelect,
+    | "id"
+    | "provider"
+    | "isDefaultTranscription"
+    | "isDefaultEnhancement"
+    | "isDefaultLearn"
+>;
+
+type DefaultProviderSettings = Pick<
+    typeof userSettings.$inferSelect,
+    "defaultTranscriptionProviderId" | "defaultProviders"
+>;
+
 function preferences(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return value as Record<string, unknown>;
@@ -52,6 +65,42 @@ export function providerPointer(
     return typeof selected === "string" && selected.length > 0
         ? selected
         : null;
+}
+
+function defaultProviderPointers(
+    credentials: DefaultProviderCredential[],
+    settings: DefaultProviderSettings | undefined,
+): DefaultProviderPointers {
+    const legacyTranscription = credentials.find(
+        (row) =>
+            row.isDefaultTranscription &&
+            !isEnhancementOnlyProvider(row.provider),
+    )?.id;
+    const legacySummary = credentials.find(
+        (row) =>
+            row.isDefaultEnhancement &&
+            !isTranscriptionOnlyProvider(row.provider),
+    )?.id;
+    const legacyLearn = credentials.find(
+        (row) =>
+            row.isDefaultLearn && !isTranscriptionOnlyProvider(row.provider),
+    )?.id;
+    return {
+        transcription:
+            settings?.defaultTranscriptionProviderId ??
+            legacyTranscription ??
+            null,
+        summary:
+            providerPointer(settings?.defaultProviders, "summary") ??
+            legacySummary ??
+            null,
+        learn:
+            providerPointer(settings?.defaultProviders, "learn") ??
+            legacyLearn ??
+            null,
+        topics: providerPointer(settings?.defaultProviders, "topics"),
+        title: providerPointer(settings?.defaultProviders, "title"),
+    };
 }
 
 /** Load provider pointers with the credentials and settings used to derive them. */
@@ -70,41 +119,7 @@ export async function loadDefaultProviderState(
         .from(userSettings)
         .where(eq(userSettings.userId, userId))
         .limit(1);
-    const preserveOrganizationLegacy = (await getOrgUserId()) === userId;
-    const legacyTranscription = credentials.find(
-        (row) =>
-            row.isDefaultTranscription &&
-            (preserveOrganizationLegacy ||
-                !isEnhancementOnlyProvider(row.provider)),
-    )?.id;
-    const legacySummary = credentials.find(
-        (row) =>
-            row.isDefaultEnhancement &&
-            (preserveOrganizationLegacy ||
-                !isTranscriptionOnlyProvider(row.provider)),
-    )?.id;
-    const legacyLearn = credentials.find(
-        (row) =>
-            row.isDefaultLearn &&
-            (preserveOrganizationLegacy ||
-                !isTranscriptionOnlyProvider(row.provider)),
-    )?.id;
-    const pointers = {
-        transcription:
-            settings?.defaultTranscriptionProviderId ??
-            legacyTranscription ??
-            null,
-        summary:
-            providerPointer(settings?.defaultProviders, "summary") ??
-            legacySummary ??
-            null,
-        learn:
-            providerPointer(settings?.defaultProviders, "learn") ??
-            legacyLearn ??
-            null,
-        topics: providerPointer(settings?.defaultProviders, "topics"),
-        title: providerPointer(settings?.defaultProviders, "title"),
-    };
+    const pointers = defaultProviderPointers(credentials, settings);
     return { pointers, credentials, settings };
 }
 
@@ -113,7 +128,30 @@ export async function loadDefaultProviderPointers(
     userId: string,
     transaction?: DefaultProviderTransaction,
 ): Promise<DefaultProviderPointers> {
-    return (await loadDefaultProviderState(userId, transaction)).pointers;
+    const executor = transaction ?? db;
+    const [credentials, settingsRows] = await Promise.all([
+        executor
+            .select({
+                id: apiCredentials.id,
+                provider: apiCredentials.provider,
+                isDefaultTranscription: apiCredentials.isDefaultTranscription,
+                isDefaultEnhancement: apiCredentials.isDefaultEnhancement,
+                isDefaultLearn: apiCredentials.isDefaultLearn,
+            })
+            .from(apiCredentials)
+            .where(eq(apiCredentials.userId, userId))
+            .limit(1000),
+        executor
+            .select({
+                defaultTranscriptionProviderId:
+                    userSettings.defaultTranscriptionProviderId,
+                defaultProviders: userSettings.defaultProviders,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, userId))
+            .limit(1),
+    ]);
+    return defaultProviderPointers(credentials, settingsRows[0]);
 }
 
 /** Set or clear one authoritative provider pointer and its legacy row mirror. */

@@ -178,6 +178,31 @@ describe("enhancement-only providers cannot become the transcription default", (
             expect(body.details).toEqual({ field: "isDefaultTranscription" });
             expect(db.transaction).not.toHaveBeenCalled();
         });
+
+        it("refuses disabling and assigning a role in the same request", async () => {
+            queueSelect([
+                {
+                    id: "cred-1",
+                    userId: "user-1",
+                    provider: "OpenAI",
+                    disabledAt: null,
+                    isDefaultTranscription: false,
+                    isDefaultEnhancement: false,
+                },
+            ]);
+
+            const response = await updateProvider(
+                jsonRequest(
+                    { disabled: true, isDefaultTranscription: true },
+                    "PUT",
+                ),
+                idParams(),
+            );
+
+            expect(response.status).toBe(409);
+            expect(db.transaction).not.toHaveBeenCalled();
+            expect(setDefaultTranscriptionProvider).not.toHaveBeenCalled();
+        });
     });
 
     describe("PUT /api/settings/ai/providers/default-transcription", () => {

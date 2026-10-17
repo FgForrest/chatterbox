@@ -780,7 +780,6 @@ async function profileHistoryReferences(
             .from(asyncJobs)
             .where(
                 and(
-                    eq(asyncJobs.userId, ownerUserId),
                     inArray(asyncJobs.status, ["pending", "processing"]),
                     inArray(
                         sql<string>`${asyncJobs.payload} ->> 'profileRevisionId'`,
@@ -1280,11 +1279,8 @@ export async function archiveProfile(
 ): Promise<boolean> {
     const [candidate] = await db
         .select({
-            id: processingProfiles.id,
-            channel: processingProfiles.channel,
             ownerUserId: processingProfiles.ownerUserId,
             scope: processingProfiles.scope,
-            isDefault: processingProfiles.isDefault,
         })
         .from(processingProfiles)
         .where(
@@ -1297,23 +1293,32 @@ export async function archiveProfile(
         .limit(1);
     if (!candidate) return false;
     await assertEditAccess(input.actor, candidate);
-    const defaultState =
-        candidate.scope === "personal"
-            ? await getDefaultProfileState(
-                  input.ownerUserId,
-                  candidate.channel,
-                  input.actor.actorId,
-              )
-            : null;
-    const switchesToOrganization = defaultState?.effective?.id === candidate.id;
-    if (switchesToOrganization && !defaultState.organizationDefault) {
-        throw new DefaultProfileArchiveError();
-    }
-    if (candidate.scope === "organization" && candidate.isDefault) {
-        throw new DefaultProfileArchiveError();
+    const organizationUserId = await getOrgUserId();
+    const organizationAvailable =
+        candidate.scope === "personal" &&
+        organizationUserId !== null &&
+        organizationUserId !== input.ownerUserId &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(input.actor.actorId));
+    if (organizationAvailable && organizationUserId) {
+        await ensureProfiles(organizationUserId);
     }
 
     return db.transaction(async (tx) => {
+        await tx
+            .insert(userSettings)
+            .values({ userId: input.ownerUserId })
+            .onConflictDoNothing({ target: userSettings.userId });
+        const [settings] = await tx
+            .select({
+                id: userSettings.id,
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+                defaultMailProfileId: userSettings.defaultMailProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, input.ownerUserId))
+            .for("update")
+            .limit(1);
         const [current] = await tx
             .select({
                 channel: processingProfiles.channel,
@@ -1336,7 +1341,47 @@ export async function archiveProfile(
         if (current.scope === "organization" && current.isDefault) {
             throw new DefaultProfileArchiveError();
         }
+        const pointerId = pointerFromSettings(
+            settings ?? null,
+            current.channel,
+        );
+        const switchesToOrganization =
+            current.scope === "personal" &&
+            (pointerId === input.profileId ||
+                (pointerId === null && current.isDefault));
         if (switchesToOrganization) {
+            let organizationDefault:
+                | Pick<StoredProfile, "id" | "ownerUserId" | "scope">
+                | undefined;
+            if (organizationAvailable && organizationUserId) {
+                [organizationDefault] = await tx
+                    .select({
+                        id: processingProfiles.id,
+                        ownerUserId: processingProfiles.ownerUserId,
+                        scope: processingProfiles.scope,
+                    })
+                    .from(processingProfiles)
+                    .where(
+                        and(
+                            eq(
+                                processingProfiles.ownerUserId,
+                                organizationUserId,
+                            ),
+                            eq(processingProfiles.scope, "organization"),
+                            eq(processingProfiles.channel, current.channel),
+                            eq(processingProfiles.isDefault, true),
+                            isNull(processingProfiles.archivedAt),
+                        ),
+                    )
+                    .for("update")
+                    .limit(1);
+            }
+            if (
+                !organizationDefault ||
+                !(await mayUseProfile(input.actor.actorId, organizationDefault))
+            ) {
+                throw new DefaultProfileArchiveError();
+            }
             await tx
                 .update(processingProfiles)
                 .set({ isDefault: false })
@@ -1348,14 +1393,39 @@ export async function archiveProfile(
                         eq(processingProfiles.isDefault, true),
                     ),
                 );
-            const pointerUpdate =
-                current.channel === "audio"
-                    ? { defaultAudioProfileId: null, updatedAt: new Date() }
-                    : { defaultMailProfileId: null, updatedAt: new Date() };
-            await tx
-                .update(userSettings)
-                .set(pointerUpdate)
-                .where(eq(userSettings.userId, input.ownerUserId));
+            if (current.channel === "audio") {
+                await tx
+                    .update(userSettings)
+                    .set({
+                        defaultAudioProfileId: null,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(userSettings.userId, input.ownerUserId),
+                            eq(
+                                userSettings.defaultAudioProfileId,
+                                input.profileId,
+                            ),
+                        ),
+                    );
+            } else {
+                await tx
+                    .update(userSettings)
+                    .set({
+                        defaultMailProfileId: null,
+                        updatedAt: new Date(),
+                    })
+                    .where(
+                        and(
+                            eq(userSettings.userId, input.ownerUserId),
+                            eq(
+                                userSettings.defaultMailProfileId,
+                                input.profileId,
+                            ),
+                        ),
+                    );
+            }
         }
         const archived = await tx
             .update(processingProfiles)

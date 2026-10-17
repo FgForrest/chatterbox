@@ -84,8 +84,10 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
+    const effectiveDisabled =
+        typeof disabled === "boolean" ? disabled : existing.disabledAt !== null;
     if (
-        existing.disabledAt &&
+        effectiveDisabled &&
         ((isDefaultTranscription === true &&
             !existing.isDefaultTranscription) ||
             (isDefaultEnhancement === true && !existing.isDefaultEnhancement))

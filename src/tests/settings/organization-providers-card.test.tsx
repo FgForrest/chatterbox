@@ -258,6 +258,38 @@ describe.each([
         });
     });
 
+    it("sets a checked role default on a duplicate", async () => {
+        renderSection();
+        const provider = providerFor(scope);
+        const card = await cardFor(scope);
+        fireEvent.click(
+            within(card).getByRole("button", {
+                name: `Duplicate ${provider.provider} · ${provider.defaultModel}`,
+            }),
+        );
+        const roleLabel =
+            scope === "personal"
+                ? "Use for summaries"
+                : "Organization default for summaries";
+        fireEvent.click(
+            await screen.findByRole("checkbox", { name: roleLabel }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "Add Copy" }));
+
+        await waitFor(() => {
+            expect(requests).toContainEqual(
+                expect.objectContaining({
+                    url: collections[scope],
+                    method: "POST",
+                    body: expect.objectContaining({
+                        copyKeyFrom: provider.id,
+                        isDefaultEnhancement: true,
+                    }),
+                }),
+            );
+        });
+    });
+
     it("opens the edit form and puts changes to the scoped route", async () => {
         renderSection();
         const provider = providerFor(scope);

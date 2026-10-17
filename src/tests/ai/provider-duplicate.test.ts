@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 
+const { setDefaultProvider } = vi.hoisted(() => ({
+    setDefaultProvider: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/env", () => ({
     env: { IS_HOSTED: false },
 }));
@@ -24,6 +28,17 @@ vi.mock("@/db", () => ({
 
 vi.mock("@/lib/ai/set-default-transcription", () => ({
     setDefaultTranscriptionProvider: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/lib/ai/default-provider", () => ({
+    loadDefaultProviderPointers: vi.fn().mockResolvedValue({
+        transcription: null,
+        summary: null,
+        learn: null,
+        topics: null,
+        title: null,
+    }),
+    setDefaultProvider,
 }));
 
 import { POST as addProvider } from "@/app/api/settings/ai/providers/route";
@@ -105,6 +120,23 @@ describe("POST /api/settings/ai/providers with copyKeyFrom", () => {
         });
         expect(decrypt).not.toHaveBeenCalled();
         expect(encrypt).not.toHaveBeenCalled();
+    });
+
+    it("applies a checked role default to the duplicate through the shared writer", async () => {
+        queueSelect([{ provider: "OpenAI", apiKey: "iv:tag:secret" }]);
+
+        const response = await post({
+            provider: "OpenAI",
+            copyKeyFrom: "cred-1",
+            isDefaultEnhancement: true,
+        });
+
+        expect(response.status).toBe(200);
+        expect(setDefaultProvider).toHaveBeenCalledWith(
+            "user-1",
+            "summary",
+            "cred-2",
+        );
     });
 
     it("prefers a key typed into the form over the copied one", async () => {

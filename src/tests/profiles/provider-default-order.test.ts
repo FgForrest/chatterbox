@@ -168,4 +168,18 @@ describe("chat credential fallback", () => {
             ]),
         ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
     });
+
+    it("skips a disabled credential", () => {
+        expect(
+            defaultProviderCandidates("summary", empty(), null, [
+                {
+                    id: "disabled-chat",
+                    provider: "OpenAI",
+                    disabledAt: new Date("2026-01-01T00:00:00.000Z"),
+                    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+                },
+                ...credentials,
+            ]),
+        ).toEqual([{ source: "member-fallback", providerId: "own-chat" }]);
+    });
 });

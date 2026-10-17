@@ -96,7 +96,7 @@ function addDefaultFlag(
     previous: boolean,
     mode: ProviderFormMode,
 ): void {
-    if (mode === "add" && value) body[key] = true;
+    if ((mode === "add" || mode === "duplicate") && value) body[key] = true;
     if (mode === "edit" && value !== previous) body[key] = value;
 }
 

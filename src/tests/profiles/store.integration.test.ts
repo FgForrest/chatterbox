@@ -81,6 +81,7 @@ const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
 const ALICE = "profiles-store-alice";
 const BOB = "profiles-store-bob";
+const ORGANIZATION = "profiles-store-organization";
 
 function actor(userId: string): ActorContext {
     return {
@@ -114,11 +115,19 @@ describeWithDatabase("profile store", () => {
             .values([
                 { id: ALICE, email: "profiles-alice@example.test" },
                 { id: BOB, email: "profiles-bob@example.test" },
+                {
+                    id: ORGANIZATION,
+                    email: "profiles-organization@example.test",
+                    role: "org",
+                },
             ]);
     }, 120_000);
 
     beforeEach(async () => {
-        await db().delete(asyncJobs).where(eq(asyncJobs.userId, ALICE));
+        mockEnv.SELF_HOST_MODE = "local";
+        mockEnv.ORG_ACCOUNT_EMAIL = undefined;
+        mockEnv.ORG_ACCOUNT_PASSWORD = undefined;
+        await db().delete(asyncJobs);
         await db()
             .delete(processingProfiles)
             .where(
@@ -130,7 +139,13 @@ describeWithDatabase("profile store", () => {
         await db()
             .delete(processingProfiles)
             .where(eq(processingProfiles.ownerUserId, BOB));
+        await db()
+            .delete(processingProfiles)
+            .where(eq(processingProfiles.ownerUserId, ORGANIZATION));
         await db().delete(userSettings).where(eq(userSettings.userId, ALICE));
+        await db()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, ORGANIZATION));
     });
 
     afterAll(async () => {
@@ -353,6 +368,79 @@ describeWithDatabase("profile store", () => {
         expect(stillDefault?.id).toBe(previous?.id);
     });
 
+    it("keeps a concurrently reassigned default pointer when archiving its previous target", async () => {
+        await ensureProfiles(ALICE);
+        const [previous] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!previous) throw new Error("audio default was not seeded");
+
+        mockEnv.SELF_HOST_MODE = "shared";
+        mockEnv.ORG_ACCOUNT_EMAIL = "profiles-organization@example.test";
+        mockEnv.ORG_ACCOUNT_PASSWORD = "test-password";
+        await ensureProfiles(ORGANIZATION);
+        const [organizationDefault] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ORGANIZATION),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+        if (!organizationDefault) {
+            throw new Error("Organization audio default was not seeded");
+        }
+        await db()
+            .insert(userSettings)
+            .values({
+                userId: ALICE,
+                defaultAudioProfileId: previous.id,
+            })
+            .onConflictDoUpdate({
+                target: userSettings.userId,
+                set: { defaultAudioProfileId: previous.id },
+            });
+        let archival: Promise<boolean> | undefined;
+
+        await db().transaction(async (tx) => {
+            await tx
+                .select({ id: userSettings.id })
+                .from(userSettings)
+                .where(eq(userSettings.userId, ALICE))
+                .for("update");
+            archival = archiveProfile({
+                ownerUserId: ALICE,
+                profileId: previous.id,
+                actor: actor(ALICE),
+            });
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            await tx
+                .update(userSettings)
+                .set({ defaultAudioProfileId: organizationDefault.id })
+                .where(eq(userSettings.userId, ALICE));
+        });
+
+        await expect(archival).resolves.toBe(true);
+        const [settings] = await db()
+            .select({
+                defaultAudioProfileId: userSettings.defaultAudioProfileId,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, ALICE));
+        expect(settings?.defaultAudioProfileId).toBe(organizationDefault.id);
+    });
+
     it("duplicates into the actor's personal scope", async () => {
         const original = await createProfile({
             ownerUserId: ALICE,
@@ -443,7 +531,7 @@ describeWithDatabase("profile store", () => {
         ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
     });
 
-    it("archives a profile referenced by a queued job payload", async () => {
+    it("archives a profile referenced by another owner's queued job payload", async () => {
         const created = await createProfile({
             ownerUserId: ALICE,
             actor: actor(ALICE),
@@ -464,7 +552,7 @@ describeWithDatabase("profile store", () => {
             .insert(asyncJobs)
             .values({
                 id: "queued-profile-summary",
-                userId: ALICE,
+                userId: BOB,
                 kind: "summary",
                 subjectId: "item-1",
                 status: "pending",

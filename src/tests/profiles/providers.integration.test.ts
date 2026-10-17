@@ -617,6 +617,34 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         });
     });
 
+    it("ignores a legacy summary flag on a transcription-only Organization provider", async () => {
+        await databaseClient()
+            .delete(apiCredentials)
+            .where(eq(apiCredentials.userId, "actor"));
+        await databaseClient()
+            .delete(userSettings)
+            .where(eq(userSettings.userId, "actor"));
+        await insertCredential({ id: "usable-summary", provider: "OpenAI" });
+        await databaseClient()
+            .update(apiCredentials)
+            .set({
+                provider: "ElevenLabs",
+                isDefaultEnhancement: true,
+            })
+            .where(eq(apiCredentials.id, "org-card"));
+
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).resolves.toMatchObject({
+            payerUserId: "actor",
+            credential: { id: "usable-summary" },
+        });
+    });
+
     it("preserves a disabled legacy Organization summary default", async () => {
         await databaseClient()
             .delete(apiCredentials)
