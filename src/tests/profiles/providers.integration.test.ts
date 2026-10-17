@@ -398,10 +398,13 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         ).resolves.toMatchObject({ kind: "managed", payerUserId: "actor" });
     });
 
-    it("excludes disabled credentials from default picks", async () => {
+    it("skips a disabled credential when no role or pin selects it", async () => {
         await databaseClient()
             .update(apiCredentials)
-            .set({ disabledAt: new Date() })
+            .set({
+                disabledAt: new Date(),
+                isDefaultEnhancement: false,
+            })
             .where(
                 and(
                     eq(apiCredentials.id, "summary"),
@@ -415,5 +418,77 @@ describeWithDatabase("profile step provider resolution (PostgreSQL)", () => {
         });
         expect(resolved.credential?.id).not.toBe("summary");
         expect(resolved.credential?.disabledAt).toBeNull();
+    });
+
+    it("fails with the provider name when transcription points at a disabled credential", async () => {
+        await databaseClient()
+            .update(apiCredentials)
+            .set({
+                provider: "Named Transcriber",
+                disabledAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(apiCredentials.id, "transcription"),
+                    eq(apiCredentials.userId, "actor"),
+                ),
+            );
+        await expect(
+            resolveStepProvider({
+                step: "transcription",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "CONFLICT",
+            message: expect.stringContaining("Named Transcriber"),
+        });
+    });
+
+    it("fails with the provider name when summaries use a disabled credential", async () => {
+        await databaseClient()
+            .update(apiCredentials)
+            .set({
+                provider: "Named Summarizer",
+                disabledAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(apiCredentials.id, "summary"),
+                    eq(apiCredentials.userId, "actor"),
+                ),
+            );
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: null,
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "CONFLICT",
+            message: expect.stringContaining("Named Summarizer"),
+        });
+    });
+
+    it("fails with the provider name when a profile pins a disabled personal credential", async () => {
+        await databaseClient()
+            .update(apiCredentials)
+            .set({ provider: "Pinned Provider", disabledAt: new Date() })
+            .where(
+                and(
+                    eq(apiCredentials.id, "summary"),
+                    eq(apiCredentials.userId, "actor"),
+                ),
+            );
+        await expect(
+            resolveStepProvider({
+                step: "summary",
+                pin: { credentialId: "summary", scope: "personal" },
+                actorUserId: "actor",
+            }),
+        ).rejects.toMatchObject({
+            code: "CONFLICT",
+            message: expect.stringContaining("Pinned Provider"),
+        });
     });
 });

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
@@ -28,6 +28,7 @@ export const PUT = apiHandler(async (request: Request) => {
             and(
                 eq(apiCredentials.id, providerId),
                 eq(apiCredentials.userId, session.user.id),
+                isNull(apiCredentials.disabledAt),
             ),
         )
         .limit(1);

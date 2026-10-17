@@ -21,17 +21,18 @@ Je-li Organizace povolena, členové vidí profily Organizace a mohou je dupliko
 
 ![Poskytovatelé AI](images/settings-providers.png)
 
-**Nastavení → Poskytovatelé** uvádí služby, které provádějí práci AI. Klikněte na **Přidat poskytovatele**, vyberte službu, vložte její API klíč a zvolte model. Chatterbox nabízí přednastavení pro OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio a Ollama, přičemž varianta **Vlastní** přijme libovolnou službu s OpenAI-kompatibilní adresou. Klíče jsou ukládány šifrovaně a z bezpečnostních důvodů se již dále nezobrazují.
+**Nastavení → Poskytovatelé** odděluje karty **Vaši poskytovatelé** a **Poskytovatelé organizace**. Použijte tlačítko **Přidat poskytovatele** na kartě, kam klíč patří, vyberte službu, vložte její API klíč a zvolte model. Chatterbox nabízí přednastavení pro OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio a Ollama, přičemž varianta **Vlastní** přijme libovolnou službu s OpenAI-kompatibilní adresou. Klíče jsou ukládány šifrovaně a z bezpečnostních důvodů se již dále nezobrazují.
 
 ![Úprava poskytovatele](images/settings-provider-edit.png)
 
 - **Cena.** Chatterbox zná zveřejněné ceny běžných modelů. Pro jiný model nebo odlišnou cenu ji zadejte zde. [Výdaj za AI](recordings.md#what-the-ai-cost) u nových požadavků použije tuto hodnotu; již zpracované náklady si zachovají původní cenu.
-- **Duplikovat** vytvoří druhého poskytovatele se stejným klíčem, například silnější model pouze pro Učení. Klíč se znovu použije, aniž by se zobrazil.
+- **Duplikovat** vytvoří druhého osobního poskytovatele nebo poskytovatele Organizace se stejným klíčem, například silnější model pouze pro Učení. Klíč se znovu použije, aniž by se zobrazil.
+- **Zakázat** ponechá klíč uložený, ale poskytovatele odebere z nových výběrů. Profil nebo role účtu, která na něj výslovně odkazuje, skončí chybou, dokud poskytovatele znovu nepovolíte nebo nevyberete jiného.
 - **Claude Code** a **Codex** fungují díky předplatnému služby Claude nebo ChatGPT místo API klíče, přes můstek, který nastaví administrátor. Viz [Pro administrátory](administrators.md#claude-code-and-codex-subscriptions).
 
 Někteří poskytovatelé zajišťují pouze přepis (ElevenLabs, Speechmatics). Kroky shrnutí pak potřebují druhého poskytovatele.
 
-Pokud jsou nastaveni, zobrazí se pod osobním seznamem **Poskytovatelé organizace**. Členové je mohou prohlížet jen pro čtení; osoby s oprávněním `access.manage` je spravují a vidí využití. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
+Členové vidí **Poskytovatele organizace** jen pro čtení. Osoby s oprávněním `access.manage` je mohou přidávat, duplikovat, upravovat, zakázat, povolit a odstranit a na stejné kartě vidí využití podle členů. Viz [Poskytovatelé Organizace](organization.md#organization-providers).
 
 ## Přepis
 

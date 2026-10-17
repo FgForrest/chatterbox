@@ -16,14 +16,18 @@ import {
 const createSchema = z
     .object({
         provider: z.string().min(1).max(100),
-        apiKey: z.string().min(1),
+        apiKey: z.string().min(1).optional(),
+        copyKeyFrom: z.string().min(1).optional(),
         baseUrl: z.string().nullable().optional(),
         defaultModel: z.string().max(100).nullable().optional(),
         inputUsdPerMillion: z.unknown().optional(),
         outputUsdPerMillion: z.unknown().optional(),
         audioUsdPerHour: z.unknown().optional(),
     })
-    .strict();
+    .strict()
+    .refine((value) => value.apiKey || value.copyKeyFrom, {
+        message: "An API key or provider to duplicate is required",
+    });
 
 async function actorFrom(request: Request) {
     const { session, actor } = await requireApiSessionActor(request);
@@ -69,7 +73,8 @@ export const POST = apiHandler(async (request: Request) => {
     }
     const provider = await createOrganizationProvider(context, {
         provider: body.provider,
-        encryptedApiKey: encrypt(body.apiKey),
+        ...(body.apiKey ? { encryptedApiKey: encrypt(body.apiKey) } : {}),
+        ...(body.copyKeyFrom ? { copyKeyFrom: body.copyKeyFrom } : {}),
         baseUrl: body.baseUrl || null,
         defaultModel: body.defaultModel || null,
         rates: parseProviderRates(body),

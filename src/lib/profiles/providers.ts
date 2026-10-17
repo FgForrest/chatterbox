@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { apiCredentials, userSettings } from "@/db/schema";
 import {
@@ -106,13 +106,16 @@ async function credentialByOwner(
     return credential;
 }
 
-function assertEnabled(credential: CredentialRow): void {
+function assertEnabled(
+    credential: CredentialRow,
+    scope: "personal" | "organization",
+): void {
     if (credential.disabledAt) {
-        throw new AppError(
-            ErrorCode.CONFLICT,
-            `The pinned provider ${credential.provider} is disabled. Ask an administrator to enable it or choose another provider.`,
-            409,
-        );
+        const message =
+            scope === "organization"
+                ? `The pinned provider ${credential.provider} is disabled. Ask an administrator to enable it or choose another provider.`
+                : `The provider ${credential.provider} is disabled. Enable it or choose another provider.`;
+        throw new AppError(ErrorCode.CONFLICT, message, 409);
     }
 }
 
@@ -242,7 +245,7 @@ async function resolvePinnedPersonal(input: {
             404,
         );
     }
-    assertEnabled(credential);
+    assertEnabled(credential, "personal");
     return resolvedCredential(credential, input.actorUserId, noReservation);
 }
 
@@ -270,7 +273,7 @@ async function resolvePinnedOrganization(input: {
             404,
         );
     }
-    assertEnabled(credential);
+    assertEnabled(credential, "organization");
     if (!isOrgScopeEnabled()) {
         throw new AppError(
             ErrorCode.NOT_FOUND,
@@ -310,19 +313,14 @@ async function resolvePinnedOrganization(input: {
     return resolvedCredential(credential, orgUserId, reserveCall, true);
 }
 
-async function activeCredentials(
+async function actorCredentials(
     actorUserId: string,
     ordered: boolean,
 ): Promise<CredentialRow[]> {
     const query = db
         .select()
         .from(apiCredentials)
-        .where(
-            and(
-                eq(apiCredentials.userId, actorUserId),
-                isNull(apiCredentials.disabledAt),
-            ),
-        );
+        .where(eq(apiCredentials.userId, actorUserId));
     return ordered
         ? query.orderBy(apiCredentials.createdAt, apiCredentials.id)
         : query;
@@ -350,7 +348,6 @@ async function resolveUnpinnedTranscription(
             and(
                 eq(apiCredentials.userId, actorUserId),
                 eq(apiCredentials.isDefaultTranscription, true),
-                isNull(apiCredentials.disabledAt),
             ),
         )
         .limit(1);
@@ -382,13 +379,14 @@ async function resolveUnpinnedTranscription(
                 400,
             );
         }
-        assertEnabled(credential);
+        assertEnabled(credential, "personal");
         return {
             ...resolvedCredential(credential, actorUserId, noReservation),
             actorSettings: settings,
         };
     }
     if (legacyDefault) {
+        assertEnabled(legacyDefault, "personal");
         return {
             ...resolvedCredential(legacyDefault, actorUserId, noReservation),
             actorSettings: settings,
@@ -412,11 +410,19 @@ async function resolveUnpinnedChat(
     actorUserId: string,
 ): Promise<ResolvedStepProvider> {
     const ordered = step === "title";
-    const credentials = await activeCredentials(actorUserId, ordered);
+    const credentials = await actorCredentials(actorUserId, ordered);
     let picked: CredentialRow | undefined;
     if (step === "summary") {
+        const selected = credentials.find(
+            (candidate) => candidate.isDefaultEnhancement,
+        );
+        if (selected) assertEnabled(selected, "personal");
         picked = pickEnhancementCredential(credentials);
     } else if (step === "learn") {
+        const selected = credentials.find(
+            (candidate) => candidate.isDefaultLearn,
+        );
+        if (selected) assertEnabled(selected, "personal");
         picked = pickLearnCredential(credentials);
     } else {
         const settings = await actorProviderSettings(actorUserId);
@@ -428,30 +434,34 @@ async function resolveUnpinnedChat(
                 !Array.isArray(defaults)
                     ? (defaults as Record<string, unknown>).topics
                     : null;
-            picked = pickTopicsCredential(
-                credentials,
-                typeof topicsId === "string" ? topicsId : null,
+            const selectedId = typeof topicsId === "string" ? topicsId : null;
+            const selected = credentials.find(
+                (candidate) => candidate.id === selectedId,
             );
+            if (selected) assertEnabled(selected, "personal");
+            picked = pickTopicsCredential(credentials, selectedId);
         } else {
             const selectedId = titleProviderId(settings?.defaults);
-            picked =
-                credentials.find((candidate) => candidate.id === selectedId) ??
-                pickEnhancementCredential(credentials);
+            const selected = credentials.find(
+                (candidate) => candidate.id === selectedId,
+            );
+            if (selected) assertEnabled(selected, "personal");
+            picked = selected ?? pickEnhancementCredential(credentials);
         }
     }
 
     if (!picked) {
-        const configured = credentials.length > 0;
-        const message =
-            step === "summary"
-                ? configured
-                    ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to generate summaries."
-                    : "No AI provider configured"
-                : step === "topics"
-                  ? configured
-                      ? "Your AI providers are transcription only. Add an OpenAI-compatible provider to detect topics."
-                      : "No AI provider configured"
-                  : "No AI provider configured";
+        const configured = credentials.some(
+            (credential) => credential.disabledAt === null,
+        );
+        let message = "No AI provider configured";
+        if (configured && step === "summary") {
+            message =
+                "Your AI providers are transcription only. Add an OpenAI-compatible provider to generate summaries.";
+        } else if (configured && step === "topics") {
+            message =
+                "Your AI providers are transcription only. Add an OpenAI-compatible provider to detect topics.";
+        }
         throw missingProvider(message);
     }
     return resolvedCredential(picked, actorUserId, noReservation);

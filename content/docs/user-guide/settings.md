@@ -21,17 +21,18 @@ If the Organization is enabled, members see Organization profiles and can duplic
 
 ![AI providers](images/settings-providers.png)
 
-**Settings → Providers** lists the services that do the AI work. Click **Add Provider**, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
+**Settings → Providers** separates **Your providers** from **Organization providers**. Use the **Add provider** button in the card where the key belongs, choose the service, paste its API key, and pick a model. Chatterbox comes with presets for OpenAI, Groq, Together AI, OpenRouter, Google Gemini, ElevenLabs, Speechmatics, LM Studio and Ollama, and **Custom** takes any service with an OpenAI-compatible address. Keys are stored encrypted and never shown again.
 
 ![Editing a provider](images/settings-provider-edit.png)
 
 - **Price.** Chatterbox knows the published prices of common models. For any other model, or if you pay a different price, enter it here. The [AI spend](recordings.md#what-the-ai-cost) of new requests uses it; costs already recorded keep their price.
-- **Duplicate** makes a second provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
+- **Duplicate** makes a second personal or Organization provider from the same key, for example a stronger model for Learn. The key is reused without being shown.
+- **Disable** keeps the key saved but removes the provider from new selections. A profile or account role that explicitly points to it stops with an error until you enable it or choose another provider.
 - **Claude Code** and **Codex** run on a Claude or ChatGPT subscription instead of an API key, through a bridge your administrator sets up. See [For administrators](administrators.md#claude-code-and-codex-subscriptions).
 
 Some providers only transcribe (ElevenLabs, Speechmatics). Summary steps then need a second provider.
 
-When configured, **Organization providers** appears below the personal list. Members can inspect them as **Read-only**; people with `access.manage` manage them and see usage. See [Organization providers](organization.md#organization-providers).
+Members inspect **Organization providers** as **Read-only**. People with `access.manage` can add, duplicate, edit, disable, enable, and delete them, and can see usage per member in the same card. See [Organization providers](organization.md#organization-providers).
 
 ## Transcription
 

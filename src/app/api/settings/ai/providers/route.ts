@@ -23,9 +23,13 @@ import {
 // GET - List all AI providers for the user
 export const GET = apiHandler(async (request: Request) => {
     const session = await requireApiSession(request);
+    const includeDisabled =
+        new URL(request.url).searchParams.get("includeDisabled") === "true";
 
     return NextResponse.json({
-        providers: await listUserProviders(session.user.id),
+        providers: await listUserProviders(session.user.id, {
+            includeDisabled,
+        }),
     });
 });
 

@@ -32,8 +32,13 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         defaultModel,
         isDefaultTranscription,
         isDefaultEnhancement,
+        disabled,
     } = body;
-    const rates = parseProviderRates(body);
+    const hasRates = [
+        "inputUsdPerMillion",
+        "outputUsdPerMillion",
+        "audioUsdPerHour",
+    ].some((field) => Object.hasOwn(body, field));
 
     // Verify ownership
     const [existing] = await db
@@ -75,16 +80,34 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         );
     }
 
+    if (
+        existing.disabledAt &&
+        ((isDefaultTranscription === true &&
+            !existing.isDefaultTranscription) ||
+            (isDefaultEnhancement === true && !existing.isDefaultEnhancement))
+    ) {
+        throw new AppError(
+            ErrorCode.CONFLICT,
+            `${existing.provider} is disabled. Enable it before assigning a role.`,
+            409,
+        );
+    }
+
     // On hosted, the app process can't reach the user's machine — reject
     // localhost / loopback baseUrls (e.g. LM Studio, Ollama) with a clear
     // message. Self-host accepts everything.
-    const baseUrlCheck = validateAiBaseUrl(baseUrl, {
-        isHosted: env.IS_HOSTED,
-    });
-    if (!baseUrlCheck.ok) {
-        throw new AppError(ErrorCode.INVALID_INPUT, baseUrlCheck.message, 400, {
-            field: "baseUrl",
+    if (baseUrl !== undefined) {
+        const baseUrlCheck = validateAiBaseUrl(baseUrl, {
+            isHosted: env.IS_HOSTED,
         });
+        if (!baseUrlCheck.ok) {
+            throw new AppError(
+                ErrorCode.INVALID_INPUT,
+                baseUrlCheck.message,
+                400,
+                { field: "baseUrl" },
+            );
+        }
     }
     const auditContext = await organizationAccountProviderAuditContext({
         userId: session.user.id,
@@ -134,13 +157,23 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
 
         // Build update object
         const updateData: Partial<typeof apiCredentials.$inferInsert> = {
-            baseUrl: baseUrl || null,
-            defaultModel: defaultModel || null,
-            isDefaultTranscription: isDefaultTranscription || false,
-            isDefaultEnhancement: isDefaultEnhancement || false,
-            ...rates,
             updatedAt: new Date(),
         };
+
+        if (baseUrl !== undefined) updateData.baseUrl = baseUrl || null;
+        if (defaultModel !== undefined) {
+            updateData.defaultModel = defaultModel || null;
+        }
+        if (isDefaultTranscription !== undefined) {
+            updateData.isDefaultTranscription = Boolean(isDefaultTranscription);
+        }
+        if (isDefaultEnhancement !== undefined) {
+            updateData.isDefaultEnhancement = Boolean(isDefaultEnhancement);
+        }
+        if (hasRates) Object.assign(updateData, parseProviderRates(body));
+        if (typeof disabled === "boolean") {
+            updateData.disabledAt = disabled ? new Date() : null;
+        }
 
         // Only update API key if provided
         if (apiKey) {
@@ -162,9 +195,18 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
         if (auditContext) {
+            let action = "org_provider.update";
+            if (before.disabledAt === null && after.disabledAt !== null) {
+                action = "org_provider.disable";
+            } else if (
+                before.disabledAt !== null &&
+                after.disabledAt === null
+            ) {
+                action = "org_provider.enable";
+            }
             await writeOrganizationProviderAudit(tx, {
                 context: auditContext,
-                action: "org_provider.update",
+                action,
                 credentialId: id,
                 before,
                 after,
@@ -172,9 +214,9 @@ export const PUT = apiHandler<IdContext>(async (request, context) => {
         }
     });
 
-    if (isDefaultTranscription) {
+    if (isDefaultTranscription === true) {
         await setDefaultTranscriptionProvider(session.user.id, id);
-    } else {
+    } else if (isDefaultTranscription === false) {
         const [settings] = await db
             .select({ pointer: userSettings.defaultTranscriptionProviderId })
             .from(userSettings)

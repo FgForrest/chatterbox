@@ -25,7 +25,8 @@ export interface OrganizationProviderContext extends OrganizationProviderActor {
 
 export interface OrganizationProviderInput {
     provider: string;
-    encryptedApiKey: string;
+    encryptedApiKey?: string;
+    copyKeyFrom?: string;
     baseUrl: string | null;
     defaultModel: string | null;
     rates: {
@@ -172,12 +173,51 @@ export async function createOrganizationProvider(
     input: OrganizationProviderInput,
 ) {
     return db.transaction(async (tx) => {
+        let encryptedApiKey = input.encryptedApiKey;
+        if (!encryptedApiKey && input.copyKeyFrom) {
+            const [source] = await tx
+                .select({
+                    provider: apiCredentials.provider,
+                    apiKey: apiCredentials.apiKey,
+                })
+                .from(apiCredentials)
+                .where(
+                    and(
+                        eq(apiCredentials.userId, context.orgUserId),
+                        eq(apiCredentials.id, input.copyKeyFrom),
+                    ),
+                )
+                .limit(1);
+            if (!source) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "The provider to duplicate no longer exists",
+                    404,
+                );
+            }
+            if (source.provider !== input.provider) {
+                throw new AppError(
+                    ErrorCode.INVALID_INPUT,
+                    `A duplicate keeps its provider: ${source.provider}'s key cannot be used for ${input.provider}.`,
+                    400,
+                    { field: "provider" },
+                );
+            }
+            encryptedApiKey = source.apiKey;
+        }
+        if (!encryptedApiKey) {
+            throw new AppError(
+                ErrorCode.MISSING_REQUIRED_FIELD,
+                "Provider and API key are required",
+                400,
+            );
+        }
         const [created] = await tx
             .insert(apiCredentials)
             .values({
                 userId: context.orgUserId,
                 provider: input.provider,
-                apiKey: input.encryptedApiKey,
+                apiKey: encryptedApiKey,
                 baseUrl: input.baseUrl,
                 defaultModel: input.defaultModel,
                 ...input.rates,
@@ -249,12 +289,12 @@ export async function updateOrganizationProvider(
         if (!after) {
             throw new AppError(ErrorCode.NOT_FOUND, "Provider not found", 404);
         }
-        const action =
-            before.disabledAt === null && after.disabledAt !== null
-                ? "org_provider.disable"
-                : before.disabledAt !== null && after.disabledAt === null
-                  ? "org_provider.enable"
-                  : "org_provider.update";
+        let action = "org_provider.update";
+        if (before.disabledAt === null && after.disabledAt !== null) {
+            action = "org_provider.disable";
+        } else if (before.disabledAt !== null && after.disabledAt === null) {
+            action = "org_provider.enable";
+        }
         await writeOrganizationProviderAudit(tx, {
             context,
             action,
