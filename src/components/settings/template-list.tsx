@@ -522,7 +522,7 @@ export function TemplateList({
     );
 }
 
-/** Read-only prompt templates retained so they can be copied into profiles. */
+/** Customized legacy prompt templates that can be copied into profiles. */
 export function LegacyTemplateList({
     kind,
     presetCopy,
@@ -532,23 +532,28 @@ export function LegacyTemplateList({
     onCopy,
 }: LegacyTemplateListProps) {
     const i18n = useExtracted();
+    const templates = config.templates.filter(
+        (template) =>
+            !isPresetId(kind, template.id) ||
+            template.name !== null ||
+            template.prompt !== null,
+    );
+
+    if (templates.length === 0) return null;
+
     return (
         <div className="space-y-3">
             <h3 className="text-base font-medium">{heading}</h3>
             <ul className="divide-y rounded-lg border">
-                {config.templates.map((template) => {
+                {templates.map((template) => {
                     const name =
                         template.name ??
                         presetCopy[template.id]?.name ??
                         template.id;
                     const builtin = isPresetId(kind, template.id);
-                    const edited =
-                        template.name !== null || template.prompt !== null;
-                    const origin = !builtin
-                        ? i18n("Custom")
-                        : edited
-                          ? i18n("Built-in, edited")
-                          : i18n("Built-in");
+                    const origin = builtin
+                        ? i18n("Built-in, edited")
+                        : i18n("Custom");
                     return (
                         <li
                             key={template.id}

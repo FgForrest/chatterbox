@@ -237,7 +237,7 @@ describe("processing settings after profiles", () => {
         expect(screen.queryByText("Process mail automatically")).toBeNull();
     });
 
-    it("copies built-in, edited built-in, and custom templates into personal recording profiles", async () => {
+    it("copies edited built-in and custom templates into personal recording profiles", async () => {
         render(
             <ConfirmDialogProvider>
                 <SummarySection />
@@ -245,11 +245,16 @@ describe("processing settings after profiles", () => {
         );
         await screen.findByText("Templates from before profiles");
 
-        for (const name of [
-            "General Summary",
-            "Edited meetings",
-            "Customer call",
-        ]) {
+        expect(
+            screen.queryByRole("button", {
+                name: "Copy General Summary into a profile",
+            }),
+        ).toBeNull();
+
+        for (const [name, expectedCount] of [
+            ["Edited meetings", 1],
+            ["Customer call", 2],
+        ] as const) {
             fireEvent.click(
                 screen.getByRole("button", {
                     name: `Copy ${name} into a profile`,
@@ -262,13 +267,7 @@ describe("processing settings after profiles", () => {
                             call.url === "/api/settings/profiles" &&
                             call.method === "POST",
                     ),
-                ).toHaveLength(
-                    name === "General Summary"
-                        ? 1
-                        : name === "Edited meetings"
-                          ? 2
-                          : 3,
-                ),
+                ).toHaveLength(expectedCount),
             );
             expect(screen.getByRole("dialog").textContent).toContain(
                 `copied-${created}`,
@@ -297,14 +296,10 @@ describe("processing settings after profiles", () => {
                 },
         );
         expect(settings[0].steps.summary).toMatchObject({
-            preset: "general",
-            fullPrompt: null,
-        });
-        expect(settings[1].steps.summary).toMatchObject({
             preset: "meeting-notes",
             fullPrompt: "Edited built-in {transcription}",
         });
-        expect(settings[2].steps.summary).toMatchObject({
+        expect(settings[1].steps.summary).toMatchObject({
             preset: "general",
             fullPrompt: "Custom prompt {transcription}",
         });
@@ -318,18 +313,17 @@ describe("processing settings after profiles", () => {
         );
         await screen.findByText("Edited meeting titles");
 
-        fireEvent.click(
-            screen.getByRole("button", {
+        expect(
+            screen.queryByRole("button", {
                 name: "Copy General into a profile",
             }),
-        );
-        await waitFor(() => expect(created).toBe(1));
+        ).toBeNull();
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Copy Edited meeting titles into a profile",
             }),
         );
-        await waitFor(() => expect(created).toBe(2));
+        await waitFor(() => expect(created).toBe(1));
 
         const settings = calls
             .filter(
@@ -349,10 +343,6 @@ describe("processing settings after profiles", () => {
                     },
             );
         expect(settings[0].steps.title).toMatchObject({
-            preset: "default",
-            fullPrompt: null,
-        });
-        expect(settings[1].steps.title).toMatchObject({
             preset: "meetings",
             fullPrompt: "Edited title prompt {transcription}",
         });
@@ -369,18 +359,17 @@ describe("processing settings after profiles", () => {
         );
         await screen.findByText("Short chapters");
 
-        fireEvent.click(
-            screen.getByRole("button", {
+        expect(
+            screen.queryByRole("button", {
                 name: "Copy Chapters into a profile",
             }),
-        );
-        await waitFor(() => expect(created).toBe(1));
+        ).toBeNull();
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Copy Short chapters into a profile",
             }),
         );
-        await waitFor(() => expect(created).toBe(2));
+        await waitFor(() => expect(created).toBe(1));
 
         const settings = calls
             .filter(
@@ -400,10 +389,6 @@ describe("processing settings after profiles", () => {
                     },
             );
         expect(settings[0].steps.topics).toMatchObject({
-            preset: "default",
-            fullPrompt: null,
-        });
-        expect(settings[1].steps.topics).toMatchObject({
             preset: "default",
             fullPrompt: "Use short chapters {transcription}",
         });

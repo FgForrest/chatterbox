@@ -15,13 +15,20 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogProvider } from "@/components/confirm-dialog";
-import { TemplateList } from "@/components/settings/template-list";
+import {
+    LegacyTemplateList,
+    TemplateList,
+} from "@/components/settings/template-list";
+import type { PresetCopy } from "@/hooks/use-preset-copy";
+import { TITLE_TEMPLATE_KIND } from "@/lib/ai/prompt-presets";
 import {
     normalizeTemplateConfig,
     type PromptTemplate,
     type TemplateConfiguration,
+    type TemplateKind,
 } from "@/lib/ai/prompt-templates";
 import { SUMMARY_TEMPLATE_KIND } from "@/lib/ai/summary-presets";
+import { TOPIC_TEMPLATE_KIND } from "@/lib/topics/topic-presets";
 
 const COPY = {
     general: { name: "General Summary", description: "General" },
@@ -34,6 +41,13 @@ const custom = (id: string): PromptTemplate => ({
     id,
     name: `Custom ${id}`,
     prompt: `Do ${id} {transcription}`,
+    createdAt: "2026-01-01T00:00:00.000Z",
+});
+
+const builtin = (id: string, name: string | null = null): PromptTemplate => ({
+    id,
+    name,
+    prompt: null,
     createdAt: "2026-01-01T00:00:00.000Z",
 });
 
@@ -213,5 +227,84 @@ describe("TemplateList", () => {
             "key-points",
             "action-items",
         ]);
+    });
+});
+
+const LEGACY_KINDS: [string, TemplateKind][] = [
+    ["title", TITLE_TEMPLATE_KIND],
+    ["topic", TOPIC_TEMPLATE_KIND],
+    ["summary", SUMMARY_TEMPLATE_KIND],
+];
+
+describe.each(LEGACY_KINDS)("LegacyTemplateList (%s)", (_label, kind) => {
+    const presetIds = Object.keys(kind.presets);
+    const presetCopy = Object.fromEntries(
+        presetIds.map((id) => [
+            id,
+            { name: `Built-in ${id}`, description: `Description ${id}` },
+        ]),
+    ) as Record<string, PresetCopy>;
+
+    function renderLegacy(templates: PromptTemplate[], onCopy = vi.fn()) {
+        return {
+            onCopy,
+            ...render(
+                <LegacyTemplateList
+                    kind={kind}
+                    presetCopy={presetCopy}
+                    config={{
+                        selectedPrompt: templates[0]?.id ?? "",
+                        templates,
+                    }}
+                    heading="Templates from before profiles"
+                    copyingId={null}
+                    onCopy={onCopy}
+                />,
+            ),
+        };
+    }
+
+    afterEach(cleanup);
+
+    it("renders nothing for unedited built-ins", () => {
+        const { container } = renderLegacy(presetIds.map((id) => builtin(id)));
+
+        expect(container.innerHTML).toBe("");
+    });
+
+    it("lists and copies only custom and edited built-ins", () => {
+        const editedId = presetIds[1] ?? presetIds[0];
+        const edited = builtin(editedId, `Edited ${editedId}`);
+        const customTemplate = custom(`${_label}-custom`);
+        const { onCopy } = renderLegacy([
+            ...presetIds
+                .filter((id) => id !== editedId)
+                .map((id) => builtin(id)),
+            edited,
+            customTemplate,
+        ]);
+
+        for (const id of presetIds.filter((id) => id !== editedId)) {
+            expect(screen.queryByText(`Built-in ${id}`)).toBeNull();
+        }
+        expect(screen.getByText(`Edited ${editedId}`)).toBeTruthy();
+        expect(screen.getByText("Built-in, edited")).toBeTruthy();
+        expect(screen.getByText(customTemplate.name as string)).toBeTruthy();
+        expect(screen.getByText("Custom")).toBeTruthy();
+        expect(screen.getAllByRole("listitem")).toHaveLength(2);
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: `Copy ${customTemplate.name} into a profile`,
+            }),
+        );
+        expect(onCopy).toHaveBeenCalledOnce();
+        expect(onCopy).toHaveBeenCalledWith(customTemplate);
+    });
+
+    it("renders nothing for an empty configuration", () => {
+        const { container } = renderLegacy([]);
+
+        expect(container.innerHTML).toBe("");
     });
 });

@@ -42,14 +42,15 @@ When configured, **Organization providers** appears below the personal list. Mem
 - **Primary transcript** when both Plaud and your provider have made one,
 - **Default transcription language**, used when you transcribe now.
 
-Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Old title templates remain under **Templates from before profiles** and can be copied into a profile.
+Automatic transcription, title generation, and their profile-specific providers are set under **Profiles**. Title templates you created or edited before profiles remain under **Templates from before profiles** and can be copied into a profile.
 
 ## Topics
 
 This section keeps the account-level topics provider default. A profile that
 does not pin a topics provider uses it. Automatic topic detection is set under
-**Profiles**. Older topic templates remain read-only under **Templates from
-before profiles**; use **Copy into a profile** to keep editing one.
+**Profiles**. Topic templates you created or edited before profiles remain
+read-only under **Templates from before profiles**; use **Copy into a profile**
+to keep editing one.
 
 ## Learning
 
@@ -62,9 +63,9 @@ correction are set under **Profiles**.
 This section keeps the account-level summary provider and multi-pass defaults.
 A profile without a pinned summary provider uses them. Automatic titles and
 summaries, output language and format, and profile-specific multi-pass behavior
-are set under **Profiles**. Older summary templates remain read-only under
-**Templates from before profiles**; use **Copy into a profile** to keep editing
-one.
+are set under **Profiles**. Summary templates you created or edited before
+profiles remain read-only under **Templates from before profiles**; use **Copy
+into a profile** to keep editing one.
 
 ## Display
 
