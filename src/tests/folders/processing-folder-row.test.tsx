@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import {
+    act,
     cleanup,
     fireEvent,
     render,
@@ -10,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemWorkflow } from "@/components/pipeline/item-workflow";
 import type { CategorizationPanelPresentation } from "@/lib/pipeline/categorization-presentation";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 import type { RecordingFolder } from "@/types/folder";
 
@@ -279,6 +281,64 @@ describe("processing folder row", () => {
         fireEvent.click(screen.getByRole("button", { name: "Choose profile" }));
 
         expect(document.activeElement).toBe(profile);
+    });
+
+    it("shows the workflow strip and Categorize card when uploaded processing arrives late", async () => {
+        vi.useFakeTimers();
+        try {
+            const waiting: ItemProcessingPresentation = {
+                ...needsProfile,
+                phases: {
+                    categorize: {
+                        state: "waiting",
+                        reason: "needs_folder",
+                        generation: 0,
+                        at: "2026-10-16T08:00:03.000Z",
+                    },
+                },
+            };
+            const filingPanel: CategorizationPanelPresentation = {
+                ...panel,
+                selectedFolderIds: [],
+                currentProfile: null,
+                currentManualOnly: false,
+                resolution: { status: "choose", candidates: [] },
+            };
+            let processingReads = 0;
+            vi.stubGlobal(
+                "fetch",
+                vi.fn(async (input: string | URL | Request) => {
+                    const url = String(input);
+                    if (url.endsWith("/categorize")) {
+                        return Response.json(filingPanel);
+                    }
+                    processingReads += 1;
+                    return Response.json({
+                        processing: processingReads < 3 ? null : waiting,
+                    });
+                }),
+            );
+            invalidateItemProcessing("item-1");
+            renderWorkflow({ initialData: null });
+
+            await act(async () => {
+                await Promise.resolve();
+                vi.advanceTimersByTime(4_000);
+                await Promise.resolve();
+                await Promise.resolve();
+            });
+
+            expect(
+                screen.getByText(
+                    "Choose a folder and a profile. Nothing is processed until the recording is filed.",
+                ),
+            ).toBeTruthy();
+            expect(
+                screen.getByRole("heading", { name: "Categorize recording" }),
+            ).toBeTruthy();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("confirms intended Organization placements from Share now", async () => {

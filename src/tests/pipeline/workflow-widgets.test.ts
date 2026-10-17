@@ -316,6 +316,45 @@ describe("workflow widgets", () => {
         expect(widgets.summary.visible).toBe(false);
         expect(widgets.taskReview.visible).toBe(false);
     });
+
+    it.each([
+        "title",
+        "topics",
+    ] as const)("marks Summary as a problem when its %s substep fails", (step) => {
+        const data = presentation({
+            phases: {
+                categorize: phase("done"),
+                transcribe: phase("done"),
+                learn: phase("done"),
+                summary: {
+                    ...phase("done"),
+                    steps: {
+                        [step]: phase("failed", "SERVICE_UNAVAILABLE"),
+                    },
+                },
+            },
+            outputs: { transcript: true, learn: true, summary: true },
+            failures: [
+                {
+                    phase: "summary",
+                    step,
+                    reasonCode: "SERVICE_UNAVAILABLE",
+                    retryAvailable: true,
+                },
+            ],
+        });
+
+        const workflow = workflowStatus.deriveWorkflowStatus(data, "audio");
+        expect(
+            workflow.steps.find((candidate) => candidate.id === "summary"),
+        ).toMatchObject({ state: "problem", current: true });
+        expect(workflow.status).toMatchObject({
+            actor: "problem",
+            message: "failureUnavailable",
+            params: { step: "summary" },
+            action: "retry",
+        });
+    });
 });
 
 describe.each([

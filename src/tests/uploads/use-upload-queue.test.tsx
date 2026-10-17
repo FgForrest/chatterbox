@@ -25,6 +25,7 @@ vi.mock("@/lib/jobs/client", () => ({
 }));
 
 import { useUploadQueue } from "@/hooks/use-upload-queue";
+import { onItemProcessingInvalidated } from "@/lib/pipeline/item-processing-events";
 
 class UploadRequest {
     upload = new EventTarget();
@@ -72,6 +73,8 @@ describe("useUploadQueue completion", () => {
         const onUploadStarted = vi.fn();
         const action = { label: "Open", onClick: vi.fn() };
         const onUploadComplete = vi.fn(() => action);
+        const invalidated = vi.fn();
+        const stop = onItemProcessingInvalidated("recording-1", invalidated);
         const { result } = renderHook(() =>
             useUploadQueue({ onUploadStarted, onUploadComplete }),
         );
@@ -99,6 +102,8 @@ describe("useUploadQueue completion", () => {
         expect(mocks.toastSuccess).toHaveBeenCalledWith('"meeting" uploaded', {
             action,
         });
+        expect(invalidated).toHaveBeenCalledOnce();
+        stop();
     });
 
     it("reports the recording id from a completed video conversion", async () => {

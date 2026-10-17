@@ -5,7 +5,7 @@
  * route imports this; only the worker imports the handler.
  */
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { enqueueJob } from "@/db/queries/async-jobs";
 import {
@@ -524,4 +524,44 @@ export async function settleDeadLearnRuns(recordingId: string): Promise<void> {
         );
     });
     if (advances.some(Boolean)) nudge();
+}
+
+/** Fail one Learn run as soon as its queue job becomes terminal. */
+export async function failLearnRunAfterTerminalJob(
+    runId: string,
+    userId: string,
+    errorCode: string,
+): Promise<string | null> {
+    const result = await db.transaction(async (tx) => {
+        const [settled] = await tx
+            .update(learnRuns)
+            .set({
+                status: "failed",
+                errorCode,
+                finishedAt: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(
+                and(
+                    eq(learnRuns.id, runId),
+                    eq(learnRuns.userId, userId),
+                    inArray(learnRuns.status, ["queued", "running"]),
+                ),
+            )
+            .returning({
+                itemId: learnRuns.itemId,
+                userId: learnRuns.userId,
+                view: learnRuns.view,
+            });
+        if (!settled) return null;
+        const advance = await requestAdvanceInTx(tx, {
+            itemId: settled.itemId,
+            userId: settled.userId,
+            view: settled.view,
+            reason: "learn-settled",
+        });
+        return { advance, itemId: settled.itemId };
+    });
+    if (result?.advance) nudge();
+    return result?.itemId ?? null;
 }

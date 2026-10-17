@@ -3,6 +3,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useItemProcessing } from "@/hooks/use-item-processing";
+import { invalidateItemProcessing } from "@/lib/pipeline/item-processing-events";
 import type { ItemProcessingPresentation } from "@/lib/pipeline/presentation";
 
 vi.mock("@/components/tasks/task-api", () => ({
@@ -11,9 +12,10 @@ vi.mock("@/components/tasks/task-api", () => ({
 
 function processing(
     job: "queued" | "running" | null,
+    itemId = "recording-1",
 ): ItemProcessingPresentation {
     return {
-        itemId: "recording-1",
+        itemId,
         kind: "audio",
         legacy: false,
         manualOnly: false,
@@ -127,5 +129,121 @@ describe("useItemProcessing", () => {
             await Promise.resolve();
         });
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("moves a finished Learn review to the server's running state without a reload", async () => {
+        const review: ItemProcessingPresentation = {
+            ...processing(null),
+            phases: {
+                ...processing(null).phases,
+                learn: {
+                    state: "waiting",
+                    reason: "review_pending",
+                    generation: 1,
+                    at: "2026-10-16T08:01:00.000Z",
+                },
+            },
+            learnFindingsWaiting: 2,
+        };
+        const running: ItemProcessingPresentation = {
+            ...review,
+            phases: {
+                ...review.phases,
+                learn: {
+                    state: "running",
+                    reason: "started",
+                    generation: 2,
+                    at: "2026-10-16T08:02:00.000Z",
+                },
+            },
+            learnFindingsWaiting: 0,
+        };
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ processing: review }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                json: async () => ({ processing: running }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId: review.itemId,
+                kind: "audio",
+                initialData: review,
+            }),
+        );
+
+        await act(async () => {
+            invalidateItemProcessing(review.itemId);
+            await Promise.resolve();
+        });
+        expect(result.current.workflow?.status?.message).toBe("learnReview");
+
+        await act(async () => {
+            vi.advanceTimersByTime(2_000);
+            await Promise.resolve();
+        });
+        expect(result.current.workflow?.status?.message).toBe("learnRunning");
+        expect(
+            result.current.workflow?.steps.find((step) => step.id === "learn")
+                ?.state,
+        ).toBe("working");
+    });
+
+    it("keeps revalidating a newly selected upload until categorization arrives", async () => {
+        const itemId = "uploaded-recording";
+        const waiting: ItemProcessingPresentation = {
+            ...processing(null, itemId),
+            phases: {
+                categorize: {
+                    state: "waiting",
+                    reason: "needs_folder",
+                    generation: 0,
+                    at: "2026-10-16T08:00:03.000Z",
+                },
+            },
+            outputs: { transcript: false, learn: false, summary: false },
+        };
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ processing: null }),
+            })
+            .mockResolvedValueOnce({
+                ok: true,
+                json: async () => ({ processing: null }),
+            })
+            .mockResolvedValue({
+                ok: true,
+                json: async () => ({ processing: waiting }),
+            });
+        vi.stubGlobal("fetch", fetchMock);
+        invalidateItemProcessing(itemId);
+        const { result } = renderHook(() =>
+            useItemProcessing({
+                itemId,
+                kind: "audio",
+                initialData: null,
+            }),
+        );
+
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(result.current.workflow).toBeNull();
+
+        await act(async () => {
+            vi.advanceTimersByTime(4_000);
+            await Promise.resolve();
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(result.current.workflow?.visible).toBe(true);
+        expect(result.current.workflow?.status?.message).toBe("notFiled");
     });
 });

@@ -284,6 +284,23 @@ describe("CategorizePanel", () => {
         );
     });
 
+    it("shows no automation loader until a profile is chosen", () => {
+        renderPanel(
+            {
+                ...base,
+                currentProfile: null,
+                resolution: { status: "choose", candidates: [] },
+            },
+            {
+                mode: "profile",
+                reason: "needs_profile",
+                profileDetails: {},
+            },
+        );
+
+        expect(screen.queryByText("Loading profile automation…")).toBeNull();
+    });
+
     it("offers Transcribe now only for audio", () => {
         const onTranscribe = vi.fn();
         const { rerender } = render(
