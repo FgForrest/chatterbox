@@ -157,7 +157,7 @@ async function updateDefault(
 ): Promise<void> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
         const current = await getDefaultProfile(userId, channel, actor.actorId);
-        if (!current) return;
+        if (!current || current.ownerUserId !== userId) return;
         const settings =
             channel === "audio"
                 ? applyAudio(current, stored, body)

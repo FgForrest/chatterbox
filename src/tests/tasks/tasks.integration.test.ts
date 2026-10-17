@@ -3824,10 +3824,9 @@ describeWithDatabase("tasks (PostgreSQL)", () => {
                 ticked: false,
             }),
         ]);
-        expect(conflictReview.updates.map((update) => update.kind)).toEqual([
-            "done",
-            "drop",
-        ]);
+        expect(
+            conflictReview.updates.map((update) => update.kind).sort(),
+        ).toEqual(["done", "drop"]);
         for (const update of conflictReview.updates) {
             await tickUpdateProposal(
                 alice,

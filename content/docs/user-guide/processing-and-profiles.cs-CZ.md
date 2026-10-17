@@ -7,7 +7,7 @@ Nové nahrávky a pošta čekají na zařazení, než Chatterbox spustí placen�
 
 ## Zařazení nové položky
 
-Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zařadit nahrávku** nebo **Zařadit e-mail**. V poli **Složka** vyberte jednu složku, nebo pomocí **Nová složka…** vytvořte složku první úrovně v části **Soukromé** či **Organizace**. V poli **Profil** zvolte navržený či jiný profil, nebo **Bez automatického zpracování**.
+Otevřete položku. Prvním krokem pracovního postupu je vložená karta **Zařadit nahrávku** nebo **Zařadit e-mail**. V poli **Složka** vyberte jednu složku, nebo pomocí **Nová složka…** vytvořte složku první úrovně v části **Soukromé** či **Organizace**. V poli **Profil** zvolte **Výchozí profil Organizace**, konkrétní profil Organizace nebo osobní profil, případně **Bez automatického zpracování**.
 
 ![Zařazení nahrávky a výběr profilu zpracování](images/categorize-card.png)
 
@@ -23,7 +23,7 @@ Výběrem složky Organizace vytvoříte zamýšlené umístění. Položka zůs
 
 ## Profily jsou recepty zpracování
 
-Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upravíte v **Nastavení → Profily**. Nový účet začíná se dvěma profily: **Nahrávky** pro zvuk a **Pošta** pro poštu. Aktualizovaný účet může mít další profily zkopírované z dřívějších šablon, aby se zachovala jeho stávající nastavení.
+Profil zpracování je recept pro jeden druh položky. Profily zobrazíte a upravíte v **Nastavení → Profily**. Nový účet bez přístupu k Organizaci začíná se dvěma osobními profily: **Nahrávky** pro zvuk a **Pošta** pro poštu. Nový člen Organizace místo toho používá výchozí profily Organizace a začíná bez osobních profilů. Aktualizovaný účet si zachová stávající osobní výchozí profily a může mít další profily zkopírované z dřívějších šablon.
 
 ![Seznam profilů zpracování](images/profiles.png)
 
@@ -33,9 +33,9 @@ Profil obsahuje také volby pro danou práci: poskytovatele a model, jazyk přep
 
 ![Úprava profilu Nahrávky](images/profile-editor.png)
 
-Profily můžete vytvářet, duplikovat, archivovat, obnovovat a nastavovat jako výchozí. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
+V horní části seznamu zvolíte samostatné výchozí profily pro nahrávky a poštu. Každý může sledovat aktuální výchozí profil Organizace, použít konkrétní profil Organizace nebo jeden z Vašich profilů. Osobní profily můžete vytvářet, duplikovat, mazat, archivovat a obnovovat. Smazání nepoužitého profilu jej odstraní natrvalo; pokud na něj odkazuje historie zpracování, Chatterbox jej odebere ze seznamů, ale ponechá jej pod **Archivované**, aby historie zůstala zachována. Ruční shrnutí může použít libovolný dostupný profil pro stejný druh položky. Výběr profilu shrnutí začíná profilem položky a v tomto prohlížeči si pamatuje poslední ruční volbu pro daný profil.
 
-**Profily Organizace** jsou sdílené recepty. Členové je mohou používat a duplikovat do osobního profilu. Kurátoři mohou vytvářet a upravovat verze Organizace.
+**Profily Organizace** jsou sdílené recepty. Členové je mohou používat na soukromé položky a duplikovat do osobního profilu. Štítek **Vaše výchozí** označuje profil, který právě používáte; **Výchozí profil Organizace** označuje volbu Organizace. Když sledujete výchozí profil Organizace, tento profil má oba štítky. Kurátoři mohou vytvářet a upravovat verze Organizace.
 
 <span id="folder-default-profiles" />
 
@@ -48,6 +48,8 @@ Otevřete nastavení složky a zvolte **Výchozí profily**. Nahrávky a pošta 
 - **Dědit** použije nejbližšího předka s nastavenou volbou. Pokud ji nemá žádný, Chatterbox použije Váš výchozí profil pro daný druh položky.
 - Výběrem profilu přiřadíte položkám zařazeným do složky tento recept.
 - **Bez automatického zpracování** přiřadí běžný výchozí profil, ale vypne všechny automatické kroky. Kroky můžete stále spouštět ručně.
+
+Pokud smažete osobní profil zvolený jako výchozí pro složku, složka se vrátí k volbě **Dědit**.
 
 Pokud složky položky navrhují rozdílné výchozí profily, vložená karta **Zařazení** Vás požádá o výběr profilu. Složky Organizace používají profily Organizace.
 

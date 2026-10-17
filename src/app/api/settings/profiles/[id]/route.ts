@@ -5,6 +5,7 @@ import { validateProfileProviderPins } from "@/lib/profiles/providers";
 import {
     archiveProfile,
     DefaultProfileArchiveError,
+    deletePersonalProfile,
     ProfileVersionConflictError,
     updateProfile,
 } from "@/lib/profiles/store";
@@ -91,6 +92,24 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
     const { id } = await (context as IdContext).params;
     const current = await editableProfile(id, routeActor);
     try {
+        if (current.profile.scope === "personal") {
+            const result = await deletePersonalProfile({
+                ownerUserId: current.profile.ownerUserId,
+                profileId: id,
+                actor: routeActor.actor,
+            });
+            if (!result) {
+                throw new AppError(
+                    ErrorCode.NOT_FOUND,
+                    "Profile not found",
+                    404,
+                );
+            }
+            return NextResponse.json({
+                success: true,
+                disposition: result.disposition,
+            });
+        }
         const archived = await archiveProfile({
             ownerUserId: current.profile.ownerUserId,
             profileId: id,
@@ -99,7 +118,7 @@ export const DELETE = apiHandler<IdContext>(async (request, context) => {
         if (!archived) {
             throw new AppError(ErrorCode.NOT_FOUND, "Profile not found", 404);
         }
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, disposition: "archive" });
     } catch (error) {
         if (error instanceof DefaultProfileArchiveError) {
             throw new AppError(ErrorCode.CONFLICT, error.message, 409);

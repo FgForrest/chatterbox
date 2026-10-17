@@ -3305,6 +3305,14 @@ export const userSettings = pgTable("user_settings", {
     // -> hosted managed fallback). Supersedes the per-row
     // api_credentials.is_default_transcription boolean for selection.
     defaultTranscriptionProviderId: text("default_transcription_provider_id"),
+    defaultAudioProfileId: text("default_audio_profile_id").references(
+        () => processingProfiles.id,
+        { onDelete: "set null" },
+    ),
+    defaultMailProfileId: text("default_mail_profile_id").references(
+        () => processingProfiles.id,
+        { onDelete: "set null" },
+    ),
     // Display/UI settings
     dateTimeFormat: varchar("date_time_format", { length: 20 })
         .notNull()

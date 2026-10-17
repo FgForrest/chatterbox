@@ -65,9 +65,11 @@ import {
     archiveProfile,
     createProfile,
     DefaultProfileArchiveError,
+    deletePersonalProfile,
     duplicateProfile,
     getProfile,
     listProfiles,
+    ProfilePermissionError,
     ProfileVersionConflictError,
     setDefaultProfile,
     updateProfile,
@@ -337,11 +339,41 @@ describeWithDatabase("profile store", () => {
                 actor: actor(BOB),
             }),
         ).resolves.toBe(false);
+        await expect(
+            setDefaultProfile({
+                ownerUserId: BOB,
+                profileId: created.id,
+                actor: actor(BOB),
+            }),
+        ).rejects.toBeInstanceOf(ProfilePermissionError);
         expect(await getProfile(ALICE, created.id, ALICE)).toMatchObject({
             name: "Private",
             version: 1,
             archivedAt: null,
         });
+    });
+
+    it("refuses to delete the current default without an Organization fallback", async () => {
+        await ensureProfiles(ALICE);
+        const [current] = await db()
+            .select({ id: processingProfiles.id })
+            .from(processingProfiles)
+            .where(
+                and(
+                    eq(processingProfiles.ownerUserId, ALICE),
+                    eq(processingProfiles.channel, "audio"),
+                    eq(processingProfiles.isDefault, true),
+                ),
+            )
+            .limit(1);
+
+        await expect(
+            deletePersonalProfile({
+                ownerUserId: ALICE,
+                profileId: current?.id ?? "missing",
+                actor: actor(ALICE),
+            }),
+        ).rejects.toBeInstanceOf(DefaultProfileArchiveError);
     });
 
     it("searches decrypted names before paginating and filters channel and scope", async () => {

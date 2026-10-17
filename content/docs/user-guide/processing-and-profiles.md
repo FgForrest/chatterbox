@@ -7,7 +7,7 @@ New recordings and mail wait for you to file them before Chatterbox starts any p
 
 ## Categorize a new item
 
-Open the item. Its first workflow step is an inline **Categorize recording** or **Categorize email** card. Under **Folder**, choose one folder, or choose **New folder…** to create a first-level folder under **Private** or **Organization**. Under **Profile**, choose the suggested profile, another profile, or **Nothing automatic**.
+Open the item. Its first workflow step is an inline **Categorize recording** or **Categorize email** card. Under **Folder**, choose one folder, or choose **New folder…** to create a first-level folder under **Private** or **Organization**. Under **Profile**, choose **Organization default**, a specific Organization or personal profile, or **Nothing automatic**.
 
 ![Categorizing a recording and choosing its processing profile](images/categorize-card.png)
 
@@ -23,7 +23,7 @@ Choosing an Organization folder records an intended placement. The item remains 
 
 ## Profiles are processing recipes
 
-A processing profile is a recipe for one kind of item. Open **Settings → Profiles** to see and edit them. A new account starts with two profiles: **Recordings** for audio and **Mail** for mail. An upgraded account can have extra profiles copied from its earlier templates so its existing choices are preserved.
+A processing profile is a recipe for one kind of item. Open **Settings → Profiles** to see and edit them. A new account without Organization access starts with two personal profiles: **Recordings** for audio and **Mail** for mail. A new Organization member follows the Organization defaults instead and starts without personal profiles. An upgraded account keeps its existing personal defaults and can have extra profiles copied from its earlier templates.
 
 ![The processing profiles list](images/profiles.png)
 
@@ -33,9 +33,9 @@ A profile also holds the choices for that work: provider and model, transcriptio
 
 ![Editing the Recordings processing profile](images/profile-editor.png)
 
-You can create, duplicate, archive, restore, and set default profiles. A manual summary can use any available profile for the same kind of item. Its profile picker starts with the item's profile and remembers your last manual choice for that profile in this browser.
+At the top of the list, choose separate defaults for recordings and mail. Each can follow the current Organization default, use a specific Organization profile, or use one of your profiles. You can create, duplicate, delete, archive, and restore personal profiles. Deleting an unused profile removes it permanently; if processing history refers to it, Chatterbox removes it from the lists but keeps it under **Archived** so that history remains intact. A manual summary can use any available profile for the same kind of item. Its profile picker starts with the item's profile and remembers your last manual choice for that profile in this browser.
 
-**Organization profiles** are shared recipes. Members can use and duplicate them into a personal profile. Curators can create and edit the Organization versions.
+**Organization profiles** are shared recipes. Members can use them on private items and duplicate them into a personal profile. **Your default** marks the profile you currently use; **Organization default** marks the Organization's choice. When you follow the Organization default, both labels appear on that profile. Curators can create and edit the Organization versions.
 
 <span id="folder-default-profiles" />
 
@@ -48,6 +48,8 @@ Open a folder's settings and choose **Default profiles**. Recordings and mail ha
 - **Inherit** uses the nearest ancestor with a choice. If none has one, Chatterbox uses your default profile for that item type.
 - Choosing a profile assigns that recipe to items filed there.
 - **Nothing automatic** assigns the normal default profile but leaves every automatic step off. You can still run steps by hand.
+
+If you delete a personal profile selected as a folder default, that folder returns to **Inherit**.
 
 When an item's folders suggest different defaults, the inline Categorize card asks you to choose the profile. Organization folders use Organization profiles.
 

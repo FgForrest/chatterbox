@@ -8,7 +8,12 @@ import {
     defaultProfileSettings,
     type ProfileSettings,
 } from "@/lib/profiles/settings";
-import { createProfile, listActorProfiles } from "@/lib/profiles/store";
+import {
+    createProfile,
+    getDefaultProfileState,
+    listActorProfiles,
+    profileDeleteDisposition,
+} from "@/lib/profiles/store";
 import {
     ensureActorProfiles,
     parseSettings,
@@ -63,18 +68,84 @@ export const GET = apiHandler(async (request: Request) => {
         limit: pageSize,
     });
     const orgUserId = await getOrgUserId();
+    const [audioDefault, mailDefault, defaultOptions] = await Promise.all([
+        getDefaultProfileState(routeActor.userId, "audio"),
+        getDefaultProfileState(routeActor.userId, "mail"),
+        listActorProfiles({
+            actor: routeActor.actor,
+            offset: 0,
+            limit: 100,
+        }),
+    ]);
     const canCreateOrganization = orgUserId
         ? await mayEditProfile(routeActor.actor, {
               ownerUserId: orgUserId,
               scope: "organization",
           })
         : false;
+    const states = { audio: audioDefault, mail: mailDefault };
+    const profiles = await Promise.all(
+        result.items.map(async (profile) => {
+            const summary = await profileSummary(profile, routeActor.actor);
+            const state = states[profile.channel];
+            const deleteDisposition =
+                profile.scope === "personal" && summary.canEdit
+                    ? await profileDeleteDisposition(
+                          routeActor.userId,
+                          profile.id,
+                      )
+                    : null;
+            return {
+                ...summary,
+                isYourDefault: state.effective?.id === profile.id,
+                isOrganizationDefault:
+                    state.organizationDefault?.id === profile.id,
+                deleteDisposition,
+            };
+        }),
+    );
     return NextResponse.json({
-        profiles: await Promise.all(
-            result.items.map((profile) =>
-                profileSummary(profile, routeActor.actor),
-            ),
-        ),
+        profiles,
+        defaults: {
+            audio: {
+                selected:
+                    audioDefault.source === "organization" &&
+                    !audioDefault.pointerId
+                        ? "organization_default"
+                        : (audioDefault.pointerId ??
+                          audioDefault.effective?.id ??
+                          null),
+                organizationDefault: audioDefault.organizationDefault
+                    ? {
+                          id: audioDefault.organizationDefault.id,
+                          name: audioDefault.organizationDefault.name,
+                      }
+                    : null,
+                explicitUnavailable: audioDefault.explicitUnavailable,
+            },
+            mail: {
+                selected:
+                    mailDefault.source === "organization" &&
+                    !mailDefault.pointerId
+                        ? "organization_default"
+                        : (mailDefault.pointerId ??
+                          mailDefault.effective?.id ??
+                          null),
+                organizationDefault: mailDefault.organizationDefault
+                    ? {
+                          id: mailDefault.organizationDefault.id,
+                          name: mailDefault.organizationDefault.name,
+                      }
+                    : null,
+                explicitUnavailable: mailDefault.explicitUnavailable,
+            },
+            options: defaultOptions.items.map((profile) => ({
+                id: profile.id,
+                name: profile.name,
+                channel: profile.channel,
+                scope: profile.scope,
+            })),
+        },
         pagination: {
             page,
             pageSize,

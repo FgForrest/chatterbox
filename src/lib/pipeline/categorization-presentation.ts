@@ -12,7 +12,11 @@ import { listFolderOrganization } from "@/lib/folders/folders";
 import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
 import { resolveProfileForPlacements } from "@/lib/profiles/resolve-for-placement";
 import { ensureProfiles } from "@/lib/profiles/seed";
-import { listProfiles, type ProfileRecord } from "@/lib/profiles/store";
+import {
+    getDefaultProfileState,
+    listProfiles,
+    type ProfileRecord,
+} from "@/lib/profiles/store";
 import type { RecordingFolder } from "@/types/folder";
 
 export interface ProcessingProfileSummary {
@@ -50,6 +54,8 @@ export interface CategorizationPanelPresentation {
     folders: ProcessingFolderSummary[];
     selectedFolderIds: string[];
     profiles: ProcessingProfileSummary[];
+    organizationDefault?: ProcessingProfileSummary | null;
+    followsOrganizationDefault?: boolean;
     resolution: ProcessingResolution;
     currentProfile: ProcessingProfileSummary | null;
     currentManualOnly: boolean;
@@ -155,6 +161,7 @@ export async function loadPrivateCategorizationPanel(
         profilePages,
         intents,
         canCreateOrganizationFolders,
+        defaultState,
     ] = await Promise.all([
         listFolderOrganization(ownerUserId),
         Promise.all(
@@ -179,6 +186,7 @@ export async function loadPrivateCategorizationPanel(
         isOrgScopeEnabled()
             ? userCuratesOrganizationNow(ownerUserId)
             : Promise.resolve(false),
+        getDefaultProfileState(ownerUserId, item.kind),
     ]);
     const byId = new Map(
         folderOrganization.folders.map((folder) => [folder.id, folder]),
@@ -238,6 +246,11 @@ export async function loadPrivateCategorizationPanel(
         profiles: profilePages.flatMap((page) =>
             page.items.map(profileSummary),
         ),
+        organizationDefault: defaultState.organizationDefault
+            ? profileSummary(defaultState.organizationDefault)
+            : null,
+        followsOrganizationDefault:
+            defaultState.source === "organization" && !defaultState.pointerId,
         resolution,
         currentProfile,
         currentManualOnly: item.currentManualOnly ?? false,

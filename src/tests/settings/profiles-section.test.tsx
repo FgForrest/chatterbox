@@ -8,6 +8,7 @@ import {
     waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConfirmDialogProvider } from "@/components/confirm-dialog";
 import { ProfilesSection } from "@/components/settings-sections/profiles-section";
 import {
     type AudioProfileSettings,
@@ -47,6 +48,9 @@ const profiles = [
         channel: "audio" as const,
         scope: "personal" as const,
         isDefault: true,
+        isYourDefault: false,
+        isOrganizationDefault: false,
+        deleteDisposition: "archive" as const,
         version: 2,
         canEdit: true,
         archivedAt: null,
@@ -59,6 +63,9 @@ const profiles = [
         channel: "audio" as const,
         scope: "organization" as const,
         isDefault: false,
+        isYourDefault: true,
+        isOrganizationDefault: true,
+        deleteDisposition: null,
         version: 1,
         canEdit: false,
         archivedAt: null,
@@ -71,6 +78,9 @@ const profiles = [
         channel: "audio" as const,
         scope: "personal" as const,
         isDefault: false,
+        isYourDefault: false,
+        isOrganizationDefault: false,
+        deleteDisposition: "delete" as const,
         version: 1,
         canEdit: true,
         archivedAt: null,
@@ -83,6 +93,9 @@ const profiles = [
         channel: "mail" as const,
         scope: "personal" as const,
         isDefault: false,
+        isYourDefault: true,
+        isOrganizationDefault: false,
+        deleteDisposition: "delete" as const,
         version: 1,
         canEdit: true,
         archivedAt: null,
@@ -236,6 +249,27 @@ describe("Settings Profiles", () => {
                         : profiles;
                     return Response.json({
                         profiles: listedProfiles,
+                        defaults: {
+                            audio: {
+                                selected: "organization_default",
+                                organizationDefault: {
+                                    id: "org-readonly",
+                                    name: "Org Profile",
+                                },
+                                explicitUnavailable: false,
+                            },
+                            mail: {
+                                selected: "mail-profile",
+                                organizationDefault: null,
+                                explicitUnavailable: false,
+                            },
+                            options: profiles.map((profile) => ({
+                                id: profile.id,
+                                name: profile.name,
+                                channel: profile.channel,
+                                scope: profile.scope,
+                            })),
+                        },
                         permissions: { canCreateOrganization },
                         pagination: {
                             page: 1,
@@ -256,8 +290,12 @@ describe("Settings Profiles", () => {
     });
 
     async function renderList() {
-        render(<ProfilesSection />);
-        await screen.findByText("Default Profile");
+        render(
+            <ConfirmDialogProvider>
+                <ProfilesSection />
+            </ConfirmDialogProvider>,
+        );
+        await screen.findByRole("button", { name: "Edit Default Profile" });
     }
 
     async function edit(name: string) {
@@ -300,8 +338,43 @@ describe("Settings Profiles", () => {
             }),
         ).toBeTruthy();
         expect(
-            screen.queryByRole("button", { name: "Archive Default Profile" }),
-        ).toBeNull();
+            screen.getByRole("button", { name: "Delete Default Profile" }),
+        ).toBeTruthy();
+    });
+
+    it("shows both channel defaults and distinguishes member and Organization badges", async () => {
+        await renderList();
+
+        const recordings = screen.getByRole("combobox", {
+            name: "Default for recordings",
+        });
+        const mail = screen.getByRole("combobox", {
+            name: "Default for mail",
+        });
+        expect(recordings.textContent).toContain(
+            "Organization default (Org Profile)",
+        );
+        expect(
+            screen.getByRole("option", { name: "Default Profile" }),
+        ).toBeTruthy();
+        expect(mail.textContent).toContain("Mail Profile");
+        expect(screen.getAllByText("Your default")).toHaveLength(2);
+        expect(screen.getByText("Organization default")).toBeTruthy();
+
+        fireEvent.change(recordings, { target: { value: "org-readonly" } });
+        await waitFor(() =>
+            expect(
+                calls.some(
+                    (call) =>
+                        call.url === "/api/settings/profiles/defaults" &&
+                        call.method === "POST" &&
+                        (call.body as { channel: string }).channel ===
+                            "audio" &&
+                        (call.body as { profileId: string }).profileId ===
+                            "org-readonly",
+                ),
+            ).toBe(true),
+        );
     });
 
     it("keeps localized output-format edits isolated and restores one locale only", async () => {
@@ -411,7 +484,12 @@ describe("Settings Profiles", () => {
         expect(provider.textContent).toContain("ElevenLabs · scribe_v2");
         expect(
             screen.getByText(
-                "Default leaves transcription unpinned, so it uses the account's transcription provider or Mynah when available.",
+                "Default uses your default transcription provider, then the Organization default, then Mynah when available.",
+            ),
+        ).toBeTruthy();
+        expect(
+            screen.getByText(
+                "Sets the same provider pin for Learn, Title, Topics, and Summary. Default for each role uses your default for that role, then the Organization default, then your first enabled provider.",
             ),
         ).toBeTruthy();
     });
@@ -537,32 +615,49 @@ describe("Settings Profiles", () => {
         );
     });
 
-    it("confirms archive in-page and restores profiles from the archived filter", async () => {
-        await renderList();
-        fireEvent.click(
-            screen.getByRole("button", { name: "Archive Unavailable Pin" }),
-        );
-        expect(screen.getByText("Archive “Unavailable Pin”?")).toBeTruthy();
-        expect(
-            calls.some(
-                (call) =>
-                    call.url === "/api/settings/profiles/unavailable-pin" &&
-                    call.method === "DELETE",
-            ),
-        ).toBe(false);
-        fireEvent.click(
-            screen.getByRole("button", { name: "Archive profile" }),
-        );
-        await waitFor(() =>
+    describe.each([
+        {
+            name: "Default Profile",
+            description:
+                "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
+        },
+        {
+            name: "Unavailable Pin",
+            description:
+                "This profile has no processing history and will be permanently deleted.",
+        },
+    ])("Delete confirmation for $name", ({ name, description }) => {
+        it("explains the server-selected disposition before deleting", async () => {
+            await renderList();
+            fireEvent.click(
+                screen.getByRole("button", { name: `Delete ${name}` }),
+            );
+            expect(screen.getByText(`Delete “${name}”?`)).toBeTruthy();
+            expect(screen.getByText(description)).toBeTruthy();
             expect(
                 calls.some(
                     (call) =>
-                        call.url === "/api/settings/profiles/unavailable-pin" &&
+                        call.url ===
+                            `/api/settings/profiles/${name === "Default Profile" ? "personal-default" : "unavailable-pin"}` &&
                         call.method === "DELETE",
                 ),
-            ).toBe(true),
-        );
+            ).toBe(false);
+            fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+            await waitFor(() =>
+                expect(
+                    calls.some(
+                        (call) =>
+                            call.url ===
+                                `/api/settings/profiles/${name === "Default Profile" ? "personal-default" : "unavailable-pin"}` &&
+                            call.method === "DELETE",
+                    ),
+                ).toBe(true),
+            );
+        });
+    });
 
+    it("restores profiles from the archived filter", async () => {
+        await renderList();
         fireEvent.change(screen.getByRole("combobox", { name: "Scope" }), {
             target: { value: "archived" },
         });

@@ -34,6 +34,9 @@ export interface SettingsProfileSummary {
     channel: "audio" | "mail";
     scope: "personal" | "organization";
     isDefault: boolean;
+    isYourDefault?: boolean;
+    isOrganizationDefault?: boolean;
+    deleteDisposition?: "delete" | "archive" | null;
     version: number;
     canEdit: boolean;
     archivedAt: string | null;
@@ -46,6 +49,11 @@ export interface SettingsProfileDetail extends SettingsProfileSummary {
 
 export interface SettingsProfilesPage {
     profiles: SettingsProfileSummary[];
+    defaults?: {
+        audio: SettingsProfileDefault;
+        mail: SettingsProfileDefault;
+        options: SettingsProfileDefaultOption[];
+    };
     permissions: {
         canCreateOrganization: boolean;
     };
@@ -55,6 +63,19 @@ export interface SettingsProfilesPage {
         total: number;
         totalPages: number;
     };
+}
+
+export interface SettingsProfileDefault {
+    selected: string | null;
+    organizationDefault: { id: string; name: string } | null;
+    explicitUnavailable: boolean;
+}
+
+export interface SettingsProfileDefaultOption {
+    id: string;
+    name: string;
+    channel: "audio" | "mail";
+    scope: "personal" | "organization";
 }
 
 export interface SettingsProfileBuiltins {

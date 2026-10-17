@@ -130,6 +130,7 @@ import { enqueueTopicsJob } from "@/lib/topics/topics-job";
 import { upsertTranscription } from "@/lib/transcription/persist";
 import { emitEvent } from "@/lib/webhooks/emit";
 import { insertRecordings } from "@/tests/integration/items";
+import { seedExistingPersonalProfiles } from "@/tests/integration/profile-fixtures";
 
 const testDatabaseUrl = getTestDatabaseUrl();
 const describeWithDatabase = testDatabaseUrl ? describe : describe.skip;
@@ -173,6 +174,7 @@ describeWithDatabase("automatic Learn holds (PostgreSQL)", () => {
             autoDetectTopics: true,
             autoGenerateTitle: true,
         });
+        await seedExistingPersonalProfiles(OWNER, mockEnv);
         await db()
             .insert(apiCredentials)
             .values({

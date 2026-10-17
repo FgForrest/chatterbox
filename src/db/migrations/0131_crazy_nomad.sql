@@ -1,0 +1,4 @@
+ALTER TABLE "user_settings" ADD COLUMN "default_audio_profile_id" text;--> statement-breakpoint
+ALTER TABLE "user_settings" ADD COLUMN "default_mail_profile_id" text;--> statement-breakpoint
+ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_default_audio_profile_id_processing_profiles_id_fk" FOREIGN KEY ("default_audio_profile_id") REFERENCES "public"."processing_profiles"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_default_mail_profile_id_processing_profiles_id_fk" FOREIGN KEY ("default_mail_profile_id") REFERENCES "public"."processing_profiles"("id") ON DELETE set null ON UPDATE no action;

@@ -13,9 +13,9 @@ Otevřete Nastavení z nabídky účtu (kulaté tlačítko s Vaší iniciálou),
 
 V **Nastavení → Profily** volíte, jak se nahrávky a pošta přepisují, učí, pojmenovávají, shrnují a převádějí na úkoly. Profily nahrazují dřívější přepínače automatizace účtu a výběr šablony vedle tlačítka **Shrnout**.
 
-Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a nastavení funkce **Vícenásobné shrnování**. Můžete nastavit jeden výchozí profil pro nahrávky a jeden pro poštu, nepoužívané profily archivovat a později je obnovit.
+Použijte **Nový profil pro nahrávky** nebo **Nový profil pro poštu**, případně duplikujte existující profil. Každý krok má jeden přepínač **Spouštět automaticky**. Editor obsahuje také poskytovatele, model, jazyk, instrukce, formát výstupu a nastavení funkce **Vícenásobné shrnování**. Nahoře nastavíte samostatné výchozí profily pro nahrávky a poštu. Můžete sledovat výchozí profil Organizace, zvolit konkrétní profil Organizace nebo jeden z Vašich profilů. Nepotřebné osobní profily smažte; profily, na které odkazuje historie zpracování, se přesunou pod **Archivované** a lze je obnovit.
 
-Je-li Organizace povolena, členové vidí profily Organizace a mohou je duplikovat do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
+Je-li Organizace povolena, noví členové sledují její výchozí profily a začínají bez osobních profilů. Členové mohou profily Organizace používat na soukromé položky a duplikovat je do osobních profilů. Kurátoři mohou sdílené verze upravovat. Viz [Zpracování a profily](processing-and-profiles.md).
 
 ## Poskytovatelé AI
 

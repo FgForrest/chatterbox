@@ -13,9 +13,9 @@ Open Settings from the account menu (the round button with your initial), or pre
 
 **Settings → Profiles** is where you choose how recordings and mail are transcribed, learned from, titled, summarized, and turned into tasks. Profiles replace the old per-account automation switches and the template picker beside **Summarize**.
 
-Use **New profile for recordings** or **New profile for mail**, or duplicate an existing profile. Each step has one **Run automatically** switch. The editor also holds its provider, model, language, instructions, output format, and multi-pass choices. You can set one default for recordings and one for mail, archive profiles you no longer use, and restore them later.
+Use **New profile for recordings** or **New profile for mail**, or duplicate an existing profile. Each step has one **Run automatically** switch. The editor also holds its provider, model, language, instructions, output format, and multi-pass choices. At the top, set separate defaults for recordings and mail. You can follow the Organization default, select a specific Organization profile, or select one of your profiles. Delete personal profiles you no longer need; profiles referenced by processing history move to **Archived** and can be restored.
 
-If the Organization is enabled, members see Organization profiles and can duplicate them into personal ones. Curators can edit the shared versions. See [Processing and profiles](processing-and-profiles.md).
+If the Organization is enabled, new members follow its defaults and start without personal profiles. Members can use Organization profiles for private items and duplicate them into personal ones. Curators can edit the shared versions. See [Processing and profiles](processing-and-profiles.md).
 
 ## AI providers
 

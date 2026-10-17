@@ -30,7 +30,8 @@ import {
     decryptText,
     encryptText,
 } from "@/lib/encryption/fields";
-import { getOrgUserId } from "@/lib/org/config";
+import { getOrgUserId, isOrgScopeEnabled } from "@/lib/org/config";
+import { mayUseOrganizationProfiles } from "@/lib/profiles/access";
 import {
     type AudioProfileSettings,
     defaultProfileSettings,
@@ -377,6 +378,14 @@ export async function ensureProfiles(userId: string): Promise<void> {
     const orgUserId = await getOrgUserId();
     const scope: ProfileScope =
         orgUserId === userId ? "organization" : "personal";
+    if (
+        scope === "personal" &&
+        orgUserId &&
+        isOrgScopeEnabled() &&
+        (await mayUseOrganizationProfiles(userId))
+    ) {
+        return;
+    }
 
     await db.transaction(async (tx) => {
         await lockProfileSeedOwner(tx, userId);

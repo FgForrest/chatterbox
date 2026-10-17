@@ -133,8 +133,9 @@ describe("per-run summary profile picker", () => {
         );
     });
 
-    afterEach(() => {
+    afterEach(async () => {
         cleanup();
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
         vi.unstubAllGlobals();
     });
 

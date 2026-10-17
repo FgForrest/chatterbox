@@ -57,6 +57,7 @@ interface CategorizePanelProps {
 
 const MANUAL_ONLY = "__manual_only__";
 const NEW_FOLDER = "__new_folder__";
+const ORGANIZATION_DEFAULT = "__organization_default__";
 
 function resolutionChoice(resolution: ProcessingResolution): string {
     if (resolution.status !== "resolved") return "";
@@ -66,6 +67,15 @@ function resolutionChoice(resolution: ProcessingResolution): string {
 function initialProfileChoice(data: CategorizePanelData): string {
     if (data.currentProfile) {
         return data.currentManualOnly ? MANUAL_ONLY : data.currentProfile.id;
+    }
+    if (
+        data.followsOrganizationDefault &&
+        data.organizationDefault &&
+        data.resolution.status === "resolved" &&
+        data.resolution.source === "default" &&
+        data.resolution.profile.id === data.organizationDefault.id
+    ) {
+        return ORGANIZATION_DEFAULT;
     }
     return resolutionChoice(data.resolution);
 }
@@ -146,16 +156,20 @@ export function CategorizePanel({
     }, [mode]);
 
     useEffect(() => {
+        const detailProfileId =
+            profileChoice === ORGANIZATION_DEFAULT
+                ? data.organizationDefault?.id
+                : profileChoice;
         if (
             profileChoice === MANUAL_ONLY ||
-            !profileChoice ||
-            details[profileChoice]
+            !detailProfileId ||
+            details[detailProfileId]
         ) {
             return;
         }
         const controller = new AbortController();
         void fetch(
-            `/api/settings/profiles/${encodeURIComponent(profileChoice)}`,
+            `/api/settings/profiles/${encodeURIComponent(detailProfileId)}`,
             { signal: controller.signal },
         )
             .then(async (response) => {
@@ -166,13 +180,13 @@ export function CategorizePanel({
                 if (detail) {
                     setDetails((current) => ({
                         ...current,
-                        [profileChoice]: detail,
+                        [detailProfileId]: detail,
                     }));
                 }
             })
             .catch(() => {});
         return () => controller.abort();
-    }, [details, profileChoice]);
+    }, [data.organizationDefault?.id, details, profileChoice]);
 
     const profileOptions = useMemo(() => {
         const byId = new Map(
@@ -193,11 +207,17 @@ export function CategorizePanel({
         return [...byId.values()];
     }, [data]);
     const selectedFolder = folders.find((folder) => folder.id === folderId);
+    const selectedProfileId =
+        profileChoice === ORGANIZATION_DEFAULT
+            ? data.organizationDefault?.id
+            : profileChoice;
     const selectedProfile = profileOptions.find(
-        (profile) => profile.id === profileChoice,
+        (profile) => profile.id === selectedProfileId,
     );
     const selectedDetails =
-        profileChoice === MANUAL_ONLY ? null : details[profileChoice];
+        profileChoice === MANUAL_ONLY || !selectedProfileId
+            ? null
+            : details[selectedProfileId];
     const prefilledChoice = initialProfileChoice(data);
 
     const selectFolder = async (nextFolderId: string) => {
@@ -287,7 +307,11 @@ export function CategorizePanel({
         ) {
             submission.manualOnly = true;
         } else if (profileChoice !== prefilledChoice) {
-            submission.profileId = profileChoice;
+            if (profileChoice === ORGANIZATION_DEFAULT) {
+                submission.profileId = data.organizationDefault?.id;
+            } else {
+                submission.profileId = profileChoice;
+            }
         }
         const rollback = onOptimisticCategorize?.(submission);
         setSubmitting(true);
@@ -541,6 +565,13 @@ export function CategorizePanel({
                                 />
                             </SelectTrigger>
                             <SelectContent>
+                                {data.organizationDefault && (
+                                    <SelectItem value={ORGANIZATION_DEFAULT}>
+                                        {i18n("Organization default ({name})", {
+                                            name: data.organizationDefault.name,
+                                        })}
+                                    </SelectItem>
+                                )}
                                 {profileOptions.map((profile) => (
                                     <SelectItem
                                         key={profile.id}

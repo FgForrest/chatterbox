@@ -10,11 +10,12 @@ import {
     Pencil,
     Plus,
     RotateCcw,
-    Star,
+    Trash2,
 } from "lucide-react";
 import { useExtracted } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/confirm-dialog";
 import { ProfileEditor } from "@/components/settings/profile-editor";
 import { SettingsSectionHeader } from "@/components/settings/section-header";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { ProfileChannel, ProfileScope } from "@/lib/profiles/settings";
 import type {
+    SettingsProfileDefault,
+    SettingsProfileDefaultOption,
     SettingsProfileSummary,
     SettingsProfilesPage,
 } from "@/types/settings";
@@ -32,6 +35,92 @@ interface EditorTarget {
     profileId: string | null;
     newChannel?: ProfileChannel;
     newScope?: ProfileScope;
+}
+
+const ORGANIZATION_DEFAULT = "organization_default";
+
+interface DefaultProfileSelectProps {
+    channel: ProfileChannel;
+    state: SettingsProfileDefault;
+    options: SettingsProfileDefaultOption[];
+    disabled: boolean;
+    onChange: (channel: ProfileChannel, value: string) => void;
+}
+
+function DefaultProfileSelect({
+    channel,
+    state,
+    options,
+    disabled,
+    onChange,
+}: DefaultProfileSelectProps) {
+    const i18n = useExtracted();
+    const channelOptions = options.filter(
+        (profile) => profile.channel === channel,
+    );
+    const organizationProfiles = channelOptions.filter(
+        (profile) => profile.scope === "organization",
+    );
+    const personalProfiles = channelOptions.filter(
+        (profile) => profile.scope === "personal",
+    );
+    const label =
+        channel === "audio"
+            ? i18n("Default for recordings")
+            : i18n("Default for mail");
+    return (
+        <div className="space-y-1.5">
+            <label
+                className="text-sm font-medium"
+                htmlFor={`default-${channel}`}
+            >
+                {label}
+            </label>
+            <NativeSelect
+                id={`default-${channel}`}
+                aria-label={label}
+                value={state.selected ?? ""}
+                disabled={disabled}
+                onChange={(event) => onChange(channel, event.target.value)}
+            >
+                {!state.selected && (
+                    <option value="" disabled>
+                        {i18n("Choose a default processing profile")}
+                    </option>
+                )}
+                {state.explicitUnavailable && state.selected && (
+                    <option value={state.selected} disabled>
+                        {i18n("Unavailable Organization profile")}
+                    </option>
+                )}
+                {state.organizationDefault && (
+                    <option value={ORGANIZATION_DEFAULT}>
+                        {i18n("Organization default ({name})", {
+                            name: state.organizationDefault.name,
+                        })}
+                    </option>
+                )}
+                {organizationProfiles.length > 0 && (
+                    <optgroup label={i18n("Organization profiles")}>
+                        {organizationProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                                {profile.name}
+                            </option>
+                        ))}
+                    </optgroup>
+                )}
+                {personalProfiles.length > 0 && (
+                    <optgroup label={i18n("Your profiles")}>
+                        {personalProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                                {profile.name}
+                            </option>
+                        ))}
+                    </optgroup>
+                )}
+            </NativeSelect>
+        </div>
+    );
 }
 
 function errorMessage(body: unknown, fallback: string): string {
@@ -48,6 +137,7 @@ function errorMessage(body: unknown, fallback: string): string {
 
 export function ProfilesSection() {
     const i18n = useExtracted();
+    const confirm = useConfirm();
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [channel, setChannel] = useState<"all" | ProfileChannel>("all");
@@ -60,8 +150,7 @@ export function ProfilesSection() {
     const [data, setData] = useState<SettingsProfilesPage | null>(null);
     const [loading, setLoading] = useState(true);
     const [editor, setEditor] = useState<EditorTarget | null>(null);
-    const [archiveTarget, setArchiveTarget] =
-        useState<SettingsProfileSummary | null>(null);
+    const [changingDefault, setChangingDefault] = useState(false);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -104,7 +193,7 @@ export function ProfilesSection() {
 
     const mutate = async (
         profile: SettingsProfileSummary,
-        action: "duplicate" | "default" | "archive" | "restore",
+        action: "duplicate" | "default" | "archive" | "delete" | "restore",
     ) => {
         const previous = data;
         if (action === "default") {
@@ -124,7 +213,11 @@ export function ProfilesSection() {
                       }
                     : current,
             );
-        } else if (action === "archive" || action === "restore") {
+        } else if (
+            action === "archive" ||
+            action === "delete" ||
+            action === "restore"
+        ) {
             setData((current) =>
                 current
                     ? {
@@ -141,17 +234,16 @@ export function ProfilesSection() {
             );
         }
 
-        const endpoint =
-            action === "duplicate"
-                ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/duplicate`
-                : action === "default"
-                  ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/default`
-                  : action === "restore"
-                    ? `/api/settings/profiles/${encodeURIComponent(profile.id)}/restore`
-                    : `/api/settings/profiles/${encodeURIComponent(profile.id)}`;
+        let endpoint = `/api/settings/profiles/${encodeURIComponent(profile.id)}`;
+        if (action === "duplicate") endpoint = `${endpoint}/duplicate`;
+        if (action === "default") endpoint = `${endpoint}/default`;
+        if (action === "restore") endpoint = `${endpoint}/restore`;
         try {
             const response = await fetch(endpoint, {
-                method: action === "archive" ? "DELETE" : "POST",
+                method:
+                    action === "archive" || action === "delete"
+                        ? "DELETE"
+                        : "POST",
                 ...(action === "duplicate"
                     ? {
                           headers: { "Content-Type": "application/json" },
@@ -165,16 +257,14 @@ export function ProfilesSection() {
                     errorMessage(body, i18n("Failed to update profile.")),
                 );
             }
-            toast.success(
-                action === "duplicate"
-                    ? i18n("Profile duplicated.")
-                    : action === "default"
-                      ? i18n("Default profile changed.")
-                      : action === "archive"
-                        ? i18n("Profile archived.")
-                        : i18n("Profile restored."),
-            );
-            if (action === "archive") setArchiveTarget(null);
+            let success = i18n("Profile restored.");
+            if (action === "duplicate") success = i18n("Profile duplicated.");
+            if (action === "default") {
+                success = i18n("Default profile changed.");
+            }
+            if (action === "archive") success = i18n("Profile archived.");
+            if (action === "delete") success = i18n("Profile deleted.");
+            toast.success(success);
             await loadProfiles();
         } catch (error) {
             if (previous) setData(previous);
@@ -184,6 +274,73 @@ export function ProfilesSection() {
                     : i18n("Failed to update profile."),
             );
         }
+    };
+
+    const changeDefault = async (
+        selectedChannel: ProfileChannel,
+        value: string,
+    ) => {
+        setChangingDefault(true);
+        try {
+            const response = await fetch("/api/settings/profiles/defaults", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    channel: selectedChannel,
+                    profileId: value === ORGANIZATION_DEFAULT ? null : value,
+                }),
+            });
+            const body: unknown = await response.json().catch(() => null);
+            if (!response.ok) {
+                throw new Error(
+                    errorMessage(body, i18n("Failed to change the default.")),
+                );
+            }
+            toast.success(i18n("Default profile changed."));
+            await loadProfiles();
+        } catch (error) {
+            toast.error(
+                error instanceof Error
+                    ? error.message
+                    : i18n("Failed to change the default."),
+            );
+        } finally {
+            setChangingDefault(false);
+        }
+    };
+
+    const removePersonal = (profile: SettingsProfileSummary) => {
+        const archives = profile.deleteDisposition === "archive";
+        const description = archives
+            ? i18n(
+                  "This profile will be removed from profile lists. Its processing history will be kept, and you can restore it from Archived.",
+              )
+            : i18n(
+                  "This profile has no processing history and will be permanently deleted.",
+              );
+        void confirm({
+            title: i18n("Delete “{name}”?", { name: profile.name }),
+            description,
+            confirmLabel: i18n("Delete"),
+            pendingLabel: i18n("Deleting…"),
+            destructive: true,
+            onConfirm: () => mutate(profile, "delete"),
+            errorMessage: i18n("Failed to delete profile."),
+        });
+    };
+
+    const archiveOrganization = (profile: SettingsProfileSummary) => {
+        void confirm({
+            title: i18n("Archive “{name}”?", { name: profile.name }),
+            description: i18n(
+                "Archived profiles stop appearing in profile choices. You can restore this profile later.",
+            ),
+            confirmLabel: i18n("Archive profile"),
+            pendingLabel: i18n("Archiving…"),
+            destructive: true,
+            onConfirm: () => mutate(profile, "archive"),
+            errorMessage: i18n("Failed to archive profile."),
+        });
     };
 
     const profiles = data?.profiles ?? [];
@@ -257,6 +414,29 @@ export function ProfilesSection() {
                 }
             />
 
+            {data?.defaults && (
+                <div className="grid gap-4 rounded-lg border p-4 sm:grid-cols-2">
+                    <DefaultProfileSelect
+                        channel="audio"
+                        state={data.defaults.audio}
+                        options={data.defaults.options}
+                        disabled={changingDefault}
+                        onChange={(selectedChannel, value) =>
+                            void changeDefault(selectedChannel, value)
+                        }
+                    />
+                    <DefaultProfileSelect
+                        channel="mail"
+                        state={data.defaults.mail}
+                        options={data.defaults.options}
+                        disabled={changingDefault}
+                        onChange={(selectedChannel, value) =>
+                            void changeDefault(selectedChannel, value)
+                        }
+                    />
+                </div>
+            )}
+
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <Input
                     type="search"
@@ -329,9 +509,14 @@ export function ProfilesSection() {
                                         <span className="truncate text-sm font-medium">
                                             {profile.name}
                                         </span>
-                                        {profile.isDefault && (
+                                        {profile.isYourDefault && (
                                             <span className="rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">
-                                                {i18n("Default")}
+                                                {i18n("Your default")}
+                                            </span>
+                                        )}
+                                        {profile.isOrganizationDefault && (
+                                            <span className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                                                {i18n("Organization default")}
                                             </span>
                                         )}
                                         {!profile.canEdit &&
@@ -452,6 +637,34 @@ export function ProfilesSection() {
                                                     : i18n("Duplicate")}
                                             </Button>
                                             {profile.canEdit &&
+                                                profile.scope ===
+                                                    "personal" && (
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        aria-label={i18n(
+                                                            "Delete {name}",
+                                                            {
+                                                                name: profile.name,
+                                                            },
+                                                        )}
+                                                        onClick={() =>
+                                                            removePersonal(
+                                                                profile,
+                                                            )
+                                                        }
+                                                    >
+                                                        <Trash2
+                                                            className="mr-1 size-3.5"
+                                                            aria-hidden="true"
+                                                        />
+                                                        {i18n("Delete")}
+                                                    </Button>
+                                                )}
+                                            {profile.canEdit &&
+                                                profile.scope ===
+                                                    "organization" &&
                                                 !profile.isDefault && (
                                                     <>
                                                         <Button
@@ -459,7 +672,7 @@ export function ProfilesSection() {
                                                             size="sm"
                                                             variant="ghost"
                                                             aria-label={i18n(
-                                                                "Make {name} default",
+                                                                "Make {name} Organization default",
                                                                 {
                                                                     name: profile.name,
                                                                 },
@@ -471,12 +684,8 @@ export function ProfilesSection() {
                                                                 )
                                                             }
                                                         >
-                                                            <Star
-                                                                className="mr-1 size-3.5"
-                                                                aria-hidden="true"
-                                                            />
                                                             {i18n(
-                                                                "Make default",
+                                                                "Make Organization default",
                                                             )}
                                                         </Button>
                                                         <Button
@@ -490,7 +699,7 @@ export function ProfilesSection() {
                                                                 },
                                                             )}
                                                             onClick={() =>
-                                                                setArchiveTarget(
+                                                                archiveOrganization(
                                                                     profile,
                                                                 )
                                                             }
@@ -510,43 +719,6 @@ export function ProfilesSection() {
                         );
                     })}
                 </ul>
-            )}
-
-            {archiveTarget && (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
-                    <div>
-                        <p className="text-sm font-medium">
-                            {i18n("Archive “{name}”?", {
-                                name: archiveTarget.name,
-                            })}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            {i18n(
-                                "Archived profiles stop appearing in profile choices. You can restore this profile later.",
-                            )}
-                        </p>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setArchiveTarget(null)}
-                        >
-                            {i18n("Cancel")}
-                        </Button>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="destructive"
-                            onClick={() =>
-                                void mutate(archiveTarget, "archive")
-                            }
-                        >
-                            {i18n("Archive profile")}
-                        </Button>
-                    </div>
-                </div>
             )}
 
             {pagination && pagination.totalPages > 1 && (
